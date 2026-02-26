@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -202,6 +203,15 @@ func UpdateOption(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": err.Error(),
+			})
+			return
+		}
+	case "InviteCommissionRatio":
+		ratio, parseErr := strconv.ParseFloat(option.Value.(string), 64)
+		if parseErr != nil || ratio < 0 || ratio > 1 {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "InviteCommissionRatio must be a number between 0 and 1",
 			})
 			return
 		}
