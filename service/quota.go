@@ -138,10 +138,25 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 
 	quota := calculateAudioQuota(quotaInfo)
 
+	if common.QuotaInsufficientDBRecheckEnabled && userQuota < quota {
+		// 缓存可能滞后，额度不足前回源 DB 再确认一次。
+		if dbQuota, dbErr := model.GetUserQuota(relayInfo.UserId, true); dbErr == nil {
+			userQuota = dbQuota
+		} else {
+			common.SysLog(fmt.Sprintf("realtime user quota db recheck failed (userId=%d): %s", relayInfo.UserId, dbErr.Error()))
+		}
+	}
 	if userQuota < quota {
 		return fmt.Errorf("user quota is not enough, user quota: %s, need quota: %s", logger.FormatQuota(userQuota), logger.FormatQuota(quota))
 	}
 
+	if common.QuotaInsufficientDBRecheckEnabled && !token.UnlimitedQuota && token.RemainQuota < quota {
+		if tokenFromDB, dbErr := model.GetTokenByKey(strings.TrimPrefix(relayInfo.TokenKey, "sk-"), true); dbErr == nil {
+			token = tokenFromDB
+		} else {
+			common.SysLog(fmt.Sprintf("realtime token quota db recheck failed (tokenId=%d): %s", relayInfo.TokenId, dbErr.Error()))
+		}
+	}
 	if !token.UnlimitedQuota && token.RemainQuota < quota {
 		return fmt.Errorf("token quota is not enough, token remain quota: %s, need quota: %s", logger.FormatQuota(token.RemainQuota), logger.FormatQuota(quota))
 	}
@@ -456,7 +471,17 @@ func PreConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int) error {
 	if err != nil {
 		return err
 	}
-	if !relayInfo.TokenUnlimited && token.RemainQuota < quota {
+	tokenUnlimited := relayInfo.TokenUnlimited || token.UnlimitedQuota
+	if common.QuotaInsufficientDBRecheckEnabled && !tokenUnlimited && token.RemainQuota < quota {
+		// 缓存可能滞后，额度不足前回源 DB 再确认一次。
+		if tokenFromDB, dbErr := model.GetTokenByKey(relayInfo.TokenKey, true); dbErr == nil {
+			token = tokenFromDB
+			tokenUnlimited = token.UnlimitedQuota
+		} else {
+			common.SysLog(fmt.Sprintf("token quota db recheck failed (userId=%d, tokenId=%d): %s", relayInfo.UserId, relayInfo.TokenId, dbErr.Error()))
+		}
+	}
+	if !tokenUnlimited && token.RemainQuota < quota {
 		return fmt.Errorf("token quota is not enough, token remain quota: %s, need quota: %s", logger.FormatQuota(token.RemainQuota), logger.FormatQuota(quota))
 	}
 	err = model.DecreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, quota)

@@ -103,15 +103,19 @@ func (channel *Channel) GetKeys() []string {
 }
 
 func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
-	// If not in multi-key mode, return the original key string directly.
+	return channel.GetNextEnabledKeyForRequest(0, "")
+}
+
+func (channel *Channel) GetNextEnabledKeyForRequest(tokenId int, modelName string) (string, int, *types.NewAPIError) {
+	// 单 key 直接返回。
 	if !channel.ChannelInfo.IsMultiKey {
 		return channel.Key, 0, nil
 	}
 
-	// Obtain all keys (split by \n)
+	// 读取全部 key。
 	keys := channel.GetKeys()
 	if len(keys) == 0 {
-		// No keys available, return error, should disable the channel
+		// 没有可用 key。
 		return "", 0, types.NewError(errors.New("no keys available"), types.ErrorCodeChannelNoAvailableKey)
 	}
 
@@ -120,7 +124,7 @@ func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
 	defer lock.Unlock()
 
 	statusList := channel.ChannelInfo.MultiKeyStatusList
-	// helper to get key status, default to enabled when missing
+	// 读取 key 状态，缺省视为启用。
 	getStatus := func(idx int) int {
 		if statusList == nil {
 			return common.ChannelStatusEnabled
@@ -131,33 +135,36 @@ func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
 		return common.ChannelStatusEnabled
 	}
 
-	// Collect indexes of enabled keys
+	// 只收集当前可用的 key（启用且不在冷却）。
 	enabledIdx := make([]int, 0, len(keys))
 	for i := range keys {
-		if getStatus(i) == common.ChannelStatusEnabled {
+		if getStatus(i) == common.ChannelStatusEnabled && !IsMultiKeyInCooldown(channel.Id, i) {
 			enabledIdx = append(enabledIdx, i)
 		}
 	}
-	// If no specific status list or none enabled, return an explicit error so caller can
-	// properly handle a channel with no available keys (e.g. mark channel disabled).
-	// Returning the first key here caused requests to keep using an already-disabled key.
 	if len(enabledIdx) == 0 {
 		return "", 0, types.NewError(errors.New("no enabled keys"), types.ErrorCodeChannelNoAvailableKey)
 	}
 
+	// 命中粘性 key 时优先使用。
+	if common.QuotaStabilityEnabled && tokenId > 0 && common.MultiKeyStickySeconds > 0 {
+		if stickyIdx, ok := GetMultiKeyStickyIndex(tokenId, channel.Id, modelName); ok {
+			if stickyIdx >= 0 && stickyIdx < len(keys) && getStatus(stickyIdx) == common.ChannelStatusEnabled && !IsMultiKeyInCooldown(channel.Id, stickyIdx) {
+				return keys[stickyIdx], stickyIdx, nil
+			}
+		}
+	}
+
+	selectedIdx := enabledIdx[0]
 	switch channel.ChannelInfo.MultiKeyMode {
 	case constant.MultiKeyModeRandom:
-		// Randomly pick one enabled key
-		selectedIdx := enabledIdx[rand.Intn(len(enabledIdx))]
-		return keys[selectedIdx], selectedIdx, nil
+		// 随机选择一个可用 key。
+		selectedIdx = enabledIdx[rand.Intn(len(enabledIdx))]
 	case constant.MultiKeyModePolling:
-		// Use channel-specific lock to ensure thread-safe polling
-
 		channelInfo, err := CacheGetChannelInfo(channel.Id)
 		if err != nil {
 			return "", 0, types.NewError(err, types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 		}
-		//println("before polling index:", channel.ChannelInfo.MultiKeyPollingIndex)
 		defer func() {
 			if common.DebugEnabled {
 				println(fmt.Sprintf("channel %d polling index: %d", channel.Id, channel.ChannelInfo.MultiKeyPollingIndex))
@@ -168,25 +175,27 @@ func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
 				// CacheUpdateChannel(channel)
 			}
 		}()
-		// Start from the saved polling index and look for the next enabled key
 		start := channelInfo.MultiKeyPollingIndex
 		if start < 0 || start >= len(keys) {
 			start = 0
 		}
 		for i := 0; i < len(keys); i++ {
 			idx := (start + i) % len(keys)
-			if getStatus(idx) == common.ChannelStatusEnabled {
-				// update polling index for next call (point to the next position)
+			if getStatus(idx) == common.ChannelStatusEnabled && !IsMultiKeyInCooldown(channel.Id, idx) {
 				channel.ChannelInfo.MultiKeyPollingIndex = (idx + 1) % len(keys)
-				return keys[idx], idx, nil
+				selectedIdx = idx
+				break
 			}
 		}
-		// Fallback – should not happen, but return first enabled key
-		return keys[enabledIdx[0]], enabledIdx[0], nil
 	default:
-		// Unknown mode, default to first enabled key (or original key string)
-		return keys[enabledIdx[0]], enabledIdx[0], nil
+		selectedIdx = enabledIdx[0]
 	}
+
+	// 更新粘性 key。
+	if common.QuotaStabilityEnabled && tokenId > 0 && common.MultiKeyStickySeconds > 0 {
+		_ = SetMultiKeyStickyIndex(tokenId, channel.Id, modelName, selectedIdx, common.MultiKeyStickySeconds)
+	}
+	return keys[selectedIdx], selectedIdx, nil
 }
 
 func (channel *Channel) SaveChannelInfo() error {

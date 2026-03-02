@@ -113,3 +113,39 @@ func ShouldEnableChannel(newAPIError *types.NewAPIError, status int) bool {
 	}
 	return true
 }
+
+// IsQuotaRelatedError 判断是否为“额度相关”的上游错误。
+func IsQuotaRelatedError(err *types.NewAPIError) bool {
+	if err == nil {
+		return false
+	}
+
+	switch err.GetErrorCode() {
+	case types.ErrorCodeInsufficientUserQuota, types.ErrorCodePreConsumeTokenQuotaFailed:
+		return true
+	}
+
+	oaiErr := err.ToOpenAIError()
+	if code := strings.ToLower(fmt.Sprintf("%v", oaiErr.Code)); code != "" {
+		switch code {
+		case "insufficient_quota", "insufficient_user_quota", "billing_not_active", "pre_consume_token_quota_failed":
+			return true
+		}
+	}
+
+	switch strings.ToLower(oaiErr.Type) {
+	case "insufficient_quota", "insufficient_user_quota":
+		return true
+	}
+
+	lowerMessage := strings.ToLower(err.Error())
+	if strings.Contains(lowerMessage, "insufficient quota") ||
+		strings.Contains(lowerMessage, "quota is not enough") ||
+		strings.Contains(lowerMessage, "billing_not_active") ||
+		strings.Contains(lowerMessage, "额度不足") ||
+		strings.Contains(lowerMessage, "余额不足") {
+		return true
+	}
+
+	return false
+}

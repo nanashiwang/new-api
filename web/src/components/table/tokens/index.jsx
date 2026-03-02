@@ -345,6 +345,7 @@ function TokensPage() {
     searchTokens,
     loading,
     searching,
+    groupOptions,
 
     // Description state
     compactMode,
@@ -389,6 +390,7 @@ function TokensPage() {
                 formInitValues={formInitValues}
                 setFormApi={setFormApi}
                 searchTokens={searchTokens}
+                groupOptions={groupOptions}
                 loading={loading}
                 searching={searching}
                 t={t}

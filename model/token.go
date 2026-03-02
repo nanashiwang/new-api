@@ -31,6 +31,30 @@ type Token struct {
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
 }
 
+func normalizeTokenSort(sortBy string, sortOrder string) (string, string) {
+	// 令牌列表仅开放白名单排序字段，避免把任意字符串透传到 ORDER BY。
+	normalizedSortBy := strings.ToLower(strings.TrimSpace(sortBy))
+	switch normalizedSortBy {
+	case "remain_quota":
+	default:
+		normalizedSortBy = "id"
+	}
+
+	normalizedSortOrder := strings.ToLower(strings.TrimSpace(sortOrder))
+	switch normalizedSortOrder {
+	case "asc":
+	default:
+		normalizedSortOrder = "desc"
+	}
+
+	return normalizedSortBy, normalizedSortOrder
+}
+
+func buildTokenOrderClause(sortBy string, sortOrder string) string {
+	normalizedSortBy, normalizedSortOrder := normalizeTokenSort(sortBy, sortOrder)
+	return normalizedSortBy + " " + normalizedSortOrder
+}
+
 func (token *Token) Clean() {
 	token.Key = ""
 }
@@ -57,11 +81,8 @@ func (token *Token) GetIpLimits() []string {
 	return ipLimits
 }
 
-func GetAllUserTokens(userId int, startIdx int, num int) ([]*Token, error) {
-	var tokens []*Token
-	var err error
-	err = DB.Where("user_id = ?", userId).Order("id desc").Limit(num).Offset(startIdx).Find(&tokens).Error
-	return tokens, err
+func GetAllUserTokens(userId int, startIdx int, num int, group string, balanceMin *int, balanceMax *int, usedBalanceMin *int, usedBalanceMax *int, sortBy string, sortOrder string) ([]*Token, int64, error) {
+	return SearchUserTokens(userId, "", "", startIdx, num, group, balanceMin, balanceMax, usedBalanceMin, usedBalanceMax, sortBy, sortOrder)
 }
 
 // sanitizeLikePattern 校验并清洗用户输入的 LIKE 搜索模式。
@@ -103,7 +124,7 @@ func sanitizeLikePattern(input string) (string, error) {
 
 const searchHardLimit = 100
 
-func SearchUserTokens(userId int, keyword string, token string, offset int, limit int) (tokens []*Token, total int64, err error) {
+func SearchUserTokens(userId int, keyword string, token string, offset int, limit int, group string, balanceMin *int, balanceMax *int, usedBalanceMin *int, usedBalanceMax *int, sortBy string, sortOrder string) (tokens []*Token, total int64, err error) {
 	// model 层强制截断
 	if limit <= 0 || limit > searchHardLimit {
 		limit = searchHardLimit
@@ -131,6 +152,9 @@ func SearchUserTokens(userId int, keyword string, token string, offset int, limi
 	}
 
 	baseQuery := DB.Model(&Token{}).Where("user_id = ?", userId)
+	if group = strings.TrimSpace(group); group != "" {
+		baseQuery = baseQuery.Where(commonGroupCol+" = ?", group)
+	}
 
 	// 非空才加 LIKE 条件，空则跳过（不过滤该字段）
 	if keyword != "" {
@@ -147,6 +171,20 @@ func SearchUserTokens(userId int, keyword string, token string, offset int, limi
 		}
 		baseQuery = baseQuery.Where(commonKeyCol+" LIKE ? ESCAPE '!'", tokenPattern)
 	}
+	// 额度筛选按“总额度 = remain_quota + used_quota”执行。
+	// 与“已使用余额筛选”配合后，可表达“总额度区间 + 已用额度区间”。
+	if balanceMin != nil {
+		baseQuery = baseQuery.Where("(remain_quota + used_quota) >= ?", *balanceMin)
+	}
+	if balanceMax != nil {
+		baseQuery = baseQuery.Where("(remain_quota + used_quota) <= ?", *balanceMax)
+	}
+	if usedBalanceMin != nil {
+		baseQuery = baseQuery.Where("used_quota >= ?", *usedBalanceMin)
+	}
+	if usedBalanceMax != nil {
+		baseQuery = baseQuery.Where("used_quota <= ?", *usedBalanceMax)
+	}
 
 	// 先查匹配总数（用于分页，受 maxTokens 上限保护，避免全表 COUNT）
 	err = baseQuery.Limit(maxTokens).Count(&total).Error
@@ -156,7 +194,8 @@ func SearchUserTokens(userId int, keyword string, token string, offset int, limi
 	}
 
 	// 再分页查数据
-	err = baseQuery.Order("id desc").Offset(offset).Limit(limit).Find(&tokens).Error
+	orderClause := buildTokenOrderClause(sortBy, sortOrder)
+	err = baseQuery.Order(orderClause).Offset(offset).Limit(limit).Find(&tokens).Error
 	if err != nil {
 		common.SysError("failed to search tokens: " + err.Error())
 		return nil, 0, errors.New("搜索令牌失败")

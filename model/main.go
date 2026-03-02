@@ -274,6 +274,8 @@ func migrateDB() error {
 		&SubscriptionOrder{},
 		&UserSubscription{},
 		&SubscriptionPreConsumeRecord{},
+		&InviteCommissionLedger{},
+		&InviteCommissionDailyCapState{},
 		&CustomOAuthProvider{},
 		&UserOAuthBinding{},
 	)
@@ -322,6 +324,8 @@ func migrateDBFast() error {
 		{&SubscriptionOrder{}, "SubscriptionOrder"},
 		{&UserSubscription{}, "UserSubscription"},
 		{&SubscriptionPreConsumeRecord{}, "SubscriptionPreConsumeRecord"},
+		{&InviteCommissionLedger{}, "InviteCommissionLedger"},
+		{&InviteCommissionDailyCapState{}, "InviteCommissionDailyCapState"},
 		{&CustomOAuthProvider{}, "CustomOAuthProvider"},
 		{&UserOAuthBinding{}, "UserOAuthBinding"},
 	}

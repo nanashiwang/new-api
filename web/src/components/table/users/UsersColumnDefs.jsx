@@ -170,10 +170,26 @@ const renderQuotaUsage = (text, record, t) => {
   );
 };
 
+// Render used quota as an independent column to make usage visibility explicit.
+const renderUsedQuota = (text, record) => {
+  const used = parseInt(record.used_quota) || 0;
+  return (
+    <Tag color='white' shape='circle'>
+      {renderQuota(used)}
+    </Tag>
+  );
+};
+
 /**
  * Render invite information
  */
-const renderInviteInfo = (text, record, t) => {
+const renderInviteInfo = (text, record, t, showInviteRelationsModal) => {
+  const inviterText =
+    record.inviter_id === 0
+      ? t('无邀请人')
+      : `${t('邀请人')}: ${record.inviter_id}${
+          record.inviter_username ? ` (${record.inviter_username})` : ''
+        }`;
   return (
     <div>
       <Space spacing={1}>
@@ -184,10 +200,16 @@ const renderInviteInfo = (text, record, t) => {
           {t('收益')}: {renderQuota(record.aff_history_quota)}
         </Tag>
         <Tag color='white' shape='circle' className='!text-xs'>
-          {record.inviter_id === 0
-            ? t('无邀请人')
-            : `${t('邀请人')}: ${record.inviter_id}`}
+          {inviterText}
         </Tag>
+        <Button
+          type='tertiary'
+          size='small'
+          theme='borderless'
+          onClick={() => showInviteRelationsModal?.(record)}
+        >
+          {t('查看关系')}
+        </Button>
       </Space>
     </div>
   );
@@ -309,6 +331,7 @@ export const getUsersColumns = ({
   showResetPasskeyModal,
   showResetTwoFAModal,
   showUserSubscriptionsModal,
+  showInviteRelationsModal,
 }) => {
   return [
     {
@@ -332,6 +355,12 @@ export const getUsersColumns = ({
       render: (text, record) => renderQuotaUsage(text, record, t),
     },
     {
+      title: t('已使用余额'),
+      dataIndex: 'used_quota',
+      key: 'used_quota',
+      render: (text, record) => renderUsedQuota(text, record),
+    },
+    {
       title: t('分组'),
       dataIndex: 'group',
       render: (text, record, index) => {
@@ -348,7 +377,8 @@ export const getUsersColumns = ({
     {
       title: t('邀请信息'),
       dataIndex: 'invite',
-      render: (text, record, index) => renderInviteInfo(text, record, t),
+      render: (text, record, index) =>
+        renderInviteInfo(text, record, t, showInviteRelationsModal),
     },
     {
       title: '',

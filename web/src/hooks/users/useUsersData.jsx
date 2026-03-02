@@ -23,6 +23,41 @@ import { API, showError, showSuccess } from '../../helpers';
 import { ITEMS_PER_PAGE } from '../../constants';
 import { useTableCompactMode } from '../common/useTableCompactMode';
 
+const DEFAULT_ADVANCED_FILTERS = {
+  searchRole: '',
+  searchStatus: '',
+  searchInviterId: '',
+  searchInviteeUserId: '',
+  searchHasInviter: '',
+  searchHasInvitees: '',
+  // 剩余额度范围已迁移到高级筛选，与“已使用余额”统一管理。
+  searchBalanceMin: '',
+  searchBalanceMax: '',
+  // 已使用余额筛选放在高级筛选里，保持主工具条紧凑。
+  searchUsedBalanceMin: '',
+  searchUsedBalanceMax: '',
+  // 组合排序：ID 与余额排序可以同时设置。
+  searchIdSortOrder: '',
+  searchBalanceSortOrder: '',
+};
+const USERS_ADVANCED_FILTERS_STORAGE_KEY = 'users-advanced-filters';
+
+const getInitialAdvancedFilters = () => {
+  try {
+    const raw = localStorage.getItem(USERS_ADVANCED_FILTERS_STORAGE_KEY);
+    if (!raw) {
+      return DEFAULT_ADVANCED_FILTERS;
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') {
+      return DEFAULT_ADVANCED_FILTERS;
+    }
+    return { ...DEFAULT_ADVANCED_FILTERS, ...parsed };
+  } catch (error) {
+    return DEFAULT_ADVANCED_FILTERS;
+  }
+};
+
 export const useUsersData = () => {
   const { t } = useTranslation();
   const [compactMode, setCompactMode] = useTableCompactMode('users');
@@ -35,6 +70,9 @@ export const useUsersData = () => {
   const [searching, setSearching] = useState(false);
   const [groupOptions, setGroupOptions] = useState([]);
   const [userCount, setUserCount] = useState(0);
+  const [advancedFilters, setAdvancedFilters] = useState(
+    getInitialAdvancedFilters,
+  );
 
   // Modal states
   const [showAddUser, setShowAddUser] = useState(false);
@@ -58,7 +96,40 @@ export const useUsersData = () => {
     return {
       searchKeyword: formValues.searchKeyword || '',
       searchGroup: formValues.searchGroup || '',
+      ...normalizeAdvancedFilters(advancedFilters),
     };
+  };
+
+  const normalizeAdvancedFilters = (filters) => {
+    const next = { ...DEFAULT_ADVANCED_FILTERS, ...(filters || {}) };
+    return {
+      searchRole: next.searchRole ?? '',
+      searchStatus: next.searchStatus ?? '',
+      searchInviterId: next.searchInviterId ?? '',
+      searchInviteeUserId: next.searchInviteeUserId ?? '',
+      searchHasInviter: next.searchHasInviter ?? '',
+      searchHasInvitees: next.searchHasInvitees ?? '',
+      searchBalanceMin: next.searchBalanceMin ?? '',
+      searchBalanceMax: next.searchBalanceMax ?? '',
+      searchUsedBalanceMin: next.searchUsedBalanceMin ?? '',
+      searchUsedBalanceMax: next.searchUsedBalanceMax ?? '',
+      searchIdSortOrder: next.searchIdSortOrder ?? '',
+      searchBalanceSortOrder: next.searchBalanceSortOrder ?? '',
+    };
+  };
+
+  const hasAdvancedFilters = (filters) => {
+    const normalized = normalizeAdvancedFilters(filters);
+    return Object.values(normalized).some(
+      (value) => value !== '' && value !== null && value !== undefined,
+    );
+  };
+
+  const hasBalanceFilters = (balanceMin, balanceMax) => {
+    return (
+      (balanceMin !== '' && balanceMin !== null && balanceMin !== undefined) ||
+      (balanceMax !== '' && balanceMax !== null && balanceMax !== undefined)
+    );
   };
 
   // Set user format with key field
@@ -70,19 +141,40 @@ export const useUsersData = () => {
   };
 
   // Load users data
-  const loadUsers = async (startIdx, pageSize) => {
+  const loadUsers = async (
+    startIdx,
+    pageSize,
+    idSortOrder = '',
+    balanceSortOrder = '',
+  ) => {
     setLoading(true);
-    const res = await API.get(`/api/user/?p=${startIdx}&page_size=${pageSize}`);
-    const { success, message, data } = res.data;
-    if (success) {
-      const newPageData = data.items;
-      setActivePage(data.page);
-      setUserCount(data.total);
-      setUserFormat(newPageData);
-    } else {
-      showError(message);
+    try {
+      const params = {
+        p: startIdx,
+        page_size: pageSize,
+      };
+      if (idSortOrder === 'asc' || idSortOrder === 'desc') {
+        params.id_sort_order = idSortOrder;
+      }
+      if (balanceSortOrder === 'asc' || balanceSortOrder === 'desc') {
+        params.balance_sort_order = balanceSortOrder;
+      }
+      const res = await API.get('/api/user/', { params });
+      const { success, message, data } = res.data;
+      if (success) {
+        const newPageData = data.items;
+        setActivePage(data.page);
+        setUserCount(data.total);
+        setUserFormat(newPageData);
+      } else {
+        showError(message);
+      }
+    } catch (error) {
+      // 网络异常/后端异常时也要退出 loading，避免列表一直转圈。
+      showError(error?.message || t('请求失败'));
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   // Search users with keyword and group
@@ -91,33 +183,149 @@ export const useUsersData = () => {
     pageSize,
     searchKeyword = null,
     searchGroup = null,
+    advanced = null,
+    searchBalanceMin = null,
+    searchBalanceMax = null,
   ) => {
     // If no parameters passed, get values from form
-    if (searchKeyword === null || searchGroup === null) {
+    let resolvedAdvanced = normalizeAdvancedFilters(
+      advanced === null ? advancedFilters : advanced,
+    );
+    if (searchKeyword === null || searchGroup === null || advanced === null) {
       const formValues = getFormValues();
-      searchKeyword = formValues.searchKeyword;
-      searchGroup = formValues.searchGroup;
+      if (searchKeyword === null) {
+        searchKeyword = formValues.searchKeyword;
+      }
+      if (searchGroup === null) {
+        searchGroup = formValues.searchGroup;
+      }
+      if (searchBalanceMin === null) {
+        searchBalanceMin = formValues.searchBalanceMin;
+      }
+      if (searchBalanceMax === null) {
+        searchBalanceMax = formValues.searchBalanceMax;
+      }
+      if (advanced === null) {
+        resolvedAdvanced = normalizeAdvancedFilters(formValues);
+      }
+    }
+    if (searchBalanceMin === null) {
+      searchBalanceMin = resolvedAdvanced.searchBalanceMin;
+    }
+    if (searchBalanceMax === null) {
+      searchBalanceMax = resolvedAdvanced.searchBalanceMax;
     }
 
-    if (searchKeyword === '' && searchGroup === '') {
+    const keyword = (searchKeyword || '').trim();
+    const group = (searchGroup || '').trim();
+    const balanceMin = searchBalanceMin;
+    const balanceMax = searchBalanceMax;
+    if (
+      keyword === '' &&
+      group === '' &&
+      !hasAdvancedFilters(resolvedAdvanced) &&
+      !hasBalanceFilters(balanceMin, balanceMax)
+    ) {
       // If keyword is blank, load files instead
-      await loadUsers(startIdx, pageSize);
+      await loadUsers(
+        startIdx,
+        pageSize,
+        resolvedAdvanced.searchIdSortOrder,
+        resolvedAdvanced.searchBalanceSortOrder,
+      );
       return;
     }
+    // 搜索分支也需要接管 loading 状态：
+    // 首屏若命中“已保存高级筛选”会直接走这里，若不置回 loading=false，表格会一直转圈。
+    setLoading(true);
     setSearching(true);
-    const res = await API.get(
-      `/api/user/search?keyword=${searchKeyword}&group=${searchGroup}&p=${startIdx}&page_size=${pageSize}`,
-    );
-    const { success, message, data } = res.data;
-    if (success) {
-      const newPageData = data.items;
-      setActivePage(data.page);
-      setUserCount(data.total);
-      setUserFormat(newPageData);
-    } else {
-      showError(message);
+    try {
+      // 前端统一通过 axios params 传参，避免手写拼接 URL 导致转义遗漏。
+      // 后端再做类型解析与参数化查询，形成“双保险”。
+      const params = {
+        keyword,
+        group,
+        p: startIdx,
+        page_size: pageSize,
+      };
+      if (
+        resolvedAdvanced.searchIdSortOrder === 'asc' ||
+        resolvedAdvanced.searchIdSortOrder === 'desc'
+      ) {
+        params.id_sort_order = resolvedAdvanced.searchIdSortOrder;
+      }
+      if (
+        resolvedAdvanced.searchBalanceSortOrder === 'asc' ||
+        resolvedAdvanced.searchBalanceSortOrder === 'desc'
+      ) {
+        params.balance_sort_order = resolvedAdvanced.searchBalanceSortOrder;
+      }
+      if (resolvedAdvanced.searchRole !== '') {
+        params.role = resolvedAdvanced.searchRole;
+      }
+      if (resolvedAdvanced.searchStatus !== '') {
+        params.status = resolvedAdvanced.searchStatus;
+      }
+      if (resolvedAdvanced.searchInviterId !== '') {
+        params.inviter_id = resolvedAdvanced.searchInviterId;
+      }
+      if (resolvedAdvanced.searchInviteeUserId !== '') {
+        params.invitee_user_id = resolvedAdvanced.searchInviteeUserId;
+      }
+      if (resolvedAdvanced.searchHasInviter !== '') {
+        params.has_inviter = resolvedAdvanced.searchHasInviter;
+      }
+      if (resolvedAdvanced.searchHasInvitees !== '') {
+        params.has_invitees = resolvedAdvanced.searchHasInvitees;
+      }
+      // 金额筛选参数统一由 axios params 透传，后端进行范围校验与参数化查询。
+      if (balanceMin !== '' && balanceMin !== null && balanceMin !== undefined) {
+        params.balance_min = balanceMin;
+      }
+      if (balanceMax !== '' && balanceMax !== null && balanceMax !== undefined) {
+        params.balance_max = balanceMax;
+      }
+      if (
+        resolvedAdvanced.searchUsedBalanceMin !== '' &&
+        resolvedAdvanced.searchUsedBalanceMin !== null &&
+        resolvedAdvanced.searchUsedBalanceMin !== undefined
+      ) {
+        params.used_balance_min = resolvedAdvanced.searchUsedBalanceMin;
+      }
+      if (
+        resolvedAdvanced.searchUsedBalanceMax !== '' &&
+        resolvedAdvanced.searchUsedBalanceMax !== null &&
+        resolvedAdvanced.searchUsedBalanceMax !== undefined
+      ) {
+        params.used_balance_max = resolvedAdvanced.searchUsedBalanceMax;
+      }
+      const res = await API.get('/api/user/search', { params });
+      const { success, message, data } = res.data;
+      if (success) {
+        const newPageData = data.items;
+        setActivePage(data.page);
+        setUserCount(data.total);
+        setUserFormat(newPageData);
+      } else {
+        showError(message);
+      }
+    } catch (error) {
+      showError(error?.message || t('请求失败'));
+    } finally {
+      setSearching(false);
+      setLoading(false);
     }
-    setSearching(false);
+  };
+
+  const applyAdvancedFilters = async (nextFilters) => {
+    const normalized = normalizeAdvancedFilters(nextFilters);
+    setAdvancedFilters(normalized);
+    await searchUsers(1, pageSize, null, null, normalized);
+  };
+
+  const resetAdvancedFilters = async () => {
+    setAdvancedFilters(DEFAULT_ADVANCED_FILTERS);
+    await searchUsers(1, pageSize, null, null, DEFAULT_ADVANCED_FILTERS);
   };
 
   // Manage user operations (promote, demote, enable, disable, delete)
@@ -191,11 +399,34 @@ export const useUsersData = () => {
   // Handle page change
   const handlePageChange = (page) => {
     setActivePage(page);
-    const { searchKeyword, searchGroup } = getFormValues();
-    if (searchKeyword === '' && searchGroup === '') {
-      loadUsers(page, pageSize).then();
+    const {
+      searchKeyword,
+      searchGroup,
+      searchBalanceMin,
+      searchBalanceMax,
+    } = getFormValues();
+    if (
+      searchKeyword === '' &&
+      searchGroup === '' &&
+      !hasAdvancedFilters(advancedFilters) &&
+      !hasBalanceFilters(searchBalanceMin, searchBalanceMax)
+    ) {
+      loadUsers(
+        page,
+        pageSize,
+        advancedFilters.searchIdSortOrder,
+        advancedFilters.searchBalanceSortOrder,
+      ).then();
     } else {
-      searchUsers(page, pageSize, searchKeyword, searchGroup).then();
+      searchUsers(
+        page,
+        pageSize,
+        searchKeyword,
+        searchGroup,
+        null,
+        searchBalanceMin,
+        searchBalanceMax,
+      ).then();
     }
   };
 
@@ -204,7 +435,39 @@ export const useUsersData = () => {
     localStorage.setItem('page-size', size + '');
     setPageSize(size);
     setActivePage(1);
-    loadUsers(activePage, size)
+    const {
+      searchKeyword,
+      searchGroup,
+      searchBalanceMin,
+      searchBalanceMax,
+    } = getFormValues();
+    if (
+      searchKeyword === '' &&
+      searchGroup === '' &&
+      !hasAdvancedFilters(advancedFilters) &&
+      !hasBalanceFilters(searchBalanceMin, searchBalanceMax)
+    ) {
+      loadUsers(
+        1,
+        size,
+        advancedFilters.searchIdSortOrder,
+        advancedFilters.searchBalanceSortOrder,
+      )
+        .then()
+        .catch((reason) => {
+          showError(reason);
+        });
+      return;
+    }
+    searchUsers(
+      1,
+      size,
+      null,
+      null,
+      null,
+      searchBalanceMin,
+      searchBalanceMax,
+    )
       .then()
       .catch((reason) => {
         showError(reason);
@@ -226,11 +489,34 @@ export const useUsersData = () => {
 
   // Refresh data
   const refresh = async (page = activePage) => {
-    const { searchKeyword, searchGroup } = getFormValues();
-    if (searchKeyword === '' && searchGroup === '') {
-      await loadUsers(page, pageSize);
+    const {
+      searchKeyword,
+      searchGroup,
+      searchBalanceMin,
+      searchBalanceMax,
+    } = getFormValues();
+    if (
+      searchKeyword === '' &&
+      searchGroup === '' &&
+      !hasAdvancedFilters(advancedFilters) &&
+      !hasBalanceFilters(searchBalanceMin, searchBalanceMax)
+    ) {
+      await loadUsers(
+        page,
+        pageSize,
+        advancedFilters.searchIdSortOrder,
+        advancedFilters.searchBalanceSortOrder,
+      );
     } else {
-      await searchUsers(page, pageSize, searchKeyword, searchGroup);
+      await searchUsers(
+        page,
+        pageSize,
+        searchKeyword,
+        searchGroup,
+        null,
+        searchBalanceMin,
+        searchBalanceMax,
+      );
     }
   };
 
@@ -266,13 +552,32 @@ export const useUsersData = () => {
 
   // Initialize data on component mount
   useEffect(() => {
-    loadUsers(0, pageSize)
-      .then()
-      .catch((reason) => {
-        showError(reason);
-      });
+    // 页面首次加载时，如果本地存在高级筛选条件，则直接恢复该条件并执行查询。
+    // 这样管理员刷新页面后不需要重复手动设置筛选项。
+    if (hasAdvancedFilters(advancedFilters)) {
+      searchUsers(1, pageSize, '', '', advancedFilters)
+        .then()
+        .catch((reason) => {
+          showError(reason);
+        });
+    } else {
+      loadUsers(0, pageSize)
+        .then()
+        .catch((reason) => {
+          showError(reason);
+        });
+    }
     fetchGroups().then();
   }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        USERS_ADVANCED_FILTERS_STORAGE_KEY,
+        JSON.stringify(advancedFilters),
+      );
+    } catch (error) {}
+  }, [advancedFilters]);
 
   return {
     // Data state
@@ -296,6 +601,9 @@ export const useUsersData = () => {
     formInitValues,
     formApi,
     setFormApi,
+    advancedFilters,
+    setAdvancedFilters,
+    defaultAdvancedFilters: DEFAULT_ADVANCED_FILTERS,
 
     // UI state
     compactMode,
@@ -314,6 +622,9 @@ export const useUsersData = () => {
     closeAddUser,
     closeEditUser,
     getFormValues,
+    applyAdvancedFilters,
+    resetAdvancedFilters,
+    hasAdvancedFilters,
 
     // Translation
     t,

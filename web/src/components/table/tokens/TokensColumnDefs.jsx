@@ -306,6 +306,16 @@ const renderQuotaUsage = (text, record, t) => {
   );
 };
 
+// 将已使用额度单独成列，便于快速横向比较不同令牌的消耗情况。
+const renderUsedQuota = (text, record) => {
+  const used = parseInt(record.used_quota) || 0;
+  return (
+    <Tag color='white' shape='circle'>
+      {renderQuota(used)}
+    </Tag>
+  );
+};
+
 // Render operations column
 const renderOperations = (
   text,
@@ -450,6 +460,12 @@ export const getTokensColumns = ({
       title: t('剩余额度/总额度'),
       key: 'quota_usage',
       render: (text, record) => renderQuotaUsage(text, record, t),
+    },
+    {
+      title: t('已使用余额'),
+      dataIndex: 'used_quota',
+      key: 'used_quota',
+      render: (text, record) => renderUsedQuota(text, record),
     },
     {
       title: t('分组'),

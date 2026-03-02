@@ -190,7 +190,7 @@ func RequestEpay(c *gin.Context) {
 		TradeNo:       tradeNo,
 		PaymentMethod: req.PaymentMethod,
 		CreateTime:    time.Now().Unix(),
-		Status:        "pending",
+		Status:        common.TopUpStatusPending,
 	}
 	err = topUp.Insert()
 	if err != nil {
@@ -287,8 +287,10 @@ func EpayNotify(c *gin.Context) {
 			log.Printf("易支付回调未找到订单: %v", verifyInfo)
 			return
 		}
-		if topUp.Status == "pending" {
-			topUp.Status = "success"
+		if topUp.Status == common.TopUpStatusPending {
+			// 回调确认后先落订单完成时间，后续返佣台账会基于 complete_time 计算业务日期（biz_date）。
+			topUp.Status = common.TopUpStatusSuccess
+			topUp.CompleteTime = common.GetTimestamp()
 			err := topUp.Update()
 			if err != nil {
 				log.Printf("易支付回调更新订单失败: %v", topUp)
@@ -306,6 +308,10 @@ func EpayNotify(c *gin.Context) {
 			}
 			log.Printf("易支付回调更新用户成功 %v", topUp)
 			model.RecordLog(topUp.UserId, model.LogTypeTopup, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%f", logger.LogQuota(quotaToAdd), topUp.Money))
+			// 只记录返佣台账，实际到账由 T+1 结算任务处理。
+			if enqueueErr := model.EnqueueInviteCommissionFromTopUp(topUp, quotaToAdd); enqueueErr != nil {
+				common.SysError("enqueue invite commission (epay) failed: " + enqueueErr.Error())
+			}
 		}
 	} else {
 		log.Printf("易支付异常回调: %v", verifyInfo)

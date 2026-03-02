@@ -47,12 +47,14 @@ const UsersPage = () => {
     formInitValues,
     setFormApi,
     searchUsers,
-    loadUsers,
-    activePage,
     pageSize,
     groupOptions,
     loading,
     searching,
+    advancedFilters,
+    defaultAdvancedFilters,
+    applyAdvancedFilters,
+    resetAdvancedFilters,
 
     // Description state
     compactMode,
@@ -94,10 +96,12 @@ const UsersPage = () => {
               formInitValues={formInitValues}
               setFormApi={setFormApi}
               searchUsers={searchUsers}
-              loadUsers={loadUsers}
-              activePage={activePage}
               pageSize={pageSize}
               groupOptions={groupOptions}
+              advancedFilters={advancedFilters}
+              defaultAdvancedFilters={defaultAdvancedFilters}
+              applyAdvancedFilters={applyAdvancedFilters}
+              resetAdvancedFilters={resetAdvancedFilters}
               loading={loading}
               searching={searching}
               t={t}

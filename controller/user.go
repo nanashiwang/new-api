@@ -144,7 +144,7 @@ func Register(c *gin.Context) {
 		return
 	}
 	if err := common.Validate.Struct(&user); err != nil {
-		common.ApiErrorI18n(c, i18n.MsgUserInputInvalid, map[string]any{"Error": err.Error()})
+		common.ApiErrorI18n(c, i18n.MsgUserInputInvalid, map[string]any{"Error": common.TranslateValidationErrors(err)})
 		return
 	}
 	if common.EmailVerificationEnabled {
@@ -227,8 +227,13 @@ func Register(c *gin.Context) {
 }
 
 func GetAllUsers(c *gin.Context) {
+	sortBy, sortOrder, idSortOrder, balanceSortOrder, err := parseUserSortQuery(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	pageInfo := common.GetPageQuery(c)
-	users, total, err := model.GetAllUsers(pageInfo)
+	users, total, err := model.GetAllUsers(pageInfo, sortBy, sortOrder, idSortOrder, balanceSortOrder)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -242,10 +247,113 @@ func GetAllUsers(c *gin.Context) {
 }
 
 func SearchUsers(c *gin.Context) {
-	keyword := c.Query("keyword")
-	group := c.Query("group")
+	keyword := strings.TrimSpace(c.Query("keyword"))
+	group := strings.TrimSpace(c.Query("group"))
+	// 这里将可选筛选参数统一解析为“指针语义”：
+	// nil 代表“未传该条件”，非 nil 代表“显式过滤”，避免把 0/false 与“未传”混淆。
+	role, err := parseOptionalIntQuery(c.Query("role"), "role")
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	status, err := parseOptionalIntQuery(c.Query("status"), "status")
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	inviterID, err := parseOptionalIntQuery(c.Query("inviter_id"), "inviter_id")
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	inviteeUserID, err := parseOptionalIntQuery(c.Query("invitee_user_id"), "invitee_user_id")
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	hasInviter, err := parseOptionalBoolQuery(c.Query("has_inviter"), "has_inviter")
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	hasInvitees, err := parseOptionalBoolQuery(c.Query("has_invitees"), "has_invitees")
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	balanceMin, err := parseOptionalIntQuery(c.Query("balance_min"), "balance_min")
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	balanceMax, err := parseOptionalIntQuery(c.Query("balance_max"), "balance_max")
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if balanceMin != nil && *balanceMin < 0 {
+		common.ApiError(c, errors.New("参数 balance_min 不能小于 0"))
+		return
+	}
+	if balanceMax != nil && *balanceMax < 0 {
+		common.ApiError(c, errors.New("参数 balance_max 不能小于 0"))
+		return
+	}
+	// 对范围条件做前置校验，避免出现“最小值大于最大值”导致结果不可预期。
+	if balanceMin != nil && balanceMax != nil && *balanceMin > *balanceMax {
+		common.ApiError(c, errors.New("参数 balance_min 不能大于 balance_max"))
+		return
+	}
+	usedBalanceMin, err := parseOptionalIntQuery(c.Query("used_balance_min"), "used_balance_min")
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	usedBalanceMax, err := parseOptionalIntQuery(c.Query("used_balance_max"), "used_balance_max")
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if usedBalanceMin != nil && *usedBalanceMin < 0 {
+		common.ApiError(c, errors.New("参数 used_balance_min 不能小于 0"))
+		return
+	}
+	if usedBalanceMax != nil && *usedBalanceMax < 0 {
+		common.ApiError(c, errors.New("参数 used_balance_max 不能小于 0"))
+		return
+	}
+	if usedBalanceMin != nil && usedBalanceMax != nil && *usedBalanceMin > *usedBalanceMax {
+		common.ApiError(c, errors.New("参数 used_balance_min 不能大于 used_balance_max"))
+		return
+	}
+
+	sortBy, sortOrder, idSortOrder, balanceSortOrder, err := parseUserSortQuery(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
 	pageInfo := common.GetPageQuery(c)
-	users, total, err := model.SearchUsers(keyword, group, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	users, total, err := model.SearchUsersWithParams(model.UserSearchParams{
+		Keyword:          keyword,
+		Group:            group,
+		Role:             role,
+		Status:           status,
+		InviterID:        inviterID,
+		InviteeUserID:    inviteeUserID,
+		HasInviter:       hasInviter,
+		HasInvitees:      hasInvitees,
+		BalanceMin:       balanceMin,
+		BalanceMax:       balanceMax,
+		UsedBalanceMin:   usedBalanceMin,
+		UsedBalanceMax:   usedBalanceMax,
+		SortBy:           sortBy,
+		SortOrder:        sortOrder,
+		IdSortOrder:      idSortOrder,
+		BalanceSortOrder: balanceSortOrder,
+		StartIdx:         pageInfo.GetStartIdx(),
+		PageSize:         pageInfo.GetPageSize(),
+	})
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -255,6 +363,144 @@ func SearchUsers(c *gin.Context) {
 	pageInfo.SetItems(users)
 	common.ApiSuccess(c, pageInfo)
 	return
+}
+
+func GetUserInviteRelations(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiError(c, errors.New("无效的 id"))
+		return
+	}
+
+	pageInfo := common.GetPageQuery(c)
+	user, inviter, invitees, total, err := model.GetUserInviteRelations(id, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	// 关系详情里被邀请人列表沿用统一分页结构，前端可直接复用表格分页组件。
+	inviteesPage := &common.PageInfo{
+		Page:     pageInfo.GetPage(),
+		PageSize: pageInfo.GetPageSize(),
+	}
+	inviteesPage.SetTotal(int(total))
+	inviteesPage.SetItems(invitees)
+
+	common.ApiSuccess(c, gin.H{
+		"user":     user,
+		"inviter":  inviter,
+		"invitees": inviteesPage,
+	})
+}
+
+type RebuildAffCountRequest struct {
+	UserID *int `json:"user_id"`
+}
+
+func RebuildAffCount(c *gin.Context) {
+	req := RebuildAffCountRequest{}
+	// 允许通过 JSON body 传 user_id；为空则表示全量修复。
+	// 示例：
+	// - 全量：POST /api/user/rebuild-aff-count
+	// - 单用户：POST /api/user/rebuild-aff-count {"user_id":123}
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+			return
+		}
+	}
+	// 兼容 query 传参，便于后台或脚本直接调用。
+	if rawUserID := strings.TrimSpace(c.Query("user_id")); rawUserID != "" {
+		parsedUserID, err := strconv.Atoi(rawUserID)
+		if err != nil || parsedUserID <= 0 {
+			common.ApiError(c, errors.New("无效的 user_id"))
+			return
+		}
+		req.UserID = &parsedUserID
+	}
+
+	result, err := model.RebuildAffCount(req.UserID)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	common.ApiSuccess(c, gin.H{
+		"target_user_id": req.UserID,
+		"result":         result,
+	})
+}
+
+func parseOptionalIntQuery(raw string, name string) (*int, error) {
+	// 可选整型参数解析：
+	// - 空字符串：视为未传
+	// - 非空：必须是合法整数，否则直接返回参数错误，避免下游查询含糊处理
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return nil, fmt.Errorf("参数 %s 不是有效整数", name)
+	}
+	return &value, nil
+}
+
+func parseOptionalBoolQuery(raw string, name string) (*bool, error) {
+	// 可选布尔参数解析，支持 true/false（大小写不敏感）。
+	// 这里不接受其它文本，避免出现“看起来像开启筛选但实际未生效”的隐性问题。
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		return nil, fmt.Errorf("参数 %s 不是有效布尔值", name)
+	}
+	return &value, nil
+}
+
+func parseUserSortQuery(c *gin.Context) (string, string, string, string, error) {
+	sortBy := strings.ToLower(strings.TrimSpace(c.Query("sort_by")))
+	if sortBy == "" {
+		sortBy = "id"
+	}
+	switch sortBy {
+	case "id", "quota":
+	default:
+		return "", "", "", "", errors.New("参数 sort_by 仅支持 id 或 quota")
+	}
+
+	sortOrder := strings.ToLower(strings.TrimSpace(c.Query("sort_order")))
+	if sortOrder == "" {
+		sortOrder = "desc"
+	}
+	switch sortOrder {
+	case "asc", "desc":
+	default:
+		return "", "", "", "", errors.New("参数 sort_order 仅支持 asc 或 desc")
+	}
+
+	// 新增组合排序参数：
+	// - id_sort_order: 控制 ID 的升/降序
+	// - balance_sort_order: 控制余额(quota)的升/降序
+	// 两者可同时传入，例如 id desc + quota asc。
+	idSortOrder := strings.ToLower(strings.TrimSpace(c.Query("id_sort_order")))
+	switch idSortOrder {
+	case "", "asc", "desc":
+	default:
+		return "", "", "", "", errors.New("参数 id_sort_order 仅支持 asc 或 desc")
+	}
+
+	balanceSortOrder := strings.ToLower(strings.TrimSpace(c.Query("balance_sort_order")))
+	switch balanceSortOrder {
+	case "", "asc", "desc":
+	default:
+		return "", "", "", "", errors.New("参数 balance_sort_order 仅支持 asc 或 desc")
+	}
+
+	return sortBy, sortOrder, idSortOrder, balanceSortOrder, nil
 }
 
 func GetUser(c *gin.Context) {
@@ -547,7 +793,7 @@ func UpdateUser(c *gin.Context) {
 		updatedUser.Password = "$I_LOVE_U" // make Validator happy :)
 	}
 	if err := common.Validate.Struct(&updatedUser); err != nil {
-		common.ApiErrorI18n(c, i18n.MsgUserInputInvalid, map[string]any{"Error": err.Error()})
+		common.ApiErrorI18n(c, i18n.MsgUserInputInvalid, map[string]any{"Error": common.TranslateValidationErrors(err)})
 		return
 	}
 	originUser, err := model.GetUserById(updatedUser.Id, false)
@@ -808,7 +1054,7 @@ func CreateUser(c *gin.Context) {
 		return
 	}
 	if err := common.Validate.Struct(&user); err != nil {
-		common.ApiErrorI18n(c, i18n.MsgUserInputInvalid, map[string]any{"Error": err.Error()})
+		common.ApiErrorI18n(c, i18n.MsgUserInputInvalid, map[string]any{"Error": common.TranslateValidationErrors(err)})
 		return
 	}
 	if user.DisplayName == "" {
@@ -824,6 +1070,7 @@ func CreateUser(c *gin.Context) {
 		Username:    user.Username,
 		Password:    user.Password,
 		DisplayName: user.DisplayName,
+		Remark:      user.Remark,
 		Role:        user.Role, // 保持管理员设置的角色
 	}
 	if err := cleanUser.Insert(0); err != nil {

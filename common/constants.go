@@ -103,11 +103,38 @@ var TelegramBotName = ""
 var QuotaForNewUser = 0
 var QuotaForInviter = 0
 var QuotaForInvitee = 0
+
+// InviterCommissionEnabled 是否启用“邀请充值返佣”功能。
+// 默认 false：不开启时不会创建返佣台账，也不会触发日批结算发放。
+var InviterCommissionEnabled = false
+
+// InviterRechargeCommissionRate 邀请返佣比例，按“充值额度”计算。
+// 取值建议 [0,1]：0.1 表示返佣 10%，0 表示不返佣。
+var InviterRechargeCommissionRate = 0.05
+
+// InviterCommissionDailyCap 邀请人单日返佣上限。
+// 0 表示不限制；大于 0 时超出上限部分会被跳过或截断（见返佣风控逻辑）。
+var InviterCommissionDailyCap = 0
 var ChannelDisableThreshold = 5.0
 var AutomaticDisableChannelEnabled = false
 var AutomaticEnableChannelEnabled = false
 var QuotaRemindThreshold = 1000
 var PreConsumedQuota = 500
+
+// QuotaStabilityEnabled 是否开启额度防抖。
+var QuotaStabilityEnabled = true
+
+// QuotaInsufficientDBRecheckEnabled 报额度不足前，是否再查一次数据库。
+var QuotaInsufficientDBRecheckEnabled = true
+
+// MultiKeyCooldownSeconds Key 冷却时长（秒）。
+var MultiKeyCooldownSeconds = 60
+
+// MultiKeyStickySeconds Key 粘性时长（秒）。
+var MultiKeyStickySeconds = 60
+
+// MultiKeySameChannelFailoverOnce 额度错误时，是否同渠道立即重试一次。
+var MultiKeySameChannelFailoverOnce = true
 
 var RetryTimes = 0
 

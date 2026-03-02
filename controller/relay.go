@@ -223,6 +223,21 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
 
+		allowSameChannelFailover := common.QuotaStabilityEnabled &&
+			common.MultiKeySameChannelFailoverOnce &&
+			channel.ChannelInfo.IsMultiKey &&
+			service.IsQuotaRelatedError(newAPIError) &&
+			!retryParam.SameChannelFailoverDone
+
+		if allowSameChannelFailover {
+			retryParam.SameChannelFailoverDone = true
+			retryParam.ResetRetryNextTry()
+			logger.LogInfo(c, fmt.Sprintf("同渠道多 Key 快速切换重试：channel=%d", channel.Id))
+			continue
+		}
+
+		retryParam.ExcludeChannels = append(retryParam.ExcludeChannels, channel.Id)
+
 		if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
 			break
 		}
@@ -338,9 +353,26 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) {
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, err.Error()))
-	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
-	// do not use context to get channel info, there may be inconsistent channel info when processing asynchronously
-	if service.ShouldDisableChannel(channelError.ChannelType, err) && channelError.AutoBan {
+	isQuotaRelated := service.IsQuotaRelatedError(err)
+	// 多 Key 且额度类错误：先给当前 key 打冷却，避免下一次又选到同一个 key。
+	if common.QuotaStabilityEnabled && channelError.IsMultiKey && isQuotaRelated {
+		keyIndex, hasKeyIndex := common.GetContextKeyType[int](c, constant.ContextKeyChannelMultiKeyIndex)
+		if hasKeyIndex && keyIndex >= 0 && common.MultiKeyCooldownSeconds > 0 {
+			reason := string(err.GetErrorCode())
+			if reason == "" {
+				reason = "quota_related_error"
+			}
+			if cooldownErr := model.SetMultiKeyCooldown(channelError.ChannelId, keyIndex, reason, common.MultiKeyCooldownSeconds); cooldownErr != nil {
+				common.SysError(fmt.Sprintf("set multi-key cooldown failed: channel=%d key_index=%d err=%v", channelError.ChannelId, keyIndex, cooldownErr))
+			} else {
+				logger.LogInfo(c, fmt.Sprintf("multi-key cooldown set: channel=%d key_index=%d ttl=%ds", channelError.ChannelId, keyIndex, common.MultiKeyCooldownSeconds))
+			}
+		}
+	}
+	// 不要在异步协程里从 context 重新读取渠道信息，避免不一致。
+	// 多 Key 的额度类错误只做短时冷却，不做永久禁用。
+	shouldDisable := service.ShouldDisableChannel(channelError.ChannelType, err) && channelError.AutoBan
+	if shouldDisable && !(common.QuotaStabilityEnabled && channelError.IsMultiKey && isQuotaRelated) {
 		gopool.Go(func() {
 			service.DisableChannel(channelError, err.ErrorWithStatusCode())
 		})
@@ -540,6 +572,8 @@ func RelayTask(c *gin.Context) {
 					common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
 				types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode))
 		}
+
+		retryParam.ExcludeChannels = append(retryParam.ExcludeChannels, channel.Id)
 
 		if !shouldRetryTaskRelay(c, channel.Id, taskErr, common.RetryTimes-retryParam.GetRetry()) {
 			break

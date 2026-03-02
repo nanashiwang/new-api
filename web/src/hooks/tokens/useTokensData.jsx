@@ -41,6 +41,7 @@ export const useTokensData = (openFluentNotification) => {
   const [pageSize, setPageSize] = useState(ITEMS_PER_PAGE);
   const [searching, setSearching] = useState(false);
   const [searchMode, setSearchMode] = useState(false); // 是否处于搜索结果视图
+  const [groupOptions, setGroupOptions] = useState([]);
 
   // Selection state
   const [selectedKeys, setSelectedKeys] = useState([]);
@@ -60,6 +61,31 @@ export const useTokensData = (openFluentNotification) => {
   const formInitValues = {
     searchKeyword: '',
     searchToken: '',
+    searchGroup: '',
+    searchBalanceMin: '',
+    searchBalanceMax: '',
+    searchUsedBalanceMin: '',
+    searchUsedBalanceMax: '',
+    searchAmountSort: '',
+  };
+
+  const normalizeTokenSortKey = (sortKey) => {
+    if (sortKey === 'quota_asc' || sortKey === 'quota_desc') {
+      return sortKey;
+    }
+    return '';
+  };
+
+  const resolveTokenSort = (sortKey) => {
+    // 令牌管理仅开放“金额排序”，不再暴露 ID 排序选项。
+    const normalized = normalizeTokenSortKey(sortKey);
+    if (normalized === 'quota_asc') {
+      return { sort_by: 'remain_quota', sort_order: 'asc' };
+    }
+    if (normalized === 'quota_desc') {
+      return { sort_by: 'remain_quota', sort_order: 'desc' };
+    }
+    return {};
   };
 
   // Get form values helper function
@@ -68,7 +94,47 @@ export const useTokensData = (openFluentNotification) => {
     return {
       searchKeyword: formValues.searchKeyword || '',
       searchToken: formValues.searchToken || '',
+      searchGroup: formValues.searchGroup || '',
+      searchBalanceMin:
+        formValues.searchBalanceMin === null ||
+        formValues.searchBalanceMin === undefined ||
+        formValues.searchBalanceMin === ''
+          ? ''
+          : formValues.searchBalanceMin,
+      searchBalanceMax:
+        formValues.searchBalanceMax === null ||
+        formValues.searchBalanceMax === undefined ||
+        formValues.searchBalanceMax === ''
+          ? ''
+          : formValues.searchBalanceMax,
+      searchUsedBalanceMin:
+        formValues.searchUsedBalanceMin === null ||
+        formValues.searchUsedBalanceMin === undefined ||
+        formValues.searchUsedBalanceMin === ''
+          ? ''
+          : formValues.searchUsedBalanceMin,
+      searchUsedBalanceMax:
+        formValues.searchUsedBalanceMax === null ||
+        formValues.searchUsedBalanceMax === undefined ||
+        formValues.searchUsedBalanceMax === ''
+          ? ''
+          : formValues.searchUsedBalanceMax,
+      searchAmountSort: normalizeTokenSortKey(formValues.searchAmountSort),
     };
+  };
+
+  const hasTokenFilters = (values) => {
+    // searchMode 依赖该判断，确保翻页/刷新时能带上当前筛选条件。
+    return (
+      values.searchKeyword !== '' ||
+      values.searchToken !== '' ||
+      values.searchGroup !== '' ||
+      values.searchBalanceMin !== '' ||
+      values.searchBalanceMax !== '' ||
+      values.searchUsedBalanceMin !== '' ||
+      values.searchUsedBalanceMax !== '' ||
+      values.searchAmountSort !== ''
+    );
   };
 
   // Close edit modal
@@ -93,7 +159,12 @@ export const useTokensData = (openFluentNotification) => {
   const loadTokens = async (page = 1, size = pageSize) => {
     setLoading(true);
     setSearchMode(false);
-    const res = await API.get(`/api/token/?p=${page}&size=${size}`);
+    const res = await API.get('/api/token/', {
+      params: {
+        p: page,
+        size,
+      },
+    });
     const { success, message, data } = res.data;
     if (success) {
       syncPageData(data);
@@ -105,7 +176,11 @@ export const useTokensData = (openFluentNotification) => {
 
   // Refresh function
   const refresh = async (page = activePage) => {
-    await loadTokens(page);
+    if (searchMode) {
+      await searchTokens(page, pageSize);
+    } else {
+      await loadTokens(page);
+    }
     setSelectedKeys([]);
   };
 
@@ -195,16 +270,60 @@ export const useTokensData = (openFluentNotification) => {
     const normalizedSize =
       Number.isInteger(size) && size > 0 ? size : pageSize;
 
-    const { searchKeyword, searchToken } = getFormValues();
-    if (searchKeyword === '' && searchToken === '') {
+    const {
+      searchKeyword,
+      searchToken,
+      searchGroup,
+      searchBalanceMin,
+      searchBalanceMax,
+      searchUsedBalanceMin,
+      searchUsedBalanceMax,
+      searchAmountSort,
+    } = getFormValues();
+    if (!hasTokenFilters(getFormValues())) {
       setSearchMode(false);
-      await loadTokens(1);
+      await loadTokens(normalizedPage, normalizedSize);
       return;
     }
     setSearching(true);
-    const res = await API.get(
-      `/api/token/search?keyword=${encodeURIComponent(searchKeyword)}&token=${encodeURIComponent(searchToken)}&p=${normalizedPage}&size=${normalizedSize}`,
-    );
+    // 统一通过 params 组装查询，避免手写 URL 拼接遗漏转义。
+    const params = {
+      keyword: searchKeyword,
+      token: searchToken,
+      group: searchGroup,
+      p: normalizedPage,
+      size: normalizedSize,
+      ...resolveTokenSort(searchAmountSort),
+    };
+    if (
+      searchBalanceMin !== '' &&
+      searchBalanceMin !== null &&
+      searchBalanceMin !== undefined
+    ) {
+      params.balance_min = searchBalanceMin;
+    }
+    if (
+      searchBalanceMax !== '' &&
+      searchBalanceMax !== null &&
+      searchBalanceMax !== undefined
+    ) {
+      params.balance_max = searchBalanceMax;
+    }
+    if (
+      searchUsedBalanceMin !== '' &&
+      searchUsedBalanceMin !== null &&
+      searchUsedBalanceMin !== undefined
+    ) {
+      params.used_balance_min = searchUsedBalanceMin;
+    }
+    if (
+      searchUsedBalanceMax !== '' &&
+      searchUsedBalanceMax !== null &&
+      searchUsedBalanceMax !== undefined
+    ) {
+      params.used_balance_max = searchUsedBalanceMax;
+    }
+    const res = await API.get('/api/token/search', { params });
     const { success, message, data } = res.data;
     if (success) {
       setSearchMode(true);
@@ -213,21 +332,6 @@ export const useTokensData = (openFluentNotification) => {
       showError(message);
     }
     setSearching(false);
-  };
-
-  // Sort tokens function
-  const sortToken = (key) => {
-    if (tokens.length === 0) return;
-    setLoading(true);
-    let sortedTokens = [...tokens];
-    sortedTokens.sort((a, b) => {
-      return ('' + a[key]).localeCompare(b[key]);
-    });
-    if (sortedTokens[0].id === tokens[0].id) {
-      sortedTokens.reverse();
-    }
-    setTokens(sortedTokens);
-    setLoading(false);
   };
 
   // Page handlers
@@ -346,12 +450,30 @@ export const useTokensData = (openFluentNotification) => {
 
   // Initialize data
   useEffect(() => {
+    const fetchGroups = async () => {
+      try {
+        const res = await API.get('/api/group/');
+        if (!res?.data?.data) {
+          return;
+        }
+        setGroupOptions(
+          res.data.data.map((group) => ({
+            label: group,
+            value: group,
+          })),
+        );
+      } catch (error) {
+        showError(error.message);
+      }
+    };
+
     loadTokens(1)
       .then()
       .catch((reason) => {
         showError(reason);
       });
-  }, [pageSize]);
+    fetchGroups().then();
+  }, []);
 
   return {
     // Basic state
@@ -361,6 +483,7 @@ export const useTokensData = (openFluentNotification) => {
     tokenCount,
     pageSize,
     searching,
+    groupOptions,
 
     // Selection state
     selectedKeys,
@@ -392,7 +515,6 @@ export const useTokensData = (openFluentNotification) => {
     onOpenLink,
     manageToken,
     searchTokens,
-    sortToken,
     handlePageChange,
     handlePageSizeChange,
     rowSelection,

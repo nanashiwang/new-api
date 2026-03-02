@@ -16,13 +16,29 @@ import (
 
 func GetAllTokens(c *gin.Context) {
 	userId := c.GetInt("id")
-	pageInfo := common.GetPageQuery(c)
-	tokens, err := model.GetAllUserTokens(userId, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	group := strings.TrimSpace(c.Query("group"))
+	balanceMin, balanceMax, usedBalanceMin, usedBalanceMax, sortBy, sortOrder, err := parseTokenListQuery(c)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	total, _ := model.CountUserTokens(userId)
+	pageInfo := common.GetPageQuery(c)
+	tokens, total, err := model.GetAllUserTokens(
+		userId,
+		pageInfo.GetStartIdx(),
+		pageInfo.GetPageSize(),
+		group,
+		balanceMin,
+		balanceMax,
+		usedBalanceMin,
+		usedBalanceMax,
+		sortBy,
+		sortOrder,
+	)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(tokens)
 	common.ApiSuccess(c, pageInfo)
@@ -33,10 +49,29 @@ func SearchTokens(c *gin.Context) {
 	userId := c.GetInt("id")
 	keyword := c.Query("keyword")
 	token := c.Query("token")
+	group := strings.TrimSpace(c.Query("group"))
+	balanceMin, balanceMax, usedBalanceMin, usedBalanceMax, sortBy, sortOrder, err := parseTokenListQuery(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 
 	pageInfo := common.GetPageQuery(c)
 
-	tokens, total, err := model.SearchUserTokens(userId, keyword, token, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	tokens, total, err := model.SearchUserTokens(
+		userId,
+		keyword,
+		token,
+		pageInfo.GetStartIdx(),
+		pageInfo.GetPageSize(),
+		group,
+		balanceMin,
+		balanceMax,
+		usedBalanceMin,
+		usedBalanceMax,
+		sortBy,
+		sortOrder,
+	)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -45,6 +80,93 @@ func SearchTokens(c *gin.Context) {
 	pageInfo.SetItems(tokens)
 	common.ApiSuccess(c, pageInfo)
 	return
+}
+
+func parseTokenListQuery(c *gin.Context) (*int, *int, *int, *int, string, string, error) {
+	// 统一解析令牌列表筛选：剩余余额区间 + 已使用余额区间 + 排序（白名单）。
+	// 该解析同时给 /api/token 和 /api/token/search 复用，避免两处行为不一致。
+	balanceMinRaw := strings.TrimSpace(c.Query("balance_min"))
+	balanceMaxRaw := strings.TrimSpace(c.Query("balance_max"))
+	usedBalanceMinRaw := strings.TrimSpace(c.Query("used_balance_min"))
+	usedBalanceMaxRaw := strings.TrimSpace(c.Query("used_balance_max"))
+
+	var balanceMin *int
+	if balanceMinRaw != "" {
+		value, err := strconv.Atoi(balanceMinRaw)
+		if err != nil {
+			return nil, nil, nil, nil, "", "", fmt.Errorf("参数 balance_min 不是有效整数")
+		}
+		if value < 0 {
+			return nil, nil, nil, nil, "", "", fmt.Errorf("参数 balance_min 不能小于 0")
+		}
+		balanceMin = &value
+	}
+
+	var balanceMax *int
+	if balanceMaxRaw != "" {
+		value, err := strconv.Atoi(balanceMaxRaw)
+		if err != nil {
+			return nil, nil, nil, nil, "", "", fmt.Errorf("参数 balance_max 不是有效整数")
+		}
+		if value < 0 {
+			return nil, nil, nil, nil, "", "", fmt.Errorf("参数 balance_max 不能小于 0")
+		}
+		balanceMax = &value
+	}
+
+	if balanceMin != nil && balanceMax != nil && *balanceMin > *balanceMax {
+		return nil, nil, nil, nil, "", "", fmt.Errorf("参数 balance_min 不能大于 balance_max")
+	}
+
+	var usedBalanceMin *int
+	if usedBalanceMinRaw != "" {
+		value, err := strconv.Atoi(usedBalanceMinRaw)
+		if err != nil {
+			return nil, nil, nil, nil, "", "", fmt.Errorf("参数 used_balance_min 不是有效整数")
+		}
+		if value < 0 {
+			return nil, nil, nil, nil, "", "", fmt.Errorf("参数 used_balance_min 不能小于 0")
+		}
+		usedBalanceMin = &value
+	}
+
+	var usedBalanceMax *int
+	if usedBalanceMaxRaw != "" {
+		value, err := strconv.Atoi(usedBalanceMaxRaw)
+		if err != nil {
+			return nil, nil, nil, nil, "", "", fmt.Errorf("参数 used_balance_max 不是有效整数")
+		}
+		if value < 0 {
+			return nil, nil, nil, nil, "", "", fmt.Errorf("参数 used_balance_max 不能小于 0")
+		}
+		usedBalanceMax = &value
+	}
+
+	if usedBalanceMin != nil && usedBalanceMax != nil && *usedBalanceMin > *usedBalanceMax {
+		return nil, nil, nil, nil, "", "", fmt.Errorf("参数 used_balance_min 不能大于 used_balance_max")
+	}
+
+	sortBy := strings.ToLower(strings.TrimSpace(c.Query("sort_by")))
+	if sortBy == "" {
+		sortBy = "id"
+	}
+	switch sortBy {
+	case "id", "remain_quota":
+	default:
+		return nil, nil, nil, nil, "", "", fmt.Errorf("参数 sort_by 仅支持 id 或 remain_quota")
+	}
+
+	sortOrder := strings.ToLower(strings.TrimSpace(c.Query("sort_order")))
+	if sortOrder == "" {
+		sortOrder = "desc"
+	}
+	switch sortOrder {
+	case "asc", "desc":
+	default:
+		return nil, nil, nil, nil, "", "", fmt.Errorf("参数 sort_order 仅支持 asc 或 desc")
+	}
+
+	return balanceMin, balanceMax, usedBalanceMin, usedBalanceMax, sortBy, sortOrder, nil
 }
 
 func GetToken(c *gin.Context) {

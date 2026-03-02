@@ -12,7 +12,6 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
 
-	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
 )
 
@@ -76,7 +75,7 @@ func (s *BillingSession) Settle(actualQuota int) error {
 	return tokenErr
 }
 
-// Refund 退还所有预扣费，幂等安全，异步执行。
+// Refund 退还所有预扣费，幂等安全，同步执行。
 func (s *BillingSession) Refund(c *gin.Context) {
 	s.mu.Lock()
 	if s.settled || s.refunded || !s.needsRefundLocked() {
@@ -92,25 +91,23 @@ func (s *BillingSession) Refund(c *gin.Context) {
 		s.funding.Source(),
 	))
 
-	// 复制需要的值到闭包中
+	// 复制需要的值，避免长耗时操作持有锁。
 	tokenId := s.relayInfo.TokenId
 	tokenKey := s.relayInfo.TokenKey
 	isPlayground := s.relayInfo.IsPlayground
 	tokenConsumed := s.tokenConsumed
 	funding := s.funding
 
-	gopool.Go(func() {
-		// 1) 退还资金来源
-		if err := funding.Refund(); err != nil {
-			common.SysLog("error refunding billing source: " + err.Error())
+	// 同步退款，避免出现“先扣后还”窗口导致短暂额度不足。
+	// 失败路径下优先保证额度状态一致性，再返回错误给客户端。
+	if err := funding.Refund(); err != nil {
+		common.SysLog("error refunding billing source: " + err.Error())
+	}
+	if tokenConsumed > 0 && !isPlayground {
+		if err := model.IncreaseTokenQuota(tokenId, tokenKey, tokenConsumed); err != nil {
+			common.SysLog("error refunding token quota: " + err.Error())
 		}
-		// 2) 退还令牌额度
-		if tokenConsumed > 0 && !isPlayground {
-			if err := model.IncreaseTokenQuota(tokenId, tokenKey, tokenConsumed); err != nil {
-				common.SysLog("error refunding token quota: " + err.Error())
-			}
-		}
-	})
+	}
 }
 
 // NeedsRefund 返回是否存在需要退还的预扣状态。
@@ -264,6 +261,14 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 		userQuota, err := model.GetUserQuota(relayInfo.UserId, false)
 		if err != nil {
 			return nil, types.NewError(err, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
+		}
+		// 缓存可能短暂滞后：当判定不足时可回源 DB 二次确认，避免误判额度不足。
+		if common.QuotaInsufficientDBRecheckEnabled && (userQuota <= 0 || userQuota < preConsumedQuota) {
+			if dbQuota, dbErr := model.GetUserQuota(relayInfo.UserId, true); dbErr == nil {
+				userQuota = dbQuota
+			} else {
+				common.SysLog(fmt.Sprintf("wallet pre-consume db recheck failed (userId=%d): %s", relayInfo.UserId, dbErr.Error()))
+			}
 		}
 		if userQuota <= 0 {
 			return nil, types.NewErrorWithStatusCode(

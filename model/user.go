@@ -50,6 +50,76 @@ type User struct {
 	Setting          string         `json:"setting" gorm:"type:text;column:setting"`
 	Remark           string         `json:"remark,omitempty" gorm:"type:varchar(255)" validate:"max=255"`
 	StripeCustomer   string         `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
+
+	InviterUsername string `json:"inviter_username,omitempty" gorm:"-"`
+	InviteeCount    int    `json:"invitee_count,omitempty" gorm:"-"`
+}
+
+type UserSearchParams struct {
+	Keyword          string
+	Group            string
+	Role             *int
+	Status           *int
+	InviterID        *int
+	InviteeUserID    *int
+	HasInviter       *bool
+	HasInvitees      *bool
+	BalanceMin       *int
+	BalanceMax       *int
+	UsedBalanceMin   *int
+	UsedBalanceMax   *int
+	SortBy           string
+	SortOrder        string
+	IdSortOrder      string
+	BalanceSortOrder string
+	StartIdx         int
+	PageSize         int
+}
+
+func normalizeUserSortOrder(sortOrder string) string {
+	normalizedSortOrder := strings.ToLower(strings.TrimSpace(sortOrder))
+	switch normalizedSortOrder {
+	case "asc", "desc":
+		return normalizedSortOrder
+	default:
+		return ""
+	}
+}
+
+func normalizeLegacyUserSort(sortBy string, sortOrder string) (string, string) {
+	normalizedSortBy := strings.ToLower(strings.TrimSpace(sortBy))
+	switch normalizedSortBy {
+	case "quota":
+	default:
+		normalizedSortBy = "id"
+	}
+
+	normalizedSortOrder := strings.ToLower(strings.TrimSpace(sortOrder))
+	switch normalizedSortOrder {
+	case "asc":
+	default:
+		normalizedSortOrder = "desc"
+	}
+
+	return normalizedSortBy, normalizedSortOrder
+}
+
+func buildUserOrderClause(sortBy string, sortOrder string, idSortOrder string, balanceSortOrder string) string {
+	orderClauses := make([]string, 0, 2)
+	if normalized := normalizeUserSortOrder(idSortOrder); normalized != "" {
+		orderClauses = append(orderClauses, "id "+normalized)
+	}
+	if normalized := normalizeUserSortOrder(balanceSortOrder); normalized != "" {
+		orderClauses = append(orderClauses, "quota "+normalized)
+	}
+
+	// 兼容旧参数：如果新参数都为空，则回退到 sort_by/sort_order。
+	if len(orderClauses) == 0 {
+		normalizedSortBy, normalizedSortOrder := normalizeLegacyUserSort(sortBy, sortOrder)
+		orderClauses = append(orderClauses, normalizedSortBy+" "+normalizedSortOrder)
+	}
+
+	return strings.Join(orderClauses, ", ")
 }
 
 func (user *User) ToBaseUser() *UserBase {
@@ -188,7 +258,7 @@ func GetMaxUserId() int {
 	return user.Id
 }
 
-func GetAllUsers(pageInfo *common.PageInfo) (users []*User, total int64, err error) {
+func GetAllUsers(pageInfo *common.PageInfo, sortBy string, sortOrder string, idSortOrder string, balanceSortOrder string) (users []*User, total int64, err error) {
 	// Start transaction
 	tx := DB.Begin()
 	if tx.Error != nil {
@@ -207,8 +277,9 @@ func GetAllUsers(pageInfo *common.PageInfo) (users []*User, total int64, err err
 		return nil, 0, err
 	}
 
+	orderClause := buildUserOrderClause(sortBy, sortOrder, idSortOrder, balanceSortOrder)
 	// Get paginated users within same transaction
-	err = tx.Unscoped().Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Omit("password").Find(&users).Error
+	err = tx.Unscoped().Order(orderClause).Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Omit("password").Find(&users).Error
 	if err != nil {
 		tx.Rollback()
 		return nil, 0, err
@@ -223,6 +294,17 @@ func GetAllUsers(pageInfo *common.PageInfo) (users []*User, total int64, err err
 }
 
 func SearchUsers(keyword string, group string, startIdx int, num int) ([]*User, int64, error) {
+	return SearchUsersWithParams(UserSearchParams{
+		Keyword:   keyword,
+		Group:     group,
+		SortBy:    "id",
+		SortOrder: "desc",
+		StartIdx:  startIdx,
+		PageSize:  num,
+	})
+}
+
+func SearchUsersWithParams(params UserSearchParams) ([]*User, int64, error) {
 	var users []*User
 	var total int64
 	var err error
@@ -241,30 +323,75 @@ func SearchUsers(keyword string, group string, startIdx int, num int) ([]*User, 
 	// 构建基础查询
 	query := tx.Unscoped().Model(&User{})
 
-	// 构建搜索条件
-	likeCondition := "username LIKE ? OR email LIKE ? OR display_name LIKE ?"
+	// 这里统一做输入清洗（去首尾空白），并且后续所有条件都使用 GORM 参数绑定写法，
+	// 避免把用户输入直接拼接到 SQL 字符串里，从根源上规避 SQL 注入风险。
+	keyword := strings.TrimSpace(params.Keyword)
+	group := strings.TrimSpace(params.Group)
+	if keyword != "" {
+		likeCondition := "username LIKE ? OR email LIKE ? OR display_name LIKE ?"
+		if keywordInt, parseErr := strconv.Atoi(keyword); parseErr == nil {
+			likeCondition = "id = ? OR " + likeCondition
+			query = query.Where(
+				likeCondition,
+				keywordInt, "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%",
+			)
+		} else {
+			query = query.Where(
+				likeCondition,
+				"%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%",
+			)
+		}
+	}
 
-	// 尝试将关键字转换为整数ID
-	keywordInt, err := strconv.Atoi(keyword)
-	if err == nil {
-		// 如果是数字，同时搜索ID和其他字段
-		likeCondition = "id = ? OR " + likeCondition
-		if group != "" {
-			query = query.Where("("+likeCondition+") AND "+commonGroupCol+" = ?",
-				keywordInt, "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%", group)
+	if group != "" {
+		query = query.Where(commonGroupCol+" = ?", group)
+	}
+	if params.Role != nil {
+		query = query.Where("role = ?", *params.Role)
+	}
+	if params.Status != nil {
+		query = query.Where("status = ?", *params.Status)
+	}
+	if params.InviterID != nil {
+		query = query.Where("inviter_id = ?", *params.InviterID)
+	}
+	if params.HasInviter != nil {
+		if *params.HasInviter {
+			query = query.Where("inviter_id > 0")
 		} else {
-			query = query.Where(likeCondition,
-				keywordInt, "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%")
+			query = query.Where("inviter_id = 0")
 		}
-	} else {
-		// 非数字关键字，只搜索字符串字段
-		if group != "" {
-			query = query.Where("("+likeCondition+") AND "+commonGroupCol+" = ?",
-				"%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%", group)
+	}
+	if params.HasInvitees != nil {
+		if *params.HasInvitees {
+			query = query.Where("aff_count > 0")
 		} else {
-			query = query.Where(likeCondition,
-				"%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%")
+			query = query.Where("aff_count = 0")
 		}
+	}
+	// 额度筛选基于“总额度 = quota + used_quota”。
+	// 使用参数绑定占位符传值，避免把数值拼接到 SQL 字符串中。
+	if params.BalanceMin != nil {
+		query = query.Where("(quota + used_quota) >= ?", *params.BalanceMin)
+	}
+	if params.BalanceMax != nil {
+		query = query.Where("(quota + used_quota) <= ?", *params.BalanceMax)
+	}
+	if params.UsedBalanceMin != nil {
+		query = query.Where("used_quota >= ?", *params.UsedBalanceMin)
+	}
+	if params.UsedBalanceMax != nil {
+		query = query.Where("used_quota <= ?", *params.UsedBalanceMax)
+	}
+	if params.InviteeUserID != nil {
+		// 通过子查询拿到“被邀请人 -> 邀请人ID”，然后反查邀请人用户。
+		// 子查询同样走参数绑定，避免原始 SQL 拼接带来的注入风险。
+		subQuery := tx.Unscoped().
+			Model(&User{}).
+			Select("inviter_id").
+			Where("id = ?", *params.InviteeUserID).
+			Limit(1)
+		query = query.Where("id = (?)", subQuery)
 	}
 
 	// 获取总数
@@ -274,9 +401,26 @@ func SearchUsers(keyword string, group string, startIdx int, num int) ([]*User, 
 		return nil, 0, err
 	}
 
+	// 对分页参数做兜底，确保极端情况下不会出现负偏移或零分页大小。
+	startIdx := params.StartIdx
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	pageSize := params.PageSize
+	if pageSize <= 0 {
+		pageSize = common.ItemsPerPage
+	}
+
+	orderClause := buildUserOrderClause(params.SortBy, params.SortOrder, params.IdSortOrder, params.BalanceSortOrder)
+
 	// 获取分页数据
-	err = query.Omit("password").Order("id desc").Limit(num).Offset(startIdx).Find(&users).Error
+	err = query.Omit("password").Order(orderClause).Limit(pageSize).Offset(startIdx).Find(&users).Error
 	if err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
+
+	if err = attachUserInviteMetadata(tx, users); err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
@@ -287,6 +431,208 @@ func SearchUsers(keyword string, group string, startIdx int, num int) ([]*User, 
 	}
 
 	return users, total, nil
+}
+
+func attachUserInviteMetadata(tx *gorm.DB, users []*User) error {
+	if len(users) == 0 {
+		return nil
+	}
+
+	inviterIDs := make([]int, 0, len(users))
+	seen := make(map[int]struct{}, len(users))
+	for _, user := range users {
+		if user == nil {
+			continue
+		}
+		user.InviteeCount = user.AffCount
+		if user.InviterId <= 0 {
+			continue
+		}
+		if _, ok := seen[user.InviterId]; ok {
+			continue
+		}
+		seen[user.InviterId] = struct{}{}
+		inviterIDs = append(inviterIDs, user.InviterId)
+	}
+	if len(inviterIDs) == 0 {
+		return nil
+	}
+
+	// 为当前页批量补充 inviter_username，避免前端逐行查询导致 N+1 问题。
+	type inviterProjection struct {
+		Id       int    `json:"id"`
+		Username string `json:"username"`
+	}
+	var inviters []inviterProjection
+	if err := tx.Unscoped().Model(&User{}).Select("id", "username").Where("id IN ?", inviterIDs).Find(&inviters).Error; err != nil {
+		return err
+	}
+	nameByID := make(map[int]string, len(inviters))
+	for _, inviter := range inviters {
+		nameByID[inviter.Id] = inviter.Username
+	}
+	for _, user := range users {
+		if user == nil || user.InviterId <= 0 {
+			continue
+		}
+		user.InviterUsername = nameByID[user.InviterId]
+	}
+	return nil
+}
+
+func GetUserInviteRelations(userID int, startIdx int, pageSize int) (*User, *User, []*User, int64, error) {
+	if userID <= 0 {
+		return nil, nil, nil, 0, errors.New("id 为空！")
+	}
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	if pageSize <= 0 {
+		pageSize = common.ItemsPerPage
+	}
+
+	// 先查主用户，再查邀请人与被邀请人分页列表，方便前端一次渲染完整关系视图。
+	user := &User{}
+	if err := DB.Unscoped().Omit("password").First(user, "id = ?", userID).Error; err != nil {
+		return nil, nil, nil, 0, err
+	}
+	user.InviteeCount = user.AffCount
+
+	var inviter *User
+	if user.InviterId > 0 {
+		inviter = &User{}
+		if err := DB.Unscoped().Omit("password").First(inviter, "id = ?", user.InviterId).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, nil, nil, 0, err
+			}
+			inviter = nil
+		}
+	}
+
+	query := DB.Unscoped().Model(&User{}).Where("inviter_id = ?", userID)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, nil, nil, 0, err
+	}
+
+	var invitees []*User
+	if err := query.
+		Omit("password").
+		Order("id desc").
+		Limit(pageSize).
+		Offset(startIdx).
+		Find(&invitees).Error; err != nil {
+		return nil, nil, nil, 0, err
+	}
+	for _, invitee := range invitees {
+		if invitee != nil {
+			invitee.InviteeCount = invitee.AffCount
+		}
+	}
+
+	return user, inviter, invitees, total, nil
+}
+
+type RebuildAffCountResult struct {
+	UpdatedInviters int64 `json:"updated_inviters"`
+	ResetRows       int64 `json:"reset_rows"`
+}
+
+func RebuildAffCount(targetUserID *int) (*RebuildAffCountResult, error) {
+	// 该能力用于修复 aff_count 与真实邀请关系(inviter_id)不一致的问题。
+	// 支持两种模式：
+	// 1) 传入 targetUserID：仅重算单个邀请人的 aff_count。
+	// 2) targetUserID 为空：全量重算所有用户的 aff_count。
+	result := &RebuildAffCountResult{}
+	tx := DB.Begin()
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	if targetUserID != nil {
+		if *targetUserID <= 0 {
+			tx.Rollback()
+			return nil, errors.New("user_id 无效")
+		}
+
+		var inviteeCount int64
+		if err := tx.Unscoped().Model(&User{}).Where("inviter_id = ?", *targetUserID).Count(&inviteeCount).Error; err != nil {
+			tx.Rollback()
+			return nil, err
+		}
+
+		updateResult := tx.Unscoped().
+			Model(&User{}).
+			Where("id = ?", *targetUserID).
+			Update("aff_count", int(inviteeCount))
+		if updateResult.Error != nil {
+			tx.Rollback()
+			return nil, updateResult.Error
+		}
+		if updateResult.RowsAffected == 0 {
+			tx.Rollback()
+			return nil, gorm.ErrRecordNotFound
+		}
+		result.UpdatedInviters = 1
+		if err := tx.Commit().Error; err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
+
+	// 全量模式：先按 inviter_id 聚合真实邀请数量，再回写 aff_count。
+	// 这里全部使用 GORM 构造器与参数绑定，保证 SQLite/MySQL/PostgreSQL 兼容。
+	type inviterCountRow struct {
+		InviterID    int   `gorm:"column:inviter_id"`
+		InviteeCount int64 `gorm:"column:invitee_count"`
+	}
+	var inviterCountRows []inviterCountRow
+	if err := tx.Unscoped().
+		Model(&User{}).
+		Select("inviter_id, COUNT(*) AS invitee_count").
+		Where("inviter_id > 0").
+		Group("inviter_id").
+		Find(&inviterCountRows).Error; err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+
+	// 为了避免旧脏数据残留，先把非 0 的 aff_count 统一归零，再按聚合结果回填。
+	resetResult := tx.Unscoped().Model(&User{}).Where("aff_count <> 0").Update("aff_count", 0)
+	if resetResult.Error != nil {
+		tx.Rollback()
+		return nil, resetResult.Error
+	}
+	result.ResetRows = resetResult.RowsAffected
+
+	var updatedInviters int64 = 0
+	for _, row := range inviterCountRows {
+		if row.InviterID <= 0 {
+			continue
+		}
+		updateResult := tx.Unscoped().
+			Model(&User{}).
+			Where("id = ?", row.InviterID).
+			Update("aff_count", int(row.InviteeCount))
+		if updateResult.Error != nil {
+			tx.Rollback()
+			return nil, updateResult.Error
+		}
+		if updateResult.RowsAffected > 0 {
+			updatedInviters += updateResult.RowsAffected
+		}
+	}
+	result.UpdatedInviters = updatedInviters
+
+	if err := tx.Commit().Error; err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func GetUserById(id int, selectAll bool) (*User, error) {
@@ -329,14 +675,26 @@ func HardDeleteUserById(id int) error {
 }
 
 func inviteUser(inviterId int) (err error) {
-	user, err := GetUserById(inviterId, true)
-	if err != nil {
-		return err
+	if inviterId <= 0 {
+		return errors.New("inviterId 为空！")
 	}
-	user.AffCount++
-	user.AffQuota += common.QuotaForInviter
-	user.AffHistoryQuota += common.QuotaForInviter
-	return DB.Save(user).Error
+	// 这里必须使用数据库原子自增而不是“先查后改再保存”：
+	// 在高并发注册场景下，后者会出现并发覆盖（lost update），导致 aff_count 实际被少加。
+	// 这正是“邀请关系查到 2 人，但直接邀请人数只有 1”这类数据漂移的常见根因。
+	result := DB.Model(&User{}).
+		Where("id = ?", inviterId).
+		Updates(map[string]interface{}{
+			"aff_count":   gorm.Expr("aff_count + 1"),
+			"aff_quota":   gorm.Expr("aff_quota + ?", common.QuotaForInviter),
+			"aff_history": gorm.Expr("aff_history + ?", common.QuotaForInviter),
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 func (user *User) TransferAffQuotaToQuota(quota int) error {
@@ -423,10 +781,16 @@ func (user *User) Insert(inviterId int) error {
 			_ = IncreaseUserQuota(user.Id, common.QuotaForInvitee, true)
 			RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
 		}
+		// 邀请人数统计必须独立于邀请奖励额度开关：
+		// 即使 QuotaForInviter=0（不发固定邀请奖励），也要累计 aff_count，
+		// 否则会出现“邀请关系已建立但邀请人数始终为 0”的错误展示。
+		if err := inviteUser(inviterId); err != nil {
+			// 邀请关系统计属于关键业务指标，这里显式记录错误便于排查数据不一致问题。
+			common.SysError(fmt.Sprintf("更新邀请统计失败(inviter_id=%d,user_id=%d): %s", inviterId, user.Id, err.Error()))
+		}
 		if common.QuotaForInviter > 0 {
 			//_ = IncreaseUserQuota(inviterId, common.QuotaForInviter)
 			RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(common.QuotaForInviter)))
-			_ = inviteUser(inviterId)
 		}
 	}
 	return nil
@@ -484,9 +848,13 @@ func (user *User) FinalizeOAuthUserCreation(inviterId int) {
 			_ = IncreaseUserQuota(user.Id, common.QuotaForInvitee, true)
 			RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
 		}
+		// 与普通注册保持一致：邀请人数统计不依赖 QuotaForInviter。
+		// 这样 OAuth 注册链路也能在“奖励为 0”时正确累计邀请人数。
+		if err := inviteUser(inviterId); err != nil {
+			common.SysError(fmt.Sprintf("更新邀请统计失败(inviter_id=%d,user_id=%d): %s", inviterId, user.Id, err.Error()))
+		}
 		if common.QuotaForInviter > 0 {
 			RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(common.QuotaForInviter)))
-			_ = inviteUser(inviterId)
 		}
 	}
 }

@@ -36,10 +36,21 @@ export default function SettingsCreditLimit(props) {
     PreConsumedQuota: '',
     QuotaForInviter: '',
     QuotaForInvitee: '',
+    InviterCommissionEnabled: false,
+    InviterRechargeCommissionRate: '',
+    InviterCommissionDailyCap: '',
     'quota_setting.enable_free_model_pre_consume': true,
   });
   const refForm = useRef();
   const [inputsRow, setInputsRow] = useState(inputs);
+  const inviterCommissionRate = Number.parseFloat(
+    inputs.InviterRechargeCommissionRate,
+  );
+  const inviterCommissionPercent = Number.isFinite(inviterCommissionRate)
+    ? (inviterCommissionRate * 100).toLocaleString(undefined, {
+        maximumFractionDigits: 2,
+      })
+    : '0';
 
   function onSubmit() {
     const updateArray = compareObjects(inputs, inputsRow);
@@ -162,6 +173,57 @@ export default function SettingsCreditLimit(props) {
                     setInputs({
                       ...inputs,
                       QuotaForInvitee: String(value),
+                    })
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={6}>
+                <Form.InputNumber
+                  label={t('邀请充值返佣比例')}
+                  field={'InviterRechargeCommissionRate'}
+                  step={0.01}
+                  min={0}
+                  max={1}
+                  extraText={t('按充值额度计算，当前比例 {{ratePercent}}%，T+1 结算', {
+                    ratePercent: inviterCommissionPercent,
+                  })}
+                  placeholder={t('例如：0.1')}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      InviterRechargeCommissionRate: String(value),
+                    })
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={6}>
+                <Form.InputNumber
+                  label={t('邀请返佣单日上限')}
+                  field={'InviterCommissionDailyCap'}
+                  step={1}
+                  min={0}
+                  suffix={'Token'}
+                  extraText={t('0 表示不限制')}
+                  placeholder={t('例如：500000')}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      InviterCommissionDailyCap: String(value),
+                    })
+                  }
+                />
+              </Col>
+            </Row>
+            <Row>
+              <Col>
+                <Form.Switch
+                  label={t('启用邀请充值返佣')}
+                  field={'InviterCommissionEnabled'}
+                  extraText={t('仅统计成功充值订单，注册赠送额度不计入返佣')}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      InviterCommissionEnabled: value,
                     })
                   }
                 />

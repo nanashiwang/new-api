@@ -106,8 +106,20 @@ func InitOptionMap() {
 	common.OptionMap["QuotaForNewUser"] = strconv.Itoa(common.QuotaForNewUser)
 	common.OptionMap["QuotaForInviter"] = strconv.Itoa(common.QuotaForInviter)
 	common.OptionMap["QuotaForInvitee"] = strconv.Itoa(common.QuotaForInvitee)
+	// 邀请充值返佣配置：
+	// - InviterCommissionEnabled: 开关
+	// - InviterRechargeCommissionRate: 比例（如 0.1 = 10%）
+	// - InviterCommissionDailyCap: 单日上限（0 表示不限）
+	common.OptionMap["InviterCommissionEnabled"] = strconv.FormatBool(common.InviterCommissionEnabled)
+	common.OptionMap["InviterRechargeCommissionRate"] = strconv.FormatFloat(common.InviterRechargeCommissionRate, 'f', -1, 64)
+	common.OptionMap["InviterCommissionDailyCap"] = strconv.Itoa(common.InviterCommissionDailyCap)
 	common.OptionMap["QuotaRemindThreshold"] = strconv.Itoa(common.QuotaRemindThreshold)
 	common.OptionMap["PreConsumedQuota"] = strconv.Itoa(common.PreConsumedQuota)
+	common.OptionMap["QuotaStabilityEnabled"] = strconv.FormatBool(common.QuotaStabilityEnabled)
+	common.OptionMap["QuotaInsufficientDBRecheckEnabled"] = strconv.FormatBool(common.QuotaInsufficientDBRecheckEnabled)
+	common.OptionMap["MultiKeySameChannelFailoverOnce"] = strconv.FormatBool(common.MultiKeySameChannelFailoverOnce)
+	common.OptionMap["MultiKeyCooldownSeconds"] = strconv.Itoa(common.MultiKeyCooldownSeconds)
+	common.OptionMap["MultiKeyStickySeconds"] = strconv.Itoa(common.MultiKeyStickySeconds)
 	common.OptionMap["ModelRequestRateLimitCount"] = strconv.Itoa(setting.ModelRequestRateLimitCount)
 	common.OptionMap["ModelRequestRateLimitDurationMinutes"] = strconv.Itoa(setting.ModelRequestRateLimitDurationMinutes)
 	common.OptionMap["ModelRequestRateLimitSuccessCount"] = strconv.Itoa(setting.ModelRequestRateLimitSuccessCount)
@@ -298,6 +310,14 @@ func updateOptionMap(key string, value string) (err error) {
 			setting.DefaultUseAutoGroup = boolValue
 		case "ExposeRatioEnabled":
 			ratio_setting.SetExposeRatioEnabled(boolValue)
+		case "InviterCommissionEnabled":
+			common.InviterCommissionEnabled = boolValue
+		case "QuotaStabilityEnabled":
+			common.QuotaStabilityEnabled = boolValue
+		case "QuotaInsufficientDBRecheckEnabled":
+			common.QuotaInsufficientDBRecheckEnabled = boolValue
+		case "MultiKeySameChannelFailoverOnce":
+			common.MultiKeySameChannelFailoverOnce = boolValue
 		}
 	}
 	switch key {
@@ -396,10 +416,20 @@ func updateOptionMap(key string, value string) (err error) {
 		common.QuotaForInviter, _ = strconv.Atoi(value)
 	case "QuotaForInvitee":
 		common.QuotaForInvitee, _ = strconv.Atoi(value)
+	case "InviterRechargeCommissionRate":
+		// 比例配置使用小数表达（例如 0.1 表示 10%）。
+		common.InviterRechargeCommissionRate, _ = strconv.ParseFloat(value, 64)
+	case "InviterCommissionDailyCap":
+		// 单日上限单位为额度，0 表示不限制。
+		common.InviterCommissionDailyCap, _ = strconv.Atoi(value)
 	case "QuotaRemindThreshold":
 		common.QuotaRemindThreshold, _ = strconv.Atoi(value)
 	case "PreConsumedQuota":
 		common.PreConsumedQuota, _ = strconv.Atoi(value)
+	case "MultiKeyCooldownSeconds":
+		common.MultiKeyCooldownSeconds, _ = strconv.Atoi(value)
+	case "MultiKeyStickySeconds":
+		common.MultiKeyStickySeconds, _ = strconv.Atoi(value)
 	case "ModelRequestRateLimitCount":
 		setting.ModelRequestRateLimitCount, _ = strconv.Atoi(value)
 	case "ModelRequestRateLimitDurationMinutes":

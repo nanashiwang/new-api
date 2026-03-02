@@ -100,12 +100,18 @@ func Recharge(referenceId string, customerId string) (err error) {
 	}
 
 	RecordLog(topUp.UserId, LogTypeTopup, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%d", logger.FormatQuota(int(quota)), topUp.Amount))
+	// 返佣采用 T+1 日批结算：
+	// 1) 此处只入返佣台账（pending），不直接发放；
+	// 2) 真正发放由定时任务统一处理，避免支付回调路径里出现复杂并发问题。
+	if enqueueErr := EnqueueInviteCommissionFromTopUp(topUp, int(quota)); enqueueErr != nil {
+		common.SysError("enqueue invite commission failed: " + enqueueErr.Error())
+	}
 
 	return nil
 }
 
 func GetUserTopUps(userId int, pageInfo *common.PageInfo) (topups []*TopUp, total int64, err error) {
-	// Start transaction
+	// 开启事务，保证统计与分页读取在同一快照下完成。
 	tx := DB.Begin()
 	if tx.Error != nil {
 		return nil, 0, tx.Error
@@ -116,21 +122,21 @@ func GetUserTopUps(userId int, pageInfo *common.PageInfo) (topups []*TopUp, tota
 		}
 	}()
 
-	// Get total count within transaction
+	// 先查总数。
 	err = tx.Model(&TopUp{}).Where("user_id = ?", userId).Count(&total).Error
 	if err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
 
-	// Get paginated topups within same transaction
+	// 再查当前页数据。
 	err = tx.Where("user_id = ?", userId).Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&topups).Error
 	if err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
 
-	// Commit transaction
+	// 提交事务。
 	if err = tx.Commit().Error; err != nil {
 		return nil, 0, err
 	}
@@ -304,6 +310,12 @@ func ManualCompleteTopUp(tradeNo string) error {
 
 	// 事务外记录日志，避免阻塞
 	RecordLog(userId, LogTypeTopup, fmt.Sprintf("管理员补单成功，充值金额: %v，支付金额：%f", logger.FormatQuota(quotaToAdd), payMoney))
+	// 补单同样纳入返佣口径，保证“全部成功充值”规则一致。
+	if topUp := GetTopUpByTradeNo(tradeNo); topUp != nil {
+		if enqueueErr := EnqueueInviteCommissionFromTopUp(topUp, quotaToAdd); enqueueErr != nil {
+			common.SysError("enqueue invite commission (manual complete) failed: " + enqueueErr.Error())
+		}
+	}
 	return nil
 }
 func RechargeCreem(referenceId string, customerEmail string, customerName string) (err error) {
@@ -373,6 +385,10 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 	}
 
 	RecordLog(topUp.UserId, LogTypeTopup, fmt.Sprintf("使用Creem充值成功，充值额度: %v，支付金额：%.2f", quota, topUp.Money))
+	// Creem 的 Amount 字段就是充值额度，直接作为返佣基数入池。
+	if enqueueErr := EnqueueInviteCommissionFromTopUp(topUp, int(quota)); enqueueErr != nil {
+		common.SysError("enqueue invite commission (creem) failed: " + enqueueErr.Error())
+	}
 
 	return nil
 }
