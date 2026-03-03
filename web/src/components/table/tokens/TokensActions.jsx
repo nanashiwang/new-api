@@ -27,9 +27,12 @@ const TokensActions = ({
   selectedKeys,
   setEditingToken,
   setShowEdit,
+  batchEnableTokens,
+  batchDisableTokens,
   batchCopyTokens,
   batchDeleteTokens,
   copyText,
+  loading = false,
   t,
 }) => {
   // Modal states
@@ -80,7 +83,30 @@ const TokensActions = ({
         <Button
           type='tertiary'
           className='flex-1 md:flex-initial'
+          onClick={batchEnableTokens}
+          disabled={selectedKeys.length === 0 || loading}
+          loading={loading}
+          size='small'
+        >
+          {t('批量启用')}
+        </Button>
+
+        <Button
+          type='tertiary'
+          className='flex-1 md:flex-initial'
+          onClick={batchDisableTokens}
+          disabled={selectedKeys.length === 0 || loading}
+          loading={loading}
+          size='small'
+        >
+          {t('批量禁用')}
+        </Button>
+
+        <Button
+          type='tertiary'
+          className='flex-1 md:flex-initial'
           onClick={handleCopySelectedTokens}
+          disabled={selectedKeys.length === 0 || loading}
           size='small'
         >
           {t('复制所选令牌')}
@@ -90,6 +116,8 @@ const TokensActions = ({
           type='danger'
           className='w-full md:w-auto'
           onClick={handleDeleteSelectedTokens}
+          disabled={selectedKeys.length === 0 || loading}
+          loading={loading}
           size='small'
         >
           {t('删除所选令牌')}

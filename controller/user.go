@@ -373,7 +373,7 @@ func GetUserInviteRelations(c *gin.Context) {
 	}
 
 	pageInfo := common.GetPageQuery(c)
-	user, inviter, invitees, total, err := model.GetUserInviteRelations(id, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	user, inviter, invitees, total, incomeSummary, err := model.GetUserInviteRelations(id, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -388,9 +388,10 @@ func GetUserInviteRelations(c *gin.Context) {
 	inviteesPage.SetItems(invitees)
 
 	common.ApiSuccess(c, gin.H{
-		"user":     user,
-		"inviter":  inviter,
-		"invitees": inviteesPage,
+		"user":                  user,
+		"inviter":               inviter,
+		"invitees":              inviteesPage,
+		"invite_income_summary": incomeSummary,
 	})
 }
 
@@ -1090,6 +1091,72 @@ type ManageRequest struct {
 	Action string `json:"action"`
 }
 
+type ManageBatchRequest struct {
+	Ids    []int  `json:"ids"`
+	Action string `json:"action"`
+}
+
+// applyManageAction 统一封装“单个用户管理动作”的执行逻辑。
+//
+// 设计目的：
+// 1. 复用给单用户接口（/api/user/manage）和批量接口（/api/user/manage/batch）；
+// 2. 保证两条路径的业务规则完全一致，避免出现“单个可操作但批量不可操作”之类分叉；
+// 3. 将“动作判定 + 状态更新 + 删除行为”集中在一个函数里，降低后续改动成本。
+//
+// 参数说明：
+// - user: 已加载完成的目标用户（调用方负责先查询）。
+// - action: 动作类型，支持 enable/disable/delete/promote/demote。
+// - myRole: 当前操作者角色（用于 root 级别操作判定）。
+//
+// 返回说明：
+// - nil: 动作执行成功。
+// - error: 动作非法、权限不足或数据库写入失败。
+func applyManageAction(user *model.User, action string, myRole int) error {
+	normalizedAction := strings.ToLower(strings.TrimSpace(action))
+	switch normalizedAction {
+	case "disable":
+		// root 用户是系统最高权限账户，禁止被禁用，避免后台完全失控。
+		if user.Role == common.RoleRootUser {
+			return errors.New("不能禁用 root 用户")
+		}
+		user.Status = common.UserStatusDisabled
+		return user.Update(false)
+	case "enable":
+		// 启用仅修改状态位，不触及其他字段。
+		user.Status = common.UserStatusEnabled
+		return user.Update(false)
+	case "delete":
+		// root 用户同样禁止删除，防止系统不可恢复。
+		if user.Role == common.RoleRootUser {
+			return errors.New("不能删除 root 用户")
+		}
+		// 这里走软删除（Delete），保留审计/追溯能力。
+		return user.Delete()
+	case "promote":
+		// 提升管理员属于高风险操作，仅 root 可执行。
+		if myRole != common.RoleRootUser {
+			return errors.New("仅 root 用户可提升管理员")
+		}
+		if user.Role >= common.RoleAdminUser {
+			return errors.New("用户已是管理员")
+		}
+		user.Role = common.RoleAdminUser
+		return user.Update(false)
+	case "demote":
+		// root 用户不可降级；普通用户已是最低角色无需重复降级。
+		if user.Role == common.RoleRootUser {
+			return errors.New("不能降级 root 用户")
+		}
+		if user.Role == common.RoleCommonUser {
+			return errors.New("用户已是普通用户")
+		}
+		user.Role = common.RoleCommonUser
+		return user.Update(false)
+	default:
+		return errors.New("不支持的操作类型")
+	}
+}
+
 // ManageUser Only admin user can do this
 func ManageUser(c *gin.Context) {
 	var req ManageRequest
@@ -1113,54 +1180,12 @@ func ManageUser(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionHigherLevel)
 		return
 	}
-	switch req.Action {
-	case "disable":
-		user.Status = common.UserStatusDisabled
-		if user.Role == common.RoleRootUser {
-			common.ApiErrorI18n(c, i18n.MsgUserCannotDisableRootUser)
-			return
-		}
-	case "enable":
-		user.Status = common.UserStatusEnabled
-	case "delete":
-		if user.Role == common.RoleRootUser {
-			common.ApiErrorI18n(c, i18n.MsgUserCannotDeleteRootUser)
-			return
-		}
-		if err := user.Delete(); err != nil {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": err.Error(),
-			})
-			return
-		}
-	case "promote":
-		if myRole != common.RoleRootUser {
-			common.ApiErrorI18n(c, i18n.MsgUserAdminCannotPromote)
-			return
-		}
-		if user.Role >= common.RoleAdminUser {
-			common.ApiErrorI18n(c, i18n.MsgUserAlreadyAdmin)
-			return
-		}
-		user.Role = common.RoleAdminUser
-	case "demote":
-		if user.Role == common.RoleRootUser {
-			common.ApiErrorI18n(c, i18n.MsgUserCannotDemoteRootUser)
-			return
-		}
-		if user.Role == common.RoleCommonUser {
-			common.ApiErrorI18n(c, i18n.MsgUserAlreadyCommon)
-			return
-		}
-		user.Role = common.RoleCommonUser
-	}
-
-	if err := user.Update(false); err != nil {
+	if err := applyManageAction(&user, req.Action, myRole); err != nil {
 		common.ApiError(c, err)
 		return
 	}
 	clearUser := model.User{
+		Id:     user.Id,
 		Role:   user.Role,
 		Status: user.Status,
 	}
@@ -1170,6 +1195,88 @@ func ManageUser(c *gin.Context) {
 		"data":    clearUser,
 	})
 	return
+}
+
+// ManageUserBatch 管理员批量执行用户管理动作。
+//
+// 行为约定（关键）：
+// 1. 支持“部分成功”语义：某些用户失败不会影响其他用户继续执行；
+// 2. 返回 success_count / failed_count 与失败明细，前端可直接展示“成功X失败Y”；
+// 3. 对重复 ID 做去重，避免同一用户在一次请求内被重复操作；
+// 4. 对每个目标用户都执行独立权限校验，保证安全边界与单操作一致。
+func ManageUserBatch(c *gin.Context) {
+	req := ManageBatchRequest{}
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.Ids) == 0 {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	action := strings.ToLower(strings.TrimSpace(req.Action))
+	if action == "" {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+
+	myRole := c.GetInt("role")
+	seen := make(map[int]struct{}, len(req.Ids))
+	updated := make([]gin.H, 0, len(req.Ids))
+	failed := make([]gin.H, 0)
+
+	for _, id := range req.Ids {
+		// 输入合法性前置校验，避免无效 ID 进入数据库查询。
+		if id <= 0 {
+			failed = append(failed, gin.H{
+				"id":      id,
+				"message": "用户 ID 无效",
+			})
+			continue
+		}
+		// 请求内去重：同一个 ID 仅处理一次，防止重复统计或状态抖动。
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+
+		// 读取目标用户（包含软删除用户），与现有单操作行为保持一致。
+		user := model.User{Id: id}
+		model.DB.Unscoped().Where(&user).First(&user)
+		if user.Id == 0 {
+			failed = append(failed, gin.H{
+				"id":      id,
+				"message": "用户不存在",
+			})
+			continue
+		}
+		// 逐条权限校验：管理员不可操作同级/更高级用户（root 除外）。
+		if myRole <= user.Role && myRole != common.RoleRootUser {
+			failed = append(failed, gin.H{
+				"id":      id,
+				"message": "权限不足",
+			})
+			continue
+		}
+
+		// 复用统一动作逻辑，确保单个与批量规则完全一致。
+		if err := applyManageAction(&user, action, myRole); err != nil {
+			failed = append(failed, gin.H{
+				"id":      id,
+				"message": err.Error(),
+			})
+			continue
+		}
+
+		updated = append(updated, gin.H{
+			"id":     user.Id,
+			"role":   user.Role,
+			"status": user.Status,
+		})
+	}
+
+	common.ApiSuccess(c, gin.H{
+		"success_count": len(updated),
+		"failed_count":  len(failed),
+		"updated":       updated,
+		"failed":        failed,
+	})
 }
 
 func EmailBind(c *gin.Context) {

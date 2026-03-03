@@ -64,6 +64,7 @@ export const useUsersData = () => {
 
   // State management
   const [users, setUsers] = useState([]);
+  const [selectedKeys, setSelectedKeys] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activePage, setActivePage] = useState(1);
   const [pageSize, setPageSize] = useState(ITEMS_PER_PAGE);
@@ -134,10 +135,22 @@ export const useUsersData = () => {
 
   // Set user format with key field
   const setUserFormat = (users) => {
+    // 每次重载列表都重置选择状态，避免“跨页残留选择”导致批量误操作。
+    setSelectedKeys([]);
     for (let i = 0; i < users.length; i++) {
       users[i].key = users[i].id;
     }
     setUsers(users);
+  };
+
+  // 表格行选择配置（用于批量操作）
+  const rowSelection = {
+    selectedRowKeys: selectedKeys.map((user) => user.id),
+    // Semi Table 会同时给 selectedRowKeys 与 selectedRows，
+    // 这里直接保留 selectedRows，后续批量操作可直接取 id/状态/角色等字段。
+    onChange: (selectedRowKeys, selectedRows) => {
+      setSelectedKeys(selectedRows || []);
+    },
   };
 
   // Load users data
@@ -362,6 +375,50 @@ export const useUsersData = () => {
     setLoading(false);
   };
 
+  // 用户批量管理（启用/禁用/删除）
+  const batchManageUsers = async (action) => {
+    if (selectedKeys.length === 0) {
+      showError(t('请至少选择一个用户！'));
+      return;
+    }
+    setLoading(true);
+    try {
+      const ids = selectedKeys.map((user) => user.id);
+      const res = await API.post('/api/user/manage/batch', { ids, action });
+      const { success, message, data } = res.data || {};
+      if (!success) {
+        showError(message || t('批量操作失败'));
+        return;
+      }
+
+      const successCount = Number(data?.success_count || 0);
+      const failedCount = Number(data?.failed_count || 0);
+      if (failedCount > 0) {
+        // 失败明细由后端返回 failed 列表，这里先给汇总提示，避免提示过长影响阅读。
+        showSuccess(
+          t('批量操作完成: {{success}}个成功, {{failed}}个失败', {
+            success: successCount,
+            failed: failedCount,
+          }),
+        );
+      } else if (action === 'enable') {
+        showSuccess(t('已批量启用 {{count}} 个用户', { count: successCount }));
+      } else if (action === 'disable') {
+        showSuccess(t('已批量禁用 {{count}} 个用户', { count: successCount }));
+      } else if (action === 'delete') {
+        showSuccess(t('已批量删除 {{count}} 个用户', { count: successCount }));
+      } else {
+        showSuccess(t('操作成功完成！'));
+      }
+
+      await refresh();
+    } catch (error) {
+      showError(error?.message || t('批量操作失败'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const resetUserPasskey = async (user) => {
     if (!user) {
       return;
@@ -582,6 +639,7 @@ export const useUsersData = () => {
   return {
     // Data state
     users,
+    selectedKeys,
     loading,
     activePage,
     pageSize,
@@ -610,9 +668,11 @@ export const useUsersData = () => {
     setCompactMode,
 
     // Actions
+    rowSelection,
     loadUsers,
     searchUsers,
     manageUser,
+    batchManageUsers,
     resetUserPasskey,
     resetUserTwoFA,
     handlePageChange,

@@ -18,18 +18,70 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Button } from '@douyinfe/semi-ui';
+import { Button, Modal } from '@douyinfe/semi-ui';
 
-const UsersActions = ({ setShowAddUser, t }) => {
+const UsersActions = ({
+  setShowAddUser,
+  selectedKeys = [],
+  batchManageUsers,
+  loading = false,
+  t,
+}) => {
   // Add new user
   const handleAddUser = () => {
     setShowAddUser(true);
   };
 
+  // 批量删除需要二次确认，避免误删。
+  const handleBatchDelete = () => {
+    if (!selectedKeys || selectedKeys.length === 0) {
+      return;
+    }
+    Modal.confirm({
+      title: t('批量删除用户'),
+      content: t('确定要删除所选的 {{count}} 个用户吗？', {
+        count: selectedKeys.length,
+      }),
+      onOk: async () => {
+        await batchManageUsers?.('delete');
+      },
+    });
+  };
+
   return (
-    <div className='flex gap-2 w-full md:w-auto order-2 md:order-1'>
+    <div className='flex flex-wrap gap-2 w-full md:w-auto order-2 md:order-1'>
       <Button className='w-full md:w-auto' onClick={handleAddUser} size='small'>
         {t('添加用户')}
+      </Button>
+      <Button
+        type='tertiary'
+        className='flex-1 md:flex-initial'
+        onClick={() => batchManageUsers?.('enable')}
+        disabled={selectedKeys.length === 0 || loading}
+        loading={loading}
+        size='small'
+      >
+        {t('批量启用')}
+      </Button>
+      <Button
+        type='tertiary'
+        className='flex-1 md:flex-initial'
+        onClick={() => batchManageUsers?.('disable')}
+        disabled={selectedKeys.length === 0 || loading}
+        loading={loading}
+        size='small'
+      >
+        {t('批量禁用')}
+      </Button>
+      <Button
+        type='danger'
+        className='w-full md:w-auto'
+        onClick={handleBatchDelete}
+        disabled={selectedKeys.length === 0 || loading}
+        loading={loading}
+        size='small'
+      >
+        {t('批量删除')}
       </Button>
     </div>
   );

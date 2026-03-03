@@ -123,6 +123,7 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.GET("/:id", controller.GetUser)
 				adminRoute.POST("/", controller.CreateUser)
 				adminRoute.POST("/manage", controller.ManageUser)
+				adminRoute.POST("/manage/batch", controller.ManageUserBatch)
 				adminRoute.PUT("/", controller.UpdateUser)
 				adminRoute.DELETE("/:id", controller.DeleteUser)
 				adminRoute.DELETE("/:id/reset_passkey", controller.AdminResetPasskey)
@@ -250,6 +251,7 @@ func SetApiRouter(router *gin.Engine) {
 			tokenRoute.PUT("/", controller.UpdateToken)
 			tokenRoute.DELETE("/:id", controller.DeleteToken)
 			tokenRoute.POST("/batch", controller.DeleteTokenBatch)
+			tokenRoute.POST("/manage/batch", controller.ManageTokenBatch)
 		}
 
 		usageRoute := apiRouter.Group("/usage")

@@ -25,13 +25,14 @@ import {
   Space,
   Spin,
   Tag,
+  Tooltip,
   Typography,
 } from '@douyinfe/semi-ui';
 import {
   IllustrationNoResult,
   IllustrationNoResultDark,
 } from '@douyinfe/semi-illustrations';
-import { API, renderGroup, showError } from '../../../../helpers';
+import { API, renderGroup, renderQuota, showError } from '../../../../helpers';
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
 import CardTable from '../../../common/ui/CardTable';
 
@@ -48,6 +49,11 @@ const UserInviteRelationsSheet = ({ visible, onCancel, user, t }) => {
       total: 0,
       page: 1,
       page_size: 10,
+    },
+    invite_income_summary: {
+      direct_total_quota: 0,
+      recharge_total_quota: 0,
+      total_quota: 0,
     },
   });
   const [page, setPage] = useState(1);
@@ -82,6 +88,11 @@ const UserInviteRelationsSheet = ({ visible, onCancel, user, t }) => {
           total: 0,
           page: targetPage,
           page_size: targetPageSize,
+        },
+        invite_income_summary: data?.invite_income_summary || {
+          direct_total_quota: 0,
+          recharge_total_quota: 0,
+          total_quota: 0,
         },
       });
     } catch (error) {
@@ -148,6 +159,36 @@ const UserInviteRelationsSheet = ({ visible, onCancel, user, t }) => {
           );
         },
       },
+      {
+        // 余额展示的是该被邀请人的当前剩余额度（quota 字段）。
+        title: t('余额'),
+        dataIndex: 'quota',
+        render: (quota) => renderQuota(quota || 0),
+      },
+      {
+        // “产生收益”按你要求展示总和：
+        // 总收益 = 直接收益（配置口径） + 充值返佣（台账结算口径）。
+        title: t('产生收益'),
+        dataIndex: 'invite_total_income_quota',
+        render: (totalIncome, record) => {
+          const direct = Number(record?.invite_direct_income_quota || 0);
+          const recharge = Number(record?.invite_recharge_commission_quota || 0);
+          const total = Number(totalIncome || 0);
+          const tooltipContent = (
+            <div style={{ whiteSpace: 'nowrap', lineHeight: 1.4 }}>
+              {t('直接收益')}: {renderQuota(direct)} + {t('充值返佣')}:{' '}
+              {renderQuota(recharge)}
+            </div>
+          );
+          return (
+            <Tooltip content={tooltipContent} position='top'>
+              <Tag color='white' shape='circle'>
+                {renderQuota(total)}
+              </Tag>
+            </Tooltip>
+          );
+        },
+      },
     ],
     [t],
   );
@@ -156,6 +197,11 @@ const UserInviteRelationsSheet = ({ visible, onCancel, user, t }) => {
     ...item,
     key: item?.id,
   }));
+  const inviteIncomeSummary = relations?.invite_income_summary || {
+    direct_total_quota: 0,
+    recharge_total_quota: 0,
+    total_quota: 0,
+  };
   const inviteesTotal = Number(relations?.invitees?.total || 0);
   const relationUser = relations?.user || user || null;
   const relationInviter = relations?.inviter || null;
@@ -191,6 +237,21 @@ const UserInviteRelationsSheet = ({ visible, onCancel, user, t }) => {
                 </Tag>
                 <Tag color='white' shape='circle'>
                   {t('本次列表总数')}：{inviteesTotal}
+                </Tag>
+                <Tag color='white' shape='circle'>
+                  {t('直接收益汇总')}：{renderQuota(
+                    inviteIncomeSummary.direct_total_quota || 0,
+                  )}
+                </Tag>
+                <Tag color='white' shape='circle'>
+                  {t('充值返佣汇总')}：{renderQuota(
+                    inviteIncomeSummary.recharge_total_quota || 0,
+                  )}
+                </Tag>
+                <Tag color='white' shape='circle'>
+                  {t('总收益汇总')}：{renderQuota(
+                    inviteIncomeSummary.total_quota || 0,
+                  )}
                 </Tag>
               </Space>
             </div>

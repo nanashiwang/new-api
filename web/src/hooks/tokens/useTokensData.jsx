@@ -376,31 +376,58 @@ export const useTokensData = (openFluentNotification) => {
 
   // Batch delete tokens
   const batchDeleteTokens = async () => {
+    await batchManageTokens('delete');
+  };
+
+  // 统一令牌批量管理（启用/禁用/删除）
+  const batchManageTokens = async (action) => {
     if (selectedKeys.length === 0) {
-      showError(t('请先选择要删除的令牌！'));
+      showError(t('请至少选择一个令牌！'));
       return;
     }
     setLoading(true);
     try {
       const ids = selectedKeys.map((token) => token.id);
-      const res = await API.post('/api/token/batch', { ids });
-      if (res?.data?.success) {
-        const count = res.data.data || 0;
-        showSuccess(t('已删除 {{count}} 个令牌！', { count }));
-        await refresh();
-        setTimeout(() => {
-          if (tokens.length === 0 && activePage > 1) {
-            refresh(activePage - 1);
-          }
-        }, 100);
-      } else {
-        showError(res?.data?.message || t('删除失败'));
+      const res = await API.post('/api/token/manage/batch', { ids, action });
+      const { success, message, data } = res.data || {};
+      if (!success) {
+        showError(message || t('批量操作失败'));
+        return;
       }
+
+      const successCount = Number(data?.success_count || 0);
+      const failedCount = Number(data?.failed_count || 0);
+      if (failedCount > 0) {
+        showSuccess(
+          t('批量操作完成: {{success}}个成功, {{failed}}个失败', {
+            success: successCount,
+            failed: failedCount,
+          }),
+        );
+      } else if (action === 'enable') {
+        showSuccess(t('已批量启用 {{count}} 个令牌', { count: successCount }));
+      } else if (action === 'disable') {
+        showSuccess(t('已批量禁用 {{count}} 个令牌', { count: successCount }));
+      } else if (action === 'delete') {
+        showSuccess(t('已删除 {{count}} 个令牌！', { count: successCount }));
+      } else {
+        showSuccess(t('操作成功完成！'));
+      }
+
+      await refresh();
     } catch (error) {
-      showError(error.message);
+      showError(error?.message || t('批量操作失败'));
     } finally {
       setLoading(false);
     }
+  };
+
+  const batchEnableTokens = async () => {
+    await batchManageTokens('enable');
+  };
+
+  const batchDisableTokens = async () => {
+    await batchManageTokens('disable');
   };
 
   // Batch copy tokens
@@ -520,6 +547,9 @@ export const useTokensData = (openFluentNotification) => {
     rowSelection,
     handleRow,
     batchDeleteTokens,
+    batchManageTokens,
+    batchEnableTokens,
+    batchDisableTokens,
     batchCopyTokens,
     syncPageData,
 

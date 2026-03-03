@@ -53,6 +53,13 @@ type User struct {
 
 	InviterUsername string `json:"inviter_username,omitempty" gorm:"-"`
 	InviteeCount    int    `json:"invitee_count,omitempty" gorm:"-"`
+	// 邀请关系视图的派生字段（仅用于接口响应，不落库）：
+	// 1) 直接收益：按当前配置口径（QuotaForInviter）估算每个被邀请人贡献；
+	// 2) 充值返佣：从返佣台账（InviteCommissionLedger）按 invitee 聚合已结算金额；
+	// 3) 总收益：直接收益 + 充值返佣。
+	InviteDirectIncomeQuota       int `json:"invite_direct_income_quota" gorm:"-"`
+	InviteRechargeCommissionQuota int `json:"invite_recharge_commission_quota" gorm:"-"`
+	InviteTotalIncomeQuota        int `json:"invite_total_income_quota" gorm:"-"`
 }
 
 type UserSearchParams struct {
@@ -74,6 +81,12 @@ type UserSearchParams struct {
 	BalanceSortOrder string
 	StartIdx         int
 	PageSize         int
+}
+
+type InviteIncomeSummary struct {
+	DirectTotalQuota   int `json:"direct_total_quota"`
+	RechargeTotalQuota int `json:"recharge_total_quota"`
+	TotalQuota         int `json:"total_quota"`
 }
 
 func normalizeUserSortOrder(sortOrder string) string {
@@ -480,9 +493,9 @@ func attachUserInviteMetadata(tx *gorm.DB, users []*User) error {
 	return nil
 }
 
-func GetUserInviteRelations(userID int, startIdx int, pageSize int) (*User, *User, []*User, int64, error) {
+func GetUserInviteRelations(userID int, startIdx int, pageSize int) (*User, *User, []*User, int64, *InviteIncomeSummary, error) {
 	if userID <= 0 {
-		return nil, nil, nil, 0, errors.New("id 为空！")
+		return nil, nil, nil, 0, nil, errors.New("id 为空！")
 	}
 	if startIdx < 0 {
 		startIdx = 0
@@ -490,11 +503,12 @@ func GetUserInviteRelations(userID int, startIdx int, pageSize int) (*User, *Use
 	if pageSize <= 0 {
 		pageSize = common.ItemsPerPage
 	}
+	summary := &InviteIncomeSummary{}
 
 	// 先查主用户，再查邀请人与被邀请人分页列表，方便前端一次渲染完整关系视图。
 	user := &User{}
 	if err := DB.Unscoped().Omit("password").First(user, "id = ?", userID).Error; err != nil {
-		return nil, nil, nil, 0, err
+		return nil, nil, nil, 0, nil, err
 	}
 	user.InviteeCount = user.AffCount
 
@@ -503,7 +517,7 @@ func GetUserInviteRelations(userID int, startIdx int, pageSize int) (*User, *Use
 		inviter = &User{}
 		if err := DB.Unscoped().Omit("password").First(inviter, "id = ?", user.InviterId).Error; err != nil {
 			if !errors.Is(err, gorm.ErrRecordNotFound) {
-				return nil, nil, nil, 0, err
+				return nil, nil, nil, 0, nil, err
 			}
 			inviter = nil
 		}
@@ -512,8 +526,25 @@ func GetUserInviteRelations(userID int, startIdx int, pageSize int) (*User, *Use
 	query := DB.Unscoped().Model(&User{}).Where("inviter_id = ?", userID)
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
-		return nil, nil, nil, 0, err
+		return nil, nil, nil, 0, nil, err
 	}
+
+	// 直接收益采用“当前配置口径”：
+	// - 每个被邀请用户按 QuotaForInviter 计一次；
+	// - 该口径实现简单、开销稳定，但不追溯历史配置变更。
+	if common.QuotaForInviter > 0 {
+		summary.DirectTotalQuota = int(total) * common.QuotaForInviter
+	}
+	// 充值返佣按台账汇总（仅统计 settled）：
+	// - pending/skipped 不计入已到账收益；
+	// - 这里按 inviter_user_id 聚合，得到“该用户作为邀请人”的总返佣。
+	if err := DB.Model(&InviteCommissionLedger{}).
+		Select("COALESCE(SUM(settled_quota), 0)").
+		Where("inviter_user_id = ? AND status = ?", userID, InviteCommissionStatusSettled).
+		Scan(&summary.RechargeTotalQuota).Error; err != nil {
+		return nil, nil, nil, 0, nil, err
+	}
+	summary.TotalQuota = summary.DirectTotalQuota + summary.RechargeTotalQuota
 
 	var invitees []*User
 	if err := query.
@@ -522,15 +553,52 @@ func GetUserInviteRelations(userID int, startIdx int, pageSize int) (*User, *Use
 		Limit(pageSize).
 		Offset(startIdx).
 		Find(&invitees).Error; err != nil {
-		return nil, nil, nil, 0, err
+		return nil, nil, nil, 0, nil, err
+	}
+
+	rechargeByInvitee := map[int]int{}
+	inviteeIDs := make([]int, 0, len(invitees))
+	for _, invitee := range invitees {
+		if invitee == nil || invitee.Id <= 0 {
+			continue
+		}
+		inviteeIDs = append(inviteeIDs, invitee.Id)
+	}
+	if len(inviteeIDs) > 0 {
+		type inviteeRechargeRow struct {
+			InviteeUserID      int `gorm:"column:invitee_user_id"`
+			RechargeTotalQuota int `gorm:"column:recharge_total_quota"`
+		}
+		var rows []inviteeRechargeRow
+		// 为“当前页被邀请人”批量聚合返佣，避免前端逐行请求导致 N+1。
+		if err := DB.Model(&InviteCommissionLedger{}).
+			Select("invitee_user_id, COALESCE(SUM(settled_quota), 0) AS recharge_total_quota").
+			Where("inviter_user_id = ? AND status = ? AND invitee_user_id IN ?", userID, InviteCommissionStatusSettled, inviteeIDs).
+			Group("invitee_user_id").
+			Find(&rows).Error; err != nil {
+			return nil, nil, nil, 0, nil, err
+		}
+		for _, row := range rows {
+			rechargeByInvitee[row.InviteeUserID] = row.RechargeTotalQuota
+		}
 	}
 	for _, invitee := range invitees {
 		if invitee != nil {
 			invitee.InviteeCount = invitee.AffCount
+			// 每个被邀请人对应一份“直接收益”（当前配置口径）。
+			directIncome := 0
+			if common.QuotaForInviter > 0 {
+				directIncome = common.QuotaForInviter
+			}
+			invitee.InviteDirectIncomeQuota = directIncome
+			// 充值返佣是按台账聚合后的真实已结算值。
+			invitee.InviteRechargeCommissionQuota = rechargeByInvitee[invitee.Id]
+			// 总收益用于前端主展示，拆分项用于 tooltip/明细展示。
+			invitee.InviteTotalIncomeQuota = invitee.InviteDirectIncomeQuota + invitee.InviteRechargeCommissionQuota
 		}
 	}
 
-	return user, inviter, invitees, total, nil
+	return user, inviter, invitees, total, summary, nil
 }
 
 type RebuildAffCountResult struct {

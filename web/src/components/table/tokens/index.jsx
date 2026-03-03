@@ -335,6 +335,8 @@ function TokensPage() {
     selectedKeys,
     setEditingToken,
     setShowEdit,
+    batchEnableTokens,
+    batchDisableTokens,
     batchCopyTokens,
     batchDeleteTokens,
     copyText,
@@ -379,9 +381,12 @@ function TokensPage() {
               selectedKeys={selectedKeys}
               setEditingToken={setEditingToken}
               setShowEdit={setShowEdit}
+              batchEnableTokens={batchEnableTokens}
+              batchDisableTokens={batchDisableTokens}
               batchCopyTokens={batchCopyTokens}
               batchDeleteTokens={batchDeleteTokens}
               copyText={copyText}
+              loading={loading}
               t={t}
             />
 

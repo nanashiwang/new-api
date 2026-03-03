@@ -413,6 +413,11 @@ type TokenBatch struct {
 	Ids []int `json:"ids"`
 }
 
+type TokenBatchManageRequest struct {
+	Ids    []int  `json:"ids"`
+	Action string `json:"action"`
+}
+
 func DeleteTokenBatch(c *gin.Context) {
 	tokenBatch := TokenBatch{}
 	if err := c.ShouldBindJSON(&tokenBatch); err != nil || len(tokenBatch.Ids) == 0 {
@@ -429,5 +434,117 @@ func DeleteTokenBatch(c *gin.Context) {
 		"success": true,
 		"message": "",
 		"data":    count,
+	})
+}
+
+// ManageTokenBatch 统一处理令牌批量管理动作。
+//
+// 设计要点：
+// 1. 一个接口同时支持 enable / disable / delete，便于前端复用；
+// 2. 按“部分成功”模型执行：单条失败不影响其他令牌；
+// 3. 返回成功数、失败数、失败明细，便于前端给出明确反馈；
+// 4. 严格限定只能操作当前用户自己的令牌（通过 userId + tokenId 查询约束）。
+func ManageTokenBatch(c *gin.Context) {
+	req := TokenBatchManageRequest{}
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.Ids) == 0 {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+
+	action := strings.ToLower(strings.TrimSpace(req.Action))
+	switch action {
+	case "enable", "disable", "delete":
+	default:
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+
+	userId := c.GetInt("id")
+	seen := make(map[int]struct{}, len(req.Ids))
+	updated := make([]gin.H, 0, len(req.Ids))
+	failed := make([]gin.H, 0)
+
+	for _, id := range req.Ids {
+		// 输入兜底：非法 ID 直接记失败，避免无效查询。
+		if id <= 0 {
+			failed = append(failed, gin.H{
+				"id":      id,
+				"message": "令牌 ID 无效",
+			})
+			continue
+		}
+		// 同一请求内去重，确保一个令牌最多处理一次。
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+
+		// 只能读取到“当前用户自己的令牌”，从根源避免跨用户越权操作。
+		token, err := model.GetTokenByIds(id, userId)
+		if err != nil || token == nil || token.Id == 0 {
+			failed = append(failed, gin.H{
+				"id":      id,
+				"message": "令牌不存在",
+			})
+			continue
+		}
+
+		switch action {
+		case "enable":
+			// 规则与单条编辑保持一致：已过期令牌不允许重新启用。
+			if token.Status == common.TokenStatusExpired && token.ExpiredTime <= common.GetTimestamp() && token.ExpiredTime != -1 {
+				failed = append(failed, gin.H{
+					"id":      id,
+					"message": "已过期令牌不可启用",
+				})
+				continue
+			}
+			// 规则与单条编辑保持一致：已耗尽且非无限额令牌不可启用。
+			if token.Status == common.TokenStatusExhausted && token.RemainQuota <= 0 && !token.UnlimitedQuota {
+				failed = append(failed, gin.H{
+					"id":      id,
+					"message": "已耗尽令牌不可启用",
+				})
+				continue
+			}
+			token.Status = common.TokenStatusEnabled
+			if err := token.Update(); err != nil {
+				failed = append(failed, gin.H{
+					"id":      id,
+					"message": err.Error(),
+				})
+				continue
+			}
+		case "disable":
+			token.Status = common.TokenStatusDisabled
+			if err := token.Update(); err != nil {
+				failed = append(failed, gin.H{
+					"id":      id,
+					"message": err.Error(),
+				})
+				continue
+			}
+		case "delete":
+			if err := token.Delete(); err != nil {
+				failed = append(failed, gin.H{
+					"id":      id,
+					"message": err.Error(),
+				})
+				continue
+			}
+		}
+
+		// 成功项返回最小必要字段，便于前端做局部刷新或统计。
+		updated = append(updated, gin.H{
+			"id":     token.Id,
+			"status": token.Status,
+		})
+	}
+
+	common.ApiSuccess(c, gin.H{
+		"success_count": len(updated),
+		"failed_count":  len(failed),
+		"updated":       updated,
+		"failed":        failed,
 	})
 }
