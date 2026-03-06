@@ -281,6 +281,11 @@ func SearchUsers(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	hasActiveSubscription, err := parseOptionalBoolQuery(c.Query("has_active_subscription"), "has_active_subscription")
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	balanceMin, err := parseOptionalIntQuery(c.Query("balance_min"), "balance_min")
 	if err != nil {
 		common.ApiError(c, err)
@@ -335,24 +340,25 @@ func SearchUsers(c *gin.Context) {
 
 	pageInfo := common.GetPageQuery(c)
 	users, total, err := model.SearchUsersWithParams(model.UserSearchParams{
-		Keyword:          keyword,
-		Group:            group,
-		Role:             role,
-		Status:           status,
-		InviterID:        inviterID,
-		InviteeUserID:    inviteeUserID,
-		HasInviter:       hasInviter,
-		HasInvitees:      hasInvitees,
-		BalanceMin:       balanceMin,
-		BalanceMax:       balanceMax,
-		UsedBalanceMin:   usedBalanceMin,
-		UsedBalanceMax:   usedBalanceMax,
-		SortBy:           sortBy,
-		SortOrder:        sortOrder,
-		IdSortOrder:      idSortOrder,
-		BalanceSortOrder: balanceSortOrder,
-		StartIdx:         pageInfo.GetStartIdx(),
-		PageSize:         pageInfo.GetPageSize(),
+		Keyword:               keyword,
+		Group:                 group,
+		Role:                  role,
+		Status:                status,
+		InviterID:             inviterID,
+		InviteeUserID:         inviteeUserID,
+		HasInviter:            hasInviter,
+		HasInvitees:           hasInvitees,
+		HasActiveSubscription: hasActiveSubscription,
+		BalanceMin:            balanceMin,
+		BalanceMax:            balanceMax,
+		UsedBalanceMin:        usedBalanceMin,
+		UsedBalanceMax:        usedBalanceMax,
+		SortBy:                sortBy,
+		SortOrder:             sortOrder,
+		IdSortOrder:           idSortOrder,
+		BalanceSortOrder:      balanceSortOrder,
+		StartIdx:              pageInfo.GetStartIdx(),
+		PageSize:              pageInfo.GetPageSize(),
 	})
 	if err != nil {
 		common.ApiError(c, err)

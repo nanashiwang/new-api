@@ -53,6 +53,11 @@ type User struct {
 
 	InviterUsername string `json:"inviter_username,omitempty" gorm:"-"`
 	InviteeCount    int    `json:"invitee_count,omitempty" gorm:"-"`
+	// 生效套餐元数据（仅用于用户管理列表响应，不落库）：
+	// - HasActiveSubscription：当前是否存在生效套餐
+	// - ActiveSubscriptionCount：当前生效套餐条数
+	HasActiveSubscription   bool `json:"has_active_subscription" gorm:"-"`
+	ActiveSubscriptionCount int  `json:"active_subscription_count" gorm:"-"`
 	// 邀请关系视图的派生字段（仅用于接口响应，不落库）：
 	// 1) 直接收益：按当前配置口径（QuotaForInviter）估算每个被邀请人贡献；
 	// 2) 充值返佣：从返佣台账（InviteCommissionLedger）按 invitee 聚合已结算金额；
@@ -63,24 +68,25 @@ type User struct {
 }
 
 type UserSearchParams struct {
-	Keyword          string
-	Group            string
-	Role             *int
-	Status           *int
-	InviterID        *int
-	InviteeUserID    *int
-	HasInviter       *bool
-	HasInvitees      *bool
-	BalanceMin       *int
-	BalanceMax       *int
-	UsedBalanceMin   *int
-	UsedBalanceMax   *int
-	SortBy           string
-	SortOrder        string
-	IdSortOrder      string
-	BalanceSortOrder string
-	StartIdx         int
-	PageSize         int
+	Keyword               string
+	Group                 string
+	Role                  *int
+	Status                *int
+	InviterID             *int
+	InviteeUserID         *int
+	HasInviter            *bool
+	HasInvitees           *bool
+	HasActiveSubscription *bool
+	BalanceMin            *int
+	BalanceMax            *int
+	UsedBalanceMin        *int
+	UsedBalanceMax        *int
+	SortBy                string
+	SortOrder             string
+	IdSortOrder           string
+	BalanceSortOrder      string
+	StartIdx              int
+	PageSize              int
 }
 
 type InviteIncomeSummary struct {
@@ -297,6 +303,11 @@ func GetAllUsers(pageInfo *common.PageInfo, sortBy string, sortOrder string, idS
 		tx.Rollback()
 		return nil, 0, err
 	}
+	// 当前页批量补充“生效套餐”统计，避免前端逐行请求造成 N+1。
+	if err = attachUserSubscriptionMetadata(tx, users); err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
 
 	// Commit transaction
 	if err = tx.Commit().Error; err != nil {
@@ -382,6 +393,17 @@ func SearchUsersWithParams(params UserSearchParams) ([]*User, int64, error) {
 			query = query.Where("aff_count = 0")
 		}
 	}
+	if params.HasActiveSubscription != nil {
+		now := common.GetTimestamp()
+		// 套餐筛选统一按“生效套餐”口径：status=active 且 end_time > now。
+		// 使用 EXISTS/NOT EXISTS 让三种数据库都能稳定执行，且不影响主表分页结构。
+		activeSubExistsSQL := "SELECT 1 FROM user_subscriptions us WHERE us.user_id = users.id AND us.status = ? AND us.end_time > ?"
+		if *params.HasActiveSubscription {
+			query = query.Where("EXISTS ("+activeSubExistsSQL+")", "active", now)
+		} else {
+			query = query.Where("NOT EXISTS ("+activeSubExistsSQL+")", "active", now)
+		}
+	}
 	// 额度筛选基于“总额度 = quota + used_quota”。
 	// 使用参数绑定占位符传值，避免把数值拼接到 SQL 字符串中。
 	if params.BalanceMin != nil {
@@ -437,6 +459,10 @@ func SearchUsersWithParams(params UserSearchParams) ([]*User, int64, error) {
 		tx.Rollback()
 		return nil, 0, err
 	}
+	if err = attachUserSubscriptionMetadata(tx, users); err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
 
 	// 提交事务
 	if err = tx.Commit().Error; err != nil {
@@ -489,6 +515,53 @@ func attachUserInviteMetadata(tx *gorm.DB, users []*User) error {
 			continue
 		}
 		user.InviterUsername = nameByID[user.InviterId]
+	}
+	return nil
+}
+
+func attachUserSubscriptionMetadata(tx *gorm.DB, users []*User) error {
+	if len(users) == 0 {
+		return nil
+	}
+	userIDs := make([]int, 0, len(users))
+	for _, user := range users {
+		if user == nil {
+			continue
+		}
+		userIDs = append(userIDs, user.Id)
+		// 先写入默认值，确保“无套餐”用户也有明确响应字段。
+		user.ActiveSubscriptionCount = 0
+		user.HasActiveSubscription = false
+	}
+	if len(userIDs) == 0 {
+		return nil
+	}
+
+	now := common.GetTimestamp()
+	type activeSubscriptionCount struct {
+		UserId      int `gorm:"column:user_id"`
+		ActiveCount int `gorm:"column:active_count"`
+	}
+	var counts []activeSubscriptionCount
+	if err := tx.Model(&UserSubscription{}).
+		Select("user_id, COUNT(*) AS active_count").
+		Where("user_id IN ? AND status = ? AND end_time > ?", userIDs, "active", now).
+		Group("user_id").
+		Scan(&counts).Error; err != nil {
+		return err
+	}
+
+	countByUserID := make(map[int]int, len(counts))
+	for _, row := range counts {
+		countByUserID[row.UserId] = row.ActiveCount
+	}
+	for _, user := range users {
+		if user == nil {
+			continue
+		}
+		activeCount := countByUserID[user.Id]
+		user.ActiveSubscriptionCount = activeCount
+		user.HasActiveSubscription = activeCount > 0
 	}
 	return nil
 }

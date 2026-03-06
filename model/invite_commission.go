@@ -7,6 +7,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
@@ -70,7 +71,89 @@ type InviteCommissionDailyCapState struct {
 
 func EnqueueInviteCommissionFromTopUp(topUp *TopUp, baseQuota int) error {
 	// 基础防护：仅合法充值额度允许入池。
-	if topUp == nil || topUp.TradeNo == "" || baseQuota <= 0 {
+	if topUp == nil {
+		return nil
+	}
+	return enqueueInviteCommission(topUp.UserId, topUp.TradeNo, topUp.CompleteTime, baseQuota)
+}
+
+// EnqueueInviteCommissionFromRedemption 将“兑换码充值”纳入邀请返佣口径。
+// 管理员直接修改余额不会调用该入口，因此不计入返佣。
+func EnqueueInviteCommissionFromRedemption(redemption *Redemption) error {
+	return EnqueueInviteCommissionFromRedemptionTx(DB, redemption)
+}
+
+// EnqueueInviteCommissionFromSubscriptionOrderTx 将“订阅支付成功”纳入邀请返佣口径。
+// 返佣基数按“实付金额折算额度”计算：
+// 返佣基数公式：baseQuota = floor(order.money * QuotaPerUnit / Price)
+// 其中 Price 为“充值价格（x元/美金）”。
+func EnqueueInviteCommissionFromSubscriptionOrderTx(tx *gorm.DB, order *SubscriptionOrder) error {
+	if tx == nil {
+		return errors.New("tx is nil")
+	}
+	if order == nil || order.Id <= 0 {
+		return nil
+	}
+	if operation_setting.Price <= 0 {
+		return errors.New("invalid payment price setting")
+	}
+
+	// 仅信任 order.id；其余字段从 DB 读取，避免调用方传入被篡改数据。
+	dbOrder := &SubscriptionOrder{}
+	if err := tx.Select("id", "user_id", "trade_no", "money", "complete_time", "status").
+		First(dbOrder, "id = ?", order.Id).Error; err != nil {
+		return err
+	}
+	// 仅已支付成功订单允许入返佣池。
+	if dbOrder.Status != common.TopUpStatusSuccess {
+		return nil
+	}
+
+	dBaseQuota := decimal.NewFromFloat(dbOrder.Money).
+		Mul(decimal.NewFromFloat(common.QuotaPerUnit)).
+		Div(decimal.NewFromFloat(operation_setting.Price))
+	baseQuota := int(dBaseQuota.IntPart())
+	if baseQuota <= 0 {
+		return nil
+	}
+
+	return enqueueInviteCommissionWithDB(tx, dbOrder.UserId, dbOrder.TradeNo, dbOrder.CompleteTime, baseQuota)
+}
+
+// EnqueueInviteCommissionFromRedemptionTx 在指定事务中入返佣台账，用于保证兑换与返佣原子一致。
+func EnqueueInviteCommissionFromRedemptionTx(tx *gorm.DB, redemption *Redemption) error {
+	if tx == nil {
+		return errors.New("tx is nil")
+	}
+	if redemption == nil || redemption.Id <= 0 {
+		return nil
+	}
+	// 仅信任 redemption.id；其余字段统一从数据库读取，避免调用方传入伪造数据。
+	dbRedemption := &Redemption{}
+	if err := tx.Select("id", "used_user_id", "quota", "redeemed_time", "status").
+		First(dbRedemption, "id = ?", redemption.Id).Error; err != nil {
+		return err
+	}
+	// 仅已兑换成功的兑换码允许参与返佣入池。
+	if dbRedemption.Status != common.RedemptionCodeStatusUsed {
+		return nil
+	}
+
+	// redemption.id 全局唯一，作为 trade_no 可保证幂等去重。
+	tradeNo := fmt.Sprintf("redeem:%d", dbRedemption.Id)
+	return enqueueInviteCommissionWithDB(tx, dbRedemption.UsedUserId, tradeNo, dbRedemption.RedeemedTime, dbRedemption.Quota)
+}
+
+func enqueueInviteCommission(inviteeUserID int, tradeNo string, completeTime int64, baseQuota int) error {
+	return enqueueInviteCommissionWithDB(DB, inviteeUserID, tradeNo, completeTime, baseQuota)
+}
+
+func enqueueInviteCommissionWithDB(db *gorm.DB, inviteeUserID int, tradeNo string, completeTime int64, baseQuota int) error {
+	if db == nil {
+		return errors.New("db is nil")
+	}
+	// 基础防护：仅合法充值额度允许入池。
+	if inviteeUserID <= 0 || tradeNo == "" || baseQuota <= 0 {
 		return nil
 	}
 	// 功能开关与比例检查。
@@ -80,7 +163,7 @@ func EnqueueInviteCommissionFromTopUp(topUp *TopUp, baseQuota int) error {
 
 	// 在入池时快照 inviter_id，避免后续用户关系变更影响历史订单归属。
 	invitee := &User{}
-	if err := DB.Select("id", "inviter_id").First(invitee, "id = ?", topUp.UserId).Error; err != nil {
+	if err := db.Select("id", "inviter_id").First(invitee, "id = ?", inviteeUserID).Error; err != nil {
 		return err
 	}
 	if invitee.InviterId == 0 {
@@ -96,7 +179,6 @@ func EnqueueInviteCommissionFromTopUp(topUp *TopUp, baseQuota int) error {
 		return nil
 	}
 
-	completeTime := topUp.CompleteTime
 	if completeTime == 0 {
 		completeTime = common.GetTimestamp()
 	}
@@ -104,7 +186,7 @@ func EnqueueInviteCommissionFromTopUp(topUp *TopUp, baseQuota int) error {
 	ledger := &InviteCommissionLedger{
 		InviteeUserId:   invitee.Id,
 		InviterUserId:   invitee.InviterId,
-		TopupTradeNo:    topUp.TradeNo,
+		TopupTradeNo:    tradeNo,
 		BizDate:         time.Unix(completeTime, 0).Format("2006-01-02"),
 		BaseQuota:       baseQuota,
 		CommissionRate:  common.InviterRechargeCommissionRate,
@@ -113,7 +195,7 @@ func EnqueueInviteCommissionFromTopUp(topUp *TopUp, baseQuota int) error {
 		CreatedAt:       common.GetTimestamp(),
 	}
 
-	return DB.Clauses(clause.OnConflict{
+	return db.Clauses(clause.OnConflict{
 		// 幂等保障：同一个订单对同一个邀请人只允许入池一次。
 		Columns: []clause.Column{
 			{Name: "topup_trade_no"},

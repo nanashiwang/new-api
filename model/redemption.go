@@ -148,7 +148,11 @@ func Redeem(key string, userId int) (quota int, err error) {
 		redemption.Status = common.RedemptionCodeStatusUsed
 		redemption.UsedUserId = userId
 		err = tx.Save(redemption).Error
-		return err
+		if err != nil {
+			return err
+		}
+		// 返佣入池与兑换成功放在同一事务，避免出现“余额已到账但返佣漏记”的一致性窗口。
+		return EnqueueInviteCommissionFromRedemptionTx(tx, redemption)
 	})
 	if err != nil {
 		common.SysError("redemption failed: " + err.Error())
