@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 
@@ -11,7 +12,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// ---- Shared types ----
+// ---- 共享类型 ----
 
 type SubscriptionPlanDTO struct {
 	Plan model.SubscriptionPlan `json:"plan"`
@@ -21,7 +22,37 @@ type BillingPreferenceRequest struct {
 	BillingPreference string `json:"billing_preference"`
 }
 
-// ---- User APIs ----
+func buildActiveQuantityByPlan(activeSubscriptions []model.SubscriptionSummary) map[int]int {
+	activeQuantityByPlan := map[int]int{}
+	if len(activeSubscriptions) == 0 {
+		return activeQuantityByPlan
+	}
+	nowUnix := common.GetTimestamp()
+	planCache := make(map[int]*model.SubscriptionPlan)
+	for _, summary := range activeSubscriptions {
+		sub := summary.Subscription
+		if sub == nil || sub.PlanId <= 0 {
+			continue
+		}
+		plan, ok := planCache[sub.PlanId]
+		if !ok {
+			loadedPlan, planErr := model.GetSubscriptionPlanById(sub.PlanId)
+			if planErr != nil || loadedPlan == nil {
+				continue
+			}
+			planCache[sub.PlanId] = loadedPlan
+			plan = loadedPlan
+		}
+		quantity := model.CountRemainingSubscriptionQuantity(sub, plan, nowUnix)
+		if quantity <= 0 {
+			continue
+		}
+		activeQuantityByPlan[sub.PlanId] += quantity
+	}
+	return activeQuantityByPlan
+}
+
+// ---- 用户接口 ----
 
 func GetSubscriptionPlans(c *gin.Context) {
 	var plans []model.SubscriptionPlan
@@ -43,22 +74,26 @@ func GetSubscriptionSelf(c *gin.Context) {
 	settingMap, _ := model.GetUserSetting(userId, false)
 	pref := common.NormalizeBillingPreference(settingMap.BillingPreference)
 
-	// Get all subscriptions (including expired)
+	// 获取全部订阅（含已过期）
 	allSubscriptions, err := model.GetAllUserSubscriptions(userId)
 	if err != nil {
 		allSubscriptions = []model.SubscriptionSummary{}
 	}
 
-	// Get active subscriptions for backward compatibility
+	// 为兼容旧前端，单独返回生效订阅列表
 	activeSubscriptions, err := model.GetAllActiveUserSubscriptions(userId)
 	if err != nil {
 		activeSubscriptions = []model.SubscriptionSummary{}
 	}
+	// active_quantity_by_plan：后端统一计算“每个套餐当前未过期份数”，
+	// 供前端直接展示动态可买上限，避免前后端算法漂移。
+	activeQuantityByPlan := buildActiveQuantityByPlan(activeSubscriptions)
 
 	common.ApiSuccess(c, gin.H{
-		"billing_preference": pref,
-		"subscriptions":      activeSubscriptions, // all active subscriptions
-		"all_subscriptions":  allSubscriptions,    // all subscriptions including expired
+		"billing_preference":      pref,
+		"subscriptions":           activeSubscriptions, // 全部生效订阅
+		"all_subscriptions":       allSubscriptions,    // 全部订阅（含已过期）
+		"active_quantity_by_plan": activeQuantityByPlan,
 	})
 }
 
@@ -86,7 +121,7 @@ func UpdateSubscriptionPreference(c *gin.Context) {
 	common.ApiSuccess(c, gin.H{"billing_preference": pref})
 }
 
-// ---- Admin APIs ----
+// ---- 管理端接口 ----
 
 func AdminListSubscriptionPlans(c *gin.Context) {
 	var plans []model.SubscriptionPlan
@@ -105,6 +140,23 @@ func AdminListSubscriptionPlans(c *gin.Context) {
 
 type AdminUpsertSubscriptionPlanRequest struct {
 	Plan model.SubscriptionPlan `json:"plan"`
+}
+
+// normalizeSubscriptionPlanPurchaseRule 归一化套餐购买数量规则（最小值/最大值）。
+func normalizeSubscriptionPlanPurchaseRule(plan *model.SubscriptionPlan) error {
+	if plan == nil {
+		return nil
+	}
+	if plan.PurchaseQuantityMin <= 0 {
+		plan.PurchaseQuantityMin = 1
+	}
+	if plan.PurchaseQuantityMax <= 0 {
+		plan.PurchaseQuantityMax = 12
+	}
+	if plan.PurchaseQuantityMax < plan.PurchaseQuantityMin {
+		return errors.New("购买数量最大值不能小于最小值")
+	}
+	return nil
 }
 
 func AdminCreateSubscriptionPlan(c *gin.Context) {
@@ -138,6 +190,14 @@ func AdminCreateSubscriptionPlan(c *gin.Context) {
 	}
 	if req.Plan.MaxPurchasePerUser < 0 {
 		common.ApiErrorMsg(c, "购买上限不能为负数")
+		return
+	}
+	if req.Plan.MaxStackPerUser < 0 {
+		common.ApiErrorMsg(c, "叠加上限不能为负数")
+		return
+	}
+	if err := normalizeSubscriptionPlanPurchaseRule(&req.Plan); err != nil {
+		common.ApiErrorMsg(c, err.Error())
 		return
 	}
 	if req.Plan.TotalAmount < 0 {
@@ -203,6 +263,14 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 		common.ApiErrorMsg(c, "购买上限不能为负数")
 		return
 	}
+	if req.Plan.MaxStackPerUser < 0 {
+		common.ApiErrorMsg(c, "叠加上限不能为负数")
+		return
+	}
+	if err := normalizeSubscriptionPlanPurchaseRule(&req.Plan); err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
 	if req.Plan.TotalAmount < 0 {
 		common.ApiErrorMsg(c, "总额度不能为负数")
 		return
@@ -221,7 +289,7 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 	}
 
 	err := model.DB.Transaction(func(tx *gorm.DB) error {
-		// update plan (allow zero values updates with map)
+		// 更新套餐（用 map 支持零值字段更新）
 		updateMap := map[string]interface{}{
 			"title":                      req.Plan.Title,
 			"subtitle":                   req.Plan.Subtitle,
@@ -235,6 +303,9 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 			"stripe_price_id":            req.Plan.StripePriceId,
 			"creem_product_id":           req.Plan.CreemProductId,
 			"max_purchase_per_user":      req.Plan.MaxPurchasePerUser,
+			"max_stack_per_user":         req.Plan.MaxStackPerUser,
+			"purchase_quantity_min":      req.Plan.PurchaseQuantityMin,
+			"purchase_quantity_max":      req.Plan.PurchaseQuantityMax,
 			"total_amount":               req.Plan.TotalAmount,
 			"upgrade_group":              req.Plan.UpgradeGroup,
 			"quota_reset_period":         req.Plan.QuotaResetPeriod,
@@ -279,7 +350,60 @@ func AdminUpdateSubscriptionPlanStatus(c *gin.Context) {
 
 type AdminBindSubscriptionRequest struct {
 	UserId int `json:"user_id"`
+	AdminCreateUserSubscriptionRequest
+}
+
+type AdminCreateUserSubscriptionRequest struct {
 	PlanId int `json:"plan_id"`
+	// PurchaseMode 支持 stack / renew / renew_extend；默认 stack。
+	PurchaseMode string `json:"purchase_mode"`
+	// PurchaseQuantity 单次新增份数；默认按套餐最小购买份数兜底。
+	PurchaseQuantity int `json:"purchase_quantity"`
+	// RenewTargetSubscriptionId 仅在 purchase_mode=renew 且同套餐有多条可续费订阅时生效。
+	RenewTargetSubscriptionId int `json:"renew_target_subscription_id"`
+}
+
+type preparedAdminSubscriptionPurchase struct {
+	PlanId                    int
+	PurchaseMode              string
+	PurchaseQuantity          int
+	RenewTargetSubscriptionId int
+}
+
+// prepareAdminSubscriptionPurchase 统一执行管理端新增订阅的参数归一化与校验逻辑。
+// 该函数被两个入口复用：
+// 1) /api/subscription/admin/bind
+// 2) /api/subscription/admin/users/:id/subscriptions
+func prepareAdminSubscriptionPurchase(userId int, req AdminCreateUserSubscriptionRequest) (*preparedAdminSubscriptionPurchase, error) {
+	if userId <= 0 || req.PlanId <= 0 {
+		return nil, errors.New("参数错误")
+	}
+	plan, err := model.GetSubscriptionPlanById(req.PlanId)
+	if err != nil {
+		return nil, err
+	}
+
+	purchaseQuantity, err := normalizeSubscriptionPurchaseQuantity(userId, req.PurchaseQuantity, plan)
+	if err != nil {
+		return nil, err
+	}
+
+	purchaseMode, renewTargetSubId, err := resolveSubscriptionPurchaseModeAndTarget(
+		userId, plan.Id, req.PurchaseMode, req.RenewTargetSubscriptionId,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkSubscriptionOrderLimits(userId, plan, purchaseMode, purchaseQuantity); err != nil {
+		return nil, err
+	}
+
+	return &preparedAdminSubscriptionPurchase{
+		PlanId:                    plan.Id,
+		PurchaseMode:              purchaseMode,
+		PurchaseQuantity:          purchaseQuantity,
+		RenewTargetSubscriptionId: renewTargetSubId,
+	}, nil
 }
 
 func AdminBindSubscription(c *gin.Context) {
@@ -288,7 +412,19 @@ func AdminBindSubscription(c *gin.Context) {
 		common.ApiErrorMsg(c, "参数错误")
 		return
 	}
-	msg, err := model.AdminBindSubscription(req.UserId, req.PlanId, "")
+	prepared, err := prepareAdminSubscriptionPurchase(req.UserId, req.AdminCreateUserSubscriptionRequest)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	msg, err := model.AdminBindSubscriptionWithOptions(
+		req.UserId,
+		prepared.PlanId,
+		prepared.PurchaseMode,
+		prepared.PurchaseQuantity,
+		prepared.RenewTargetSubscriptionId,
+		"",
+	)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -300,7 +436,7 @@ func AdminBindSubscription(c *gin.Context) {
 	common.ApiSuccess(c, nil)
 }
 
-// ---- Admin: user subscription management ----
+// ---- 管理端：用户订阅管理 ----
 
 func AdminListUserSubscriptions(c *gin.Context) {
 	userId, _ := strconv.Atoi(c.Param("id"))
@@ -313,14 +449,17 @@ func AdminListUserSubscriptions(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	common.ApiSuccess(c, subs)
+	activeSubs, err := model.GetAllActiveUserSubscriptions(userId)
+	if err != nil {
+		activeSubs = []model.SubscriptionSummary{}
+	}
+	common.ApiSuccess(c, gin.H{
+		"subscriptions":           subs,
+		"active_quantity_by_plan": buildActiveQuantityByPlan(activeSubs),
+	})
 }
 
-type AdminCreateUserSubscriptionRequest struct {
-	PlanId int `json:"plan_id"`
-}
-
-// AdminCreateUserSubscription creates a new user subscription from a plan (no payment).
+// AdminCreateUserSubscription 管理端按套餐创建用户订阅（无需支付）。
 func AdminCreateUserSubscription(c *gin.Context) {
 	userId, _ := strconv.Atoi(c.Param("id"))
 	if userId <= 0 {
@@ -332,7 +471,19 @@ func AdminCreateUserSubscription(c *gin.Context) {
 		common.ApiErrorMsg(c, "参数错误")
 		return
 	}
-	msg, err := model.AdminBindSubscription(userId, req.PlanId, "")
+	prepared, err := prepareAdminSubscriptionPurchase(userId, req)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	msg, err := model.AdminBindSubscriptionWithOptions(
+		userId,
+		prepared.PlanId,
+		prepared.PurchaseMode,
+		prepared.PurchaseQuantity,
+		prepared.RenewTargetSubscriptionId,
+		"",
+	)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -344,7 +495,104 @@ func AdminCreateUserSubscription(c *gin.Context) {
 	common.ApiSuccess(c, nil)
 }
 
-// AdminInvalidateUserSubscription cancels a user subscription immediately.
+type AdminManageUserSubscriptionRequest struct {
+	Id     int    `json:"id"`
+	Action string `json:"action"`
+}
+
+type AdminManageUserSubscriptionBatchRequest struct {
+	Ids    []int  `json:"ids"`
+	Action string `json:"action"`
+}
+
+// AdminManageUserSubscription 管理员单条管理用户订阅（启用/禁用/删除）。
+func AdminManageUserSubscription(c *gin.Context) {
+	userId, _ := strconv.Atoi(c.Param("id"))
+	if userId <= 0 {
+		common.ApiErrorMsg(c, "无效的用户ID")
+		return
+	}
+	var req AdminManageUserSubscriptionRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.Id <= 0 {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	action := strings.ToLower(strings.TrimSpace(req.Action))
+	if action == "" {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	msg, err := model.AdminManageUserSubscription(userId, req.Id, action)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{
+		"id":      req.Id,
+		"action":  action,
+		"message": msg,
+	})
+}
+
+// AdminManageUserSubscriptionBatch 管理员批量管理用户订阅（启用/禁用/删除），支持部分成功。
+func AdminManageUserSubscriptionBatch(c *gin.Context) {
+	userId, _ := strconv.Atoi(c.Param("id"))
+	if userId <= 0 {
+		common.ApiErrorMsg(c, "无效的用户ID")
+		return
+	}
+	req := AdminManageUserSubscriptionBatchRequest{}
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.Ids) == 0 {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	action := strings.ToLower(strings.TrimSpace(req.Action))
+	if action == "" {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+
+	seen := make(map[int]struct{}, len(req.Ids))
+	updated := make([]gin.H, 0, len(req.Ids))
+	failed := make([]gin.H, 0)
+
+	for _, id := range req.Ids {
+		if id <= 0 {
+			failed = append(failed, gin.H{
+				"id":      id,
+				"message": "订阅 ID 无效",
+			})
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+
+		msg, err := model.AdminManageUserSubscription(userId, id, action)
+		if err != nil {
+			failed = append(failed, gin.H{
+				"id":      id,
+				"message": err.Error(),
+			})
+			continue
+		}
+		updated = append(updated, gin.H{
+			"id":      id,
+			"action":  action,
+			"message": msg,
+		})
+	}
+
+	common.ApiSuccess(c, gin.H{
+		"success_count": len(updated),
+		"failed_count":  len(failed),
+		"updated":       updated,
+		"failed":        failed,
+	})
+}
+
+// AdminInvalidateUserSubscription 立即取消一条用户订阅。
 func AdminInvalidateUserSubscription(c *gin.Context) {
 	subId, _ := strconv.Atoi(c.Param("id"))
 	if subId <= 0 {
@@ -363,7 +611,7 @@ func AdminInvalidateUserSubscription(c *gin.Context) {
 	common.ApiSuccess(c, nil)
 }
 
-// AdminDeleteUserSubscription hard-deletes a user subscription.
+// AdminDeleteUserSubscription 硬删除一条用户订阅。
 func AdminDeleteUserSubscription(c *gin.Context) {
 	subId, _ := strconv.Atoi(c.Param("id"))
 	if subId <= 0 {

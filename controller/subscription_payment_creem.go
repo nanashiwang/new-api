@@ -15,7 +15,11 @@ import (
 )
 
 type SubscriptionCreemPayRequest struct {
-	PlanId int `json:"plan_id"`
+	PlanId           int    `json:"plan_id"`
+	PurchaseMode     string `json:"purchase_mode"`
+	PurchaseQuantity int    `json:"purchase_quantity"`
+	// RenewTargetSubscriptionId 仅在 purchase_mode=renew 时生效。
+	RenewTargetSubscriptionId int `json:"renew_target_subscription_id"`
 }
 
 func SubscriptionRequestCreemPay(c *gin.Context) {
@@ -63,17 +67,28 @@ func SubscriptionRequestCreemPay(c *gin.Context) {
 		common.ApiErrorMsg(c, "用户不存在")
 		return
 	}
+	purchaseQuantity, err := normalizeSubscriptionPurchaseQuantity(userId, req.PurchaseQuantity, plan)
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+	// Creem 当前按 product_id 拉起支付，暂不支持同订单多数量。
+	if purchaseQuantity > 1 {
+		common.ApiErrorMsg(c, "Creem 暂不支持多数量购买，请分次支付")
+		return
+	}
 
-	if plan.MaxPurchasePerUser > 0 {
-		count, err := model.CountUserSubscriptionsByPlan(userId, plan.Id)
-		if err != nil {
-			common.ApiError(c, err)
-			return
-		}
-		if count >= int64(plan.MaxPurchasePerUser) {
-			common.ApiErrorMsg(c, "已达到该套餐购买上限")
-			return
-		}
+	// 续费模式支持手动指定目标订阅；未指定时按规则自动命中（唯一或最早到期）。
+	purchaseMode, renewTargetSubId, err := resolveSubscriptionPurchaseModeAndTarget(
+		userId, plan.Id, req.PurchaseMode, req.RenewTargetSubscriptionId,
+	)
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+	if err := checkSubscriptionOrderLimits(userId, plan, purchaseMode, purchaseQuantity); err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
 	}
 
 	reference := "sub-creem-ref-" + randstr.String(6)
@@ -81,13 +96,16 @@ func SubscriptionRequestCreemPay(c *gin.Context) {
 
 	// create pending order first
 	order := &model.SubscriptionOrder{
-		UserId:        userId,
-		PlanId:        plan.Id,
-		Money:         plan.PriceAmount,
-		TradeNo:       referenceId,
-		PaymentMethod: PaymentMethodCreem,
-		CreateTime:    time.Now().Unix(),
-		Status:        common.TopUpStatusPending,
+		UserId:                    userId,
+		PlanId:                    plan.Id,
+		Money:                     plan.PriceAmount,
+		PurchaseQuantity:          purchaseQuantity,
+		TradeNo:                   referenceId,
+		PaymentMethod:             PaymentMethodCreem,
+		PurchaseMode:              purchaseMode,
+		RenewTargetSubscriptionId: renewTargetSubId,
+		CreateTime:                time.Now().Unix(),
+		Status:                    common.TopUpStatusPending,
 	}
 	if err := order.Insert(); err != nil {
 		c.JSON(200, gin.H{"message": "error", "data": "创建订单失败"})

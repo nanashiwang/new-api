@@ -18,8 +18,12 @@ import (
 )
 
 type SubscriptionEpayPayRequest struct {
-	PlanId        int    `json:"plan_id"`
-	PaymentMethod string `json:"payment_method"`
+	PlanId           int    `json:"plan_id"`
+	PaymentMethod    string `json:"payment_method"`
+	PurchaseMode     string `json:"purchase_mode"`
+	PurchaseQuantity int    `json:"purchase_quantity"`
+	// RenewTargetSubscriptionId 仅在 purchase_mode=renew 时生效。
+	RenewTargetSubscriptionId int `json:"renew_target_subscription_id"`
 }
 
 func SubscriptionRequestEpay(c *gin.Context) {
@@ -48,16 +52,22 @@ func SubscriptionRequestEpay(c *gin.Context) {
 	}
 
 	userId := c.GetInt("id")
-	if plan.MaxPurchasePerUser > 0 {
-		count, err := model.CountUserSubscriptionsByPlan(userId, plan.Id)
-		if err != nil {
-			common.ApiError(c, err)
-			return
-		}
-		if count >= int64(plan.MaxPurchasePerUser) {
-			common.ApiErrorMsg(c, "已达到该套餐购买上限")
-			return
-		}
+	purchaseQuantity, err := normalizeSubscriptionPurchaseQuantity(userId, req.PurchaseQuantity, plan)
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+	// 续费模式支持手动指定目标订阅；未指定时按规则自动命中（唯一或最早到期）。
+	purchaseMode, renewTargetSubId, err := resolveSubscriptionPurchaseModeAndTarget(
+		userId, plan.Id, req.PurchaseMode, req.RenewTargetSubscriptionId,
+	)
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+	if err := checkSubscriptionOrderLimits(userId, plan, purchaseMode, purchaseQuantity); err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
 	}
 
 	callBackAddress := service.GetCallbackAddress()
@@ -81,14 +91,19 @@ func SubscriptionRequestEpay(c *gin.Context) {
 		return
 	}
 
+	totalMoney := plan.PriceAmount * float64(purchaseQuantity)
+
 	order := &model.SubscriptionOrder{
-		UserId:        userId,
-		PlanId:        plan.Id,
-		Money:         plan.PriceAmount,
-		TradeNo:       tradeNo,
-		PaymentMethod: req.PaymentMethod,
-		CreateTime:    time.Now().Unix(),
-		Status:        common.TopUpStatusPending,
+		UserId:                    userId,
+		PlanId:                    plan.Id,
+		Money:                     totalMoney,
+		PurchaseQuantity:          purchaseQuantity,
+		TradeNo:                   tradeNo,
+		PaymentMethod:             req.PaymentMethod,
+		PurchaseMode:              purchaseMode,
+		RenewTargetSubscriptionId: renewTargetSubId,
+		CreateTime:                time.Now().Unix(),
+		Status:                    common.TopUpStatusPending,
 	}
 	if err := order.Insert(); err != nil {
 		common.ApiErrorMsg(c, "创建订单失败")
@@ -97,8 +112,8 @@ func SubscriptionRequestEpay(c *gin.Context) {
 	uri, params, err := client.Purchase(&epay.PurchaseArgs{
 		Type:           req.PaymentMethod,
 		ServiceTradeNo: tradeNo,
-		Name:           fmt.Sprintf("SUB:%s", plan.Title),
-		Money:          strconv.FormatFloat(plan.PriceAmount, 'f', 2, 64),
+		Name:           fmt.Sprintf("SUB:%s x%d", plan.Title, purchaseQuantity),
+		Money:          strconv.FormatFloat(totalMoney, 'f', 2, 64),
 		Device:         epay.PC,
 		NotifyUrl:      notifyUrl,
 		ReturnUrl:      returnUrl,

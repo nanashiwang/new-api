@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Badge,
   Button,
@@ -32,8 +32,12 @@ import {
 } from '@douyinfe/semi-ui';
 import { API, showError, showSuccess, renderQuota } from '../../helpers';
 import { getCurrencyConfig } from '../../helpers/render';
-import { RefreshCw, Sparkles } from 'lucide-react';
+import { ChevronDown, ChevronUp, RefreshCw, Sparkles } from 'lucide-react';
 import SubscriptionPurchaseModal from './modals/SubscriptionPurchaseModal';
+import {
+  getPlanPurchaseQuantityConfig,
+  getRenewableSubscriptionsByPlan,
+} from '../../helpers/subscriptionPurchase';
 import {
   formatSubscriptionDuration,
   formatSubscriptionResetPeriod,
@@ -41,14 +45,14 @@ import {
 
 const { Text } = Typography;
 
-// 过滤易支付方式
+// 过滤 EPay 支付方式。
 function getEpayMethods(payMethods = []) {
   return (payMethods || []).filter(
     (m) => m?.type && m.type !== 'stripe' && m.type !== 'creem',
   );
 }
 
-// 提交易支付表单
+// 提交 EPay 表单。
 function submitEpayForm({ url, params }) {
   const form = document.createElement('form');
   form.action = url;
@@ -80,20 +84,116 @@ const SubscriptionPlansCard = ({
   billingPreference,
   onChangeBillingPreference,
   activeSubscriptions = [],
+  activeQuantityByPlan = {},
   allSubscriptions = [],
   reloadSubscriptionSelf,
   withCard = true,
 }) => {
   const [open, setOpen] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState(null);
+  const [selectedPurchaseMode, setSelectedPurchaseMode] = useState('stack');
+  const [selectedPurchaseQuantity, setSelectedPurchaseQuantity] = useState(1);
+  // 在“续费当前套餐”模式下选中的目标订阅 ID。
+  const [selectedRenewTargetSubscriptionId, setSelectedRenewTargetSubscriptionId] =
+    useState(0);
   const [paying, setPaying] = useState(false);
   const [selectedEpayMethod, setSelectedEpayMethod] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [subscriptionListCollapsed, setSubscriptionListCollapsed] =
+    useState(true);
 
   const epayMethods = useMemo(() => getEpayMethods(payMethods), [payMethods]);
 
+  // 按套餐统计可续费的生效订阅数量（仅统计生效订阅）。
+  const planActiveCountMap = useMemo(() => {
+    const map = new Map();
+    (activeSubscriptions || []).forEach((sub) => {
+      const planId = sub?.subscription?.plan_id;
+      if (!planId) return;
+      map.set(planId, (map.get(planId) || 0) + 1);
+    });
+    return map;
+  }, [activeSubscriptions]);
+
+  // 按套餐统计未过期份数，用于动态降低最大可购数量。
+  const planActiveQuantityMap = useMemo(() => {
+    const map = new Map();
+    Object.entries(activeQuantityByPlan || {}).forEach(([planId, quantity]) => {
+      const id = Number(planId);
+      if (id <= 0) return;
+      map.set(id, Math.max(0, Number(quantity || 0)));
+    });
+    return map;
+  }, [activeQuantityByPlan]);
+
+  const selectedPlanQuantityConfig = useMemo(() => {
+    const planId = selectedPlan?.plan?.id;
+    const activeQuantity = Number(planActiveQuantityMap.get(planId) || 0);
+    return getPlanPurchaseQuantityConfig(selectedPlan?.plan, activeQuantity);
+  }, [selectedPlan, planActiveQuantityMap]);
+  const minPurchaseQuantity = selectedPlanQuantityConfig.min;
+  const maxPurchaseQuantity = selectedPlanQuantityConfig.max;
+
+  // 当前所选套餐下可续费订阅列表，按最早到期排序。
+  const selectedPlanRenewableSubscriptions = useMemo(() => {
+    const planId = Number(selectedPlan?.plan?.id || 0);
+    return getRenewableSubscriptionsByPlan(activeSubscriptions, planId);
+  }, [activeSubscriptions, selectedPlan]);
+  const selectedPlanRenewable = selectedPlanRenewableSubscriptions.length > 0;
+
+  useEffect(() => {
+    setSelectedPurchaseQuantity((prev) => {
+      const quantity = Number(prev || minPurchaseQuantity);
+      if (maxPurchaseQuantity <= 0) return 0;
+      if (quantity < minPurchaseQuantity) return minPurchaseQuantity;
+      if (quantity > maxPurchaseQuantity) return maxPurchaseQuantity;
+      return quantity;
+    });
+  }, [minPurchaseQuantity, maxPurchaseQuantity]);
+
+  useEffect(() => {
+    // "renew_extend" 仅在数量 > 1 时有效；数量回到 1 时切回 stack。
+    if (selectedPurchaseMode === 'renew_extend' && Number(selectedPurchaseQuantity || 0) <= 1) {
+      setSelectedPurchaseMode('stack');
+    }
+  }, [selectedPurchaseMode, selectedPurchaseQuantity]);
+
+  useEffect(() => {
+    if (!open || selectedPurchaseMode !== 'renew') return;
+    if (selectedPlanRenewableSubscriptions.length === 0) {
+      setSelectedRenewTargetSubscriptionId(0);
+      return;
+    }
+    // 当存在多个目标时，默认选择最早到期的订阅。
+    const currentSelectedId = Number(selectedRenewTargetSubscriptionId || 0);
+    const selectedExists = selectedPlanRenewableSubscriptions.some(
+      (sub) => Number(sub?.id || 0) === currentSelectedId,
+    );
+    if (!selectedExists) {
+      setSelectedRenewTargetSubscriptionId(
+        Number(selectedPlanRenewableSubscriptions[0]?.id || 0),
+      );
+    }
+  }, [
+    open,
+    selectedPurchaseMode,
+    selectedPlanRenewableSubscriptions,
+    selectedRenewTargetSubscriptionId,
+  ]);
+
   const openBuy = (p) => {
+    const planId = p?.plan?.id;
+    const activeQuantity = planId ? planActiveQuantityMap.get(planId) || 0 : 0;
+    const planQuantityConfig = getPlanPurchaseQuantityConfig(
+      p?.plan,
+      activeQuantity,
+    );
     setSelectedPlan(p);
+    setSelectedPurchaseMode('stack');
+    setSelectedPurchaseQuantity(
+      planQuantityConfig.max > 0 ? planQuantityConfig.min : 0,
+    );
+    setSelectedRenewTargetSubscriptionId(0);
     setSelectedEpayMethod(epayMethods?.[0]?.type || '');
     setOpen(true);
   };
@@ -101,6 +201,9 @@ const SubscriptionPlansCard = ({
   const closeBuy = () => {
     setOpen(false);
     setSelectedPlan(null);
+    setSelectedPurchaseMode('stack');
+    setSelectedPurchaseQuantity(minPurchaseQuantity);
+    setSelectedRenewTargetSubscriptionId(0);
     setPaying(false);
   };
 
@@ -113,15 +216,38 @@ const SubscriptionPlansCard = ({
     }
   };
 
+  const resolveRenewTargetSubscriptionId = () => {
+    if (selectedPurchaseMode !== 'renew') return 0;
+    if (!selectedPlanRenewable) return 0;
+    const selectedId = Number(selectedRenewTargetSubscriptionId || 0);
+    if (selectedId > 0) return selectedId;
+    // 兜底：未设置时选最早到期；若无候选则保持 0，交由后端校验。
+    return Number(selectedPlanRenewableSubscriptions[0]?.id || 0);
+  };
+
+  const ensureRenewTargetSelected = () => {
+    if (selectedPurchaseMode !== 'renew') return true;
+    if (!selectedPlanRenewable) return true;
+    const renewTargetId = resolveRenewTargetSubscriptionId();
+    if (renewTargetId > 0) return true;
+    showError(t('请选择续费目标订阅'));
+    return false;
+  };
+
   const payStripe = async () => {
     if (!selectedPlan?.plan?.stripe_price_id) {
       showError(t('该套餐未配置 Stripe'));
       return;
     }
+    if (!ensureRenewTargetSelected()) return;
+    const renewTargetSubscriptionId = resolveRenewTargetSubscriptionId();
     setPaying(true);
     try {
       const res = await API.post('/api/subscription/stripe/pay', {
         plan_id: selectedPlan.plan.id,
+        purchase_mode: selectedPurchaseMode,
+        purchase_quantity: selectedPurchaseQuantity,
+        renew_target_subscription_id: renewTargetSubscriptionId,
       });
       if (res.data?.message === 'success') {
         window.open(res.data.data?.pay_link, '_blank');
@@ -146,10 +272,15 @@ const SubscriptionPlansCard = ({
       showError(t('该套餐未配置 Creem'));
       return;
     }
+    if (!ensureRenewTargetSelected()) return;
+    const renewTargetSubscriptionId = resolveRenewTargetSubscriptionId();
     setPaying(true);
     try {
       const res = await API.post('/api/subscription/creem/pay', {
         plan_id: selectedPlan.plan.id,
+        purchase_mode: selectedPurchaseMode,
+        purchase_quantity: selectedPurchaseQuantity,
+        renew_target_subscription_id: renewTargetSubscriptionId,
       });
       if (res.data?.message === 'success') {
         window.open(res.data.data?.checkout_url, '_blank');
@@ -174,11 +305,16 @@ const SubscriptionPlansCard = ({
       showError(t('请选择支付方式'));
       return;
     }
+    if (!ensureRenewTargetSelected()) return;
+    const renewTargetSubscriptionId = resolveRenewTargetSubscriptionId();
     setPaying(true);
     try {
       const res = await API.post('/api/subscription/epay/pay', {
         plan_id: selectedPlan.plan.id,
         payment_method: selectedEpayMethod,
+        purchase_mode: selectedPurchaseMode,
+        purchase_quantity: selectedPurchaseQuantity,
+        renew_target_subscription_id: renewTargetSubscriptionId,
       });
       if (res.data?.message === 'success') {
         submitEpayForm({ url: res.data.url, params: res.data.data });
@@ -198,7 +334,7 @@ const SubscriptionPlansCard = ({
     }
   };
 
-  // 当前订阅信息 - 支持多个订阅
+  // 当前订阅区块（支持多条订阅）。
   const hasActiveSubscription = activeSubscriptions.length > 0;
   const hasAnySubscription = allSubscriptions.length > 0;
   const disableSubscriptionPreference = !hasActiveSubscription;
@@ -235,7 +371,7 @@ const SubscriptionPlansCard = ({
   const getPlanPurchaseCount = (planId) =>
     planPurchaseCountMap.get(planId) || 0;
 
-  // 计算单个订阅的剩余天数
+  // 计算单条订阅剩余天数。
   const getRemainingDays = (sub) => {
     if (!sub?.subscription?.end_time) return 0;
     const now = Date.now() / 1000;
@@ -243,7 +379,7 @@ const SubscriptionPlansCard = ({
     return Math.max(0, Math.ceil(remaining / 86400));
   };
 
-  // 计算单个订阅的使用进度
+  // 计算单条订阅使用进度。
   const getUsagePercent = (sub) => {
     const total = Number(sub?.subscription?.amount_total || 0);
     const used = Number(sub?.subscription?.amount_used || 0);
@@ -377,97 +513,121 @@ const SubscriptionPlansCard = ({
             {hasAnySubscription ? (
               <>
                 <Divider margin={8} />
-                <div className='max-h-64 overflow-y-auto pr-1 semi-table-body'>
-                  {allSubscriptions.map((sub, subIndex) => {
-                    const isLast = subIndex === allSubscriptions.length - 1;
-                    const subscription = sub.subscription;
-                    const totalAmount = Number(subscription?.amount_total || 0);
-                    const usedAmount = Number(subscription?.amount_used || 0);
-                    const remainAmount =
-                      totalAmount > 0
-                        ? Math.max(0, totalAmount - usedAmount)
-                        : 0;
-                    const planTitle =
-                      planTitleMap.get(subscription?.plan_id) || '';
-                    const remainDays = getRemainingDays(sub);
-                    const usagePercent = getUsagePercent(sub);
-                    const now = Date.now() / 1000;
-                    const isExpired = (subscription?.end_time || 0) < now;
-                    const isCancelled = subscription?.status === 'cancelled';
-                    const isActive =
-                      subscription?.status === 'active' && !isExpired;
+                <div className='flex items-center justify-between mb-2'>
+                  <Text type='tertiary' size='small'>
+                    {t('共')} {allSubscriptions.length} {t('条订阅')}
+                  </Text>
+                  <Button
+                    size='small'
+                    theme='borderless'
+                    type='tertiary'
+                    icon={
+                      subscriptionListCollapsed ? (
+                        <ChevronDown size={12} />
+                      ) : (
+                        <ChevronUp size={12} />
+                      )
+                    }
+                    onClick={() =>
+                      setSubscriptionListCollapsed((collapsed) => !collapsed)
+                    }
+                  >
+                    {subscriptionListCollapsed ? t('展开') : t('收起')}
+                  </Button>
+                </div>
+                {!subscriptionListCollapsed && (
+                  <div className='max-h-64 overflow-y-auto pr-1 semi-table-body'>
+                    {allSubscriptions.map((sub, subIndex) => {
+                      const isLast = subIndex === allSubscriptions.length - 1;
+                      const subscription = sub.subscription;
+                      const totalAmount = Number(subscription?.amount_total || 0);
+                      const usedAmount = Number(subscription?.amount_used || 0);
+                      const remainAmount =
+                        totalAmount > 0
+                          ? Math.max(0, totalAmount - usedAmount)
+                          : 0;
+                      const planTitle =
+                        planTitleMap.get(subscription?.plan_id) || '';
+                      const remainDays = getRemainingDays(sub);
+                      const usagePercent = getUsagePercent(sub);
+                      const now = Date.now() / 1000;
+                      const isExpired = (subscription?.end_time || 0) < now;
+                      const isCancelled = subscription?.status === 'cancelled';
+                      const isActive =
+                        subscription?.status === 'active' && !isExpired;
 
-                    return (
-                      <div key={subscription?.id || subIndex}>
-                        {/* 订阅概要 */}
-                        <div className='flex items-center justify-between text-xs mb-2'>
-                          <div className='flex items-center gap-2'>
-                            <span className='font-medium'>
-                              {planTitle
-                                ? `${planTitle} · ${t('订阅')} #${subscription?.id}`
-                                : `${t('订阅')} #${subscription?.id}`}
-                            </span>
-                            {isActive ? (
-                              <Tag
-                                color='white'
-                                size='small'
-                                shape='circle'
-                                prefixIcon={<Badge dot type='success' />}
-                              >
-                                {t('生效')}
-                              </Tag>
-                            ) : isCancelled ? (
-                              <Tag color='white' size='small' shape='circle'>
-                                {t('已作废')}
-                              </Tag>
-                            ) : (
-                              <Tag color='white' size='small' shape='circle'>
-                                {t('已过期')}
-                              </Tag>
+                      return (
+                        <div key={subscription?.id || subIndex}>
+                          {/* 订阅摘要 */}
+                          <div className='flex items-center justify-between text-xs mb-2'>
+                            <div className='flex items-center gap-2'>
+                              <span className='font-medium'>
+                                {planTitle
+                                  ? `${planTitle} · ${t('订阅')} #${subscription?.id}`
+                                  : `${t('订阅')} #${subscription?.id}`}
+                              </span>
+                              {isActive ? (
+                                <Tag
+                                  color='white'
+                                  size='small'
+                                  shape='circle'
+                                  prefixIcon={<Badge dot type='success' />}
+                                >
+                                  {t('生效')}
+                                </Tag>
+                              ) : isCancelled ? (
+                                <Tag color='white' size='small' shape='circle'>
+                                  {t('已作废')}
+                                </Tag>
+                              ) : (
+                                <Tag color='white' size='small' shape='circle'>
+                                  {t('已过期')}
+                                </Tag>
+                              )}
+                            </div>
+                            {isActive && (
+                              <span className='text-gray-500'>
+                                {t('剩余')} {remainDays} {t('天')}
+                              </span>
                             )}
                           </div>
-                          {isActive && (
-                            <span className='text-gray-500'>
-                              {t('剩余')} {remainDays} {t('天')}
-                            </span>
-                          )}
-                        </div>
-                        <div className='text-xs text-gray-500 mb-2'>
-                          {isActive
-                            ? t('至')
-                            : isCancelled
-                              ? t('作废于')
-                              : t('过期于')}{' '}
-                          {new Date(
-                            (subscription?.end_time || 0) * 1000,
-                          ).toLocaleString()}
-                        </div>
-                        <div className='text-xs text-gray-500 mb-2'>
-                          {t('总额度')}:{' '}
-                          {totalAmount > 0 ? (
-                            <Tooltip
-                              content={`${t('原生额度')}：${usedAmount}/${totalAmount} · ${t('剩余')} ${remainAmount}`}
-                            >
-                              <span>
-                                {renderQuota(usedAmount)}/
-                                {renderQuota(totalAmount)} · {t('剩余')}{' '}
-                                {renderQuota(remainAmount)}
+                          <div className='text-xs text-gray-500 mb-2'>
+                            {isActive
+                              ? t('至')
+                              : isCancelled
+                                ? t('作废于')
+                                : t('过期于')}{' '}
+                            {new Date(
+                              (subscription?.end_time || 0) * 1000,
+                            ).toLocaleString()}
+                          </div>
+                          <div className='text-xs text-gray-500 mb-2'>
+                            {t('总额度')}:{' '}
+                            {totalAmount > 0 ? (
+                              <Tooltip
+                                content={`${t('原生额度')}：${usedAmount}/${totalAmount} · ${t('剩余')} ${remainAmount}`}
+                              >
+                                <span>
+                                  {renderQuota(usedAmount)}/
+                                  {renderQuota(totalAmount)} · {t('剩余')}{' '}
+                                  {renderQuota(remainAmount)}
+                                </span>
+                              </Tooltip>
+                            ) : (
+                              t('不限')
+                            )}
+                            {totalAmount > 0 && (
+                              <span className='ml-2'>
+                                {t('已用')} {usagePercent}%
                               </span>
-                            </Tooltip>
-                          ) : (
-                            t('不限')
-                          )}
-                          {totalAmount > 0 && (
-                            <span className='ml-2'>
-                              {t('已用')} {usagePercent}%
-                            </span>
-                          )}
+                            )}
+                          </div>
+                          {!isLast && <Divider margin={12} />}
                         </div>
-                        {!isLast && <Divider margin={12} />}
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+                )}
               </>
             ) : (
               <div className='text-xs text-gray-500'>
@@ -489,8 +649,37 @@ const SubscriptionPlansCard = ({
                   Number.isInteger(convertedPrice) ? 0 : 2,
                 );
                 const isPopular = index === 0 && plans.length > 1;
-                const limit = Number(plan?.max_purchase_per_user || 0);
-                const limitLabel = limit > 0 ? `${t('限购')} ${limit}` : null;
+                const purchasedCount = getPlanPurchaseCount(plan?.id);
+                const activeCount = Number(planActiveCountMap.get(plan?.id) || 0);
+                const activeQuantity = Number(
+                  planActiveQuantityMap.get(plan?.id) || 0,
+                );
+                const purchaseLimit = Number(plan?.max_purchase_per_user || 0);
+                const stackLimit = Number(plan?.max_stack_per_user || 0);
+                const quantityConfig = getPlanPurchaseQuantityConfig(
+                  plan,
+                  activeQuantity,
+                );
+                const remainPurchasable =
+                  purchaseLimit > 0
+                    ? Math.max(0, purchaseLimit - purchasedCount)
+                    : -1;
+                const remainStackable =
+                  stackLimit > 0 ? Math.max(0, stackLimit - activeCount) : -1;
+                const purchaseQuantityReached =
+                  quantityConfig.max <= 0 ||
+                  quantityConfig.max < quantityConfig.min;
+                const purchaseLimitLabel =
+                  purchaseLimit > 0
+                    ? `${t('购买上限')}: ${purchaseLimit}${t('份')} (${t('剩余')}${remainPurchasable}${t('份')})`
+                    : `${t('购买上限')}: ${t('不限')}`;
+                const stackLimitLabel =
+                  stackLimit > 0
+                    ? `${t('叠加上限')}: ${stackLimit}${t('份')} (${t('剩余')}${remainStackable}${t('份')})`
+                    : `${t('叠加上限')}: ${t('不限')}`;
+                const quantityRuleLabel = purchaseQuantityReached
+                  ? `${t('本次可买')}: 0${t('份')}`
+                  : `${t('本次可买')}: ${quantityConfig.min}-${quantityConfig.max}${t('份')}`;
                 const totalLabel =
                   totalAmount > 0
                     ? `${t('总额度')}: ${renderQuota(totalAmount)}`
@@ -513,7 +702,9 @@ const SubscriptionPlansCard = ({
                         tooltip: `${t('原生额度')}：${totalAmount}`,
                       }
                     : { label: totalLabel },
-                  limitLabel ? { label: limitLabel } : null,
+                  { label: purchaseLimitLabel },
+                  { label: stackLimitLabel },
+                  { label: quantityRuleLabel },
                   upgradeLabel ? { label: upgradeLabel } : null,
                 ].filter(Boolean);
 
@@ -526,7 +717,7 @@ const SubscriptionPlansCard = ({
                     bodyStyle={{ padding: 0 }}
                   >
                     <div className='p-4 h-full flex flex-col'>
-                      {/* 推荐标签 */}
+                      {/* 推荐标记 */}
                       {isPopular && (
                         <div className='mb-2'>
                           <Tag color='purple' shape='circle' size='small'>
@@ -535,7 +726,7 @@ const SubscriptionPlansCard = ({
                           </Tag>
                         </div>
                       )}
-                      {/* 套餐名称 */}
+                      {/* 套餐标题 */}
                       <div className='mb-3'>
                         <Typography.Title
                           heading={5}
@@ -568,7 +759,7 @@ const SubscriptionPlansCard = ({
                         </div>
                       </div>
 
-                      {/* 套餐权益描述 */}
+                      {/* 权益说明 */}
                       <div className='flex flex-col items-start gap-1 pb-2'>
                         {planBenefits.map((item) => {
                           const content = (
@@ -602,11 +793,23 @@ const SubscriptionPlansCard = ({
 
                         {/* 购买按钮 */}
                         {(() => {
-                          const count = getPlanPurchaseCount(p?.plan?.id);
-                          const reached = limit > 0 && count >= limit;
-                          const tip = reached
-                            ? t('已达到购买上限') + ` (${count}/${limit})`
-                            : '';
+                          const canRenew = activeCount > 0;
+                          const purchaseReached =
+                            purchaseLimit > 0 && purchasedCount >= purchaseLimit;
+                          const stackReached =
+                            stackLimit > 0 && activeCount >= stackLimit;
+                          const quantityReached = purchaseQuantityReached;
+                          // 若无可续费订阅，触达任一上限即禁止购买；否则可在弹窗中选择续费目标。
+                          const reached =
+                            quantityReached || (!canRenew && (purchaseReached || stackReached));
+                          const tip = quantityReached
+                            ? t('当前可购买数量为 0，请等待部分订阅到期后再试')
+                            : purchaseReached
+                            ? t('已达到购买上限') +
+                              ` (${purchasedCount}/${purchaseLimit})`
+                            : stackReached
+                              ? t('已达到叠加上限') + ` (${activeCount}/${stackLimit})`
+                              : '';
                           const buttonEl = (
                             <Button
                               theme='outline'
@@ -665,11 +868,32 @@ const SubscriptionPlansCard = ({
         enableOnlineTopUp={enableOnlineTopUp}
         enableStripeTopUp={enableStripeTopUp}
         enableCreemTopUp={enableCreemTopUp}
+        purchaseMode={selectedPurchaseMode}
+        onChangePurchaseMode={setSelectedPurchaseMode}
+        purchaseQuantity={selectedPurchaseQuantity}
+        onChangePurchaseQuantity={setSelectedPurchaseQuantity}
+        purchaseQuantityRange={selectedPlanQuantityConfig}
+        canRenew={selectedPlanRenewable}
+        renewableSubscriptions={selectedPlanRenewableSubscriptions}
+        renewTargetSubscriptionId={selectedRenewTargetSubscriptionId}
+        onChangeRenewTargetSubscriptionId={setSelectedRenewTargetSubscriptionId}
         purchaseLimitInfo={
           selectedPlan?.plan?.id
             ? {
-                limit: Number(selectedPlan?.plan?.max_purchase_per_user || 0),
-                count: getPlanPurchaseCount(selectedPlan?.plan?.id),
+                purchase_limit: Number(
+                  selectedPlan?.plan?.max_purchase_per_user || 0,
+                ),
+                purchase_count: getPlanPurchaseCount(selectedPlan?.plan?.id),
+                stack_limit: Number(selectedPlan?.plan?.max_stack_per_user || 0),
+                stack_count: Number(
+                  planActiveCountMap.get(selectedPlan?.plan?.id) || 0,
+                ),
+                quantity_max: Number(
+                  selectedPlan?.plan?.purchase_quantity_max || 12,
+                ),
+                active_quantity: Number(
+                  planActiveQuantityMap.get(selectedPlan?.plan?.id) || 0,
+                ),
               }
             : null
         }

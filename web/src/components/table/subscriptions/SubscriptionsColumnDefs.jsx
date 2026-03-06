@@ -97,6 +97,15 @@ const renderPlanTitle = (text, record, t) => {
             ? plan.max_purchase_per_user
             : t('不限')}
         </Text>
+        <Text type='tertiary'>{t('叠加上限')}</Text>
+        <Text>
+          {plan?.max_stack_per_user > 0 ? plan.max_stack_per_user : t('不限')}
+        </Text>
+        <Text type='tertiary'>{t('购买数量')}</Text>
+        <Text>
+          {Number(plan?.purchase_quantity_min || 1)}-
+          {Number(plan?.purchase_quantity_max || 12)}
+        </Text>
         <Text type='tertiary'>{t('有效期')}</Text>
         <Text>{formatDuration(plan, t)}</Text>
         <Text type='tertiary'>{t('重置')}</Text>
@@ -140,6 +149,21 @@ const renderPurchaseLimit = (text, record, t) => {
       {limit > 0 ? limit : t('不限')}
     </Text>
   );
+};
+
+const renderStackLimit = (text, record, t) => {
+  const limit = Number(record?.plan?.max_stack_per_user || 0);
+  return (
+    <Text type={limit > 0 ? 'secondary' : 'tertiary'}>
+      {limit > 0 ? limit : t('不限')}
+    </Text>
+  );
+};
+
+const renderPurchaseQuantityRule = (text, record, t) => {
+  const min = Number(record?.plan?.purchase_quantity_min || 1);
+  const max = Number(record?.plan?.purchase_quantity_max || 12);
+  return <Text type='secondary'>{min}-{max}</Text>;
 };
 
 const renderDuration = (text, record, t) => {
@@ -306,6 +330,16 @@ export const getSubscriptionsColumns = ({
       title: t('购买上限'),
       width: 90,
       render: (text, record) => renderPurchaseLimit(text, record, t),
+    },
+    {
+      title: t('叠加上限'),
+      width: 90,
+      render: (text, record) => renderStackLimit(text, record, t),
+    },
+    {
+      title: t('购买数量'),
+      width: 140,
+      render: (text, record) => renderPurchaseQuantityRule(text, record, t),
     },
     {
       title: t('优先级'),

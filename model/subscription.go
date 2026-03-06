@@ -14,7 +14,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// Subscription duration units
+// 订阅时长单位
 const (
 	SubscriptionDurationYear   = "year"
 	SubscriptionDurationMonth  = "month"
@@ -23,7 +23,21 @@ const (
 	SubscriptionDurationCustom = "custom"
 )
 
-// Subscription quota reset period
+// 订阅购买模式
+const (
+	SubscriptionPurchaseModeStack       = "stack"
+	SubscriptionPurchaseModeRenew       = "renew"
+	SubscriptionPurchaseModeRenewExtend = "renew_extend"
+)
+
+// 管理端订阅动作
+const (
+	SubscriptionManageActionEnable  = "enable"
+	SubscriptionManageActionDisable = "disable"
+	SubscriptionManageActionDelete  = "delete"
+)
+
+// 订阅额度重置周期
 const (
 	SubscriptionResetNever   = "never"
 	SubscriptionResetDaily   = "daily"
@@ -36,6 +50,17 @@ var (
 	ErrSubscriptionOrderNotFound      = errors.New("subscription order not found")
 	ErrSubscriptionOrderStatusInvalid = errors.New("subscription order status invalid")
 )
+
+func NormalizeSubscriptionPurchaseMode(mode string) string {
+	switch strings.TrimSpace(mode) {
+	case SubscriptionPurchaseModeRenew:
+		return SubscriptionPurchaseModeRenew
+	case SubscriptionPurchaseModeRenewExtend:
+		return SubscriptionPurchaseModeRenewExtend
+	default:
+		return SubscriptionPurchaseModeStack
+	}
+}
 
 const (
 	subscriptionPlanCacheNamespace     = "new-api:subscription_plan:v1"
@@ -141,14 +166,14 @@ func InvalidateSubscriptionPlanCache(planId int) {
 	_ = infoCache.Purge()
 }
 
-// Subscription plan
+// 订阅套餐定义
 type SubscriptionPlan struct {
 	Id int `json:"id"`
 
 	Title    string `json:"title" gorm:"type:varchar(128);not null"`
 	Subtitle string `json:"subtitle" gorm:"type:varchar(255);default:''"`
 
-	// Display money amount (follow existing code style: float64 for money)
+	// 展示用金额（沿用现有代码风格，金额使用 float64）
 	PriceAmount float64 `json:"price_amount" gorm:"type:decimal(10,6);not null;default:0"`
 	Currency    string  `json:"currency" gorm:"type:varchar(8);not null;default:'USD'"`
 
@@ -162,16 +187,22 @@ type SubscriptionPlan struct {
 	StripePriceId  string `json:"stripe_price_id" gorm:"type:varchar(128);default:''"`
 	CreemProductId string `json:"creem_product_id" gorm:"type:varchar(128);default:''"`
 
-	// Max purchases per user (0 = unlimited)
+	// 每个用户最大购买次数（0 表示不限制）
 	MaxPurchasePerUser int `json:"max_purchase_per_user" gorm:"type:int;default:0"`
+	// 每个用户最大叠加条数（0 表示不限制），仅限制“叠加新购”，不限制续费。
+	MaxStackPerUser int `json:"max_stack_per_user" gorm:"type:int;default:0"`
+	// PurchaseQuantityMin/Max 控制该套餐单次购买数量范围。
+	// 例如 1~12 表示一次可买 1 到 12 份。
+	PurchaseQuantityMin int `json:"purchase_quantity_min" gorm:"type:int;default:1"`
+	PurchaseQuantityMax int `json:"purchase_quantity_max" gorm:"type:int;default:12"`
 
-	// Upgrade user group after purchase (empty = no change)
+	// 购买后升级用户分组（为空表示不变）
 	UpgradeGroup string `json:"upgrade_group" gorm:"type:varchar(64);default:''"`
 
-	// Total quota (amount in quota units, 0 = unlimited)
+	// 总额度（以配额单位计，0 表示不限制）
 	TotalAmount int64 `json:"total_amount" gorm:"type:bigint;not null;default:0"`
 
-	// Quota reset period for plan
+	// 套餐的额度重置周期
 	QuotaResetPeriod        string `json:"quota_reset_period" gorm:"type:varchar(16);default:'never'"`
 	QuotaResetCustomSeconds int64  `json:"quota_reset_custom_seconds" gorm:"type:bigint;default:0"`
 
@@ -191,18 +222,23 @@ func (p *SubscriptionPlan) BeforeUpdate(tx *gorm.DB) error {
 	return nil
 }
 
-// Subscription order (payment -> webhook -> create UserSubscription)
+// 订阅订单（支付 -> webhook 回调 -> 创建 UserSubscription）
 type SubscriptionOrder struct {
 	Id     int     `json:"id"`
 	UserId int     `json:"user_id" gorm:"index"`
 	PlanId int     `json:"plan_id" gorm:"index"`
 	Money  float64 `json:"money"`
+	// PurchaseQuantity 表示本次购买份数，默认 1。
+	PurchaseQuantity int `json:"purchase_quantity" gorm:"type:int;not null;default:1"`
 
 	TradeNo       string `json:"trade_no" gorm:"unique;type:varchar(255);index"`
 	PaymentMethod string `json:"payment_method" gorm:"type:varchar(50)"`
-	Status        string `json:"status"`
-	CreateTime    int64  `json:"create_time"`
-	CompleteTime  int64  `json:"complete_time"`
+	PurchaseMode  string `json:"purchase_mode" gorm:"type:varchar(16);not null;default:'stack'"`
+	// RenewTargetSubscriptionId 仅在 purchase_mode=renew 时生效。
+	RenewTargetSubscriptionId int    `json:"renew_target_subscription_id" gorm:"index;default:0"`
+	Status                    string `json:"status"`
+	CreateTime                int64  `json:"create_time"`
+	CompleteTime              int64  `json:"complete_time"`
 
 	ProviderPayload string `json:"provider_payload" gorm:"type:text"`
 }
@@ -210,6 +246,9 @@ type SubscriptionOrder struct {
 func (o *SubscriptionOrder) Insert() error {
 	if o.CreateTime == 0 {
 		o.CreateTime = common.GetTimestamp()
+	}
+	if o.PurchaseQuantity <= 0 {
+		o.PurchaseQuantity = 1
 	}
 	return DB.Create(o).Error
 }
@@ -229,7 +268,7 @@ func GetSubscriptionOrderByTradeNo(tradeNo string) *SubscriptionOrder {
 	return &order
 }
 
-// User subscription instance
+// 用户订阅实例
 type UserSubscription struct {
 	Id     int `json:"id"`
 	UserId int `json:"user_id" gorm:"index;index:idx_user_sub_active,priority:1"`
@@ -319,9 +358,9 @@ func calcNextResetTime(base time.Time, plan *SubscriptionPlan, endUnix int64) in
 		next = time.Date(base.Year(), base.Month(), base.Day(), 0, 0, 0, 0, base.Location()).
 			AddDate(0, 0, 1)
 	case SubscriptionResetWeekly:
-		// Align to next Monday 00:00
+		// 对齐到下周一 00:00
 		weekday := int(base.Weekday()) // Sunday=0
-		// Convert to Monday=1..Sunday=7
+		// 转换为 Monday=1..Sunday=7
 		if weekday == 0 {
 			weekday = 7
 		}
@@ -329,7 +368,7 @@ func calcNextResetTime(base time.Time, plan *SubscriptionPlan, endUnix int64) in
 		next = time.Date(base.Year(), base.Month(), base.Day(), 0, 0, 0, 0, base.Location()).
 			AddDate(0, 0, daysUntil)
 	case SubscriptionResetMonthly:
-		// Align to first day of next month 00:00
+		// 对齐到下月第一天 00:00
 		next = time.Date(base.Year(), base.Month(), 1, 0, 0, 0, 0, base.Location()).
 			AddDate(0, 1, 0)
 	case SubscriptionResetCustom:
@@ -385,6 +424,202 @@ func CountUserSubscriptionsByPlan(userId int, planId int) (int64, error) {
 	return count, nil
 }
 
+func countUserActiveSubscriptionsByPlanTx(tx *gorm.DB, userId int, planId int) (int64, error) {
+	if userId <= 0 || planId <= 0 {
+		return 0, errors.New("invalid userId or planId")
+	}
+	if tx == nil {
+		tx = DB
+	}
+	now := common.GetTimestamp()
+	var count int64
+	if err := tx.Model(&UserSubscription{}).
+		Where("user_id = ? AND plan_id = ? AND status = ? AND end_time > ?", userId, planId, "active", now).
+		Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func CountUserActiveSubscriptionsByPlan(userId int, planId int) (int64, error) {
+	return countUserActiveSubscriptionsByPlanTx(nil, userId, planId)
+}
+
+// fixedPlanDurationSeconds 返回固定时长套餐的周期秒数（day/hour/custom）。
+// month/year 不返回固定秒数，交给按边界迭代计算。
+func fixedPlanDurationSeconds(plan *SubscriptionPlan) int64 {
+	if plan == nil {
+		return 0
+	}
+	switch plan.DurationUnit {
+	case SubscriptionDurationDay:
+		if plan.DurationValue > 0 {
+			return int64(plan.DurationValue) * 24 * 3600
+		}
+	case SubscriptionDurationHour:
+		if plan.DurationValue > 0 {
+			return int64(plan.DurationValue) * 3600
+		}
+	case SubscriptionDurationCustom:
+		if plan.CustomSeconds > 0 {
+			return plan.CustomSeconds
+		}
+	}
+	return 0
+}
+
+// countRemainingSubscriptionQuantity 计算单条生效订阅的“剩余份数”。
+// 说明：
+// - 固定秒数周期（day/hour/custom）使用向上取整；
+// - month/year 使用周期边界迭代，保证与续费 AddDate 行为一致；
+// - 对历史异常数据保守兜底为 1，避免出现“明明生效却计算为 0”。
+func countRemainingSubscriptionQuantity(sub *UserSubscription, plan *SubscriptionPlan, nowUnix int64) int {
+	if sub == nil || plan == nil {
+		return 0
+	}
+	if sub.Status != "active" || sub.EndTime <= nowUnix {
+		return 0
+	}
+
+	if durationSeconds := fixedPlanDurationSeconds(plan); durationSeconds > 0 {
+		remainSeconds := sub.EndTime - nowUnix
+		if remainSeconds <= 0 {
+			return 0
+		}
+		// 向上取整，部分周期按 1 份计入。
+		return int((remainSeconds + durationSeconds - 1) / durationSeconds)
+	}
+
+	startUnix := sub.StartTime
+	if startUnix <= 0 || startUnix >= sub.EndTime {
+		return 1
+	}
+
+	const maxCycleIterations = 5000
+	remaining := 0
+	cursor := time.Unix(startUnix, 0)
+	for i := 0; i < maxCycleIterations; i++ {
+		nextUnix, err := calcPlanEndTime(cursor, plan)
+		if err != nil || nextUnix <= cursor.Unix() {
+			return 1
+		}
+		if nextUnix > nowUnix {
+			remaining++
+		}
+		if nextUnix >= sub.EndTime {
+			break
+		}
+		cursor = time.Unix(nextUnix, 0)
+	}
+	if remaining <= 0 {
+		return 1
+	}
+	return remaining
+}
+
+// CountRemainingSubscriptionQuantity 对外暴露单条订阅“剩余份数”计算，供控制层复用。
+func CountRemainingSubscriptionQuantity(sub *UserSubscription, plan *SubscriptionPlan, nowUnix int64) int {
+	return countRemainingSubscriptionQuantity(sub, plan, nowUnix)
+}
+
+// CountUserActiveSubscriptionQuantityByPlan 统计用户在某套餐下当前“未过期份数”总和。
+// 该值用于限制“最大购买数量”的动态可买上限。
+func CountUserActiveSubscriptionQuantityByPlan(userId int, plan *SubscriptionPlan) (int, error) {
+	if userId <= 0 || plan == nil || plan.Id <= 0 {
+		return 0, errors.New("invalid userId or plan")
+	}
+	nowUnix := common.GetTimestamp()
+	var subs []UserSubscription
+	if err := DB.Where("user_id = ? AND plan_id = ? AND status = ? AND end_time > ?",
+		userId, plan.Id, "active", nowUnix).
+		Find(&subs).Error; err != nil {
+		return 0, err
+	}
+	total := 0
+	for i := range subs {
+		total += countRemainingSubscriptionQuantity(&subs[i], plan, nowUnix)
+	}
+	return total, nil
+}
+
+func GetEarliestActiveUserSubscriptionByPlan(userId int, planId int) (*UserSubscription, error) {
+	if userId <= 0 || planId <= 0 {
+		return nil, errors.New("invalid userId or planId")
+	}
+	now := common.GetTimestamp()
+	var sub UserSubscription
+	query := DB.Where("user_id = ? AND plan_id = ? AND status = ? AND end_time > ?",
+		userId, planId, "active", now).
+		Order("end_time asc, id asc").
+		Limit(1).
+		Find(&sub)
+	if query.Error != nil {
+		return nil, query.Error
+	}
+	if query.RowsAffected == 0 {
+		return nil, nil
+	}
+	return &sub, nil
+}
+
+// GetActiveUserSubscriptionsByPlan 返回用户在某套餐下所有生效订阅，按最早到期优先排序。
+func GetActiveUserSubscriptionsByPlan(userId int, planId int) ([]UserSubscription, error) {
+	if userId <= 0 || planId <= 0 {
+		return nil, errors.New("invalid userId or planId")
+	}
+	now := common.GetTimestamp()
+	subs := make([]UserSubscription, 0)
+	if err := DB.Where("user_id = ? AND plan_id = ? AND status = ? AND end_time > ?",
+		userId, planId, "active", now).
+		Order("end_time asc, id asc").
+		Find(&subs).Error; err != nil {
+		return nil, err
+	}
+	return subs, nil
+}
+
+// getActiveUserSubscriptionsByPlanTx 在事务内读取用户同套餐生效订阅，并按最早到期优先排序。
+// targetSubscriptionId>0 时仅返回指定目标（若目标无效则返回空切片）。
+func getActiveUserSubscriptionsByPlanTx(tx *gorm.DB, userId int, planId int, targetSubscriptionId int) ([]UserSubscription, error) {
+	if userId <= 0 || planId <= 0 {
+		return nil, errors.New("invalid userId or planId")
+	}
+	if tx == nil {
+		tx = DB
+	}
+	now := GetDBTimestampTx(tx)
+	query := tx.Where("user_id = ? AND plan_id = ? AND status = ? AND end_time > ?",
+		userId, planId, "active", now).
+		Order("end_time asc, id asc")
+	if targetSubscriptionId > 0 {
+		query = query.Where("id = ?", targetSubscriptionId)
+	}
+	if !common.UsingSQLite {
+		query = query.Set("gorm:query_option", "FOR UPDATE")
+	}
+	subs := make([]UserSubscription, 0)
+	if err := query.Find(&subs).Error; err != nil {
+		return nil, err
+	}
+	return subs, nil
+}
+
+// lockUserForSubscriptionMutationTx 锁定用户行，避免同用户并发完成订单时出现超卖。
+func lockUserForSubscriptionMutationTx(tx *gorm.DB, userId int) error {
+	if tx == nil {
+		return errors.New("tx is nil")
+	}
+	if userId <= 0 {
+		return errors.New("invalid user id")
+	}
+	query := tx.Select("id").Where("id = ?", userId)
+	if !common.UsingSQLite {
+		query = query.Set("gorm:query_option", "FOR UPDATE")
+	}
+	var user User
+	return query.First(&user).Error
+}
+
 func getUserGroupByIdTx(tx *gorm.DB, userId int) (string, error) {
 	if userId <= 0 {
 		return "", errors.New("invalid userId")
@@ -434,7 +669,7 @@ func downgradeUserGroupForSubscriptionTx(tx *gorm.DB, sub *UserSubscription, now
 	return prevGroup, nil
 }
 
-func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *SubscriptionPlan, source string) (*UserSubscription, error) {
+func createUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *SubscriptionPlan, source string, enforcePurchaseLimit bool) (*UserSubscription, error) {
 	if tx == nil {
 		return nil, errors.New("tx is nil")
 	}
@@ -444,7 +679,7 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 	if userId <= 0 {
 		return nil, errors.New("invalid user id")
 	}
-	if plan.MaxPurchasePerUser > 0 {
+	if enforcePurchaseLimit && plan.MaxPurchasePerUser > 0 {
 		var count int64
 		if err := tx.Model(&UserSubscription{}).
 			Where("user_id = ? AND plan_id = ?", userId, plan.Id).
@@ -455,7 +690,7 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 			return nil, errors.New("已达到该套餐购买上限")
 		}
 	}
-	nowUnix := GetDBTimestamp()
+	nowUnix := GetDBTimestampTx(tx)
 	now := time.Unix(nowUnix, 0)
 	endUnix, err := calcPlanEndTime(now, plan)
 	if err != nil {
@@ -504,7 +739,74 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 	return sub, nil
 }
 
-// Complete a subscription order (idempotent). Creates a UserSubscription snapshot from the plan.
+func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *SubscriptionPlan, source string) (*UserSubscription, error) {
+	return createUserSubscriptionFromPlanTx(tx, userId, plan, source, true)
+}
+
+// renewUserSubscriptionByPlanTx 对用户同 plan 的生效订阅做续费：
+// 1) 优先命中指定目标订阅（targetSubscriptionId）
+// 2) 若未指定或目标不可用，则按最早到期优先
+func renewUserSubscriptionByPlanTx(tx *gorm.DB, userId int, plan *SubscriptionPlan, targetSubscriptionId int) (*UserSubscription, bool, error) {
+	if tx == nil {
+		return nil, false, errors.New("tx is nil")
+	}
+	if plan == nil || plan.Id == 0 {
+		return nil, false, errors.New("invalid plan")
+	}
+	if userId <= 0 {
+		return nil, false, errors.New("invalid user id")
+	}
+	now := GetDBTimestampTx(tx)
+	query := tx.Set("gorm:query_option", "FOR UPDATE").
+		Where("user_id = ? AND plan_id = ? AND status = ? AND end_time > ?",
+			userId, plan.Id, "active", now)
+	if targetSubscriptionId > 0 {
+		query = query.Where("id = ?", targetSubscriptionId)
+	}
+	var sub UserSubscription
+	result := query.Order("end_time asc, id asc").Limit(1).Find(&sub)
+	if result.Error != nil {
+		return nil, false, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, false, nil
+	}
+
+	baseEnd := sub.EndTime
+	if baseEnd <= 0 {
+		baseEnd = now
+	}
+	newEnd, err := calcPlanEndTime(time.Unix(baseEnd, 0), plan)
+	if err != nil {
+		return nil, false, err
+	}
+	sub.EndTime = newEnd
+
+	// 对“不重置”套餐，续费时累计总额度；
+	// 对“会重置”套餐，仅延长有效期，避免每日/月度额度越续越膨胀。
+	if NormalizeResetPeriod(plan.QuotaResetPeriod) == SubscriptionResetNever {
+		if plan.TotalAmount <= 0 || sub.AmountTotal <= 0 {
+			sub.AmountTotal = 0
+		} else {
+			sub.AmountTotal += plan.TotalAmount
+		}
+	}
+
+	if err := tx.Save(&sub).Error; err != nil {
+		return nil, false, err
+	}
+	if NormalizeResetPeriod(plan.QuotaResetPeriod) != SubscriptionResetNever {
+		if err := maybeResetUserSubscriptionWithPlanTx(tx, &sub, plan, now); err != nil {
+			return nil, false, err
+		}
+	}
+	return &sub, true, nil
+}
+
+// CompleteSubscriptionOrder 完成订阅订单（幂等）：
+// - stack: 新建订阅
+// - renew: 仅续费同 plan 生效订阅；无可续费目标时直接失败，不回退到叠加
+// - renew_extend: 续费式购买；无生效订阅时先创建 1 条，再按同条顺延
 func CompleteSubscriptionOrder(tradeNo string, providerPayload string) error {
 	if tradeNo == "" {
 		return errors.New("tradeNo is empty")
@@ -517,7 +819,9 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string) error {
 	var logPlanTitle string
 	var logMoney float64
 	var logPaymentMethod string
+	var logPurchaseQuantity int
 	var upgradeGroup string
+	var logAction string
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var order SubscriptionOrder
 		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", tradeNo).First(&order).Error; err != nil {
@@ -529,17 +833,148 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string) error {
 		if order.Status != common.TopUpStatusPending {
 			return ErrSubscriptionOrderStatusInvalid
 		}
-		plan, err := GetSubscriptionPlanById(order.PlanId)
+		plan, err := getSubscriptionPlanByIdTx(tx, order.PlanId)
 		if err != nil {
 			return err
 		}
 		if !plan.Enabled {
-			// still allow completion for already purchased orders
+			// 已支付成功的订单即使套餐被禁用也允许完成
 		}
-		upgradeGroup = strings.TrimSpace(plan.UpgradeGroup)
-		_, err = CreateUserSubscriptionFromPlanTx(tx, order.UserId, plan, "order")
-		if err != nil {
+		mode := NormalizeSubscriptionPurchaseMode(order.PurchaseMode)
+		order.PurchaseMode = mode
+		if order.PurchaseQuantity <= 0 {
+			order.PurchaseQuantity = 1
+		}
+		if err := lockUserForSubscriptionMutationTx(tx, order.UserId); err != nil {
 			return err
+		}
+		nowUnix := GetDBTimestampTx(tx)
+		activeSubQuery := tx.Where("user_id = ? AND plan_id = ? AND status = ? AND end_time > ?",
+			order.UserId, plan.Id, "active", nowUnix).
+			Order("end_time asc, id asc")
+		if !common.UsingSQLite {
+			activeSubQuery = activeSubQuery.Set("gorm:query_option", "FOR UPDATE")
+		}
+		var activeSubs []UserSubscription
+		if err := activeSubQuery.Find(&activeSubs).Error; err != nil {
+			return err
+		}
+		activeCountBeforeStack := int64(len(activeSubs))
+		activeQuantityBefore := 0
+		for i := range activeSubs {
+			activeQuantityBefore += countRemainingSubscriptionQuantity(&activeSubs[i], plan, nowUnix)
+		}
+		// 订单完成时二次校验动态可买上限，防止“下单后到回调前”并发突破限制。
+		purchaseQuantityMin := plan.PurchaseQuantityMin
+		purchaseQuantityMax := plan.PurchaseQuantityMax
+		if purchaseQuantityMin <= 0 {
+			purchaseQuantityMin = 1
+		}
+		if purchaseQuantityMax <= 0 {
+			purchaseQuantityMax = 12
+		}
+		if purchaseQuantityMax < purchaseQuantityMin {
+			purchaseQuantityMax = purchaseQuantityMin
+		}
+		availableQuantity := purchaseQuantityMax - activeQuantityBefore
+		if availableQuantity < 0 {
+			availableQuantity = 0
+		}
+		if order.PurchaseQuantity > availableQuantity {
+			return fmt.Errorf("购买数量超出上限，当前最多可购买 %d 份", availableQuantity)
+		}
+		// 完成阶段再次校验购买上限，避免并发完成订单时超出历史购买总量。
+		if plan.MaxPurchasePerUser > 0 &&
+			(mode == SubscriptionPurchaseModeStack || mode == SubscriptionPurchaseModeRenewExtend || common.SubscriptionRenewRespectPurchaseLimit) {
+			var totalCount int64
+			if err := tx.Model(&UserSubscription{}).
+				Where("user_id = ? AND plan_id = ?", order.UserId, plan.Id).
+				Count(&totalCount).Error; err != nil {
+				return err
+			}
+			limit := int64(plan.MaxPurchasePerUser)
+			if ((mode == SubscriptionPurchaseModeStack || mode == SubscriptionPurchaseModeRenewExtend) &&
+				totalCount+int64(order.PurchaseQuantity) > limit) ||
+				(mode == SubscriptionPurchaseModeRenew && totalCount >= limit) {
+				return errors.New("已达到该套餐购买上限")
+			}
+		}
+		if (mode == SubscriptionPurchaseModeStack || mode == SubscriptionPurchaseModeRenewExtend) && plan.MaxStackPerUser > 0 {
+			// 在订单完成阶段再次校验叠加上限，避免并发完成导致超卖。
+			addedActiveCount := int64(order.PurchaseQuantity)
+			if mode == SubscriptionPurchaseModeRenewExtend {
+				addedActiveCount = 0
+			}
+			if mode == SubscriptionPurchaseModeRenewExtend && activeCountBeforeStack == 0 {
+				addedActiveCount = 1
+			}
+			if activeCountBeforeStack+addedActiveCount > int64(plan.MaxStackPerUser) {
+				return errors.New("已达到该套餐叠加上限")
+			}
+		}
+		renewExtendTargetSubscriptionId := 0
+		if mode == SubscriptionPurchaseModeRenewExtend && len(activeSubs) > 0 {
+			renewExtendTargetSubscriptionId = activeSubs[0].Id
+		}
+		logAction = "购买"
+		// 按购买份数循环执行，支持“多份续费”与“多份叠加”。
+		for i := 0; i < order.PurchaseQuantity; i++ {
+			switch mode {
+			case SubscriptionPurchaseModeRenew:
+				// 续费模式下，多份购买始终续费同一目标订阅：
+				// - 指定目标：每份都续到该目标，不回退到其他订阅；
+				// - 未指定目标（兼容旧客户端）：每份按最早到期续费。
+				targetId := order.RenewTargetSubscriptionId
+				if targetId > 0 {
+					_, renewed, err := renewUserSubscriptionByPlanTx(tx, order.UserId, plan, targetId)
+					if err != nil {
+						return err
+					}
+					if !renewed {
+						return errors.New("续费目标订阅不存在或已失效")
+					}
+					logAction = "续费"
+					continue
+				}
+				_, renewed, err := renewUserSubscriptionByPlanTx(tx, order.UserId, plan, 0)
+				if err != nil {
+					return err
+				}
+				if renewed {
+					logAction = "续费"
+					continue
+				}
+				// 用户选择续费时，不允许自动改成叠加（新建订阅）。
+				return errors.New("无可续费的同规格订阅")
+			case SubscriptionPurchaseModeRenewExtend:
+				// 续费式购买：
+				// - 有同套餐生效订阅时，按最早到期单条顺延；
+				// - 无生效订阅时，先创建 1 条，再把剩余份数顺延到该条。
+				if renewExtendTargetSubscriptionId > 0 {
+					_, renewed, renewErr := renewUserSubscriptionByPlanTx(tx, order.UserId, plan, renewExtendTargetSubscriptionId)
+					if renewErr != nil {
+						return renewErr
+					}
+					if !renewed {
+						return errors.New("续费式顺延失败")
+					}
+					continue
+				}
+				createdSub, createErr := createUserSubscriptionFromPlanTx(tx, order.UserId, plan, "order", true)
+				if createErr != nil {
+					return createErr
+				}
+				renewExtendTargetSubscriptionId = createdSub.Id
+				upgradeGroup = strings.TrimSpace(plan.UpgradeGroup)
+				continue
+			default:
+				// 叠加模式下，按“购买上限”限制可创建总条数。
+				_, err = createUserSubscriptionFromPlanTx(tx, order.UserId, plan, "order", true)
+				if err != nil {
+					return err
+				}
+				upgradeGroup = strings.TrimSpace(plan.UpgradeGroup)
+			}
 		}
 		if err := upsertSubscriptionTopUpTx(tx, &order); err != nil {
 			return err
@@ -552,10 +987,14 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string) error {
 		if err := tx.Save(&order).Error; err != nil {
 			return err
 		}
+		if err := EnqueueInviteCommissionFromSubscriptionOrderTx(tx, &order); err != nil {
+			return err
+		}
 		logUserId = order.UserId
 		logPlanTitle = plan.Title
 		logMoney = order.Money
 		logPaymentMethod = order.PaymentMethod
+		logPurchaseQuantity = order.PurchaseQuantity
 		return nil
 	})
 	if err != nil {
@@ -565,7 +1004,10 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string) error {
 		_ = UpdateUserGroupCache(logUserId, upgradeGroup)
 	}
 	if logUserId > 0 {
-		msg := fmt.Sprintf("订阅购买成功，套餐: %s，支付金额: %.2f，支付方式: %s", logPlanTitle, logMoney, logPaymentMethod)
+		if logPurchaseQuantity <= 0 {
+			logPurchaseQuantity = 1
+		}
+		msg := fmt.Sprintf("订阅%s成功，套餐: %s，份数: %d，支付金额: %.2f，支付方式: %s", logAction, logPlanTitle, logPurchaseQuantity, logMoney, logPaymentMethod)
 		RecordLog(logUserId, LogTypeTopup, msg)
 	}
 	return nil
@@ -627,8 +1069,27 @@ func ExpireSubscriptionOrder(tradeNo string) error {
 	})
 }
 
-// Admin bind (no payment). Creates a UserSubscription from a plan.
+// 管理端绑定（无需支付）：按套餐创建一条 UserSubscription。
 func AdminBindSubscription(userId int, planId int, sourceNote string) (string, error) {
+	return AdminBindSubscriptionWithOptions(
+		userId,
+		planId,
+		SubscriptionPurchaseModeStack,
+		1,
+		0,
+		sourceNote,
+	)
+}
+
+// AdminBindSubscriptionWithOptions 支持管理端在无支付场景下执行 stack/renew 操作。
+func AdminBindSubscriptionWithOptions(
+	userId int,
+	planId int,
+	purchaseMode string,
+	purchaseQuantity int,
+	renewTargetSubscriptionId int,
+	sourceNote string,
+) (string, error) {
 	if userId <= 0 || planId <= 0 {
 		return "", errors.New("invalid userId or planId")
 	}
@@ -636,21 +1097,84 @@ func AdminBindSubscription(userId int, planId int, sourceNote string) (string, e
 	if err != nil {
 		return "", err
 	}
+	mode := NormalizeSubscriptionPurchaseMode(purchaseMode)
+	if purchaseQuantity <= 0 {
+		purchaseQuantity = 1
+	}
+	now := common.GetTimestamp()
+
+	renewTargetForExtend := 0
 	err = DB.Transaction(func(tx *gorm.DB) error {
-		_, err := CreateUserSubscriptionFromPlanTx(tx, userId, plan, "admin")
-		return err
+		if err := lockUserForSubscriptionMutationTx(tx, userId); err != nil {
+			return err
+		}
+		if mode == SubscriptionPurchaseModeRenewExtend {
+			activeSubs, err := getActiveUserSubscriptionsByPlanTx(tx, userId, plan.Id, 0)
+			if err != nil {
+				return err
+			}
+			if len(activeSubs) > 0 {
+				renewTargetForExtend = activeSubs[0].Id
+			}
+		}
+
+		for i := 0; i < purchaseQuantity; i++ {
+			switch mode {
+			case SubscriptionPurchaseModeRenew:
+				_, renewed, err := renewUserSubscriptionByPlanTx(tx, userId, plan, renewTargetSubscriptionId)
+				if err != nil {
+					return err
+				}
+				if !renewed {
+					if renewTargetSubscriptionId > 0 {
+						return errors.New("续费目标订阅不存在或已失效")
+					}
+					return errors.New("无可续费的同规格订阅")
+				}
+			case SubscriptionPurchaseModeRenewExtend:
+				if renewTargetForExtend > 0 {
+					_, renewed, renewErr := renewUserSubscriptionByPlanTx(tx, userId, plan, renewTargetForExtend)
+					if renewErr != nil {
+						return renewErr
+					}
+					if !renewed {
+						return errors.New("续费式顺延失败")
+					}
+					continue
+				}
+				createdSub, createErr := createUserSubscriptionFromPlanTx(tx, userId, plan, "admin", true)
+				if createErr != nil {
+					return createErr
+				}
+				renewTargetForExtend = createdSub.Id
+			default:
+				if _, err := CreateUserSubscriptionFromPlanTx(tx, userId, plan, "admin"); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return "", err
 	}
+	modeLabel := "叠加"
+	if mode == SubscriptionPurchaseModeRenew {
+		modeLabel = "续费"
+	} else if mode == SubscriptionPurchaseModeRenewExtend {
+		modeLabel = "续费式购买"
+	}
+	resultMessage := fmt.Sprintf("已按%s方式添加 %d 份套餐", modeLabel, purchaseQuantity)
 	if strings.TrimSpace(plan.UpgradeGroup) != "" {
 		_ = UpdateUserGroupCache(userId, plan.UpgradeGroup)
-		return fmt.Sprintf("用户分组将升级到 %s", plan.UpgradeGroup), nil
+		return fmt.Sprintf("%s，用户分组将升级到 %s", resultMessage, plan.UpgradeGroup), nil
 	}
-	return "", nil
+	_ = sourceNote
+	_ = now
+	return resultMessage, nil
 }
 
-// GetAllActiveUserSubscriptions returns all active subscriptions for a user.
+// GetAllActiveUserSubscriptions 返回用户全部生效订阅。
 func GetAllActiveUserSubscriptions(userId int) ([]SubscriptionSummary, error) {
 	if userId <= 0 {
 		return nil, errors.New("invalid userId")
@@ -666,8 +1190,8 @@ func GetAllActiveUserSubscriptions(userId int) ([]SubscriptionSummary, error) {
 	return buildSubscriptionSummaries(subs), nil
 }
 
-// HasActiveUserSubscription returns whether the user has any active subscription.
-// This is a lightweight existence check to avoid heavy pre-consume transactions.
+// HasActiveUserSubscription 返回用户是否存在任意生效订阅。
+// 这是轻量级存在性判断，避免进入较重的预扣事务。
 func HasActiveUserSubscription(userId int) (bool, error) {
 	if userId <= 0 {
 		return false, errors.New("invalid userId")
@@ -682,7 +1206,7 @@ func HasActiveUserSubscription(userId int) (bool, error) {
 	return count > 0, nil
 }
 
-// GetAllUserSubscriptions returns all subscriptions (active and expired) for a user.
+// GetAllUserSubscriptions 返回用户全部订阅（含生效与过期）。
 func GetAllUserSubscriptions(userId int) ([]SubscriptionSummary, error) {
 	if userId <= 0 {
 		return nil, errors.New("invalid userId")
@@ -711,7 +1235,138 @@ func buildSubscriptionSummaries(subs []UserSubscription) []SubscriptionSummary {
 	return result
 }
 
-// AdminInvalidateUserSubscription marks a user subscription as cancelled and ends it immediately.
+func normalizeSubscriptionManageAction(action string) string {
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case SubscriptionManageActionEnable:
+		return SubscriptionManageActionEnable
+	case SubscriptionManageActionDisable:
+		return SubscriptionManageActionDisable
+	case SubscriptionManageActionDelete:
+		return SubscriptionManageActionDelete
+	default:
+		return ""
+	}
+}
+
+// AdminManageUserSubscription 执行管理端订阅动作（启用/禁用/删除）。
+//
+// 规则说明：
+// 1. disable：仅把状态改为 cancelled，保持 end_time 不变；
+// 2. enable：仅允许 cancelled 且仍未过期（end_time > now）；
+// 3. delete：硬删除记录。
+func AdminManageUserSubscription(userId int, userSubscriptionId int, action string) (string, error) {
+	if userId <= 0 || userSubscriptionId <= 0 {
+		return "", errors.New("invalid userId or userSubscriptionId")
+	}
+	normalizedAction := normalizeSubscriptionManageAction(action)
+	if normalizedAction == "" {
+		return "", errors.New("不支持的操作类型")
+	}
+	now := common.GetTimestamp()
+	cacheGroup := ""
+	resultMessage := ""
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		query := tx.Where("id = ? AND user_id = ?", userSubscriptionId, userId)
+		if !common.UsingSQLite {
+			query = query.Set("gorm:query_option", "FOR UPDATE")
+		}
+		var sub UserSubscription
+		if err := query.First(&sub).Error; err != nil {
+			return err
+		}
+
+		switch normalizedAction {
+		case SubscriptionManageActionDisable:
+			if sub.Status == "cancelled" {
+				return errors.New("订阅已禁用")
+			}
+			if sub.EndTime > 0 && sub.EndTime <= now {
+				return errors.New("订阅已过期，无法禁用")
+			}
+			if err := tx.Model(&sub).Updates(map[string]interface{}{
+				"status":     "cancelled",
+				"updated_at": now,
+			}).Error; err != nil {
+				return err
+			}
+			targetGroup, err := downgradeUserGroupForSubscriptionTx(tx, &sub, now)
+			if err != nil {
+				return err
+			}
+			if targetGroup != "" {
+				cacheGroup = targetGroup
+				resultMessage = fmt.Sprintf("已禁用，用户分组将回退到 %s", targetGroup)
+			} else {
+				resultMessage = "已禁用"
+			}
+		case SubscriptionManageActionEnable:
+			if sub.Status == "active" && (sub.EndTime == 0 || sub.EndTime > now) {
+				return errors.New("订阅已启用")
+			}
+			if sub.Status != "cancelled" {
+				return errors.New("仅已禁用订阅可启用")
+			}
+			if sub.EndTime > 0 && sub.EndTime <= now {
+				return errors.New("订阅已过期，无法启用")
+			}
+			if err := tx.Model(&sub).Updates(map[string]interface{}{
+				"status":     "active",
+				"updated_at": now,
+			}).Error; err != nil {
+				return err
+			}
+			upgradeGroup := strings.TrimSpace(sub.UpgradeGroup)
+			if upgradeGroup != "" {
+				currentGroup, err := getUserGroupByIdTx(tx, userId)
+				if err != nil {
+					return err
+				}
+				if currentGroup != upgradeGroup {
+					if strings.TrimSpace(sub.PrevUserGroup) == "" {
+						// 首次补齐 prev_user_group，避免后续禁用/删除无法正确回退分组。
+						if err := tx.Model(&sub).Update("prev_user_group", currentGroup).Error; err != nil {
+							return err
+						}
+					}
+					if err := tx.Model(&User{}).Where("id = ?", userId).Update("group", upgradeGroup).Error; err != nil {
+						return err
+					}
+				}
+				cacheGroup = upgradeGroup
+				resultMessage = fmt.Sprintf("已启用，用户分组将升级到 %s", upgradeGroup)
+			} else {
+				resultMessage = "已启用"
+			}
+		case SubscriptionManageActionDelete:
+			targetGroup, err := downgradeUserGroupForSubscriptionTx(tx, &sub, now)
+			if err != nil {
+				return err
+			}
+			if err := tx.Where("id = ? AND user_id = ?", userSubscriptionId, userId).Delete(&UserSubscription{}).Error; err != nil {
+				return err
+			}
+			if targetGroup != "" {
+				cacheGroup = targetGroup
+				resultMessage = fmt.Sprintf("已删除，用户分组将回退到 %s", targetGroup)
+			} else {
+				resultMessage = "已删除"
+			}
+		default:
+			return errors.New("不支持的操作类型")
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	if cacheGroup != "" {
+		_ = UpdateUserGroupCache(userId, cacheGroup)
+	}
+	return resultMessage, nil
+}
+
+// AdminInvalidateUserSubscription 将用户订阅标记为 cancelled 并立即结束。
 func AdminInvalidateUserSubscription(userSubscriptionId int) (string, error) {
 	if userSubscriptionId <= 0 {
 		return "", errors.New("invalid userSubscriptionId")
@@ -756,7 +1411,7 @@ func AdminInvalidateUserSubscription(userSubscriptionId int) (string, error) {
 	return "", nil
 }
 
-// AdminDeleteUserSubscription hard-deletes a user subscription.
+// AdminDeleteUserSubscription 硬删除一条用户订阅。
 func AdminDeleteUserSubscription(userSubscriptionId int) (string, error) {
 	if userSubscriptionId <= 0 {
 		return "", errors.New("invalid userSubscriptionId")
@@ -805,7 +1460,7 @@ type SubscriptionPreConsumeResult struct {
 	AmountUsedAfter    int64
 }
 
-// ExpireDueSubscriptions marks expired subscriptions and handles group downgrade.
+// ExpireDueSubscriptions 处理到期订阅并执行分组回退。
 func ExpireDueSubscriptions(limit int) (int, error) {
 	if limit <= 0 {
 		limit = 200
@@ -842,7 +1497,7 @@ func ExpireDueSubscriptions(limit int) (int, error) {
 			}
 			expiredCount += int(res.RowsAffected)
 
-			// If there's an active upgraded subscription, keep current group.
+			// 若仍有生效的升级订阅，则保持当前分组。
 			var activeSub UserSubscription
 			activeQuery := tx.Where("user_id = ? AND status = ? AND end_time > ? AND upgrade_group <> ''",
 				userId, "active", now).
@@ -853,7 +1508,7 @@ func ExpireDueSubscriptions(limit int) (int, error) {
 				return nil
 			}
 
-			// No active upgraded subscription, downgrade to previous group if needed.
+			// 若没有生效的升级订阅，则按需回退到历史分组。
 			var lastExpired UserSubscription
 			expiredQuery := tx.Where("user_id = ? AND status = ? AND upgrade_group <> ''",
 				userId, "expired").
@@ -892,7 +1547,7 @@ func ExpireDueSubscriptions(limit int) (int, error) {
 	return expiredCount, nil
 }
 
-// SubscriptionPreConsumeRecord stores idempotent pre-consume operations per request.
+// SubscriptionPreConsumeRecord 记录每次请求的幂等预扣流水。
 type SubscriptionPreConsumeRecord struct {
 	Id                 int    `json:"id"`
 	RequestId          string `json:"request_id" gorm:"type:varchar(64);uniqueIndex"`
@@ -952,7 +1607,7 @@ func maybeResetUserSubscriptionWithPlanTx(tx *gorm.DB, sub *UserSubscription, pl
 	return tx.Save(sub).Error
 }
 
-// PreConsumeUserSubscription pre-consumes from any active subscription total quota.
+// PreConsumeUserSubscription 从任意生效订阅总额度中执行预扣。
 func PreConsumeUserSubscription(requestId string, userId int, modelName string, quotaType int, amount int64) (*SubscriptionPreConsumeResult, error) {
 	if userId <= 0 {
 		return nil, errors.New("invalid userId")
@@ -1056,7 +1711,7 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 	return returnValue, nil
 }
 
-// RefundSubscriptionPreConsume is idempotent and refunds pre-consumed subscription quota by requestId.
+// RefundSubscriptionPreConsume 是幂等操作，按 requestId 退回已预扣的订阅额度。
 func RefundSubscriptionPreConsume(requestId string) error {
 	if strings.TrimSpace(requestId) == "" {
 		return errors.New("requestId is empty")
@@ -1082,7 +1737,7 @@ func RefundSubscriptionPreConsume(requestId string) error {
 	})
 }
 
-// ResetDueSubscriptions resets subscriptions whose next_reset_time has passed.
+// ResetDueSubscriptions 重置 next_reset_time 已到期的订阅。
 func ResetDueSubscriptions(limit int) (int, error) {
 	if limit <= 0 {
 		limit = 200
@@ -1125,7 +1780,7 @@ func ResetDueSubscriptions(limit int) (int, error) {
 	return resetCount, nil
 }
 
-// CleanupSubscriptionPreConsumeRecords removes old idempotency records to keep table small.
+// CleanupSubscriptionPreConsumeRecords 清理旧幂等记录，控制表体积。
 func CleanupSubscriptionPreConsumeRecords(olderThanSeconds int64) (int64, error) {
 	if olderThanSeconds <= 0 {
 		olderThanSeconds = 7 * 24 * 3600
@@ -1164,7 +1819,7 @@ func GetSubscriptionPlanInfoByUserSubscriptionId(userSubscriptionId int) (*Subsc
 	return info, nil
 }
 
-// Update subscription used amount by delta (positive consume more, negative refund).
+// 按 delta 更新订阅已用额度（正数为继续消耗，负数为退款回滚）。
 func PostConsumeUserSubscriptionDelta(userSubscriptionId int, delta int64) error {
 	if userSubscriptionId <= 0 {
 		return errors.New("invalid userSubscriptionId")
