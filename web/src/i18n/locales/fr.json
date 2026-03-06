@@ -3387,7 +3387,21 @@
     "Well-Known URL": "URL bien connue",
     "Well-Known URL 必须以 http:// 或 https:// 开头": "L'URL bien connue doit commencer par http:// ou https://",
     "whsec_xxx 的 Webhook 签名密钥，敏感信息不显示": "Clé de signature Webhook whsec_xxx, les informations sensibles ne sont pas affichées",
+    "新购并叠加": "Nouvel achat et empilement",
+    "续费当前套餐": "Renouveler le forfait actuel",
+    "续费式购买（无可续费订阅时自动顺延）": "Achat de type renouvellement (prolonge automatiquement un seul abonnement s'il n'y a rien à renouveler)",
+    "叠加新增": "Ajouter en empilement",
+    "续费已有订阅": "Renouveler un abonnement existant",
+    "选择续费目标": "Sélectionner la cible de renouvellement",
+    "购买数量范围": "Plage de quantité d'achat",
+    "是否确认新增订阅？": "Confirmer l'ajout d'un abonnement ?",
+    "当前可购买数量为 0，请等待部分订阅到期后再试": "La quantité achetable actuelle est de 0. Attendez l'expiration de certains abonnements puis réessayez.",
     "Worker地址": "Adresse du Worker",
-    "Worker密钥": "Clé du Worker"
+    "Worker密钥": "Clé du Worker",
+    "周期模式": "Period mode",
+    "自然周期": "Natural cycle",
+    "相对周期": "Relative cycle",
+    "每日/每周一/每月1号 00:00 重置": "Reset at 00:00 daily / every Monday / 1st of month",
+    "从激活时间起按固定间隔重置": "Reset by a fixed interval from activation time"
   }
 }

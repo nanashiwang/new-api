@@ -3207,7 +3207,21 @@
     "Well-Known URL": "Well-Known URL",
     "Well-Known URL 必须以 http:// 或 https:// 开头": "Well-Known URLは、http://またはhttps://で始まることが必須です",
     "whsec_xxx 的 Webhook 签名密钥，敏感信息不显示": "whsec_xxx のWebhook署名シークレット。機密情報は表示されません",
+    "新购并叠加": "新規購入して積み増し",
+    "续费当前套餐": "現在のプランを更新",
+    "续费式购买（无可续费订阅时自动顺延）": "更新型購入（更新対象がない場合は1件を自動延長）",
+    "叠加新增": "積み増し追加",
+    "续费已有订阅": "既存サブスクを更新",
+    "选择续费目标": "更新対象を選択",
+    "购买数量范围": "購入数量の範囲",
+    "是否确认新增订阅？": "サブスクリプションを追加しますか？",
+    "当前可购买数量为 0，请等待部分订阅到期后再试": "現在購入可能な数量は 0 です。一部サブスクリプションの有効期限切れ後に再試行してください。",
     "Worker地址": "Workerアドレス",
-    "Worker密钥": "WorkerAPIキー"
+    "Worker密钥": "WorkerAPIキー",
+    "周期模式": "Period mode",
+    "自然周期": "Natural cycle",
+    "相对周期": "Relative cycle",
+    "每日/每周一/每月1号 00:00 重置": "Reset at 00:00 daily / every Monday / 1st of month",
+    "从激活时间起按固定间隔重置": "Reset by a fixed interval from activation time"
   }
 }

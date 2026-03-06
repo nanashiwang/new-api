@@ -3779,7 +3779,21 @@
     "Well-Known URL": "Well-Known URL",
     "Well-Known URL 必须以 http:// 或 https:// 开头": "Well-Known URL phải bắt đầu bằng http:// hoặc https://",
     "whsec_xxx 的 Webhook 签名密钥，敏感信息不显示": "Khóa chữ ký Webhook cho whsec_xxx, thông tin nhạy cảm không được hiển thị",
+    "新购并叠加": "Mua mới và cộng dồn",
+    "续费当前套餐": "Gia hạn gói hiện tại",
+    "续费式购买（无可续费订阅时自动顺延）": "Mua kiểu gia hạn (khi không có đăng ký có thể gia hạn sẽ tự động gia hạn một đăng ký)",
+    "叠加新增": "Thêm theo kiểu cộng dồn",
+    "续费已有订阅": "Gia hạn đăng ký hiện có",
+    "选择续费目标": "Chọn mục tiêu gia hạn",
+    "购买数量范围": "Phạm vi số lượng mua",
+    "是否确认新增订阅？": "Xác nhận thêm đăng ký?",
+    "当前可购买数量为 0，请等待部分订阅到期后再试": "Số lượng có thể mua hiện tại là 0. Vui lòng đợi một số đăng ký hết hạn rồi thử lại.",
     "Worker地址": "Địa chỉ Worker",
-    "Worker密钥": "Khóa Worker"
+    "Worker密钥": "Khóa Worker",
+    "周期模式": "Period mode",
+    "自然周期": "Natural cycle",
+    "相对周期": "Relative cycle",
+    "每日/每周一/每月1号 00:00 重置": "Reset at 00:00 daily / every Monday / 1st of month",
+    "从激活时间起按固定间隔重置": "Reset by a fixed interval from activation time"
   }
 }
