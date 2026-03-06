@@ -17,7 +17,7 @@ import (
 func GetAllTokens(c *gin.Context) {
 	userId := c.GetInt("id")
 	group := strings.TrimSpace(c.Query("group"))
-	balanceMin, balanceMax, usedBalanceMin, usedBalanceMax, sortBy, sortOrder, err := parseTokenListQuery(c)
+	balanceMin, balanceMax, usedBalanceMin, usedBalanceMax, packageMode, sortBy, sortOrder, err := parseTokenListQuery(c)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -32,6 +32,7 @@ func GetAllTokens(c *gin.Context) {
 		balanceMax,
 		usedBalanceMin,
 		usedBalanceMax,
+		packageMode,
 		sortBy,
 		sortOrder,
 	)
@@ -50,7 +51,7 @@ func SearchTokens(c *gin.Context) {
 	keyword := c.Query("keyword")
 	token := c.Query("token")
 	group := strings.TrimSpace(c.Query("group"))
-	balanceMin, balanceMax, usedBalanceMin, usedBalanceMax, sortBy, sortOrder, err := parseTokenListQuery(c)
+	balanceMin, balanceMax, usedBalanceMin, usedBalanceMax, packageMode, sortBy, sortOrder, err := parseTokenListQuery(c)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -69,6 +70,7 @@ func SearchTokens(c *gin.Context) {
 		balanceMax,
 		usedBalanceMin,
 		usedBalanceMax,
+		packageMode,
 		sortBy,
 		sortOrder,
 	)
@@ -82,7 +84,7 @@ func SearchTokens(c *gin.Context) {
 	return
 }
 
-func parseTokenListQuery(c *gin.Context) (*int, *int, *int, *int, string, string, error) {
+func parseTokenListQuery(c *gin.Context) (*int, *int, *int, *int, string, string, string, error) {
 	// 统一解析令牌列表筛选：剩余余额区间 + 已使用余额区间 + 排序（白名单）。
 	// 该解析同时给 /api/token 和 /api/token/search 复用，避免两处行为不一致。
 	balanceMinRaw := strings.TrimSpace(c.Query("balance_min"))
@@ -94,10 +96,10 @@ func parseTokenListQuery(c *gin.Context) (*int, *int, *int, *int, string, string
 	if balanceMinRaw != "" {
 		value, err := strconv.Atoi(balanceMinRaw)
 		if err != nil {
-			return nil, nil, nil, nil, "", "", fmt.Errorf("参数 balance_min 不是有效整数")
+			return nil, nil, nil, nil, "", "", "", fmt.Errorf("参数 balance_min 不是有效整数")
 		}
 		if value < 0 {
-			return nil, nil, nil, nil, "", "", fmt.Errorf("参数 balance_min 不能小于 0")
+			return nil, nil, nil, nil, "", "", "", fmt.Errorf("参数 balance_min 不能小于 0")
 		}
 		balanceMin = &value
 	}
@@ -106,26 +108,26 @@ func parseTokenListQuery(c *gin.Context) (*int, *int, *int, *int, string, string
 	if balanceMaxRaw != "" {
 		value, err := strconv.Atoi(balanceMaxRaw)
 		if err != nil {
-			return nil, nil, nil, nil, "", "", fmt.Errorf("参数 balance_max 不是有效整数")
+			return nil, nil, nil, nil, "", "", "", fmt.Errorf("参数 balance_max 不是有效整数")
 		}
 		if value < 0 {
-			return nil, nil, nil, nil, "", "", fmt.Errorf("参数 balance_max 不能小于 0")
+			return nil, nil, nil, nil, "", "", "", fmt.Errorf("参数 balance_max 不能小于 0")
 		}
 		balanceMax = &value
 	}
 
 	if balanceMin != nil && balanceMax != nil && *balanceMin > *balanceMax {
-		return nil, nil, nil, nil, "", "", fmt.Errorf("参数 balance_min 不能大于 balance_max")
+		return nil, nil, nil, nil, "", "", "", fmt.Errorf("参数 balance_min 不能大于 balance_max")
 	}
 
 	var usedBalanceMin *int
 	if usedBalanceMinRaw != "" {
 		value, err := strconv.Atoi(usedBalanceMinRaw)
 		if err != nil {
-			return nil, nil, nil, nil, "", "", fmt.Errorf("参数 used_balance_min 不是有效整数")
+			return nil, nil, nil, nil, "", "", "", fmt.Errorf("参数 used_balance_min 不是有效整数")
 		}
 		if value < 0 {
-			return nil, nil, nil, nil, "", "", fmt.Errorf("参数 used_balance_min 不能小于 0")
+			return nil, nil, nil, nil, "", "", "", fmt.Errorf("参数 used_balance_min 不能小于 0")
 		}
 		usedBalanceMin = &value
 	}
@@ -134,16 +136,23 @@ func parseTokenListQuery(c *gin.Context) (*int, *int, *int, *int, string, string
 	if usedBalanceMaxRaw != "" {
 		value, err := strconv.Atoi(usedBalanceMaxRaw)
 		if err != nil {
-			return nil, nil, nil, nil, "", "", fmt.Errorf("参数 used_balance_max 不是有效整数")
+			return nil, nil, nil, nil, "", "", "", fmt.Errorf("参数 used_balance_max 不是有效整数")
 		}
 		if value < 0 {
-			return nil, nil, nil, nil, "", "", fmt.Errorf("参数 used_balance_max 不能小于 0")
+			return nil, nil, nil, nil, "", "", "", fmt.Errorf("参数 used_balance_max 不能小于 0")
 		}
 		usedBalanceMax = &value
 	}
 
 	if usedBalanceMin != nil && usedBalanceMax != nil && *usedBalanceMin > *usedBalanceMax {
-		return nil, nil, nil, nil, "", "", fmt.Errorf("参数 used_balance_min 不能大于 used_balance_max")
+		return nil, nil, nil, nil, "", "", "", fmt.Errorf("参数 used_balance_min 不能大于 used_balance_max")
+	}
+
+	packageMode := strings.ToLower(strings.TrimSpace(c.Query("package_mode")))
+	switch packageMode {
+	case "", "package", "standard":
+	default:
+		return nil, nil, nil, nil, "", "", "", fmt.Errorf("参数 package_mode 仅支持 package 或 standard")
 	}
 
 	sortBy := strings.ToLower(strings.TrimSpace(c.Query("sort_by")))
@@ -153,7 +162,7 @@ func parseTokenListQuery(c *gin.Context) (*int, *int, *int, *int, string, string
 	switch sortBy {
 	case "id", "remain_quota":
 	default:
-		return nil, nil, nil, nil, "", "", fmt.Errorf("参数 sort_by 仅支持 id 或 remain_quota")
+		return nil, nil, nil, nil, "", "", "", fmt.Errorf("参数 sort_by 仅支持 id 或 remain_quota")
 	}
 
 	sortOrder := strings.ToLower(strings.TrimSpace(c.Query("sort_order")))
@@ -163,10 +172,10 @@ func parseTokenListQuery(c *gin.Context) (*int, *int, *int, *int, string, string
 	switch sortOrder {
 	case "asc", "desc":
 	default:
-		return nil, nil, nil, nil, "", "", fmt.Errorf("参数 sort_order 仅支持 asc 或 desc")
+		return nil, nil, nil, nil, "", "", "", fmt.Errorf("参数 sort_order 仅支持 asc 或 desc")
 	}
 
-	return balanceMin, balanceMax, usedBalanceMin, usedBalanceMax, sortBy, sortOrder, nil
+	return balanceMin, balanceMax, usedBalanceMin, usedBalanceMax, packageMode, sortBy, sortOrder, nil
 }
 
 func GetToken(c *gin.Context) {
@@ -246,15 +255,22 @@ func GetTokenUsage(c *gin.Context) {
 		"code":    true,
 		"message": "ok",
 		"data": gin.H{
-			"object":               "token_usage",
-			"name":                 token.Name,
-			"total_granted":        token.RemainQuota + token.UsedQuota,
-			"total_used":           token.UsedQuota,
-			"total_available":      token.RemainQuota,
-			"unlimited_quota":      token.UnlimitedQuota,
-			"model_limits":         token.GetModelLimitsMap(),
-			"model_limits_enabled": token.ModelLimitsEnabled,
-			"expires_at":           expiredAt,
+			"object":                  "token_usage",
+			"name":                    token.Name,
+			"total_granted":           token.RemainQuota + token.UsedQuota,
+			"total_used":              token.UsedQuota,
+			"total_available":         token.RemainQuota,
+			"unlimited_quota":         token.UnlimitedQuota,
+			"model_limits":            token.GetModelLimitsMap(),
+			"model_limits_enabled":    token.ModelLimitsEnabled,
+			"package_enabled":         token.PackageEnabled,
+			"package_limit_quota":     token.PackageLimitQuota,
+			"package_period":          token.PackagePeriod,
+			"package_custom_seconds":  token.PackageCustomSeconds,
+			"package_period_mode":     token.PackagePeriodMode,
+			"package_used_quota":      token.PackageUsedQuota,
+			"package_next_reset_time": token.PackageNextResetTime,
+			"expires_at":              expiredAt,
 		},
 	})
 }
@@ -268,6 +284,10 @@ func AddToken(c *gin.Context) {
 	}
 	if len(token.Name) > 50 {
 		common.ApiErrorI18n(c, i18n.MsgTokenNameTooLong)
+		return
+	}
+	if err := model.ValidateTokenPackageConfig(&token); err != nil {
+		common.ApiError(c, err)
 		return
 	}
 	// 非无限额度时，检查额度值是否超出有效范围
@@ -303,19 +323,30 @@ func AddToken(c *gin.Context) {
 		return
 	}
 	cleanToken := model.Token{
-		UserId:             c.GetInt("id"),
-		Name:               token.Name,
-		Key:                key,
-		CreatedTime:        common.GetTimestamp(),
-		AccessedTime:       common.GetTimestamp(),
-		ExpiredTime:        token.ExpiredTime,
-		RemainQuota:        token.RemainQuota,
-		UnlimitedQuota:     token.UnlimitedQuota,
-		ModelLimitsEnabled: token.ModelLimitsEnabled,
-		ModelLimits:        token.ModelLimits,
-		AllowIps:           token.AllowIps,
-		Group:              token.Group,
-		CrossGroupRetry:    token.CrossGroupRetry,
+		UserId:               c.GetInt("id"),
+		Name:                 token.Name,
+		Key:                  key,
+		CreatedTime:          common.GetTimestamp(),
+		AccessedTime:         common.GetTimestamp(),
+		ExpiredTime:          token.ExpiredTime,
+		RemainQuota:          token.RemainQuota,
+		UnlimitedQuota:       token.UnlimitedQuota,
+		ModelLimitsEnabled:   token.ModelLimitsEnabled,
+		ModelLimits:          token.ModelLimits,
+		AllowIps:             token.AllowIps,
+		Group:                token.Group,
+		CrossGroupRetry:      token.CrossGroupRetry,
+		PackageEnabled:       token.PackageEnabled,
+		PackageLimitQuota:    token.PackageLimitQuota,
+		PackagePeriod:        token.PackagePeriod,
+		PackageCustomSeconds: token.PackageCustomSeconds,
+		PackagePeriodMode:    token.PackagePeriodMode,
+		PackageUsedQuota:     token.PackageUsedQuota,
+		PackageNextResetTime: token.PackageNextResetTime,
+	}
+	if err := model.ValidateTokenQuotaPackageRelation(&cleanToken); err != nil {
+		common.ApiError(c, err)
+		return
 	}
 	err = cleanToken.Insert()
 	if err != nil {
@@ -357,6 +388,10 @@ func UpdateToken(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgTokenNameTooLong)
 		return
 	}
+	if err := model.ValidateTokenPackageConfig(&token); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	if !token.UnlimitedQuota {
 		if token.RemainQuota < 0 {
 			common.ApiErrorI18n(c, i18n.MsgTokenQuotaNegative)
@@ -396,6 +431,18 @@ func UpdateToken(c *gin.Context) {
 		cleanToken.AllowIps = token.AllowIps
 		cleanToken.Group = token.Group
 		cleanToken.CrossGroupRetry = token.CrossGroupRetry
+		cleanToken.PackageEnabled = token.PackageEnabled
+		cleanToken.PackageLimitQuota = token.PackageLimitQuota
+		cleanToken.PackagePeriod = token.PackagePeriod
+		cleanToken.PackageCustomSeconds = token.PackageCustomSeconds
+		cleanToken.PackagePeriodMode = token.PackagePeriodMode
+		// 允许管理员/用户在编辑时手动归零该周期已用额度，便于紧急解锁
+		cleanToken.PackageUsedQuota = token.PackageUsedQuota
+		cleanToken.PackageNextResetTime = token.PackageNextResetTime
+		if err := model.ValidateTokenQuotaPackageRelation(cleanToken); err != nil {
+			common.ApiError(c, err)
+			return
+		}
 	}
 	err = cleanToken.Update()
 	if err != nil {

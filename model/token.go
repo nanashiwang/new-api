@@ -12,23 +12,30 @@ import (
 )
 
 type Token struct {
-	Id                 int            `json:"id"`
-	UserId             int            `json:"user_id" gorm:"index"`
-	Key                string         `json:"key" gorm:"type:char(48);uniqueIndex"`
-	Status             int            `json:"status" gorm:"default:1"`
-	Name               string         `json:"name" gorm:"index" `
-	CreatedTime        int64          `json:"created_time" gorm:"bigint"`
-	AccessedTime       int64          `json:"accessed_time" gorm:"bigint"`
-	ExpiredTime        int64          `json:"expired_time" gorm:"bigint;default:-1"` // -1 means never expired
-	RemainQuota        int            `json:"remain_quota" gorm:"default:0"`
-	UnlimitedQuota     bool           `json:"unlimited_quota"`
-	ModelLimitsEnabled bool           `json:"model_limits_enabled"`
-	ModelLimits        string         `json:"model_limits" gorm:"type:varchar(1024);default:''"`
-	AllowIps           *string        `json:"allow_ips" gorm:"default:''"`
-	UsedQuota          int            `json:"used_quota" gorm:"default:0"` // used quota
-	Group              string         `json:"group" gorm:"default:''"`
-	CrossGroupRetry    bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
-	DeletedAt          gorm.DeletedAt `gorm:"index"`
+	Id                   int            `json:"id"`
+	UserId               int            `json:"user_id" gorm:"index"`
+	Key                  string         `json:"key" gorm:"type:char(48);uniqueIndex"`
+	Status               int            `json:"status" gorm:"default:1"`
+	Name                 string         `json:"name" gorm:"index" `
+	CreatedTime          int64          `json:"created_time" gorm:"bigint"`
+	AccessedTime         int64          `json:"accessed_time" gorm:"bigint"`
+	ExpiredTime          int64          `json:"expired_time" gorm:"bigint;default:-1"` // -1 means never expired
+	RemainQuota          int            `json:"remain_quota" gorm:"default:0"`
+	UnlimitedQuota       bool           `json:"unlimited_quota"`
+	ModelLimitsEnabled   bool           `json:"model_limits_enabled"`
+	ModelLimits          string         `json:"model_limits" gorm:"type:varchar(1024);default:''"`
+	AllowIps             *string        `json:"allow_ips" gorm:"default:''"`
+	UsedQuota            int            `json:"used_quota" gorm:"default:0"` // used quota
+	Group                string         `json:"group" gorm:"default:''"`
+	CrossGroupRetry      bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
+	PackageEnabled       bool           `json:"package_enabled" gorm:"default:false"`
+	PackageLimitQuota    int            `json:"package_limit_quota" gorm:"default:0"`
+	PackagePeriod        string         `json:"package_period" gorm:"type:varchar(16);default:'none'"`
+	PackageCustomSeconds int64          `json:"package_custom_seconds" gorm:"type:bigint;default:0"`
+	PackageUsedQuota     int            `json:"package_used_quota" gorm:"default:0"`
+	PackageNextResetTime int64          `json:"package_next_reset_time" gorm:"bigint;default:0"`
+	PackagePeriodMode    string         `json:"package_period_mode" gorm:"type:varchar(16);default:'relative'"`
+	DeletedAt            gorm.DeletedAt `gorm:"index"`
 }
 
 func normalizeTokenSort(sortBy string, sortOrder string) (string, string) {
@@ -81,8 +88,19 @@ func (token *Token) GetIpLimits() []string {
 	return ipLimits
 }
 
-func GetAllUserTokens(userId int, startIdx int, num int, group string, balanceMin *int, balanceMax *int, usedBalanceMin *int, usedBalanceMax *int, sortBy string, sortOrder string) ([]*Token, int64, error) {
-	return SearchUserTokens(userId, "", "", startIdx, num, group, balanceMin, balanceMax, usedBalanceMin, usedBalanceMax, sortBy, sortOrder)
+func GetAllUserTokens(userId int, startIdx int, num int, group string, balanceMin *int, balanceMax *int, usedBalanceMin *int, usedBalanceMax *int, packageMode string, sortBy string, sortOrder string) ([]*Token, int64, error) {
+	return SearchUserTokens(userId, "", "", startIdx, num, group, balanceMin, balanceMax, usedBalanceMin, usedBalanceMax, packageMode, sortBy, sortOrder)
+}
+
+func normalizeTokenPackageMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "package":
+		return "package"
+	case "standard":
+		return "standard"
+	default:
+		return ""
+	}
 }
 
 // sanitizeLikePattern 校验并清洗用户输入的 LIKE 搜索模式。
@@ -124,7 +142,7 @@ func sanitizeLikePattern(input string) (string, error) {
 
 const searchHardLimit = 100
 
-func SearchUserTokens(userId int, keyword string, token string, offset int, limit int, group string, balanceMin *int, balanceMax *int, usedBalanceMin *int, usedBalanceMax *int, sortBy string, sortOrder string) (tokens []*Token, total int64, err error) {
+func SearchUserTokens(userId int, keyword string, token string, offset int, limit int, group string, balanceMin *int, balanceMax *int, usedBalanceMin *int, usedBalanceMax *int, packageMode string, sortBy string, sortOrder string) (tokens []*Token, total int64, err error) {
 	// model 层强制截断
 	if limit <= 0 || limit > searchHardLimit {
 		limit = searchHardLimit
@@ -154,6 +172,12 @@ func SearchUserTokens(userId int, keyword string, token string, offset int, limi
 	baseQuery := DB.Model(&Token{}).Where("user_id = ?", userId)
 	if group = strings.TrimSpace(group); group != "" {
 		baseQuery = baseQuery.Where(commonGroupCol+" = ?", group)
+	}
+	switch normalizeTokenPackageMode(packageMode) {
+	case "package":
+		baseQuery = baseQuery.Where("package_enabled = ?", true)
+	case "standard":
+		baseQuery = baseQuery.Where("package_enabled = ?", false)
 	}
 
 	// 非空才加 LIKE 条件，空则跳过（不过滤该字段）
@@ -322,7 +346,9 @@ func (token *Token) Update() (err error) {
 		}
 	}()
 	err = DB.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
-		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry").Updates(token).Error
+		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry",
+		"package_enabled", "package_limit_quota", "package_period", "package_custom_seconds",
+		"package_used_quota", "package_next_reset_time", "package_period_mode").Updates(token).Error
 	return err
 }
 
@@ -403,9 +429,16 @@ func IncreaseTokenQuota(tokenId int, key string, quota int) (err error) {
 	if quota < 0 {
 		return errors.New("quota 不能为负数！")
 	}
+	token, err := getTokenForQuotaAdjust(tokenId, key)
+	if err != nil {
+		return err
+	}
+	if token.PackageEnabled {
+		return increaseTokenQuotaWithPackage(token, quota)
+	}
 	if common.RedisEnabled {
 		gopool.Go(func() {
-			err := cacheIncrTokenQuota(key, int64(quota))
+			err := cacheIncrTokenQuota(token.Key, int64(quota))
 			if err != nil {
 				common.SysLog("failed to increase token quota: " + err.Error())
 			}
@@ -433,9 +466,16 @@ func DecreaseTokenQuota(id int, key string, quota int) (err error) {
 	if quota < 0 {
 		return errors.New("quota 不能为负数！")
 	}
+	token, err := getTokenForQuotaAdjust(id, key)
+	if err != nil {
+		return err
+	}
+	if token.PackageEnabled {
+		return decreaseTokenQuotaWithPackage(token, quota)
+	}
 	if common.RedisEnabled {
 		gopool.Go(func() {
-			err := cacheDecrTokenQuota(key, int64(quota))
+			err := cacheDecrTokenQuota(token.Key, int64(quota))
 			if err != nil {
 				common.SysLog("failed to decrease token quota: " + err.Error())
 			}
@@ -457,6 +497,143 @@ func decreaseTokenQuota(id int, quota int) (err error) {
 		},
 	).Error
 	return err
+}
+
+func getTokenForQuotaAdjust(tokenId int, key string) (*Token, error) {
+	if tokenId <= 0 {
+		return nil, errors.New("tokenId 不能小于等于 0")
+	}
+	// 扣费路径必须以数据库真实状态为准，避免缓存延迟导致套餐令牌误走普通扣费分支。
+	token, err := GetTokenById(tokenId)
+	if err != nil {
+		return nil, err
+	}
+	cleanKey := strings.TrimSpace(strings.TrimPrefix(key, "sk-"))
+	if cleanKey != "" && token.Key != cleanKey {
+		return nil, errors.New("token key 与 tokenId 不匹配")
+	}
+	return token, nil
+}
+
+func increaseTokenQuotaWithPackage(token *Token, quota int) error {
+	if token == nil || token.Id <= 0 {
+		return errors.New("token 不存在")
+	}
+	if quota <= 0 {
+		return nil
+	}
+	now := common.GetTimestamp()
+	var updated Token
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		query := tx.Where("id = ?", token.Id)
+		if !common.UsingSQLite {
+			query = query.Set("gorm:query_option", "FOR UPDATE")
+		}
+		if err := query.First(&updated).Error; err != nil {
+			return err
+		}
+		changed, err := MaybeResetTokenPackageState(&updated, GetDBTimestampTx(tx))
+		if err != nil {
+			return err
+		}
+
+		updates := map[string]interface{}{
+			"remain_quota":  gorm.Expr("remain_quota + ?", quota),
+			"used_quota":    gorm.Expr("used_quota - ?", quota),
+			"accessed_time": now,
+		}
+		if changed {
+			updates["package_next_reset_time"] = updated.PackageNextResetTime
+			updates["package_used_quota"] = updated.PackageUsedQuota
+		}
+		nextUsed := updated.PackageUsedQuota - quota
+		if nextUsed < 0 {
+			nextUsed = 0
+		}
+		updates["package_used_quota"] = nextUsed
+		updated.PackageUsedQuota = nextUsed
+
+		if err := tx.Model(&Token{}).Where("id = ?", token.Id).Updates(updates).Error; err != nil {
+			return err
+		}
+		updated.RemainQuota += quota
+		updated.UsedQuota -= quota
+		updated.AccessedTime = now
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if common.RedisEnabled {
+		gopool.Go(func() {
+			if err := cacheSetToken(updated); err != nil {
+				common.SysLog("failed to update token cache: " + err.Error())
+			}
+		})
+	}
+	return nil
+}
+
+func decreaseTokenQuotaWithPackage(token *Token, quota int) error {
+	if token == nil || token.Id <= 0 {
+		return errors.New("token 不存在")
+	}
+	if quota <= 0 {
+		return nil
+	}
+	now := common.GetTimestamp()
+	var updated Token
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		query := tx.Where("id = ?", token.Id)
+		if !common.UsingSQLite {
+			query = query.Set("gorm:query_option", "FOR UPDATE")
+		}
+		if err := query.First(&updated).Error; err != nil {
+			return err
+		}
+		changed, err := MaybeResetTokenPackageState(&updated, GetDBTimestampTx(tx))
+		if err != nil {
+			return err
+		}
+
+		if !updated.UnlimitedQuota && updated.RemainQuota < quota {
+			return fmt.Errorf("token quota is not enough, token remain quota: %d, need quota: %d", updated.RemainQuota, quota)
+		}
+		if updated.PackageLimitQuota > 0 && updated.PackageUsedQuota+quota > updated.PackageLimitQuota {
+			return fmt.Errorf("令牌套餐周期额度不足，当前周期已用 %d，需要 %d，上限 %d", updated.PackageUsedQuota, quota, updated.PackageLimitQuota)
+		}
+
+		updates := map[string]interface{}{
+			"remain_quota":  gorm.Expr("remain_quota - ?", quota),
+			"used_quota":    gorm.Expr("used_quota + ?", quota),
+			"accessed_time": now,
+		}
+		if changed {
+			updates["package_next_reset_time"] = updated.PackageNextResetTime
+		}
+		nextUsed := updated.PackageUsedQuota + quota
+		updates["package_used_quota"] = nextUsed
+		updated.PackageUsedQuota = nextUsed
+
+		if err := tx.Model(&Token{}).Where("id = ?", token.Id).Updates(updates).Error; err != nil {
+			return err
+		}
+		updated.RemainQuota -= quota
+		updated.UsedQuota += quota
+		updated.AccessedTime = now
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if common.RedisEnabled {
+		gopool.Go(func() {
+			if err := cacheSetToken(updated); err != nil {
+				common.SysLog("failed to update token cache: " + err.Error())
+			}
+		})
+	}
+	return nil
 }
 
 // CountUserTokens returns total number of tokens for the given user, used for pagination

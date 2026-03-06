@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -192,6 +193,11 @@ func (s *BillingSession) preConsume(c *gin.Context, quota int) *types.NewAPIErro
 func (s *BillingSession) shouldTrust(c *gin.Context) bool {
 	// 异步任务（ForcePreConsume=true）必须预扣全额，不允许信任旁路
 	if s.relayInfo.ForcePreConsume {
+		return false
+	}
+	// 套餐令牌必须走“前置预扣+限额校验”，不能跳过预扣；
+	// 否则会出现“请求已成功但周期账本未扣减”的体验问题。
+	if common.GetContextKeyBool(c, constant.ContextKeyTokenPackageEnabled) {
 		return false
 	}
 
