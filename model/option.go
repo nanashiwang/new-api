@@ -118,6 +118,7 @@ func InitOptionMap() {
 	common.OptionMap["QuotaStabilityEnabled"] = strconv.FormatBool(common.QuotaStabilityEnabled)
 	common.OptionMap["QuotaInsufficientDBRecheckEnabled"] = strconv.FormatBool(common.QuotaInsufficientDBRecheckEnabled)
 	common.OptionMap["MultiKeySameChannelFailoverOnce"] = strconv.FormatBool(common.MultiKeySameChannelFailoverOnce)
+	common.OptionMap["SubscriptionRenewRespectPurchaseLimit"] = strconv.FormatBool(common.SubscriptionRenewRespectPurchaseLimit)
 	common.OptionMap["MultiKeyCooldownSeconds"] = strconv.Itoa(common.MultiKeyCooldownSeconds)
 	common.OptionMap["MultiKeyStickySeconds"] = strconv.Itoa(common.MultiKeyStickySeconds)
 	common.OptionMap["ModelRequestRateLimitCount"] = strconv.Itoa(setting.ModelRequestRateLimitCount)
@@ -318,6 +319,8 @@ func updateOptionMap(key string, value string) (err error) {
 			common.QuotaInsufficientDBRecheckEnabled = boolValue
 		case "MultiKeySameChannelFailoverOnce":
 			common.MultiKeySameChannelFailoverOnce = boolValue
+		case "SubscriptionRenewRespectPurchaseLimit":
+			common.SubscriptionRenewRespectPurchaseLimit = boolValue
 		}
 	}
 	switch key {

@@ -283,7 +283,13 @@ func migrateDB() error {
 		return err
 	}
 	if common.UsingSQLite {
+		if err := ensureTokenColumnsSQLite(); err != nil {
+			return err
+		}
 		if err := ensureSubscriptionPlanTableSQLite(); err != nil {
+			return err
+		}
+		if err := ensureSubscriptionOrderColumnsSQLite(); err != nil {
 			return err
 		}
 	} else {
@@ -353,7 +359,13 @@ func migrateDBFast() error {
 		}
 	}
 	if common.UsingSQLite {
+		if err := ensureTokenColumnsSQLite(); err != nil {
+			return err
+		}
 		if err := ensureSubscriptionPlanTableSQLite(); err != nil {
+			return err
+		}
+		if err := ensureSubscriptionOrderColumnsSQLite(); err != nil {
 			return err
 		}
 	} else {
@@ -398,6 +410,9 @@ func ensureSubscriptionPlanTableSQLite() error {
 ` + "`stripe_price_id`" + ` varchar(128) DEFAULT '',
 ` + "`creem_product_id`" + ` varchar(128) DEFAULT '',
 ` + "`max_purchase_per_user`" + ` integer DEFAULT 0,
+` + "`max_stack_per_user`" + ` integer DEFAULT 0,
+` + "`purchase_quantity_min`" + ` integer DEFAULT 1,
+` + "`purchase_quantity_max`" + ` integer DEFAULT 12,
 ` + "`upgrade_group`" + ` varchar(64) DEFAULT '',
 ` + "`total_amount`" + ` bigint NOT NULL DEFAULT 0,
 ` + "`quota_reset_period`" + ` varchar(16) DEFAULT 'never',
@@ -431,12 +446,89 @@ PRIMARY KEY (` + "`id`" + `)
 		{Name: "stripe_price_id", DDL: "`stripe_price_id` varchar(128) DEFAULT ''"},
 		{Name: "creem_product_id", DDL: "`creem_product_id` varchar(128) DEFAULT ''"},
 		{Name: "max_purchase_per_user", DDL: "`max_purchase_per_user` integer DEFAULT 0"},
+		{Name: "max_stack_per_user", DDL: "`max_stack_per_user` integer DEFAULT 0"},
+		{Name: "purchase_quantity_min", DDL: "`purchase_quantity_min` integer DEFAULT 1"},
+		{Name: "purchase_quantity_max", DDL: "`purchase_quantity_max` integer DEFAULT 12"},
 		{Name: "upgrade_group", DDL: "`upgrade_group` varchar(64) DEFAULT ''"},
 		{Name: "total_amount", DDL: "`total_amount` bigint NOT NULL DEFAULT 0"},
 		{Name: "quota_reset_period", DDL: "`quota_reset_period` varchar(16) DEFAULT 'never'"},
 		{Name: "quota_reset_custom_seconds", DDL: "`quota_reset_custom_seconds` bigint DEFAULT 0"},
 		{Name: "created_at", DDL: "`created_at` bigint"},
 		{Name: "updated_at", DDL: "`updated_at` bigint"},
+	}
+	for _, col := range required {
+		if _, ok := existing[col.Name]; ok {
+			continue
+		}
+		if err := DB.Exec("ALTER TABLE `" + tableName + "` ADD COLUMN " + col.DDL).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ensureSubscriptionOrderColumnsSQLite 为 SQLite 旧库补齐新增字段。
+func ensureSubscriptionOrderColumnsSQLite() error {
+	if !common.UsingSQLite {
+		return nil
+	}
+	tableName := "subscription_orders"
+	if !DB.Migrator().HasTable(tableName) {
+		return nil
+	}
+	var cols []struct {
+		Name string `gorm:"column:name"`
+	}
+	if err := DB.Raw("PRAGMA table_info(`" + tableName + "`)").Scan(&cols).Error; err != nil {
+		return err
+	}
+	existing := make(map[string]struct{}, len(cols))
+	for _, c := range cols {
+		existing[c.Name] = struct{}{}
+	}
+	required := []sqliteColumnDef{
+		{Name: "purchase_mode", DDL: "`purchase_mode` varchar(16) NOT NULL DEFAULT 'stack'"},
+		{Name: "renew_target_subscription_id", DDL: "`renew_target_subscription_id` integer DEFAULT 0"},
+		{Name: "purchase_quantity", DDL: "`purchase_quantity` integer NOT NULL DEFAULT 1"},
+	}
+	for _, col := range required {
+		if _, ok := existing[col.Name]; ok {
+			continue
+		}
+		if err := DB.Exec("ALTER TABLE `" + tableName + "` ADD COLUMN " + col.DDL).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ensureTokenColumnsSQLite 为 SQLite 旧库补齐令牌套餐字段。
+func ensureTokenColumnsSQLite() error {
+	if !common.UsingSQLite {
+		return nil
+	}
+	tableName := "tokens"
+	if !DB.Migrator().HasTable(tableName) {
+		return nil
+	}
+	var cols []struct {
+		Name string `gorm:"column:name"`
+	}
+	if err := DB.Raw("PRAGMA table_info(`" + tableName + "`)").Scan(&cols).Error; err != nil {
+		return err
+	}
+	existing := make(map[string]struct{}, len(cols))
+	for _, c := range cols {
+		existing[c.Name] = struct{}{}
+	}
+	required := []sqliteColumnDef{
+		{Name: "package_enabled", DDL: "`package_enabled` numeric DEFAULT 0"},
+		{Name: "package_limit_quota", DDL: "`package_limit_quota` integer DEFAULT 0"},
+		{Name: "package_period", DDL: "`package_period` varchar(16) DEFAULT 'none'"},
+		{Name: "package_custom_seconds", DDL: "`package_custom_seconds` bigint DEFAULT 0"},
+		{Name: "package_used_quota", DDL: "`package_used_quota` integer DEFAULT 0"},
+		{Name: "package_next_reset_time", DDL: "`package_next_reset_time` bigint DEFAULT 0"},
+		{Name: "package_period_mode", DDL: "`package_period_mode` varchar(16) DEFAULT 'relative'"},
 	}
 	for _, col := range required {
 		if _, ok := existing[col.Name]; ok {

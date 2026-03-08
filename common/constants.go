@@ -136,6 +136,10 @@ var MultiKeyStickySeconds = 60
 // MultiKeySameChannelFailoverOnce 额度错误时，是否同渠道立即重试一次。
 var MultiKeySameChannelFailoverOnce = true
 
+// SubscriptionRenewRespectPurchaseLimit 是否让“续费”也受每用户购买上限约束。
+// false: 仅新购受限；true: 新购与续费都受限。
+var SubscriptionRenewRespectPurchaseLimit = false
+
 var RetryTimes = 0
 
 //var RootUserEmail = ""

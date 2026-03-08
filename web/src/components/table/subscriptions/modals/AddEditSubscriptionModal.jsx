@@ -93,6 +93,9 @@ const AddEditSubscriptionModal = ({
     enabled: true,
     sort_order: 0,
     max_purchase_per_user: 0,
+    max_stack_per_user: 0,
+    purchase_quantity_min: 1,
+    purchase_quantity_max: 12,
     total_amount: 0,
     upgrade_group: '',
     stripe_price_id: '',
@@ -117,6 +120,9 @@ const AddEditSubscriptionModal = ({
       enabled: p.enabled !== false,
       sort_order: Number(p.sort_order || 0),
       max_purchase_per_user: Number(p.max_purchase_per_user || 0),
+      max_stack_per_user: Number(p.max_stack_per_user || 0),
+      purchase_quantity_min: Number(p.purchase_quantity_min || 1),
+      purchase_quantity_max: Number(p.purchase_quantity_max || 12),
       total_amount: Number(
         quotaToDisplayAmount(p.total_amount || 0).toFixed(2),
       ),
@@ -146,6 +152,16 @@ const AddEditSubscriptionModal = ({
       showError(t('套餐标题不能为空'));
       return;
     }
+    const quantityMin = Number(values.purchase_quantity_min || 1);
+    const quantityMax = Number(values.purchase_quantity_max || 12);
+    if (quantityMin < 1 || quantityMax < 1) {
+      showError(t('购买数量最小值/最大值必须大于0'));
+      return;
+    }
+    if (quantityMax < quantityMin) {
+      showError(t('购买数量最大值不能小于最小值'));
+      return;
+    }
     setLoading(true);
     try {
       const payload = {
@@ -162,6 +178,9 @@ const AddEditSubscriptionModal = ({
               : 0,
           sort_order: Number(values.sort_order || 0),
           max_purchase_per_user: Number(values.max_purchase_per_user || 0),
+          max_stack_per_user: Number(values.max_stack_per_user || 0),
+          purchase_quantity_min: Number(values.purchase_quantity_min || 1),
+          purchase_quantity_max: Number(values.purchase_quantity_max || 12),
           total_amount: displayAmountToQuota(values.total_amount),
           upgrade_group: values.upgrade_group || '',
         },
@@ -252,7 +271,7 @@ const AddEditSubscriptionModal = ({
           >
             {({ values }) => (
               <div className='p-2'>
-                {/* 基本信息 */}
+                {/* 基础信息 */}
                 <Card className='!rounded-2xl shadow-sm border-0 mb-4'>
                   <div className='flex items-center mb-2'>
                     <Avatar
@@ -361,21 +380,74 @@ const AddEditSubscriptionModal = ({
                     </Col>
 
                     <Col span={12}>
+                      <Form.Switch
+                        field='enabled'
+                        label={t('启用状态')}
+                        size='large'
+                      />
+                    </Col>
+                  </Row>
+                </Card>
+
+                {/* 购买规则 */}
+                <Card className='!rounded-2xl shadow-sm border-0 mb-4'>
+                  <div className='flex items-center mb-2'>
+                    <Avatar
+                      size='small'
+                      color='purple'
+                      className='mr-2 shadow-md'
+                    >
+                      <IconSave size={16} />
+                    </Avatar>
+                    <div>
+                      <Text className='text-lg font-medium'>
+                        {t('购买规则')}
+                      </Text>
+                      <div className='text-xs text-gray-600'>
+                        {t('控制购买上限、叠加上限和购买数量范围')}
+                      </div>
+                    </div>
+                  </div>
+
+                  <Row gutter={12}>
+                    <Col xs={24} sm={12} md={12}>
                       <Form.InputNumber
                         field='max_purchase_per_user'
                         label={t('购买上限')}
                         min={0}
                         precision={0}
-                        extraText={t('0 表示不限')}
+                        extraText={t('限制总购买次数，0 表示不限')}
                         style={{ width: '100%' }}
                       />
                     </Col>
-
-                    <Col span={12}>
-                      <Form.Switch
-                        field='enabled'
-                        label={t('启用状态')}
-                        size='large'
+                    <Col xs={24} sm={12} md={12}>
+                      <Form.InputNumber
+                        field='max_stack_per_user'
+                        label={t('叠加上限')}
+                        min={0}
+                        precision={0}
+                        extraText={t('限制同时生效的订阅数，0 表示不限')}
+                        style={{ width: '100%' }}
+                      />
+                    </Col>
+                    <Col xs={24} sm={12} md={12}>
+                      <Form.InputNumber
+                        field='purchase_quantity_min'
+                        label={t('最小购买数量')}
+                        min={1}
+                        precision={0}
+                        extraText={t('单次下单至少购买多少份')}
+                        style={{ width: '100%' }}
+                      />
+                    </Col>
+                    <Col xs={24} sm={12} md={12}>
+                      <Form.InputNumber
+                        field='purchase_quantity_max'
+                        label={t('最大购买数量')}
+                        min={1}
+                        precision={0}
+                        extraText={t('会按当前未过期份数动态扣减可买上限')}
+                        style={{ width: '100%' }}
                       />
                     </Col>
                   </Row>
@@ -443,7 +515,7 @@ const AddEditSubscriptionModal = ({
                   </Row>
                 </Card>
 
-                {/* 额度重置 */}
+                {/* 配额重置 */}
                 <Card className='!rounded-2xl shadow-sm border-0 mb-4'>
                   <div className='flex items-center mb-2'>
                     <Avatar
@@ -501,7 +573,7 @@ const AddEditSubscriptionModal = ({
                   </Row>
                 </Card>
 
-                {/* 第三方支付配置 */}
+                {/* 第三方支付设置 */}
                 <Card className='!rounded-2xl shadow-sm border-0 mb-4'>
                   <div className='flex items-center mb-2'>
                     <Avatar
