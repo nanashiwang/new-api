@@ -55,7 +55,7 @@ const UsersTable = (usersData) => {
     t,
   } = usersData;
 
-  // Modal states
+  // 弹窗状态
   const [showPromoteModal, setShowPromoteModal] = useState(false);
   const [showDemoteModal, setShowDemoteModal] = useState(false);
   const [showEnableDisableModal, setShowEnableDisableModal] = useState(false);

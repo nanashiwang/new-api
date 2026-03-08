@@ -92,6 +92,7 @@ const RechargeCard = ({
   billingPreference,
   onChangeBillingPreference,
   activeSubscriptions = [],
+  activeQuantityByPlan = {},
   allSubscriptions = [],
   reloadSubscriptionSelf,
 }) => {
@@ -117,7 +118,7 @@ const RechargeCard = ({
   }, [shouldShowSubscription, activeTab]);
   const topupContent = (
     <Space vertical style={{ width: '100%' }}>
-      {/* 统计数据 */}
+      {/* 统计信息 */}
       <Card
         className='!rounded-xl w-full'
         cover={
@@ -138,7 +139,7 @@ const RechargeCard = ({
                 </Text>
               </div>
 
-              {/* 统计数据 */}
+              {/* 统计信息 */}
               <div className='grid grid-cols-3 gap-6 mt-4'>
                 {/* 当前余额 */}
                 <div className='text-center'>
@@ -165,7 +166,7 @@ const RechargeCard = ({
                   </div>
                 </div>
 
-                {/* 历史消耗 */}
+                {/* 历史用量 */}
                 <div className='text-center'>
                   <div
                     className='text-base sm:text-2xl font-bold mb-2'
@@ -396,10 +397,10 @@ const RechargeCard = ({
                       const actualPay = discountedPrice;
                       const save = originalPrice - discountedPrice;
 
-                      // 根据当前货币类型换算显示金额和数量
+                      // 按当前货币模式转换展示的金额与份数。
                       const { symbol, rate, type } = getCurrencyConfig();
                       const statusStr = localStorage.getItem('status');
-                      let usdRate = 7; // 默认CNY汇率
+                      let usdRate = 7; // Default CNY exchange rate
                       try {
                         if (statusStr) {
                           const s = JSON.parse(statusStr);
@@ -407,19 +408,19 @@ const RechargeCard = ({
                         }
                       } catch (e) { }
 
-                      let displayValue = preset.value; // 显示的数量
+                      let displayValue = preset.value; // Displayed quantity
                       let displayActualPay = actualPay;
                       let displaySave = save;
 
                       if (type === 'USD') {
-                        // 数量保持USD，价格从CNY转USD
+                        // 数量保持 USD，价格从 CNY 换算为 USD。
                         displayActualPay = actualPay / usdRate;
                         displaySave = save / usdRate;
                       } else if (type === 'CNY') {
-                        // 数量转CNY，价格已是CNY
+                        // 将数量换算为 CNY；价格本身已是 CNY。
                         displayValue = preset.value * usdRate;
                       } else if (type === 'CUSTOM') {
-                        // 数量和价格都转自定义货币
+                        // 将数量和价格都换算为自定义货币。
                         displayValue = preset.value * rate;
                         displayActualPay = (actualPay / usdRate) * rate;
                         displaySave = (save / usdRate) * rate;
@@ -483,7 +484,7 @@ const RechargeCard = ({
                 </Form.Slot>
               )}
 
-              {/* Creem 充值区域 */}
+              {/* Creem 充值区 */}
               {enableCreemTopUp && creemProducts.length > 0 && (
                 <Form.Slot label={t('Creem 充值')}>
                   <div className='grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3'>
@@ -625,6 +626,7 @@ const RechargeCard = ({
                 billingPreference={billingPreference}
                 onChangeBillingPreference={onChangeBillingPreference}
                 activeSubscriptions={activeSubscriptions}
+                activeQuantityByPlan={activeQuantityByPlan}
                 allSubscriptions={allSubscriptions}
                 reloadSubscriptionSelf={reloadSubscriptionSelf}
                 withCard={false}

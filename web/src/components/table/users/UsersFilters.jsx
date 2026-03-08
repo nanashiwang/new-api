@@ -51,7 +51,7 @@ const UsersFilters = ({
   );
   const { Text } = Typography;
 
-  // 这里统一定义高级筛选下拉选项，避免在 JSX 中散落硬编码，后续迭代时可直接扩展。
+  // 将高级筛选选项集中管理，避免 JSX 字面量分散，便于后续维护。
   const roleOptions = useMemo(
     () => [
       { label: t('全部角色'), value: '' },
@@ -69,7 +69,7 @@ const UsersFilters = ({
     ],
     [t],
   );
-  // 两个“布尔筛选”使用不同文案，避免都显示“全部/是/否”时用户无法区分当前筛选含义。
+  // 布尔筛选使用明确标签，便于一眼区分。
   const hasInviterOptions = useMemo(
     () => [
       { label: t('邀请人：全部'), value: '' },
@@ -86,8 +86,16 @@ const UsersFilters = ({
     ],
     [t],
   );
-  // 两个排序项可同时生效：例如 ID 降序 + 余额升序。
-  // 这里分别给 ID/余额提供独立文案，避免都显示“升序/降序”导致语义不清。
+  const hasActiveSubscriptionOptions = useMemo(
+    () => [
+      { label: t('套餐：全部'), value: '' },
+      { label: t('套餐：有生效套餐'), value: 'true' },
+      { label: t('套餐：无生效套餐'), value: 'false' },
+    ],
+    [t],
+  );
+  // 两种排序可同时生效（例如 ID 降序 + 余额升序）。
+  // ID 与余额排序使用独立文案，避免 "asc/desc" 歧义。
   const idSortDirectionOptions = useMemo(
     () => [
       { label: t('ID排序：默认'), value: '' },
@@ -105,7 +113,7 @@ const UsersFilters = ({
     [t],
   );
 
-  // 统计激活中的高级筛选数量，用于按钮上的数字提示，帮助管理员识别当前是否存在隐藏过滤条件。
+  // 统计已启用的高级筛选数量，用于徽标提示隐藏条件。
   const activeAdvancedCount = useMemo(() => {
     if (!advancedFilters) return 0;
     return Object.values(advancedFilters).filter(
@@ -114,7 +122,7 @@ const UsersFilters = ({
   }, [advancedFilters]);
 
   const openAdvancedFilters = () => {
-    // 每次打开抽屉都以“当前生效值”为准初始化草稿，保证取消操作不会污染已生效条件。
+    // 打开时用当前生效值重建草稿筛选，保证取消不会影响在线筛选状态。
     setDraftAdvancedFilters({
       ...(defaultAdvancedFilters || {}),
       ...(advancedFilters || {}),
@@ -135,7 +143,7 @@ const UsersFilters = ({
     if (formApiRef.current) {
       formApiRef.current.reset();
     }
-    // 这里重置“基础搜索 + 高级筛选”两类条件，避免出现只清空了可见条件但后台仍带高级过滤的问题。
+    // 重置基础与高级筛选，避免重置后仍有后端隐形条件。
     await resetAdvancedFilters?.();
   };
 
@@ -162,7 +170,7 @@ const UsersFilters = ({
             <Form.Input
               field='searchKeyword'
               prefix={<IconSearch />}
-              // 输入提示按你的要求收敛为最常用字段，避免视觉干扰。
+              // placeholder 聚焦常用字段，减少视觉噪音。
               placeholder={t('ID/用户名')}
               showClear
               pure
@@ -175,7 +183,7 @@ const UsersFilters = ({
               placeholder={t('选择分组')}
               optionList={groupOptions}
               onChange={() => {
-                // 分组是高频条件，保留即时触发查询，减少一次额外点击。
+                // Group 是高频项，保持即时搜索以减少一次点击。
                 setTimeout(() => {
                   searchUsers(1, pageSize);
                 }, 100);
@@ -224,7 +232,7 @@ const UsersFilters = ({
         onCancel={() => setAdvancedVisible(false)}
         title={t('高级筛选')}
         placement='right'
-        width={420}
+        width={460}
         bodyStyle={{ padding: 16 }}
         footer={
           <div className='flex justify-end'>
@@ -239,203 +247,231 @@ const UsersFilters = ({
           </div>
         }
       >
+        {/* 将高级筛选拆分为基础/额度/排序分区，减少表单拥挤。 */}
         <div className='grid grid-cols-1 gap-3'>
-          <Text type='tertiary' size='small'>
-            {t('基础筛选')}
-          </Text>
-          <Select
-            value={draftAdvancedFilters.searchRole}
-            onChange={(value) =>
-              setDraftAdvancedFilters((prev) => ({ ...prev, searchRole: value }))
-            }
-            optionList={roleOptions}
-            placeholder={t('角色')}
-            showClear
-          />
-          <Select
-            value={draftAdvancedFilters.searchStatus}
-            onChange={(value) =>
-              setDraftAdvancedFilters((prev) => ({
-                ...prev,
-                searchStatus: value,
-              }))
-            }
-            optionList={statusOptions}
-            placeholder={t('状态')}
-            showClear
-          />
-          <InputNumber
-            value={
-              draftAdvancedFilters.searchInviterId === ''
-                ? undefined
-                : Number(draftAdvancedFilters.searchInviterId)
-            }
-            onChange={(value) =>
-              setDraftAdvancedFilters((prev) => ({
-                ...prev,
-                searchInviterId:
-                  value === null || value === undefined ? '' : String(value),
-              }))
-            }
-            min={1}
-            precision={0}
-            placeholder={t('邀请人 ID')}
-            style={{ width: '100%' }}
-          />
-          <InputNumber
-            value={
-              draftAdvancedFilters.searchInviteeUserId === ''
-                ? undefined
-                : Number(draftAdvancedFilters.searchInviteeUserId)
-            }
-            onChange={(value) =>
-              setDraftAdvancedFilters((prev) => ({
-                ...prev,
-                searchInviteeUserId:
-                  value === null || value === undefined ? '' : String(value),
-              }))
-            }
-            min={1}
-            precision={0}
-            placeholder={t('被邀请人 ID')}
-            style={{ width: '100%' }}
-          />
-          <Select
-            value={draftAdvancedFilters.searchHasInviter}
-            onChange={(value) =>
-              setDraftAdvancedFilters((prev) => ({
-                ...prev,
-                searchHasInviter:
-                  value === null || value === undefined ? '' : value,
-              }))
-            }
-            optionList={hasInviterOptions}
-            placeholder={t('是否有邀请人')}
-            showClear
-          />
-          <Select
-            value={draftAdvancedFilters.searchHasInvitees}
-            onChange={(value) =>
-              setDraftAdvancedFilters((prev) => ({
-                ...prev,
-                searchHasInvitees:
-                  value === null || value === undefined ? '' : value,
-              }))
-            }
-            optionList={hasInviteesOptions}
-            placeholder={t('是否有被邀请人')}
-            showClear
-          />
-          <Divider margin='4px' />
-          <Text type='tertiary' size='small'>
-            {t('额度筛选')}
-          </Text>
-          <InputNumber
-            value={
-              draftAdvancedFilters.searchBalanceMin === ''
-                ? undefined
-                : Number(draftAdvancedFilters.searchBalanceMin)
-            }
-            onChange={(value) =>
-              setDraftAdvancedFilters((prev) => ({
-                ...prev,
-                searchBalanceMin:
-                  value === null || value === undefined ? '' : String(value),
-              }))
-            }
-            min={0}
-            precision={0}
-            placeholder={t('额度最小值')}
-            style={{ width: '100%' }}
-          />
-          <InputNumber
-            value={
-              draftAdvancedFilters.searchBalanceMax === ''
-                ? undefined
-                : Number(draftAdvancedFilters.searchBalanceMax)
-            }
-            onChange={(value) =>
-              setDraftAdvancedFilters((prev) => ({
-                ...prev,
-                searchBalanceMax:
-                  value === null || value === undefined ? '' : String(value),
-              }))
-            }
-            min={0}
-            precision={0}
-            placeholder={t('额度最大值')}
-            style={{ width: '100%' }}
-          />
-          <Divider margin='4px' />
-          <Text type='tertiary' size='small'>
-            {t('已使用余额筛选')}
-          </Text>
-          <InputNumber
-            value={
-              draftAdvancedFilters.searchUsedBalanceMin === ''
-                ? undefined
-                : Number(draftAdvancedFilters.searchUsedBalanceMin)
-            }
-            onChange={(value) =>
-              setDraftAdvancedFilters((prev) => ({
-                ...prev,
-                searchUsedBalanceMin:
-                  value === null || value === undefined ? '' : String(value),
-              }))
-            }
-            min={0}
-            precision={0}
-            placeholder={t('已使用余额最小值')}
-            style={{ width: '100%' }}
-          />
-          <InputNumber
-            value={
-              draftAdvancedFilters.searchUsedBalanceMax === ''
-                ? undefined
-                : Number(draftAdvancedFilters.searchUsedBalanceMax)
-            }
-            onChange={(value) =>
-              setDraftAdvancedFilters((prev) => ({
-                ...prev,
-                searchUsedBalanceMax:
-                  value === null || value === undefined ? '' : String(value),
-              }))
-            }
-            min={0}
-            precision={0}
-            placeholder={t('已使用余额最大值')}
-            style={{ width: '100%' }}
-          />
-          <Divider margin='4px' />
-          <Text type='tertiary' size='small'>
-            {t('高级排序')}
-          </Text>
-          <Select
-            value={draftAdvancedFilters.searchIdSortOrder}
-            onChange={(value) =>
-              setDraftAdvancedFilters((prev) => ({
-                ...prev,
-                searchIdSortOrder:
-                  value === null || value === undefined ? '' : value,
-              }))
-            }
-            optionList={idSortDirectionOptions}
-            placeholder={t('ID排序')}
-            showClear
-          />
-          <Select
-            value={draftAdvancedFilters.searchBalanceSortOrder}
-            onChange={(value) =>
-              setDraftAdvancedFilters((prev) => ({
-                ...prev,
-                searchBalanceSortOrder:
-                  value === null || value === undefined ? '' : value,
-              }))
-            }
-            optionList={balanceSortDirectionOptions}
-            placeholder={t('余额排序')}
-            showClear
-          />
+          <div className='rounded-lg border border-[var(--semi-color-border)] p-3'>
+            <Text type='tertiary' size='small'>
+              {t('基础筛选')}
+            </Text>
+            <div className='grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2'>
+              <Select
+                value={draftAdvancedFilters.searchRole}
+                onChange={(value) =>
+                  setDraftAdvancedFilters((prev) => ({
+                    ...prev,
+                    searchRole: value,
+                  }))
+                }
+                optionList={roleOptions}
+                placeholder={t('角色')}
+                showClear
+              />
+              <Select
+                value={draftAdvancedFilters.searchStatus}
+                onChange={(value) =>
+                  setDraftAdvancedFilters((prev) => ({
+                    ...prev,
+                    searchStatus: value,
+                  }))
+                }
+                optionList={statusOptions}
+                placeholder={t('状态')}
+                showClear
+              />
+              <Select
+                value={draftAdvancedFilters.searchHasInviter}
+                onChange={(value) =>
+                  setDraftAdvancedFilters((prev) => ({
+                    ...prev,
+                    searchHasInviter:
+                      value === null || value === undefined ? '' : value,
+                  }))
+                }
+                optionList={hasInviterOptions}
+                placeholder={t('是否有邀请人')}
+                showClear
+              />
+              <Select
+                value={draftAdvancedFilters.searchHasInvitees}
+                onChange={(value) =>
+                  setDraftAdvancedFilters((prev) => ({
+                    ...prev,
+                    searchHasInvitees:
+                      value === null || value === undefined ? '' : value,
+                  }))
+                }
+                optionList={hasInviteesOptions}
+                placeholder={t('是否有被邀请人')}
+                showClear
+              />
+              <div className='sm:col-span-2'>
+                <Select
+                  value={draftAdvancedFilters.searchHasActiveSubscription}
+                  onChange={(value) =>
+                    setDraftAdvancedFilters((prev) => ({
+                      ...prev,
+                      searchHasActiveSubscription:
+                        value === null || value === undefined ? '' : value,
+                    }))
+                  }
+                  optionList={hasActiveSubscriptionOptions}
+                  placeholder={t('套餐筛选')}
+                  showClear
+                />
+              </div>
+              <InputNumber
+                value={
+                  draftAdvancedFilters.searchInviterId === ''
+                    ? undefined
+                    : Number(draftAdvancedFilters.searchInviterId)
+                }
+                onChange={(value) =>
+                  setDraftAdvancedFilters((prev) => ({
+                    ...prev,
+                    searchInviterId:
+                      value === null || value === undefined ? '' : String(value),
+                  }))
+                }
+                min={1}
+                precision={0}
+                placeholder={t('邀请人 ID')}
+                style={{ width: '100%' }}
+              />
+              <InputNumber
+                value={
+                  draftAdvancedFilters.searchInviteeUserId === ''
+                    ? undefined
+                    : Number(draftAdvancedFilters.searchInviteeUserId)
+                }
+                onChange={(value) =>
+                  setDraftAdvancedFilters((prev) => ({
+                    ...prev,
+                    searchInviteeUserId:
+                      value === null || value === undefined ? '' : String(value),
+                  }))
+                }
+                min={1}
+                precision={0}
+                placeholder={t('被邀请人 ID')}
+                style={{ width: '100%' }}
+              />
+            </div>
+          </div>
+
+          <div className='rounded-lg border border-[var(--semi-color-border)] p-3'>
+            <Text type='tertiary' size='small'>
+              {t('额度筛选')}
+            </Text>
+            <div className='grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2'>
+              <InputNumber
+                value={
+                  draftAdvancedFilters.searchBalanceMin === ''
+                    ? undefined
+                    : Number(draftAdvancedFilters.searchBalanceMin)
+                }
+                onChange={(value) =>
+                  setDraftAdvancedFilters((prev) => ({
+                    ...prev,
+                    searchBalanceMin:
+                      value === null || value === undefined ? '' : String(value),
+                  }))
+                }
+                min={0}
+                precision={0}
+                placeholder={t('额度最小值')}
+                style={{ width: '100%' }}
+              />
+              <InputNumber
+                value={
+                  draftAdvancedFilters.searchBalanceMax === ''
+                    ? undefined
+                    : Number(draftAdvancedFilters.searchBalanceMax)
+                }
+                onChange={(value) =>
+                  setDraftAdvancedFilters((prev) => ({
+                    ...prev,
+                    searchBalanceMax:
+                      value === null || value === undefined ? '' : String(value),
+                  }))
+                }
+                min={0}
+                precision={0}
+                placeholder={t('额度最大值')}
+                style={{ width: '100%' }}
+              />
+              <Divider margin='4px' className='sm:col-span-2' />
+              <InputNumber
+                value={
+                  draftAdvancedFilters.searchUsedBalanceMin === ''
+                    ? undefined
+                    : Number(draftAdvancedFilters.searchUsedBalanceMin)
+                }
+                onChange={(value) =>
+                  setDraftAdvancedFilters((prev) => ({
+                    ...prev,
+                    searchUsedBalanceMin:
+                      value === null || value === undefined ? '' : String(value),
+                  }))
+                }
+                min={0}
+                precision={0}
+                placeholder={t('已使用余额最小值')}
+                style={{ width: '100%' }}
+              />
+              <InputNumber
+                value={
+                  draftAdvancedFilters.searchUsedBalanceMax === ''
+                    ? undefined
+                    : Number(draftAdvancedFilters.searchUsedBalanceMax)
+                }
+                onChange={(value) =>
+                  setDraftAdvancedFilters((prev) => ({
+                    ...prev,
+                    searchUsedBalanceMax:
+                      value === null || value === undefined ? '' : String(value),
+                  }))
+                }
+                min={0}
+                precision={0}
+                placeholder={t('已使用余额最大值')}
+                style={{ width: '100%' }}
+              />
+            </div>
+          </div>
+
+          <div className='rounded-lg border border-[var(--semi-color-border)] p-3'>
+            <Text type='tertiary' size='small'>
+              {t('高级排序')}
+            </Text>
+            <div className='grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2'>
+              <Select
+                value={draftAdvancedFilters.searchIdSortOrder}
+                onChange={(value) =>
+                  setDraftAdvancedFilters((prev) => ({
+                    ...prev,
+                    searchIdSortOrder:
+                      value === null || value === undefined ? '' : value,
+                  }))
+                }
+                optionList={idSortDirectionOptions}
+                placeholder={t('ID排序')}
+                showClear
+              />
+              <Select
+                value={draftAdvancedFilters.searchBalanceSortOrder}
+                onChange={(value) =>
+                  setDraftAdvancedFilters((prev) => ({
+                    ...prev,
+                    searchBalanceSortOrder:
+                      value === null || value === undefined ? '' : value,
+                  }))
+                }
+                optionList={balanceSortDirectionOptions}
+                placeholder={t('余额排序')}
+                showClear
+              />
+            </div>
+          </div>
         </div>
       </SideSheet>
     </>

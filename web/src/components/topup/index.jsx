@@ -63,7 +63,7 @@ const TopUp = () => {
   );
   const [statusLoading, setStatusLoading] = useState(true);
 
-  // Creem 相关状态
+  // Creem 状态
   const [creemProducts, setCreemProducts] = useState([]);
   const [enableCreemTopUp, setEnableCreemTopUp] = useState(false);
   const [creemOpen, setCreemOpen] = useState(false);
@@ -79,27 +79,28 @@ const TopUp = () => {
 
   const affFetchedRef = useRef(false);
 
-  // 邀请相关状态
+  // 邀请状态
   const [affLink, setAffLink] = useState('');
   const [openTransfer, setOpenTransfer] = useState(false);
   const [transferAmount, setTransferAmount] = useState(0);
 
-  // 账单Modal状态
+  // 计费弹窗状态
   const [openHistory, setOpenHistory] = useState(false);
 
-  // 订阅相关
+  // 订阅状态
   const [subscriptionPlans, setSubscriptionPlans] = useState([]);
   const [subscriptionLoading, setSubscriptionLoading] = useState(true);
   const [billingPreference, setBillingPreference] =
     useState('subscription_first');
   const [activeSubscriptions, setActiveSubscriptions] = useState([]);
+  const [activeQuantityByPlan, setActiveQuantityByPlan] = useState({});
   const [allSubscriptions, setAllSubscriptions] = useState([]);
 
-  // 预设充值额度选项
+  // 预设充值金额选项
   const [presetAmounts, setPresetAmounts] = useState([]);
   const [selectedPreset, setSelectedPreset] = useState(null);
 
-  // 充值配置信息
+  // 充值配置数据
   const [topupInfo, setTopupInfo] = useState({
     amount_options: [],
     discount: {},
@@ -185,12 +186,12 @@ const TopUp = () => {
 
   const onlineTopUp = async () => {
     if (payWay === 'stripe') {
-      // Stripe 支付处理
+      // Stripe 支付分支
       if (amount === 0) {
         await getStripeAmount();
       }
     } else {
-      // 普通支付处理
+      // 常规支付分支
       if (amount === 0) {
         await getAmount();
       }
@@ -210,7 +211,7 @@ const TopUp = () => {
           payment_method: 'stripe',
         });
       } else {
-        // 普通支付请求
+        // 常规支付请求
         res = await API.post('/api/user/pay', {
           amount: parseInt(topUpCount),
           payment_method: payWay,
@@ -221,10 +222,10 @@ const TopUp = () => {
         const { message, data } = res.data;
         if (message === 'success') {
           if (payWay === 'stripe') {
-            // Stripe 支付回调处理
+            // Stripe 回调处理
             window.open(data.pay_link, '_blank');
           } else {
-            // 普通支付表单提交
+            // 常规支付表单提交
             let params = data;
             let url = res.data.url;
             let form = document.createElement('form');
@@ -311,7 +312,7 @@ const TopUp = () => {
   };
 
   const processCreemCallback = (data) => {
-    // 与 Stripe 保持一致的实现方式
+    // 与 Stripe 保持一致的行为模式。
     window.open(data.checkout_url, '_blank');
   };
 
@@ -349,6 +350,7 @@ const TopUp = () => {
         // Active subscriptions
         const activeSubs = res.data.data?.subscriptions || [];
         setActiveSubscriptions(activeSubs);
+        setActiveQuantityByPlan(res.data.data?.active_quantity_by_plan || {});
         // All subscriptions (including expired)
         const allSubs = res.data.data?.all_subscriptions || [];
         setAllSubscriptions(allSubs);
@@ -380,7 +382,7 @@ const TopUp = () => {
     }
   };
 
-  // 获取充值配置信息
+  // 拉取充值配置。
   const getTopupInfo = async () => {
     try {
       const res = await API.get('/api/user/topup/info');
@@ -391,26 +393,26 @@ const TopUp = () => {
           discount: data.discount || {},
         });
 
-        // 处理支付方式
+        // 标准化支付方式数据。
         let payMethods = data.pay_methods || [];
         try {
           if (typeof payMethods === 'string') {
             payMethods = JSON.parse(payMethods);
           }
           if (payMethods && payMethods.length > 0) {
-            // 检查name和type是否为空
+            // 过滤缺少 name 或 type 的支付方式。
             payMethods = payMethods.filter((method) => {
               return method.name && method.type;
             });
-            // 如果没有color，则设置默认颜色
+            // 缺失颜色时补默认值。
             payMethods = payMethods.map((method) => {
-              // 规范化最小充值数
+              // 规范化最小充值值。
               const normalizedMinTopup = Number(method.min_topup);
               method.min_topup = Number.isFinite(normalizedMinTopup)
                 ? normalizedMinTopup
                 : 0;
 
-              // Stripe 的最小充值从后端字段回填
+              // 用后端字段回填 Stripe 最小充值值。
               if (
                 method.type === 'stripe' &&
                 (!method.min_topup || method.min_topup <= 0)
@@ -438,8 +440,8 @@ const TopUp = () => {
             payMethods = [];
           }
 
-          // 如果启用了 Stripe 支付，添加到支付方法列表
-          // 这个逻辑现在由后端处理，如果 Stripe 启用，后端会在 pay_methods 中包含它
+          // 若启用 Stripe，则将其加入支付方式列表。
+          // 该逻辑现由后端处理：启用时 Stripe 会出现在 pay_methods。
 
           setPayMethods(payMethods);
           const enableStripeTopUp = data.enable_stripe_topup || false;
@@ -456,7 +458,7 @@ const TopUp = () => {
           setMinTopUp(minTopUpValue);
           setTopUpCount(minTopUpValue);
 
-          // 设置 Creem 产品
+          // 设置 Creem 商品列表。
           try {
             console.log(' data is ?', data);
             console.log(' creem products is ?', data.creem_products);
@@ -466,19 +468,19 @@ const TopUp = () => {
             setCreemProducts([]);
           }
 
-          // 如果没有自定义充值数量选项，根据最小充值金额生成预设充值额度选项
+          // 当无自定义选项时，根据最小充值生成预设金额。
           if (topupInfo.amount_options.length === 0) {
             setPresetAmounts(generatePresetAmounts(minTopUpValue));
           }
 
-          // 初始化显示实付金额
+          // 初始化应付金额预览。
           getAmount(minTopUpValue);
         } catch (e) {
           console.log('解析支付方式失败:', e);
           setPayMethods([]);
         }
 
-        // 如果有自定义充值数量选项，使用它们替换默认的预设选项
+        // 存在自定义金额选项时，替换默认预设。
         if (data.amount_options && data.amount_options.length > 0) {
           const customPresets = data.amount_options.map((amount) => ({
             value: amount,
@@ -494,7 +496,7 @@ const TopUp = () => {
     }
   };
 
-  // 获取邀请链接
+  // 获取邀请链接。
   const getAffLink = async () => {
     const res = await API.get('/api/user/aff');
     const { success, message, data } = res.data;
@@ -506,7 +508,7 @@ const TopUp = () => {
     }
   };
 
-  // 划转邀请额度
+  // 划转邀请额度。
   const transfer = async () => {
     if (transferAmount < getQuotaPerUnit()) {
       showError(t('划转金额最低为') + ' ' + renderQuota(getQuotaPerUnit()));
@@ -525,14 +527,14 @@ const TopUp = () => {
     }
   };
 
-  // 复制邀请链接
+  // 复制邀请链接。
   const handleAffLinkClick = async () => {
     await copy(affLink);
     showSuccess(t('邀请链接已复制到剪切板'));
   };
 
   useEffect(() => {
-    // 始终获取最新用户数据，确保余额等统计信息准确
+    // 始终刷新用户数据，确保余额与统计准确。
     getUserQuota().then();
     setTransferAmount(getQuotaPerUnit());
   }, []);
@@ -543,7 +545,7 @@ const TopUp = () => {
     getAffLink().then();
   }, []);
 
-  // 在 statusState 可用时获取充值信息
+  // statusState 可用后再拉取充值数据。
   useEffect(() => {
     getTopupInfo().then();
     getSubscriptionPlans().then();
@@ -640,23 +642,23 @@ const TopUp = () => {
     setSelectedCreemProduct(null);
   };
 
-  // 选择预设充值额度
+  // 选择预设充值金额。
   const selectPresetAmount = (preset) => {
     setTopUpCount(preset.value);
     setSelectedPreset(preset.value);
 
-    // 计算实际支付金额，考虑折扣
+    // 计算折扣后的实际应付金额。
     const discount = preset.discount || topupInfo.discount[preset.value] || 1.0;
     const discountedAmount = preset.value * priceRatio * discount;
     setAmount(discountedAmount);
   };
 
-  // 格式化大数字显示
+  // 格式化大数字展示。
   const formatLargeNumber = (num) => {
     return num.toString();
   };
 
-  // 根据最小充值金额生成预设充值额度选项
+  // 根据最小充值生成预设金额选项。
   const generatePresetAmounts = (minAmount) => {
     const multipliers = [1, 5, 10, 30, 50, 100, 300, 500];
     return multipliers.map((multiplier) => ({
@@ -666,7 +668,7 @@ const TopUp = () => {
 
   return (
     <div className='w-full max-w-7xl mx-auto relative min-h-screen lg:min-h-0 mt-[60px] px-2'>
-      {/* 划转模态框 */}
+      {/* 划转弹窗 */}
       <TransferModal
         t={t}
         openTransfer={openTransfer}
@@ -679,7 +681,7 @@ const TopUp = () => {
         setTransferAmount={setTransferAmount}
       />
 
-      {/* 充值确认模态框 */}
+      {/* 充值确认弹窗 */}
       <PaymentConfirmModal
         t={t}
         open={open}
@@ -696,14 +698,14 @@ const TopUp = () => {
         discountRate={topupInfo?.discount?.[topUpCount] || 1.0}
       />
 
-      {/* 充值账单模态框 */}
+      {/* 充值记录弹窗 */}
       <TopupHistoryModal
         visible={openHistory}
         onCancel={handleHistoryCancel}
         t={t}
       />
 
-      {/* Creem 充值确认模态框 */}
+      {/* Creem 确认弹窗 */}
       <Modal
         title={t('确定要充值 $')}
         visible={creemOpen}
@@ -773,6 +775,7 @@ const TopUp = () => {
           billingPreference={billingPreference}
           onChangeBillingPreference={updateBillingPreference}
           activeSubscriptions={activeSubscriptions}
+          activeQuantityByPlan={activeQuantityByPlan}
           allSubscriptions={allSubscriptions}
           reloadSubscriptionSelf={getSubscriptionSelf}
         />

@@ -30,13 +30,15 @@ const DEFAULT_ADVANCED_FILTERS = {
   searchInviteeUserId: '',
   searchHasInviter: '',
   searchHasInvitees: '',
-  // 剩余额度范围已迁移到高级筛选，与“已使用余额”统一管理。
+  // 订阅筛选统一口径：active 且未过期。
+  searchHasActiveSubscription: '',
+  // 剩余额度区间移入高级筛选，与已用额度筛选归并。
   searchBalanceMin: '',
   searchBalanceMax: '',
-  // 已使用余额筛选放在高级筛选里，保持主工具条紧凑。
+  // 将已用额度筛选放在高级面板，保持工具栏紧凑。
   searchUsedBalanceMin: '',
   searchUsedBalanceMax: '',
-  // 组合排序：ID 与余额排序可以同时设置。
+  // 复合排序支持 ID 与余额同时生效。
   searchIdSortOrder: '',
   searchBalanceSortOrder: '',
 };
@@ -62,7 +64,7 @@ export const useUsersData = () => {
   const { t } = useTranslation();
   const [compactMode, setCompactMode] = useTableCompactMode('users');
 
-  // State management
+  // 状态管理
   const [users, setUsers] = useState([]);
   const [selectedKeys, setSelectedKeys] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -75,23 +77,23 @@ export const useUsersData = () => {
     getInitialAdvancedFilters,
   );
 
-  // Modal states
+  // 弹窗状态
   const [showAddUser, setShowAddUser] = useState(false);
   const [showEditUser, setShowEditUser] = useState(false);
   const [editingUser, setEditingUser] = useState({
     id: undefined,
   });
 
-  // Form initial values
+  // 表单初始值
   const formInitValues = {
     searchKeyword: '',
     searchGroup: '',
   };
 
-  // Form API reference
+  // 表单 API 引用
   const [formApi, setFormApi] = useState(null);
 
-  // Get form values helper function
+  // 获取表单值的辅助函数
   const getFormValues = () => {
     const formValues = formApi ? formApi.getValues() : {};
     return {
@@ -110,6 +112,7 @@ export const useUsersData = () => {
       searchInviteeUserId: next.searchInviteeUserId ?? '',
       searchHasInviter: next.searchHasInviter ?? '',
       searchHasInvitees: next.searchHasInvitees ?? '',
+      searchHasActiveSubscription: next.searchHasActiveSubscription ?? '',
       searchBalanceMin: next.searchBalanceMin ?? '',
       searchBalanceMax: next.searchBalanceMax ?? '',
       searchUsedBalanceMin: next.searchUsedBalanceMin ?? '',
@@ -133,9 +136,9 @@ export const useUsersData = () => {
     );
   };
 
-  // Set user format with key field
+  // 为用户数据设置 key 字段
   const setUserFormat = (users) => {
-    // 每次重载列表都重置选择状态，避免“跨页残留选择”导致批量误操作。
+    // 每次重载时重置选择，避免跨页批量操作命中陈旧数据。
     setSelectedKeys([]);
     for (let i = 0; i < users.length; i++) {
       users[i].key = users[i].id;
@@ -143,17 +146,17 @@ export const useUsersData = () => {
     setUsers(users);
   };
 
-  // 表格行选择配置（用于批量操作）
+  // 批量操作的表格行选择配置。
   const rowSelection = {
     selectedRowKeys: selectedKeys.map((user) => user.id),
-    // Semi Table 会同时给 selectedRowKeys 与 selectedRows，
-    // 这里直接保留 selectedRows，后续批量操作可直接取 id/状态/角色等字段。
+    // Semi Table 同时提供 selectedRowKeys 和 selectedRows。
+    // 直接保存 selectedRows，批量操作可直接使用 id/status/role 字段，无需二次映射。
     onChange: (selectedRowKeys, selectedRows) => {
       setSelectedKeys(selectedRows || []);
     },
   };
 
-  // Load users data
+  // 加载用户数据
   const loadUsers = async (
     startIdx,
     pageSize,
@@ -183,14 +186,14 @@ export const useUsersData = () => {
         showError(message);
       }
     } catch (error) {
-      // 网络异常/后端异常时也要退出 loading，避免列表一直转圈。
+      // 网络/后端报错时始终退出 loading，避免转圈不止。
       showError(error?.message || t('请求失败'));
     } finally {
       setLoading(false);
     }
   };
 
-  // Search users with keyword and group
+  // 按关键词和分组搜索用户
   const searchUsers = async (
     startIdx,
     pageSize,
@@ -200,7 +203,7 @@ export const useUsersData = () => {
     searchBalanceMin = null,
     searchBalanceMax = null,
   ) => {
-    // If no parameters passed, get values from form
+    // 若未传参数，则从表单读取
     let resolvedAdvanced = normalizeAdvancedFilters(
       advanced === null ? advancedFilters : advanced,
     );
@@ -239,7 +242,7 @@ export const useUsersData = () => {
       !hasAdvancedFilters(resolvedAdvanced) &&
       !hasBalanceFilters(balanceMin, balanceMax)
     ) {
-      // If keyword is blank, load files instead
+      // 若关键词为空，则改为加载列表数据
       await loadUsers(
         startIdx,
         pageSize,
@@ -248,13 +251,13 @@ export const useUsersData = () => {
       );
       return;
     }
-    // 搜索分支也需要接管 loading 状态：
-    // 首屏若命中“已保存高级筛选”会直接走这里，若不置回 loading=false，表格会一直转圈。
+    // 搜索分支也必须控制 loading 状态：
+    // 首次加载可能因已保存的高级筛选进入该分支，loading 必须重置为 false。
     setLoading(true);
     setSearching(true);
     try {
-      // 前端统一通过 axios params 传参，避免手写拼接 URL 导致转义遗漏。
-      // 后端再做类型解析与参数化查询，形成“双保险”。
+      // 前端通过 axios params 传递筛选，避免手写 URL 组装/转义错误。
+      // 后端仍会做类型解析和参数化查询，作为第二层安全保障。
       const params = {
         keyword,
         group,
@@ -291,7 +294,11 @@ export const useUsersData = () => {
       if (resolvedAdvanced.searchHasInvitees !== '') {
         params.has_invitees = resolvedAdvanced.searchHasInvitees;
       }
-      // 金额筛选参数统一由 axios params 透传，后端进行范围校验与参数化查询。
+      if (resolvedAdvanced.searchHasActiveSubscription !== '') {
+        params.has_active_subscription =
+          resolvedAdvanced.searchHasActiveSubscription;
+      }
+      // 额度筛选经 axios params 下发；后端负责区间校验与参数化查询。
       if (balanceMin !== '' && balanceMin !== null && balanceMin !== undefined) {
         params.balance_min = balanceMin;
       }
@@ -341,9 +348,9 @@ export const useUsersData = () => {
     await searchUsers(1, pageSize, null, null, DEFAULT_ADVANCED_FILTERS);
   };
 
-  // Manage user operations (promote, demote, enable, disable, delete)
+  // 用户管理操作（promote/demote/enable/disable/delete）
   const manageUser = async (userId, action, record) => {
-    // Trigger loading state to force table re-render
+    // 触发 loading，强制表格重渲染
     setLoading(true);
 
     const res = await API.post('/api/user/manage', {
@@ -356,7 +363,7 @@ export const useUsersData = () => {
       showSuccess(t('操作成功完成！'));
       const user = res.data.data;
 
-      // Create a new array and new object to ensure React detects changes
+      // 创建新数组和新对象，确保 React 感知变更
       const newUsers = users.map((u) => {
         if (u.id === userId) {
           if (action === 'delete') {
@@ -375,7 +382,7 @@ export const useUsersData = () => {
     setLoading(false);
   };
 
-  // 用户批量管理（启用/禁用/删除）
+  // 用户批量管理（启用/禁用/删除）。
   const batchManageUsers = async (action) => {
     if (selectedKeys.length === 0) {
       showError(t('请至少选择一个用户！'));
@@ -394,7 +401,7 @@ export const useUsersData = () => {
       const successCount = Number(data?.success_count || 0);
       const failedCount = Number(data?.failed_count || 0);
       if (failedCount > 0) {
-        // 失败明细由后端返回 failed 列表，这里先给汇总提示，避免提示过长影响阅读。
+        // 后端会返回失败明细；先展示简要摘要，保证通知可读性。
         showSuccess(
           t('批量操作完成: {{success}}个成功, {{failed}}个失败', {
             success: successCount,
@@ -453,7 +460,7 @@ export const useUsersData = () => {
     }
   };
 
-  // Handle page change
+  // 处理页码变更
   const handlePageChange = (page) => {
     setActivePage(page);
     const {
@@ -487,7 +494,7 @@ export const useUsersData = () => {
     }
   };
 
-  // Handle page size change
+  // 处理每页条数变更
   const handlePageSizeChange = async (size) => {
     localStorage.setItem('page-size', size + '');
     setPageSize(size);
@@ -531,7 +538,7 @@ export const useUsersData = () => {
       });
   };
 
-  // Handle table row styling for disabled/deleted users
+  // 处理禁用/删除用户的行样式
   const handleRow = (record, index) => {
     if (record.DeletedAt !== null || record.status !== 1) {
       return {
@@ -544,7 +551,7 @@ export const useUsersData = () => {
     }
   };
 
-  // Refresh data
+  // 刷新数据
   const refresh = async (page = activePage) => {
     const {
       searchKeyword,
@@ -577,7 +584,7 @@ export const useUsersData = () => {
     }
   };
 
-  // Fetch groups data
+  // 拉取分组数据
   const fetchGroups = async () => {
     try {
       let res = await API.get(`/api/group/`);
@@ -595,7 +602,7 @@ export const useUsersData = () => {
     }
   };
 
-  // Modal control functions
+  // 弹窗控制函数
   const closeAddUser = () => {
     setShowAddUser(false);
   };
@@ -607,10 +614,10 @@ export const useUsersData = () => {
     });
   };
 
-  // Initialize data on component mount
+  // 初始化数据 on component mount
   useEffect(() => {
-    // 页面首次加载时，如果本地存在高级筛选条件，则直接恢复该条件并执行查询。
-    // 这样管理员刷新页面后不需要重复手动设置筛选项。
+    // 首次加载时恢复本地高级筛选（若存在）并立即查询。
+    // 避免页面刷新后需要重新配置筛选。
     if (hasAdvancedFilters(advancedFilters)) {
       searchUsers(1, pageSize, '', '', advancedFilters)
         .then()
@@ -637,7 +644,7 @@ export const useUsersData = () => {
   }, [advancedFilters]);
 
   return {
-    // Data state
+    // 数据状态
     users,
     selectedKeys,
     loading,
@@ -647,7 +654,7 @@ export const useUsersData = () => {
     searching,
     groupOptions,
 
-    // Modal state
+    // 弹窗状态
     showAddUser,
     showEditUser,
     editingUser,
@@ -655,7 +662,7 @@ export const useUsersData = () => {
     setShowEditUser,
     setEditingUser,
 
-    // Form state
+    // 表单状态
     formInitValues,
     formApi,
     setFormApi,
@@ -663,11 +670,11 @@ export const useUsersData = () => {
     setAdvancedFilters,
     defaultAdvancedFilters: DEFAULT_ADVANCED_FILTERS,
 
-    // UI state
+    // UI 状态
     compactMode,
     setCompactMode,
 
-    // Actions
+    // 操作函数
     rowSelection,
     loadUsers,
     searchUsers,
@@ -686,7 +693,7 @@ export const useUsersData = () => {
     resetAdvancedFilters,
     hasAdvancedFilters,
 
-    // Translation
+    // 国际化
     t,
   };
 };

@@ -98,7 +98,7 @@ const renderUsername = (text, record) => {
 const renderStatistics = (text, record, showEnableDisableModal, t) => {
   const isDeleted = record.DeletedAt !== null;
 
-  // Determine tag text & color like original status column
+  // 参考原状态列规则确定标签文案与颜色
   let tagColor = 'grey';
   let tagText = t('未知状态');
   if (isDeleted) {
@@ -133,7 +133,7 @@ const renderStatistics = (text, record, showEnableDisableModal, t) => {
   );
 };
 
-// Render separate quota usage column
+// 渲染独立额度用量列
 const renderQuotaUsage = (text, record, t) => {
   const { Paragraph } = Typography;
   const used = parseInt(record.used_quota) || 0;
@@ -170,13 +170,54 @@ const renderQuotaUsage = (text, record, t) => {
   );
 };
 
-// Render used quota as an independent column to make usage visibility explicit.
+// 将已用额度独立成列，提升用量可见性。
 const renderUsedQuota = (text, record) => {
   const used = parseInt(record.used_quota) || 0;
   return (
     <Tag color='white' shape='circle'>
       {renderQuota(used)}
     </Tag>
+  );
+};
+
+/**
+ * 渲染订阅状态项。
+ * 即使用户没有生效订阅也可点击，方便管理员直接进入管理。
+ */
+const renderSubscriptionStatus = (record, t, showUserSubscriptionsModal) => {
+  const activeCount = Number(record?.active_subscription_count || 0);
+  const hasActiveSubscription = record?.has_active_subscription || activeCount > 0;
+  const dotColor = hasActiveSubscription ? '#10b981' : '#94a3b8';
+  const label = hasActiveSubscription
+    ? `${t('有套餐')} · ${activeCount}`
+    : t('无套餐');
+  const isDeleted = record?.DeletedAt !== null;
+  const content = (
+    <Tag color='white' shape='circle'>
+      <div className='flex items-center gap-1'>
+        <div
+          className='w-2 h-2 rounded-full flex-shrink-0'
+          style={{ backgroundColor: dotColor }}
+        />
+        <span className='text-xs'>{label}</span>
+      </div>
+    </Tag>
+  );
+
+  if (isDeleted) {
+    return content;
+  }
+
+  return (
+    <Button
+      type='tertiary'
+      theme='borderless'
+      size='small'
+      className='!px-0 cursor-pointer'
+      onClick={() => showUserSubscriptionsModal?.(record)}
+    >
+      {content}
+    </Button>
   );
 };
 
@@ -348,6 +389,13 @@ export const getUsersColumns = ({
       dataIndex: 'info',
       render: (text, record, index) =>
         renderStatistics(text, record, showEnableDisableModal, t),
+    },
+    {
+      title: t('套餐情况'),
+      dataIndex: 'subscription_status',
+      key: 'subscription_status',
+      render: (text, record) =>
+        renderSubscriptionStatus(record, t, showUserSubscriptionsModal),
     },
     {
       title: t('剩余额度/总额度'),

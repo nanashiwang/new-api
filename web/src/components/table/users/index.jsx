@@ -34,7 +34,7 @@ const UsersPage = () => {
   const isMobile = useIsMobile();
 
   const {
-    // Modal state
+    // 弹窗状态
     showAddUser,
     showEditUser,
     editingUser,
@@ -43,7 +43,7 @@ const UsersPage = () => {
     closeEditUser,
     refresh,
 
-    // Form state
+    // 表单状态
     formInitValues,
     setFormApi,
     searchUsers,
@@ -60,7 +60,7 @@ const UsersPage = () => {
     compactMode,
     setCompactMode,
 
-    // Translation
+    // 国际化
     t,
   } = usersData;
 
