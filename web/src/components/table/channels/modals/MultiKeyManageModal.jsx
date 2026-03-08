@@ -273,13 +273,13 @@ const MultiKeyManageModal = ({ visible, onCancel, channel, onRefresh }) => {
     }
   };
 
-  // Handle page change
+  // 处理页码变更
   const handlePageChange = (page) => {
     setCurrentPage(page);
     loadKeyStatus(page, pageSize);
   };
 
-  // Handle page size change
+  // 处理每页条数变更
   const handlePageSizeChange = (size) => {
     setPageSize(size);
     setCurrentPage(1); // Reset to first page

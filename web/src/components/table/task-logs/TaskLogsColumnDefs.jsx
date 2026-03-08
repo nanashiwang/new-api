@@ -63,7 +63,7 @@ const colors = [
   'yellow',
 ];
 
-// Render functions
+// 渲染函数
 const renderTimestamp = (timestampInSeconds) => {
   const date = new Date(timestampInSeconds * 1000); // 从秒转换为毫秒
 

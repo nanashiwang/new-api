@@ -79,7 +79,7 @@ const CreateDeploymentModal = ({ visible, onCancel, onSuccess, t }) => {
   const [locationTotalAvailable, setLocationTotalAvailable] = useState(null);
   const [priceEstimation, setPriceEstimation] = useState(null);
 
-  // UI states
+  // UI 状态s
   const [loadingHardware, setLoadingHardware] = useState(false);
   const [loadingReplicas, setLoadingReplicas] = useState(false);
   const [loadingPrice, setLoadingPrice] = useState(false);

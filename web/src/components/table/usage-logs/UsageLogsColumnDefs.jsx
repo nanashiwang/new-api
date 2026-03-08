@@ -100,7 +100,7 @@ function buildChannelAffinityTooltip(affinity, t) {
   );
 }
 
-// Render functions
+// 渲染函数
 function renderType(type, t) {
   switch (type) {
     case 1:

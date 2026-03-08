@@ -46,7 +46,7 @@ import {
 } from '@douyinfe/semi-icons';
 import { FaRandom } from 'react-icons/fa';
 
-// Render functions
+// 渲染函数
 const renderType = (type, record = {}, t) => {
   const channelInfo = record?.channel_info;
   let type2label = new Map();

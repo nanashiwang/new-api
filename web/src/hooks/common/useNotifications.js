@@ -61,7 +61,7 @@ export const useNotifications = (statusState) => {
     setUnreadCount(calculateUnreadCount());
   }, [announcements]);
 
-  // Actions
+  // 操作函数
   const handleNoticeOpen = () => {
     setNoticeVisible(true);
   };

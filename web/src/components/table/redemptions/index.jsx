@@ -33,13 +33,13 @@ const RedemptionsPage = () => {
   const isMobile = useIsMobile();
 
   const {
-    // Edit state
+    // 编辑状态
     showEdit,
     editingRedemption,
     closeEdit,
     refresh,
 
-    // Actions state
+    // 操作函数 state
     selectedKeys,
     setEditingRedemption,
     setShowEdit,
@@ -53,11 +53,11 @@ const RedemptionsPage = () => {
     loading,
     searching,
 
-    // UI state
+    // UI 状态
     compactMode,
     setCompactMode,
 
-    // Translation
+    // 国际化
     t,
   } = redemptionsData;
 

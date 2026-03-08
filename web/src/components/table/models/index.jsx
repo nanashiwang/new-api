@@ -39,13 +39,13 @@ const ModelsPage = () => {
   const isMobile = useIsMobile();
 
   const {
-    // Edit state
+    // 编辑状态
     showEdit,
     editingModel,
     closeEdit,
     refresh,
 
-    // Actions state
+    // 操作函数 state
     selectedKeys,
     setSelectedKeys,
     setEditingModel,
@@ -72,7 +72,7 @@ const ModelsPage = () => {
     setEditingVendor,
     loadVendors,
 
-    // Translation
+    // 国际化
     t,
   } = modelsData;
 

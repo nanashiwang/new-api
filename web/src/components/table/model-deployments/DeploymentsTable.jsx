@@ -60,7 +60,7 @@ const DeploymentsTable = (deploymentsData) => {
     refresh,
   } = deploymentsData;
 
-  // Modal states
+  // 弹窗状态
   const [selectedDeployment, setSelectedDeployment] = useState(null);
   const [showLogsModal, setShowLogsModal] = useState(false);
   const [showExtendModal, setShowExtendModal] = useState(false);

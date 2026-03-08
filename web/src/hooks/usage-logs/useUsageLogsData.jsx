@@ -61,7 +61,7 @@ export const useLogsData = () => {
     DETAILS: 'details',
   };
 
-  // Basic state
+  // 基础状态
   const [logs, setLogs] = useState([]);
   const [expandData, setExpandData] = useState({});
   const [showStat, setShowStat] = useState(false);
@@ -85,7 +85,7 @@ export const useLogsData = () => {
     token: 0,
   });
 
-  // Form state
+  // 表单状态
   const [formApi, setFormApi] = useState(null);
   let now = new Date();
   const formInitValues = {
@@ -680,7 +680,7 @@ export const useLogsData = () => {
     setLoading(false);
   };
 
-  // Page handlers
+  // 分页处理函数
   const handlePageChange = (page) => {
     setActivePage(page);
     loadLogs(page, pageSize).then((r) => {});
@@ -697,14 +697,14 @@ export const useLogsData = () => {
       });
   };
 
-  // Refresh function
+  // 刷新函数
   const refresh = async () => {
     setActivePage(1);
     handleEyeClick();
     await loadLogs(1, pageSize);
   };
 
-  // Copy text function
+  // 复制文本函数
   const copyText = async (e, text) => {
     e.stopPropagation();
     if (await copy(text)) {
@@ -714,7 +714,7 @@ export const useLogsData = () => {
     }
   };
 
-  // Initialize data
+  // 初始化数据
   useEffect(() => {
     const localPageSize =
       parseInt(localStorage.getItem('page-size')) || ITEMS_PER_PAGE;
@@ -741,7 +741,7 @@ export const useLogsData = () => {
   };
 
   return {
-    // Basic state
+    // 基础状态
     logs,
     expandData,
     showStat,
@@ -754,7 +754,7 @@ export const useLogsData = () => {
     stat,
     isAdminUser,
 
-    // Form state
+    // 表单状态
     formApi,
     setFormApi,
     formInitValues,
@@ -785,7 +785,7 @@ export const useLogsData = () => {
     channelAffinityUsageCacheTarget,
     openChannelAffinityUsageCacheModal,
 
-    // Functions
+    // 函数集合
     loadLogs,
     handlePageChange,
     handlePageSizeChange,
@@ -796,7 +796,7 @@ export const useLogsData = () => {
     hasExpandableRows,
     setLogType,
 
-    // Translation
+    // 国际化
     t,
   };
 };

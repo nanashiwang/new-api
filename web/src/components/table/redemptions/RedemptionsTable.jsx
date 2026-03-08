@@ -46,7 +46,7 @@ const RedemptionsTable = (redemptionsData) => {
     t,
   } = redemptionsData;
 
-  // Modal states
+  // 弹窗状态
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deletingRecord, setDeletingRecord] = useState(null);
 

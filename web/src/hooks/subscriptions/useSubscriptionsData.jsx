@@ -26,7 +26,7 @@ export const useSubscriptionsData = () => {
   const { t } = useTranslation();
   const [compactMode, setCompactMode] = useTableCompactMode('subscriptions');
 
-  // State management
+  // 状态管理
   const [allPlans, setAllPlans] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -61,7 +61,7 @@ export const useSubscriptionsData = () => {
     }
   };
 
-  // Refresh data
+  // 刷新数据
   const refresh = async () => {
     await loadPlans();
   };
@@ -100,7 +100,7 @@ export const useSubscriptionsData = () => {
     }
   };
 
-  // Modal control functions
+  // 弹窗控制函数
   const closeEdit = () => {
     setShowEdit(false);
     setEditingPlan(null);
@@ -118,7 +118,7 @@ export const useSubscriptionsData = () => {
     setShowEdit(true);
   };
 
-  // Initialize data on component mount
+  // 初始化数据 on component mount
   useEffect(() => {
     loadPlans();
   }, []);
@@ -130,19 +130,19 @@ export const useSubscriptionsData = () => {
   );
 
   return {
-    // Data state
+    // 数据状态
     plans,
     planCount,
     loading,
 
-    // Modal state
+    // 弹窗状态
     showEdit,
     editingPlan,
     sheetPlacement,
     setShowEdit,
     setEditingPlan,
 
-    // UI state
+    // UI 状态
     compactMode,
     setCompactMode,
 
@@ -152,7 +152,7 @@ export const useSubscriptionsData = () => {
     handlePageChange,
     handlePageSizeChange,
 
-    // Actions
+    // 操作函数
     loadPlans,
     setPlanEnabled,
     refresh,
@@ -160,7 +160,7 @@ export const useSubscriptionsData = () => {
     openCreate,
     openEdit,
 
-    // Translation
+    // 国际化
     t,
   };
 };

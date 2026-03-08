@@ -43,7 +43,7 @@ const ModelsActions = ({
   setCompactMode,
   t,
 }) => {
-  // Modal states
+  // 弹窗状态
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showMissingModal, setShowMissingModal] = useState(false);
   const [showGroupManagement, setShowGroupManagement] = useState(false);

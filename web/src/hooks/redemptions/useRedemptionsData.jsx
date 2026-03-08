@@ -31,7 +31,7 @@ import { useTableCompactMode } from '../common/useTableCompactMode';
 export const useRedemptionsData = () => {
   const { t } = useTranslation();
 
-  // Basic state
+  // 基础状态
   const [redemptions, setRedemptions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
@@ -40,7 +40,7 @@ export const useRedemptionsData = () => {
   const [tokenCount, setTokenCount] = useState(0);
   const [selectedKeys, setSelectedKeys] = useState([]);
 
-  // Edit state
+  // 编辑状态
   const [editingRedemption, setEditingRedemption] = useState({
     id: undefined,
   });
@@ -49,10 +49,10 @@ export const useRedemptionsData = () => {
   // Form API
   const [formApi, setFormApi] = useState(null);
 
-  // UI state
+  // UI 状态
   const [compactMode, setCompactMode] = useTableCompactMode('redemptions');
 
-  // Form state
+  // 表单状态
   const formInitValues = {
     searchKeyword: '',
   };
@@ -161,7 +161,7 @@ export const useRedemptionsData = () => {
     setLoading(false);
   };
 
-  // Refresh data
+  // 刷新数据
   const refresh = async (page = activePage) => {
     const { searchKeyword } = getFormValues();
     if (searchKeyword === '') {
@@ -171,7 +171,7 @@ export const useRedemptionsData = () => {
     }
   };
 
-  // Handle page change
+  // 处理页码变更
   const handlePageChange = (page) => {
     setActivePage(page);
     const { searchKeyword } = getFormValues();
@@ -182,7 +182,7 @@ export const useRedemptionsData = () => {
     }
   };
 
-  // Handle page size change
+  // 处理每页条数变更
   const handlePageSizeChange = (size) => {
     setPageSize(size);
     setActivePage(1);
@@ -272,7 +272,7 @@ export const useRedemptionsData = () => {
     });
   };
 
-  // Close edit modal
+  // 关闭编辑弹窗
   const closeEdit = () => {
     setShowEdit(false);
     setTimeout(() => {
@@ -294,7 +294,7 @@ export const useRedemptionsData = () => {
     }
   };
 
-  // Initialize data loading
+  // 初始化数据 loading
   useEffect(() => {
     loadRedemptions(1, pageSize)
       .then()
@@ -304,7 +304,7 @@ export const useRedemptionsData = () => {
   }, [pageSize]);
 
   return {
-    // Data state
+    // 数据状态
     redemptions,
     loading,
     searching,
@@ -313,15 +313,15 @@ export const useRedemptionsData = () => {
     tokenCount,
     selectedKeys,
 
-    // Edit state
+    // 编辑状态
     editingRedemption,
     showEdit,
 
-    // Form state
+    // 表单状态
     formApi,
     formInitValues,
 
-    // UI state
+    // UI 状态
     compactMode,
     setCompactMode,
 
@@ -354,7 +354,7 @@ export const useRedemptionsData = () => {
     batchCopyRedemptions,
     batchDeleteRedemptions,
 
-    // Translation function
+    // 国际化 function
     t,
   };
 };

@@ -42,7 +42,7 @@ export const useChannelsData = () => {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
 
-  // Basic states
+  // 基础状态s
   const [channels, setChannels] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activePage, setActivePage] = useState(1);
@@ -52,7 +52,7 @@ export const useChannelsData = () => {
   const [channelCount, setChannelCount] = useState(0);
   const [groupOptions, setGroupOptions] = useState([]);
 
-  // UI states
+  // UI 状态s
   const [showEdit, setShowEdit] = useState(false);
   const [enableBatchDelete, setEnableBatchDelete] = useState(false);
   const [editingChannel, setEditingChannel] = useState({ id: undefined });
@@ -509,7 +509,7 @@ export const useChannelsData = () => {
     }
   };
 
-  // Page handlers
+  // 分页处理函数
   const handlePageChange = (page) => {
     const { searchKeyword, searchGroup, searchModel } = getFormValues();
     setActivePage(page);
@@ -1125,7 +1125,7 @@ export const useChannelsData = () => {
   }, [channelTypeCounts]);
 
   return {
-    // Basic states
+    // 基础状态s
     channels,
     loading,
     searching,
@@ -1140,7 +1140,7 @@ export const useChannelsData = () => {
     compactMode,
     globalPassThroughEnabled,
 
-    // UI states
+    // UI 状态s
     showEdit,
     setShowEdit,
     editingChannel,
@@ -1204,7 +1204,7 @@ export const useChannelsData = () => {
     t,
     isMobile,
 
-    // Functions
+    // 函数集合
     loadChannels,
     searchChannels,
     refresh,

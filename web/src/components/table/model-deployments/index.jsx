@@ -38,13 +38,13 @@ const DeploymentsPage = () => {
   const batchOperationsEnabled = false;
 
   const {
-    // Edit state
+    // 编辑状态
     showEdit,
     editingDeployment,
     closeEdit,
     refresh,
 
-    // Actions state
+    // 操作函数 state
     selectedKeys,
     setSelectedKeys,
     setEditingDeployment,
@@ -69,7 +69,7 @@ const DeploymentsPage = () => {
     compactMode,
     setCompactMode,
 
-    // Translation
+    // 国际化
     t,
   } = deploymentsData;
 

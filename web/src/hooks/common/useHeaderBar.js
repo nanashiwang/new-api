@@ -136,7 +136,7 @@ export const useHeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
     };
   }, [i18n]);
 
-  // Actions
+  // 操作函数
   const logout = useCallback(async () => {
     await API.get('/api/user/logout');
     showSuccess(t('注销成功!'));
@@ -226,7 +226,7 @@ export const useHeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
     headerNavModules,
     pricingRequireAuth,
 
-    // Actions
+    // 操作函数
     logout,
     handleLanguageChange,
     handleThemeToggle,

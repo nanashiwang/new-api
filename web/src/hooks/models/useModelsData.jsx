@@ -27,7 +27,7 @@ export const useModelsData = () => {
   const { t } = useTranslation();
   const [compactMode, setCompactMode] = useTableCompactMode('models');
 
-  // State management
+  // 状态管理
   const [models, setModels] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activePage, setActivePage] = useState(1);
@@ -35,7 +35,7 @@ export const useModelsData = () => {
   const [searching, setSearching] = useState(false);
   const [modelCount, setModelCount] = useState(0);
 
-  // Modal states
+  // 弹窗状态
   const [showEdit, setShowEdit] = useState(false);
   const [editingModel, setEditingModel] = useState({
     id: undefined,
@@ -53,7 +53,7 @@ export const useModelsData = () => {
     },
   };
 
-  // Form initial values
+  // 表单初始值
   const formInitValues = {
     searchKeyword: '',
     searchVendor: '',
@@ -66,13 +66,13 @@ export const useModelsData = () => {
     return Array.isArray(items) ? items : [];
   };
 
-  // Form API reference
+  // 表单 API 引用
   const [formApi, setFormApi] = useState(null);
 
-  // Get form values helper function
+  // 获取表单值的辅助函数
   const getFormValues = () => formApi?.getValues() || formInitValues;
 
-  // Close edit modal
+  // 关闭编辑弹窗
   const closeEdit = () => {
     setShowEdit(false);
     setTimeout(() => {
@@ -160,7 +160,7 @@ export const useModelsData = () => {
     setLoading(false);
   };
 
-  // Refresh data
+  // 刷新数据
   const refresh = async (page = activePage) => {
     await loadModels(page, pageSize);
   };
@@ -327,7 +327,7 @@ export const useModelsData = () => {
     }
   };
 
-  // Handle page change
+  // 处理页码变更
   const handlePageChange = (page) => {
     setActivePage(page);
     loadModels(page, pageSize, activeVendorKey);
@@ -338,7 +338,7 @@ export const useModelsData = () => {
     loadModels(1, pageSize, activeVendorKey);
   }, [activeVendorKey]);
 
-  // Handle page size change
+  // 处理每页条数变更
   const handlePageSizeChange = async (size) => {
     setPageSize(size);
     setActivePage(1);
@@ -428,7 +428,7 @@ export const useModelsData = () => {
   }, []);
 
   return {
-    // Data state
+    // 数据状态
     models,
     loading,
     searching,
@@ -436,24 +436,24 @@ export const useModelsData = () => {
     pageSize,
     modelCount,
 
-    // Selection state
+    // 选择状态
     selectedKeys,
     rowSelection,
     handleRow,
     setSelectedKeys,
 
-    // Modal state
+    // 弹窗状态
     showEdit,
     editingModel,
     setEditingModel,
     setShowEdit,
     closeEdit,
 
-    // Form state
+    // 表单状态
     formInitValues,
     setFormApi,
 
-    // Actions
+    // 操作函数
     loadModels,
     searchModels,
     refresh,
@@ -466,7 +466,7 @@ export const useModelsData = () => {
     handlePageChange,
     handlePageSizeChange,
 
-    // UI state
+    // UI 状态
     compactMode,
     setCompactMode,
 
@@ -484,7 +484,7 @@ export const useModelsData = () => {
     setEditingVendor,
     loadVendors,
 
-    // Translation
+    // 国际化
     t,
 
     // Upstream sync

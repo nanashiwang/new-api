@@ -50,7 +50,7 @@ export const useTaskLogsData = () => {
     RESULT_URL: 'result_url',
   };
 
-  // Basic state
+  // 基础状态
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [activePage, setActivePage] = useState(1);
@@ -64,7 +64,7 @@ export const useTaskLogsData = () => {
     ? 'task-logs-table-columns-admin'
     : 'task-logs-table-columns-user';
 
-  // Modal state
+  // 弹窗状态
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalContent, setModalContent] = useState('');
 
@@ -80,7 +80,7 @@ export const useTaskLogsData = () => {
   const [showUserInfo, setShowUserInfoModal] = useState(false);
   const [userInfoData, setUserInfoData] = useState(null);
 
-  // Form state
+  // 表单状态
   const [formApi, setFormApi] = useState(null);
   let now = new Date();
   let zeroNow = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -182,7 +182,7 @@ export const useTaskLogsData = () => {
     }
   }, [visibleColumns]);
 
-  // Get form values helper function
+  // 获取表单值的辅助函数
   const getFormValues = () => {
     const formValues = formApi ? formApi.getValues() : {};
 
@@ -245,7 +245,7 @@ export const useTaskLogsData = () => {
     setLoading(false);
   };
 
-  // Page handlers
+  // 分页处理函数
   const handlePageChange = (page) => {
     loadLogs(page, pageSize).then();
   };
@@ -255,12 +255,12 @@ export const useTaskLogsData = () => {
     await loadLogs(1, size);
   };
 
-  // Refresh function
+  // 刷新函数
   const refresh = async () => {
     await loadLogs(1, pageSize);
   };
 
-  // Copy text function
+  // 复制文本函数
   const copyText = async (text) => {
     if (await copy(text)) {
       showSuccess(t('已复制：') + text);
@@ -301,7 +301,7 @@ export const useTaskLogsData = () => {
     }
   };
 
-  // Initialize data
+  // 初始化数据
   useEffect(() => {
     const localPageSize =
       parseInt(localStorage.getItem('task-page-size')) || ITEMS_PER_PAGE;
@@ -310,7 +310,7 @@ export const useTaskLogsData = () => {
   }, []);
 
   return {
-    // Basic state
+    // 基础状态
     logs,
     loading,
     activePage,
@@ -318,7 +318,7 @@ export const useTaskLogsData = () => {
     pageSize,
     isAdminUser,
 
-    // Modal state
+    // 弹窗状态
     isModalOpen,
     setIsModalOpen,
     modalContent,
@@ -333,7 +333,7 @@ export const useTaskLogsData = () => {
     setIsAudioModalOpen,
     audioClips,
 
-    // Form state
+    // 表单状态
     formApi,
     setFormApi,
     formInitValues,
@@ -358,7 +358,7 @@ export const useTaskLogsData = () => {
     userInfoData,
     showUserInfoFunc,
 
-    // Functions
+    // 函数集合
     loadLogs,
     handlePageChange,
     handlePageSizeChange,
@@ -370,7 +370,7 @@ export const useTaskLogsData = () => {
     enrichLogs,
     syncPageData,
 
-    // Translation
+    // 国际化
     t,
   };
 };

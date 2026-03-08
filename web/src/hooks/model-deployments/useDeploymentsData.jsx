@@ -28,7 +28,7 @@ export const useDeploymentsData = () => {
   const [compactMode, setCompactMode] = useTableCompactMode('deployments');
   const requestSeq = useRef(0);
 
-  // State management
+  // 状态管理
   const [deployments, setDeployments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activePage, setActivePage] = useState(1);
@@ -37,7 +37,7 @@ export const useDeploymentsData = () => {
   const [deploymentCount, setDeploymentCount] = useState(0);
   const [query, setQuery] = useState({ keyword: '', status: '' });
 
-  // Modal states
+  // 弹窗状态
   const [showEdit, setShowEdit] = useState(false);
   const [editingDeployment, setEditingDeployment] = useState({
     id: undefined,
@@ -55,7 +55,7 @@ export const useDeploymentsData = () => {
     },
   };
 
-  // Form initial values
+  // 表单初始值
   const formInitValues = {
     searchKeyword: '',
     searchStatus: '',
@@ -68,13 +68,13 @@ export const useDeploymentsData = () => {
     return Array.isArray(items) ? items : [];
   };
 
-  // Form API reference
+  // 表单 API 引用
   const [formApi, setFormApi] = useState(null);
 
-  // Get form values helper function
+  // 获取表单值的辅助函数
   const getFormValues = () => formApi?.getValues() || formInitValues;
 
-  // Close edit modal
+  // 关闭编辑弹窗
   const closeEdit = () => {
     setShowEdit(false);
     setTimeout(() => {
@@ -224,7 +224,7 @@ export const useDeploymentsData = () => {
     }
   };
 
-  // Refresh data
+  // 刷新数据
   const refresh = async (page = activePage) => {
     await fetchDeployments({
       page,
@@ -234,7 +234,7 @@ export const useDeploymentsData = () => {
     });
   };
 
-  // Handle page change
+  // 处理页码变更
   const handlePageChange = (page) => {
     setActivePage(page);
     fetchDeployments({
@@ -245,7 +245,7 @@ export const useDeploymentsData = () => {
     });
   };
 
-  // Handle page size change
+  // 处理每页条数变更
   const handlePageSizeChange = (size) => {
     setPageSize(size);
     setActivePage(1);
@@ -516,7 +516,7 @@ export const useDeploymentsData = () => {
     // Batch operations
     batchDeleteDeployments,
 
-    // Translation
+    // 国际化
     t,
   };
 };

@@ -174,7 +174,7 @@ const renderBoundChannels = (channels) => {
   });
 };
 
-// Render operations column
+// 渲染操作列
 const renderOperations = (
   text,
   record,
