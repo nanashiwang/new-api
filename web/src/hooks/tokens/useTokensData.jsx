@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Modal } from '@douyinfe/semi-ui';
 import {
@@ -33,35 +33,37 @@ import { useTableCompactMode } from '../common/useTableCompactMode';
 export const useTokensData = (openFluentNotification) => {
   const { t } = useTranslation();
 
-  // Basic state
+  // 基础状态
   const [tokens, setTokens] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activePage, setActivePage] = useState(1);
   const [tokenCount, setTokenCount] = useState(0);
   const [pageSize, setPageSize] = useState(ITEMS_PER_PAGE);
   const [searching, setSearching] = useState(false);
-  const [searchMode, setSearchMode] = useState(false); // 是否处于搜索结果视图
+  const [searchMode, setSearchMode] = useState(false); // whether current list is search-result view
   const [groupOptions, setGroupOptions] = useState([]);
 
-  // Selection state
+  // 选择状态
   const [selectedKeys, setSelectedKeys] = useState([]);
 
-  // Edit state
+  // 编辑状态
   const [showEdit, setShowEdit] = useState(false);
   const [editingToken, setEditingToken] = useState({
     id: undefined,
   });
+  const clearEditingTokenTimerRef = useRef(null);
 
-  // UI state
+  // UI 状态
   const [compactMode, setCompactMode] = useTableCompactMode('tokens');
   const [showKeys, setShowKeys] = useState({});
 
-  // Form state
+  // 表单状态
   const [formApi, setFormApi] = useState(null);
   const formInitValues = {
     searchKeyword: '',
     searchToken: '',
     searchGroup: '',
+    searchPackageMode: '',
     searchBalanceMin: '',
     searchBalanceMax: '',
     searchUsedBalanceMin: '',
@@ -77,7 +79,7 @@ export const useTokensData = (openFluentNotification) => {
   };
 
   const resolveTokenSort = (sortKey) => {
-    // 令牌管理仅开放“金额排序”，不再暴露 ID 排序选项。
+    // Token 管理仅开放额度排序，隐藏 ID 排序选项。
     const normalized = normalizeTokenSortKey(sortKey);
     if (normalized === 'quota_asc') {
       return { sort_by: 'remain_quota', sort_order: 'asc' };
@@ -88,13 +90,14 @@ export const useTokensData = (openFluentNotification) => {
     return {};
   };
 
-  // Get form values helper function
+  // 获取表单值的辅助函数
   const getFormValues = () => {
     const formValues = formApi ? formApi.getValues() : {};
     return {
       searchKeyword: formValues.searchKeyword || '',
       searchToken: formValues.searchToken || '',
       searchGroup: formValues.searchGroup || '',
+      searchPackageMode: formValues.searchPackageMode || '',
       searchBalanceMin:
         formValues.searchBalanceMin === null ||
         formValues.searchBalanceMin === undefined ||
@@ -124,11 +127,12 @@ export const useTokensData = (openFluentNotification) => {
   };
 
   const hasTokenFilters = (values) => {
-    // searchMode 依赖该判断，确保翻页/刷新时能带上当前筛选条件。
+    // searchMode 依赖此判断，保证分页/刷新时保留生效筛选。
     return (
       values.searchKeyword !== '' ||
       values.searchToken !== '' ||
       values.searchGroup !== '' ||
+      values.searchPackageMode !== '' ||
       values.searchBalanceMin !== '' ||
       values.searchBalanceMax !== '' ||
       values.searchUsedBalanceMin !== '' ||
@@ -137,17 +141,23 @@ export const useTokensData = (openFluentNotification) => {
     );
   };
 
-  // Close edit modal
+  // 关闭编辑弹窗
   const closeEdit = () => {
     setShowEdit(false);
-    setTimeout(() => {
+    if (clearEditingTokenTimerRef.current) {
+      clearTimeout(clearEditingTokenTimerRef.current);
+    }
+    // 延迟到关闭动画结束后再清理编辑数据，
+    // 避免 SideSheet 在退出过程中发生位置跳变。
+    clearEditingTokenTimerRef.current = setTimeout(() => {
       setEditingToken({
         id: undefined,
       });
+      clearEditingTokenTimerRef.current = null;
     }, 500);
   };
 
-  // Sync page data from API response
+  // 从 API 响应同步分页数据
   const syncPageData = (payload) => {
     setTokens(payload.items || []);
     setTokenCount(payload.total || 0);
@@ -155,7 +165,7 @@ export const useTokensData = (openFluentNotification) => {
     setPageSize(payload.page_size || pageSize);
   };
 
-  // Load tokens function
+  // 加载 Token 列表
   const loadTokens = async (page = 1, size = pageSize) => {
     setLoading(true);
     setSearchMode(false);
@@ -174,7 +184,7 @@ export const useTokensData = (openFluentNotification) => {
     setLoading(false);
   };
 
-  // Refresh function
+  // 刷新函数
   const refresh = async (page = activePage) => {
     if (searchMode) {
       await searchTokens(page, pageSize);
@@ -184,7 +194,7 @@ export const useTokensData = (openFluentNotification) => {
     setSelectedKeys([]);
   };
 
-  // Copy text function
+  // 复制文本函数
   const copyText = async (text) => {
     if (await copy(text)) {
       showSuccess(t('已复制到剪贴板！'));
@@ -197,7 +207,7 @@ export const useTokensData = (openFluentNotification) => {
     }
   };
 
-  // Open link function for chat integrations
+  // 打开聊天集成链接函数
   const onOpenLink = async (type, url, record) => {
     if (url && url.startsWith('fluent')) {
       openFluentNotification(record.key);
@@ -231,7 +241,7 @@ export const useTokensData = (openFluentNotification) => {
     window.open(url, '_blank');
   };
 
-  // Manage token function (delete, enable, disable)
+  // Token 管理函数（delete/enable/disable）
   const manageToken = async (id, action, record) => {
     setLoading(true);
     let data = { id };
@@ -264,7 +274,7 @@ export const useTokensData = (openFluentNotification) => {
     setLoading(false);
   };
 
-  // Search tokens function
+  // 搜索 Token 函数
   const searchTokens = async (page = 1, size = pageSize) => {
     const normalizedPage = Number.isInteger(page) && page > 0 ? page : 1;
     const normalizedSize =
@@ -274,6 +284,7 @@ export const useTokensData = (openFluentNotification) => {
       searchKeyword,
       searchToken,
       searchGroup,
+      searchPackageMode,
       searchBalanceMin,
       searchBalanceMax,
       searchUsedBalanceMin,
@@ -286,7 +297,7 @@ export const useTokensData = (openFluentNotification) => {
       return;
     }
     setSearching(true);
-    // 统一通过 params 组装查询，避免手写 URL 拼接遗漏转义。
+    // 通过 params 构造查询，避免手写 URL 拼接与转义遗漏。
     const params = {
       keyword: searchKeyword,
       token: searchToken,
@@ -308,6 +319,9 @@ export const useTokensData = (openFluentNotification) => {
       searchBalanceMax !== undefined
     ) {
       params.balance_max = searchBalanceMax;
+    }
+    if (searchPackageMode !== '') {
+      params.package_mode = searchPackageMode;
     }
     if (
       searchUsedBalanceMin !== '' &&
@@ -334,7 +348,7 @@ export const useTokensData = (openFluentNotification) => {
     setSearching(false);
   };
 
-  // Page handlers
+  // 分页处理函数
   const handlePageChange = (page) => {
     if (searchMode) {
       searchTokens(page, pageSize).then();
@@ -352,7 +366,7 @@ export const useTokensData = (openFluentNotification) => {
     }
   };
 
-  // Row selection handlers
+  // 行选择处理函数
   const rowSelection = {
     onSelect: (record, selected) => {},
     onSelectAll: (selected, selectedRows) => {},
@@ -361,7 +375,7 @@ export const useTokensData = (openFluentNotification) => {
     },
   };
 
-  // Handle row styling
+  // 行样式处理
   const handleRow = (record, index) => {
     if (record.status !== 1) {
       return {
@@ -374,12 +388,12 @@ export const useTokensData = (openFluentNotification) => {
     }
   };
 
-  // Batch delete tokens
+  // 批量删除 Token
   const batchDeleteTokens = async () => {
     await batchManageTokens('delete');
   };
 
-  // 统一令牌批量管理（启用/禁用/删除）
+  // 统一 Token 批量管理（启用/禁用/删除）。
   const batchManageTokens = async (action) => {
     if (selectedKeys.length === 0) {
       showError(t('请至少选择一个令牌！'));
@@ -430,7 +444,7 @@ export const useTokensData = (openFluentNotification) => {
     await batchManageTokens('disable');
   };
 
-  // Batch copy tokens
+  // 批量复制 Token
   const batchCopyTokens = (copyType) => {
     if (selectedKeys.length === 0) {
       showError(t('请至少选择一个令牌！'));
@@ -475,7 +489,15 @@ export const useTokensData = (openFluentNotification) => {
     });
   };
 
-  // Initialize data
+  // 初始化数据
+  useEffect(() => {
+    return () => {
+      if (clearEditingTokenTimerRef.current) {
+        clearTimeout(clearEditingTokenTimerRef.current);
+      }
+    };
+  }, []);
+
   useEffect(() => {
     const fetchGroups = async () => {
       try {
@@ -503,7 +525,7 @@ export const useTokensData = (openFluentNotification) => {
   }, []);
 
   return {
-    // Basic state
+    // 基础状态
     tokens,
     loading,
     activePage,
@@ -512,30 +534,30 @@ export const useTokensData = (openFluentNotification) => {
     searching,
     groupOptions,
 
-    // Selection state
+    // 选择状态
     selectedKeys,
     setSelectedKeys,
 
-    // Edit state
+    // 编辑状态
     showEdit,
     setShowEdit,
     editingToken,
     setEditingToken,
     closeEdit,
 
-    // UI state
+    // UI 状态
     compactMode,
     setCompactMode,
     showKeys,
     setShowKeys,
 
-    // Form state
+    // 表单状态
     formApi,
     setFormApi,
     formInitValues,
     getFormValues,
 
-    // Functions
+    // 函数集合
     loadTokens,
     refresh,
     copyText,
@@ -553,7 +575,7 @@ export const useTokensData = (openFluentNotification) => {
     batchCopyTokens,
     syncPageData,
 
-    // Translation
+    // 国际化
     t,
   };
 };

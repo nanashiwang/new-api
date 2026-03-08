@@ -35,7 +35,7 @@ const TokensActions = ({
   loading = false,
   t,
 }) => {
-  // Modal states
+  // 弹窗状态
   const [showCopyModal, setShowCopyModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
 

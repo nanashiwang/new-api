@@ -47,7 +47,7 @@ import {
   IconEyeClosed,
 } from '@douyinfe/semi-icons';
 
-// progress color helper
+// 进度颜色辅助函数
 const getProgressColor = (pct) => {
   if (pct === 100) return 'var(--semi-color-success)';
   if (pct <= 10) return 'var(--semi-color-danger)';
@@ -55,12 +55,12 @@ const getProgressColor = (pct) => {
   return undefined;
 };
 
-// Render functions
+// 渲染函数
 function renderTimestamp(timestamp) {
   return <>{timestamp2string(timestamp)}</>;
 }
 
-// Render status column only (no usage)
+// 仅渲染状态列（不含用量）
 const renderStatus = (text, record, t) => {
   const enabled = text === 1;
 
@@ -87,7 +87,7 @@ const renderStatus = (text, record, t) => {
   );
 };
 
-// Render group column
+// 渲染分组列
 const renderGroupColumn = (text, record, t) => {
   if (text === 'auto') {
     return (
@@ -107,7 +107,7 @@ const renderGroupColumn = (text, record, t) => {
   return renderGroup(text);
 };
 
-// Render token key column with show/hide and copy functionality
+// 渲染 Token key 列（支持显示/隐藏与复制）
 const renderTokenKey = (text, record, showKeys, setShowKeys, copyText) => {
   const fullKey = 'sk-' + record.key;
   const maskedKey =
@@ -151,7 +151,7 @@ const renderTokenKey = (text, record, showKeys, setShowKeys, copyText) => {
   );
 };
 
-// Render model limits column
+// 渲染模型限制列
 const renderModelLimits = (text, record, t) => {
   if (record.model_limits_enabled && text) {
     const models = text.split(',').filter(Boolean);
@@ -212,7 +212,7 @@ const renderModelLimits = (text, record, t) => {
   }
 };
 
-// Render IP restrictions column
+// 渲染 IP 限制列
 const renderAllowIps = (text, t) => {
   if (!text || text.trim() === '') {
     return (
@@ -252,18 +252,40 @@ const renderAllowIps = (text, t) => {
   return <Space wrap>{ipTags}</Space>;
 };
 
-// Render separate quota usage column
+// 渲染独立额度用量列
 const renderQuotaUsage = (text, record, t) => {
   const { Paragraph } = Typography;
   const used = parseInt(record.used_quota) || 0;
   const remain = parseInt(record.remain_quota) || 0;
   const total = used + remain;
+  const isPackageToken = !!record?.package_enabled;
+  const packageLimit = Number(record?.package_limit_quota || 0);
+  const packageUsed = Number(record?.package_used_quota || 0);
+  const packageRemain =
+    packageLimit > 0 ? Math.max(0, packageLimit - packageUsed) : null;
+  const packageNextResetText =
+    Number(record?.package_next_reset_time || 0) > 0
+      ? timestamp2string(Number(record.package_next_reset_time))
+      : t('待初始化');
   if (record.unlimited_quota) {
     const popoverContent = (
       <div className='text-xs p-2'>
         <Paragraph copyable={{ content: renderQuota(used) }}>
           {t('已用额度')}: {renderQuota(used)}
         </Paragraph>
+        {isPackageToken && (
+          <>
+            <Paragraph
+              copyable={{
+                content: packageRemain === null ? '-' : renderQuota(packageRemain),
+              }}
+            >
+              {t('本周期剩余')}:{' '}
+              {packageRemain === null ? '-' : renderQuota(packageRemain)}
+            </Paragraph>
+            <Paragraph>{t('下次重置')}: {packageNextResetText}</Paragraph>
+          </>
+        )}
       </div>
     );
     return (
@@ -286,6 +308,19 @@ const renderQuotaUsage = (text, record, t) => {
       <Paragraph copyable={{ content: renderQuota(total) }}>
         {t('总额度')}: {renderQuota(total)}
       </Paragraph>
+      {isPackageToken && (
+        <>
+          <Paragraph
+            copyable={{
+              content: packageRemain === null ? '-' : renderQuota(packageRemain),
+            }}
+          >
+            {t('本周期剩余')}:{' '}
+            {packageRemain === null ? '-' : renderQuota(packageRemain)}
+          </Paragraph>
+          <Paragraph>{t('下次重置')}: {packageNextResetText}</Paragraph>
+        </>
+      )}
     </div>
   );
   return (
@@ -306,7 +341,7 @@ const renderQuotaUsage = (text, record, t) => {
   );
 };
 
-// 将已使用额度单独成列，便于快速横向比较不同令牌的消耗情况。
+// 将已用额度保存在独立字段中，便于跨 Token 更快比较。
 const renderUsedQuota = (text, record) => {
   const used = parseInt(record.used_quota) || 0;
   return (
@@ -316,7 +351,121 @@ const renderUsedQuota = (text, record) => {
   );
 };
 
-// Render operations column
+const formatResetTimeCompact = (timestamp) => {
+  const ts = Number(timestamp || 0);
+  if (ts <= 0) return '';
+  const d = new Date(ts * 1000);
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const hour = String(d.getHours()).padStart(2, '0');
+  const minute = String(d.getMinutes()).padStart(2, '0');
+  return `${month}-${day} ${hour}:${minute}`;
+};
+
+const renderPackageCycleBalance = (text, record, t) => {
+  const isPackageToken = !!record?.package_enabled;
+  const packageLimit = Number(record?.package_limit_quota || 0);
+  const packageUsed = Number(record?.package_used_quota || 0);
+  const packageRemain =
+    packageLimit > 0 ? Math.max(0, packageLimit - packageUsed) : 0;
+  const packageNextResetTs = Number(record?.package_next_reset_time || 0);
+  const packageNextResetText =
+    packageNextResetTs > 0
+      ? timestamp2string(packageNextResetTs)
+      : t('待初始化');
+  const packageNextResetCompact =
+    packageNextResetTs > 0
+      ? formatResetTimeCompact(packageNextResetTs)
+      : t('待初始化');
+
+  if (!isPackageToken || packageLimit <= 0) {
+    return (
+      <Tag color='white' shape='circle'>
+        -
+      </Tag>
+    );
+  }
+
+  const remainPct = (packageRemain / packageLimit) * 100;
+  const popoverContent = (
+    <div className='text-xs p-2'>
+      <Typography.Paragraph copyable={{ content: renderQuota(packageUsed) }}>
+        {t('本周期已用')}: {renderQuota(packageUsed)}
+      </Typography.Paragraph>
+      <Typography.Paragraph copyable={{ content: renderQuota(packageRemain) }}>
+        {t('本周期剩余')}: {renderQuota(packageRemain)}
+      </Typography.Paragraph>
+      <Typography.Paragraph copyable={{ content: renderQuota(packageLimit) }}>
+        {t('周期额度')}: {renderQuota(packageLimit)}
+      </Typography.Paragraph>
+      <Typography.Paragraph>{t('下次重置')}: {packageNextResetText}</Typography.Paragraph>
+    </div>
+  );
+
+  return (
+    <div className='flex flex-col gap-1'>
+      <Popover content={popoverContent} position='top'>
+        <Tag color='white' shape='circle'>
+          <div className='flex flex-col items-end'>
+            <span className='text-xs leading-none'>{`${renderQuota(packageRemain)} / ${renderQuota(packageLimit)}`}</span>
+            <Progress
+              percent={remainPct}
+              stroke={getProgressColor(remainPct)}
+              aria-label='package cycle balance'
+              format={() => `${remainPct.toFixed(0)}%`}
+              style={{ width: '100%', marginTop: '1px', marginBottom: 0 }}
+            />
+          </div>
+        </Tag>
+      </Popover>
+      <Tooltip content={`${t('下次重置')}: ${packageNextResetText}`} position='top'>
+        <Tag color='grey' shape='circle' size='small'>
+          {t('重置')}: {packageNextResetCompact}
+        </Tag>
+      </Tooltip>
+    </div>
+  );
+};
+
+const getPackagePeriodLabel = (record, t) => {
+  switch (record?.package_period) {
+    case 'daily':
+      return t('每日');
+    case 'weekly':
+      return t('每周');
+    case 'monthly':
+      return t('每月');
+    case 'custom':
+      return t('自定义');
+    default:
+      return t('周期');
+  }
+};
+
+const renderTokenName = (text, record, t) => {
+  if (!record?.package_enabled) {
+    return <span>{text}</span>;
+  }
+  const packageLimit = Number(record?.package_limit_quota || 0);
+  const periodLabel = getPackagePeriodLabel(record, t);
+  const budgetLabel =
+    record?.package_period === 'custom'
+      ? `${periodLabel} ${Math.max(0, Number(record?.package_custom_seconds || 0))}${t('秒')}`
+      : `${periodLabel} ${renderQuota(packageLimit)}`;
+  return (
+    <div className='flex items-center gap-1 flex-wrap'>
+      <span>{text}</span>
+      <Tag color='blue' shape='circle' size='small'>
+        {t('套餐令牌')}
+      </Tag>
+      <Tag color='white' shape='circle' size='small'>
+        {budgetLabel}
+      </Tag>
+    </div>
+  );
+};
+
+// 渲染操作列
 const renderOperations = (
   text,
   record,
@@ -449,6 +598,7 @@ export const getTokensColumns = ({
     {
       title: t('名称'),
       dataIndex: 'name',
+      render: (text, record) => renderTokenName(text, record, t),
     },
     {
       title: t('状态'),
@@ -466,6 +616,11 @@ export const getTokensColumns = ({
       dataIndex: 'used_quota',
       key: 'used_quota',
       render: (text, record) => renderUsedQuota(text, record),
+    },
+    {
+      title: t('周期余额'),
+      key: 'package_cycle_balance',
+      render: (text, record) => renderPackageCycleBalance(text, record, t),
     },
     {
       title: t('分组'),

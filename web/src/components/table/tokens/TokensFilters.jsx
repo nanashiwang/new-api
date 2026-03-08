@@ -30,7 +30,7 @@ const TokensFilters = ({
   searching,
   t,
 }) => {
-  // Handle form reset and immediate search
+  // 处理表单重置并立即搜索
   const formApiRef = useRef(null);
   const [advancedVisible, setAdvancedVisible] = useState(false);
   const [activeAdvancedCount, setActiveAdvancedCount] = useState(0);
@@ -40,6 +40,7 @@ const TokensFilters = ({
     if (!formApiRef.current) return 0;
     const values = formApiRef.current.getValues() || {};
     const fields = [
+      values.searchPackageMode,
       values.searchBalanceMin,
       values.searchBalanceMax,
       values.searchUsedBalanceMin,
@@ -64,7 +65,7 @@ const TokensFilters = ({
     }, 100);
   };
 
-  // 保留“默认 + 金额升降序”三档，满足排序需求同时避免筛选区堆叠太多控件。
+  // 保留三种排序（默认/额度降序/额度升序），兼顾易用性与界面密度。
   const amountSortOptions = [
     { label: t('默认排序'), value: '' },
     { label: t('金额降序'), value: 'quota_desc' },
@@ -86,8 +87,9 @@ const TokensFilters = ({
 
   const clearAdvancedFilters = () => {
     if (!formApiRef.current) return;
-    // 只清空金额相关字段，不影响关键词输入。
+    // 仅清空额度相关字段，保留关键词输入。
     formApiRef.current.setValues({
+      searchPackageMode: '',
       searchBalanceMin: '',
       searchBalanceMax: '',
       searchUsedBalanceMin: '',
@@ -145,7 +147,7 @@ const TokensFilters = ({
             pure
             size='small'
             onChange={() => {
-              // 分组属于高频过滤条件，切换后立即刷新结果，减少一次额外点击。
+              // Group 是高频筛选项，变更后立即刷新，减少一次点击。
               setTimeout(() => {
                 searchTokens(1);
               }, 100);
@@ -207,6 +209,22 @@ const TokensFilters = ({
         }
       >
         <div className='grid grid-cols-1 gap-3'>
+          <Text type='tertiary' size='small'>
+            {t('令牌类型')}
+          </Text>
+          <Form.Select
+            field='searchPackageMode'
+            placeholder={t('令牌类型')}
+            optionList={[
+              { label: t('全部类型'), value: '' },
+              { label: t('标准令牌'), value: 'standard' },
+              { label: t('套餐令牌'), value: 'package' },
+            ]}
+            noLabel
+            showClear
+            onChange={refreshAdvancedCount}
+          />
+          <Divider margin='4px' />
           <Text type='tertiary' size='small'>
             {t('额度筛选')}
           </Text>

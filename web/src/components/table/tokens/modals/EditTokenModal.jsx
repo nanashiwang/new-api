@@ -24,10 +24,13 @@ import {
   showSuccess,
   timestamp2string,
   renderGroupOption,
-  renderQuotaWithPrompt,
   getModelCategories,
   selectFilter,
 } from '../../../../helpers';
+import {
+  quotaToUSDAmount,
+  usdAmountToQuota,
+} from '../../../../helpers/quota';
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
 import {
   Button,
@@ -60,13 +63,16 @@ const EditTokenModal = (props) => {
   const [loading, setLoading] = useState(false);
   const isMobile = useIsMobile();
   const formApiRef = useRef(null);
+  const loadedTokenValuesRef = useRef(null);
   const [models, setModels] = useState([]);
   const [groups, setGroups] = useState([]);
+  const [tokenMode, setTokenMode] = useState('standard');
   const isEdit = props.editingToken.id !== undefined;
 
   const getInitValues = () => ({
     name: '',
     remain_quota: 0,
+    remain_amount: 0,
     expired_time: -1,
     unlimited_quota: true,
     model_limits_enabled: false,
@@ -75,7 +81,26 @@ const EditTokenModal = (props) => {
     group: '',
     cross_group_retry: false,
     tokenCount: 1,
+    package_enabled: false,
+    package_limit_amount: 0,
+    package_limit_quota: 0,
+    package_period: 'daily',
+    package_period_mode: 'relative',
+    package_custom_seconds: 86400,
+    package_used_quota: 0,
+    package_next_reset_time: 0,
   });
+
+  const applyLoadedTokenValues = () => {
+    if (!formApiRef.current) return;
+    const values = loadedTokenValuesRef.current;
+    if (!values) return;
+    formApiRef.current.setValues(values);
+    if (values.package_limit_amount !== undefined) {
+      // 首次挂载时显式回填套餐额度，避免初始 0.00 残留。
+      formApiRef.current.setValue('package_limit_amount', values.package_limit_amount);
+    }
+  };
 
   const handleCancel = () => {
     props.handleClose();
@@ -150,6 +175,7 @@ const EditTokenModal = (props) => {
   };
 
   const loadToken = async () => {
+    loadedTokenValuesRef.current = null;
     setLoading(true);
     let res = await API.get(`/api/token/${props.editingToken.id}`);
     const { success, message, data } = res.data;
@@ -162,9 +188,14 @@ const EditTokenModal = (props) => {
       } else {
         data.model_limits = [];
       }
-      if (formApiRef.current) {
-        formApiRef.current.setValues({ ...getInitValues(), ...data });
+      if (!data.package_period || data.package_period === 'none') {
+        data.package_period = 'daily';
       }
+      data.remain_amount = quotaToUSDAmount(data.remain_quota || 0);
+      data.package_limit_amount = quotaToUSDAmount(data.package_limit_quota || 0);
+      loadedTokenValuesRef.current = { ...getInitValues(), ...data };
+      applyLoadedTokenValues();
+      setTokenMode(data.package_enabled ? 'package' : 'standard');
     } else {
       showError(message);
     }
@@ -172,6 +203,7 @@ const EditTokenModal = (props) => {
   };
 
   useEffect(() => {
+    loadedTokenValuesRef.current = null;
     if (formApiRef.current) {
       if (!isEdit) {
         formApiRef.current.setValues(getInitValues());
@@ -186,12 +218,103 @@ const EditTokenModal = (props) => {
       if (isEdit) {
         loadToken();
       } else {
+        loadedTokenValuesRef.current = null;
         formApiRef.current?.setValues(getInitValues());
+        setTokenMode('standard');
       }
     } else {
+      loadedTokenValuesRef.current = null;
       formApiRef.current?.reset();
     }
   }, [props.visiable, props.editingToken.id]);
+
+  const switchTokenMode = (mode) => {
+    setTokenMode(mode);
+    if (!formApiRef.current) return;
+    const isPackage = mode === 'package';
+    formApiRef.current.setValue('package_enabled', isPackage);
+    if (isPackage) {
+      const currentPeriod = formApiRef.current.getValue('package_period');
+      if (!currentPeriod || currentPeriod === 'none') {
+        formApiRef.current.setValue('package_period', 'daily');
+      }
+      const currentLimit = Number(formApiRef.current.getValue('package_limit_quota') || 0);
+      if (currentLimit <= 0) {
+        formApiRef.current.setValue('package_limit_amount', 10);
+        formApiRef.current.setValue('package_limit_quota', usdAmountToQuota(10));
+      }
+    } else {
+      formApiRef.current.setValue('package_limit_amount', 0);
+      formApiRef.current.setValue('package_period', 'daily');
+      formApiRef.current.setValue('package_limit_quota', 0);
+      formApiRef.current.setValue('package_custom_seconds', 86400);
+      formApiRef.current.setValue('package_used_quota', 0);
+      formApiRef.current.setValue('package_next_reset_time', 0);
+    }
+  };
+
+  const normalizePackageFields = (localInputs) => {
+    const isPackage = tokenMode === 'package';
+    localInputs.package_enabled = isPackage;
+    if (!isPackage) {
+      localInputs.package_limit_amount = 0;
+      localInputs.package_limit_quota = 0;
+      localInputs.package_period = 'none';
+      localInputs.package_period_mode = 'relative';
+      localInputs.package_custom_seconds = 0;
+      localInputs.package_used_quota = 0;
+      localInputs.package_next_reset_time = 0;
+      return { ok: true };
+    }
+    localInputs.package_limit_amount = Number(localInputs.package_limit_amount || 0);
+    localInputs.package_limit_quota = usdAmountToQuota(localInputs.package_limit_amount);
+    localInputs.package_used_quota = parseInt(localInputs.package_used_quota, 10) || 0;
+    localInputs.package_next_reset_time = parseInt(localInputs.package_next_reset_time, 10) || 0;
+    const period = (localInputs.package_period || '').trim();
+    if (!['daily', 'weekly', 'monthly', 'custom'].includes(period)) {
+      return { ok: false, message: t('套餐周期无效') };
+    }
+    localInputs.package_period = period;
+    // custom 周期本身就是相对的，强制设为 relative
+    if (period === 'custom') {
+      localInputs.package_period_mode = 'relative';
+    } else {
+      const mode = (localInputs.package_period_mode || '').trim();
+      localInputs.package_period_mode = ['relative', 'natural'].includes(mode) ? mode : 'relative';
+    }
+    if (localInputs.package_limit_quota <= 0) {
+      return { ok: false, message: t('周期金额必须大于 0') };
+    }
+    if (period === 'custom') {
+      localInputs.package_custom_seconds =
+        parseInt(localInputs.package_custom_seconds, 10) || 0;
+      if (localInputs.package_custom_seconds <= 0) {
+        return { ok: false, message: t('自定义周期秒数必须大于 0') };
+      }
+    } else {
+      localInputs.package_custom_seconds = 0;
+    }
+    if (localInputs.package_used_quota < 0) {
+      localInputs.package_used_quota = 0;
+    }
+    if (localInputs.package_next_reset_time < 0) {
+      localInputs.package_next_reset_time = 0;
+    }
+    return { ok: true };
+  };
+
+  const normalizeRemainQuotaFields = (localInputs) => {
+    localInputs.remain_amount = Number(localInputs.remain_amount || 0);
+    if (localInputs.unlimited_quota) {
+      localInputs.remain_quota = parseInt(localInputs.remain_quota, 10) || 0;
+      return { ok: true };
+    }
+    localInputs.remain_quota = usdAmountToQuota(localInputs.remain_amount);
+    if (localInputs.remain_quota < 0) {
+      localInputs.remain_quota = 0;
+    }
+    return { ok: true };
+  };
 
   const generateRandomSuffix = () => {
     const characters =
@@ -209,7 +332,20 @@ const EditTokenModal = (props) => {
     setLoading(true);
     if (isEdit) {
       let { tokenCount: _tc, ...localInputs } = values;
-      localInputs.remain_quota = parseInt(localInputs.remain_quota);
+      const remainResult = normalizeRemainQuotaFields(localInputs);
+      if (!remainResult.ok) {
+        showError(remainResult.message);
+        setLoading(false);
+        return;
+      }
+      const packageResult = normalizePackageFields(localInputs);
+      if (!packageResult.ok) {
+        showError(packageResult.message);
+        setLoading(false);
+        return;
+      }
+      delete localInputs.remain_amount;
+      delete localInputs.package_limit_amount;
       if (localInputs.expired_time !== -1) {
         let time = Date.parse(localInputs.expired_time);
         if (isNaN(time)) {
@@ -245,7 +381,12 @@ const EditTokenModal = (props) => {
         } else {
           localInputs.name = baseName;
         }
-        localInputs.remain_quota = parseInt(localInputs.remain_quota);
+        const remainResult = normalizeRemainQuotaFields(localInputs);
+        if (!remainResult.ok) {
+          showError(remainResult.message);
+          setLoading(false);
+          break;
+        }
 
         if (localInputs.expired_time !== -1) {
           let time = Date.parse(localInputs.expired_time);
@@ -258,6 +399,14 @@ const EditTokenModal = (props) => {
         }
         localInputs.model_limits = localInputs.model_limits.join(',');
         localInputs.model_limits_enabled = localInputs.model_limits.length > 0;
+        const packageResult = normalizePackageFields(localInputs);
+        if (!packageResult.ok) {
+          showError(packageResult.message);
+          setLoading(false);
+          break;
+        }
+        delete localInputs.remain_amount;
+        delete localInputs.package_limit_amount;
         let res = await API.post(`/api/token/`, localInputs);
         const { success, message } = res.data;
         if (success) {
@@ -330,12 +479,52 @@ const EditTokenModal = (props) => {
         <Form
           key={isEdit ? 'edit' : 'new'}
           initValues={getInitValues()}
-          getFormApi={(api) => (formApiRef.current = api)}
+          getFormApi={(api) => {
+            formApiRef.current = api;
+            applyLoadedTokenValues();
+          }}
           onSubmit={submit}
+          onSubmitFail={(errs) => {
+            const first = Object.values(errs || {})[0];
+            if (first) {
+              showError(Array.isArray(first) ? first[0] : first);
+            }
+            formApiRef.current?.scrollToError();
+          }}
         >
           {({ values }) => (
             <div className='p-2'>
-              {/* 基本信息 */}
+              <Card className='!rounded-2xl shadow-sm border-0'>
+                <div className='flex items-center mb-2'>
+                  <Avatar size='small' color='orange' className='mr-2 shadow-md'>
+                    <IconCreditCard size={16} />
+                  </Avatar>
+                  <div>
+                    <Text className='text-lg font-medium'>{t('创建模式')}</Text>
+                    <div className='text-xs text-gray-600'>
+                      {t('标准令牌保持现有体验；套餐令牌可按周期配置额度')}
+                    </div>
+                  </div>
+                </div>
+                <Space wrap>
+                  <Button
+                    type={tokenMode === 'standard' ? 'primary' : 'tertiary'}
+                    theme={tokenMode === 'standard' ? 'solid' : 'light'}
+                    onClick={() => switchTokenMode('standard')}
+                  >
+                    {t('标准令牌')}
+                  </Button>
+                  <Button
+                    type={tokenMode === 'package' ? 'primary' : 'tertiary'}
+                    theme={tokenMode === 'package' ? 'solid' : 'light'}
+                    onClick={() => switchTokenMode('package')}
+                  >
+                    {t('套餐令牌')}
+                  </Button>
+                </Space>
+              </Card>
+
+              {/* 基础信息 */}
               <Card className='!rounded-2xl shadow-sm border-0'>
                 <div className='flex items-center mb-2'>
                   <Avatar size='small' color='blue' className='mr-2 shadow-md'>
@@ -403,7 +592,7 @@ const EditTokenModal = (props) => {
                         { required: true, message: t('请选择过期时间') },
                         {
                           validator: (rule, value) => {
-                            // 允许 -1 表示永不过期，也允许空值在必填校验时被拦截
+                            // 允许 -1 表示永不过期，空值交给必填校验处理。
                             if (value === -1 || !value)
                               return Promise.resolve();
                             const time = Date.parse(value);
@@ -489,26 +678,21 @@ const EditTokenModal = (props) => {
                 </div>
                 <Row gutter={12}>
                   <Col span={24}>
-                    <Form.AutoComplete
-                      field='remain_quota'
-                      label={t('额度')}
-                      placeholder={t('请输入额度')}
-                      type='number'
+                    <Form.InputNumber
+                      field='remain_amount'
+                      label={t('总额度金额 (USD)')}
+                      placeholder={t('例如 500（USD）')}
+                      prefix='$'
+                      min={0}
+                      precision={2}
                       disabled={values.unlimited_quota}
-                      extraText={renderQuotaWithPrompt(values.remain_quota)}
                       rules={
                         values.unlimited_quota
                           ? []
-                          : [{ required: true, message: t('请输入额度') }]
+                          : [{ required: true, message: t('请输入总额度金额（USD）') }]
                       }
-                      data={[
-                        { value: 500000, label: '1$' },
-                        { value: 5000000, label: '10$' },
-                        { value: 25000000, label: '50$' },
-                        { value: 50000000, label: '100$' },
-                        { value: 250000000, label: '500$' },
-                        { value: 500000000, label: '1000$' },
-                      ]}
+                      extraText={t('按 USD 输入，仅用于换算，实际保存的是额度')}
+                      style={{ width: '100%' }}
                     />
                   </Col>
                   <Col span={24}>
@@ -523,6 +707,84 @@ const EditTokenModal = (props) => {
                   </Col>
                 </Row>
               </Card>
+
+              {tokenMode === 'package' && (
+                <Card className='!rounded-2xl shadow-sm border-0'>
+                  <div className='flex items-center mb-2'>
+                    <Avatar size='small' color='red' className='mr-2 shadow-md'>
+                      <IconCreditCard size={16} />
+                    </Avatar>
+                    <div>
+                      <Text className='text-lg font-medium'>{t('套餐配置')}</Text>
+                      <div className='text-xs text-gray-600'>
+                        {t('仅设置周期和每周期额度，计费规则保持不变')}
+                      </div>
+                    </div>
+                  </div>
+                  <Row gutter={12}>
+                    <Col span={24}>
+                      <Form.Select
+                        field='package_period'
+                        label={t('套餐周期')}
+                        optionList={[
+                          { label: t('每日'), value: 'daily' },
+                          { label: t('每周'), value: 'weekly' },
+                          { label: t('每月'), value: 'monthly' },
+                          { label: t('自定义'), value: 'custom' },
+                        ]}
+                        style={{ width: '100%' }}
+                      />
+                    </Col>
+                    <Col
+                      span={24}
+                      style={{
+                        display: values.package_period === 'custom' ? 'none' : 'block',
+                      }}
+                    >
+                      <Form.Select
+                        field='package_period_mode'
+                        label={t('周期模式')}
+                        optionList={[
+                          { label: t('相对周期'), value: 'relative' },
+                          { label: t('自然周期'), value: 'natural' },
+                        ]}
+                        extraText={
+                          values.package_period_mode === 'natural'
+                            ? t('每日/每周一/每月1号 00:00 重置')
+                            : t('从激活时间起按固定间隔重置')
+                        }
+                        style={{ width: '100%' }}
+                      />
+                    </Col>
+                    <Col span={24}>
+                      <Form.InputNumber
+                        field='package_limit_amount'
+                        label={t('周期金额 (USD)')}
+                        placeholder={t('例如 10（USD）')}
+                        prefix='$'
+                        min={0}
+                        precision={2}
+                        style={{ width: '100%' }}
+                        rules={[{ required: true, message: t('请输入周期金额（USD）') }]}
+                      />
+                    </Col>
+                    <Col
+                      span={24}
+                      style={{
+                        display: values.package_period === 'custom' ? 'block' : 'none',
+                      }}
+                    >
+                      <Form.InputNumber
+                        field='package_custom_seconds'
+                        label={t('自定义周期秒数')}
+                        min={1}
+                        extraText={t('例如 86400 表示每天重置')}
+                        style={{ width: '100%' }}
+                      />
+                    </Col>
+                  </Row>
+                </Card>
+              )}
 
               {/* 访问限制 */}
               <Card className='!rounded-2xl shadow-sm border-0'>

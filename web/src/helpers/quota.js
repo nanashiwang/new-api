@@ -23,3 +23,17 @@ export const displayAmountToQuota = (amount) => {
   const usd = type === 'USD' ? val : val / (rate || 1);
   return Math.round(usd * getQuotaPerUnit());
 };
+
+// 将 USD 金额转换为配额，与当前展示货币无关。
+export const usdAmountToQuota = (usdAmount) => {
+  const val = Number(usdAmount || 0);
+  if (!Number.isFinite(val) || val <= 0) return 0;
+  return Math.round(val * getQuotaPerUnit());
+};
+
+// 将配额转换为 USD 金额，与当前展示货币无关。
+export const quotaToUSDAmount = (quota) => {
+  const q = Number(quota || 0);
+  if (!Number.isFinite(q) || q <= 0) return 0;
+  return q / getQuotaPerUnit();
+};

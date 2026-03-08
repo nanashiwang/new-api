@@ -325,13 +325,13 @@ function TokensPage() {
   }, []);
 
   const {
-    // Edit state
+    // 编辑状态
     showEdit,
     editingToken,
     closeEdit,
     refresh,
 
-    // Actions state
+    // 操作函数 state
     selectedKeys,
     setEditingToken,
     setShowEdit,
@@ -353,7 +353,7 @@ function TokensPage() {
     compactMode,
     setCompactMode,
 
-    // Translation
+    // 国际化
     t,
   } = tokensData;
 
