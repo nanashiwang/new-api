@@ -1,13 +1,15 @@
 package console_setting
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"github.com/QuantumNous/new-api/common"
 )
 
 var (
@@ -24,7 +26,7 @@ var (
 
 func parseJSONArray(jsonStr string, typeName string) ([]map[string]interface{}, error) {
 	var list []map[string]interface{}
-	if err := json.Unmarshal([]byte(jsonStr), &list); err != nil {
+	if err := common.UnmarshalJsonStr(jsonStr, &list); err != nil {
 		return nil, fmt.Errorf("%s格式错误：%s", typeName, err.Error())
 	}
 	return list, nil
@@ -55,8 +57,12 @@ func getJSONList(jsonStr string) []map[string]interface{} {
 		return []map[string]interface{}{}
 	}
 	var list []map[string]interface{}
-	json.Unmarshal([]byte(jsonStr), &list)
+	_ = common.UnmarshalJsonStr(jsonStr, &list)
 	return list
+}
+
+func countCharacters(text string) int {
+	return utf8.RuneCountInString(text)
 }
 
 func ValidateConsoleSettings(settingsStr string, settingType string) error {
@@ -172,11 +178,11 @@ func validateAnnouncements(announcementsStr string) error {
 				}
 			}
 		}
-		if len(content) > 500 {
+		if countCharacters(content) > 500 {
 			return fmt.Errorf("第%d个公告的内容长度不能超过500字符", i+1)
 		}
 		if extra, exists := ann["extra"]; exists {
-			if extraStr, ok := extra.(string); ok && len(extraStr) > 200 {
+			if extraStr, ok := extra.(string); ok && countCharacters(extraStr) > 200 {
 				return fmt.Errorf("第%d个公告的说明长度不能超过200字符", i+1)
 			}
 		}

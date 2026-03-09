@@ -48,6 +48,11 @@ import { useTranslation } from 'react-i18next';
 
 const { Text } = Typography;
 
+const ANNOUNCEMENT_CONTENT_LIMIT = 500;
+const ANNOUNCEMENT_EXTRA_LIMIT = 200;
+
+const getCharacterCount = (value = '') => Array.from(value || '').length;
+
 const SettingsAnnouncements = ({ options, refresh }) => {
   const { t } = useTranslation();
 
@@ -74,6 +79,30 @@ const SettingsAnnouncements = ({ options, refresh }) => {
   const [panelEnabled, setPanelEnabled] = useState(true);
 
   const formApiRef = useRef(null);
+  const contentCharacterCount = getCharacterCount(announcementForm.content);
+  const extraCharacterCount = getCharacterCount(announcementForm.extra);
+
+  const contentCountText = `按字符数计算：${contentCharacterCount}/${ANNOUNCEMENT_CONTENT_LIMIT}`;
+  const extraCountText = `按字符数计算：${extraCharacterCount}/${ANNOUNCEMENT_EXTRA_LIMIT}`;
+
+  const validateAnnouncementForm = () => {
+    if (!announcementForm.content || !announcementForm.publishDate) {
+      showError('请填写完整的公告信息');
+      return false;
+    }
+
+    if (contentCharacterCount > ANNOUNCEMENT_CONTENT_LIMIT) {
+      showError(`公告内容不能超过${ANNOUNCEMENT_CONTENT_LIMIT}个字符`);
+      return false;
+    }
+
+    if (extraCharacterCount > ANNOUNCEMENT_EXTRA_LIMIT) {
+      showError(`说明信息不能超过${ANNOUNCEMENT_EXTRA_LIMIT}个字符`);
+      return false;
+    }
+
+    return true;
+  };
 
   const typeOptions = [
     { value: 'default', label: t('默认') },
@@ -268,8 +297,7 @@ const SettingsAnnouncements = ({ options, refresh }) => {
   };
 
   const handleSaveAnnouncement = async () => {
-    if (!announcementForm.content || !announcementForm.publishDate) {
-      showError('请填写完整的公告信息');
+    if (!validateAnnouncementForm()) {
       return;
     }
 
@@ -536,7 +564,7 @@ const SettingsAnnouncements = ({ options, refresh }) => {
             field='content'
             label={t('公告内容')}
             placeholder={t('请输入公告内容（支持 Markdown/HTML）')}
-            maxCount={500}
+            extraText={contentCountText}
             rows={3}
             rules={[{ required: true, message: t('请输入公告内容') }]}
             onChange={(value) =>
@@ -574,6 +602,7 @@ const SettingsAnnouncements = ({ options, refresh }) => {
             field='extra'
             label={t('说明信息')}
             placeholder={t('可选，公告的补充说明')}
+            extraText={extraCountText}
             onChange={(value) =>
               setAnnouncementForm({ ...announcementForm, extra: value })
             }
@@ -619,13 +648,25 @@ const SettingsAnnouncements = ({ options, refresh }) => {
         <TextArea
           value={announcementForm.content}
           placeholder={t('请输入公告内容（支持 Markdown/HTML）')}
-          maxCount={500}
           rows={15}
           style={{ width: '100%' }}
           onChange={(value) =>
             setAnnouncementForm({ ...announcementForm, content: value })
           }
         />
+        <div
+          style={{
+            marginTop: 8,
+            textAlign: 'right',
+            fontSize: 12,
+            color:
+              contentCharacterCount > ANNOUNCEMENT_CONTENT_LIMIT
+                ? 'var(--semi-color-danger)'
+                : 'var(--semi-color-text-2)',
+          }}
+        >
+          {contentCountText}
+        </div>
       </Modal>
     </>
   );
