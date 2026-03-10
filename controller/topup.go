@@ -3,13 +3,13 @@ package controller
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"net/url"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
@@ -129,39 +129,47 @@ func RequestEpay(c *gin.Context) {
 	var req EpayRequest
 	err := c.ShouldBindJSON(&req)
 	if err != nil {
-		c.JSON(200, gin.H{"message": "error", "data": "参数错误"})
+		c.JSON(200, gin.H{"message": "error", "data": "invalid parameters"})
 		return
 	}
 	if req.Amount < getMinTopup() {
-		c.JSON(200, gin.H{"message": "error", "data": fmt.Sprintf("充值数量不能小于 %d", getMinTopup())})
+		c.JSON(200, gin.H{"message": "error", "data": fmt.Sprintf("top-up amount must be at least %d", getMinTopup())})
 		return
 	}
 
 	id := c.GetInt("id")
 	group, err := model.GetUserGroup(id, true)
 	if err != nil {
-		c.JSON(200, gin.H{"message": "error", "data": "获取用户分组失败"})
+		c.JSON(200, gin.H{"message": "error", "data": "failed to get user group"})
 		return
 	}
 	payMoney := getPayMoney(req.Amount, group)
 	if payMoney < 0.01 {
-		c.JSON(200, gin.H{"message": "error", "data": "充值金额过低"})
+		c.JSON(200, gin.H{"message": "error", "data": "top-up amount is too low"})
 		return
 	}
 
 	if !operation_setting.ContainsPayMethod(req.PaymentMethod) {
-		c.JSON(200, gin.H{"message": "error", "data": "支付方式不存在"})
+		c.JSON(200, gin.H{"message": "error", "data": "payment method does not exist"})
 		return
 	}
 
 	callBackAddress := service.GetCallbackAddress()
-	returnUrl, _ := url.Parse(system_setting.ServerAddress + "/console/log")
-	notifyUrl, _ := url.Parse(callBackAddress + "/api/user/epay/notify")
+	returnUrl, err := url.Parse(callBackAddress + "/api/user/epay/return")
+	if err != nil {
+		c.JSON(200, gin.H{"message": "error", "data": "callback address configuration error"})
+		return
+	}
+	notifyUrl, err := url.Parse(callBackAddress + "/api/user/epay/notify")
+	if err != nil {
+		c.JSON(200, gin.H{"message": "error", "data": "callback address configuration error"})
+		return
+	}
 	tradeNo := fmt.Sprintf("%s%d", common.GetRandomString(6), time.Now().Unix())
 	tradeNo = fmt.Sprintf("USR%dNO%s", id, tradeNo)
 	client := GetEpayClient()
 	if client == nil {
-		c.JSON(200, gin.H{"message": "error", "data": "当前管理员未配置支付信息"})
+		c.JSON(200, gin.H{"message": "error", "data": "payment config is not set"})
 		return
 	}
 	uri, params, err := client.Purchase(&epay.PurchaseArgs{
@@ -174,7 +182,7 @@ func RequestEpay(c *gin.Context) {
 		ReturnUrl:      returnUrl,
 	})
 	if err != nil {
-		c.JSON(200, gin.H{"message": "error", "data": "拉起支付失败"})
+		c.JSON(200, gin.H{"message": "error", "data": "failed to start payment"})
 		return
 	}
 	amount := req.Amount
@@ -194,7 +202,7 @@ func RequestEpay(c *gin.Context) {
 	}
 	err = topUp.Insert()
 	if err != nil {
-		c.JSON(200, gin.H{"message": "error", "data": "创建订单失败"})
+		c.JSON(200, gin.H{"message": "error", "data": "failed to create order"})
 		return
 	}
 	c.JSON(200, gin.H{"message": "success", "data": params, "url": uri})
@@ -204,7 +212,7 @@ func RequestEpay(c *gin.Context) {
 var orderLocks sync.Map
 var createLock sync.Mutex
 
-// LockOrder 尝试对给定订单号加锁
+// LockOrder tries to lock a trade number in-process.
 func LockOrder(tradeNo string) {
 	lock, ok := orderLocks.Load(tradeNo)
 	if !ok {
@@ -219,7 +227,7 @@ func LockOrder(tradeNo string) {
 	lock.(*sync.Mutex).Lock()
 }
 
-// UnlockOrder 释放给定订单号的锁
+// UnlockOrder releases an in-process lock for a trade number.
 func UnlockOrder(tradeNo string) {
 	lock, ok := orderLocks.Load(tradeNo)
 	if ok {
@@ -227,95 +235,101 @@ func UnlockOrder(tradeNo string) {
 	}
 }
 
-func EpayNotify(c *gin.Context) {
-	var params map[string]string
-
-	if c.Request.Method == "POST" {
-		// POST 请求：从 POST body 解析参数
+func parseEpayCallbackParams(c *gin.Context) (map[string]string, error) {
+	if c.Request.Method == http.MethodPost {
 		if err := c.Request.ParseForm(); err != nil {
-			log.Println("易支付回调POST解析失败:", err)
-			_, _ = c.Writer.Write([]byte("fail"))
-			return
+			return nil, err
 		}
-		params = lo.Reduce(lo.Keys(c.Request.PostForm), func(r map[string]string, t string, i int) map[string]string {
-			r[t] = c.Request.PostForm.Get(t)
-			return r
+		params := lo.Reduce(lo.Keys(c.Request.PostForm), func(result map[string]string, key string, index int) map[string]string {
+			result[key] = c.Request.PostForm.Get(key)
+			return result
 		}, map[string]string{})
-	} else {
-		// GET 请求：从 URL Query 解析参数
-		params = lo.Reduce(lo.Keys(c.Request.URL.Query()), func(r map[string]string, t string, i int) map[string]string {
-			r[t] = c.Request.URL.Query().Get(t)
-			return r
-		}, map[string]string{})
+		if len(params) == 0 {
+			return nil, fmt.Errorf("empty callback params")
+		}
+		return params, nil
 	}
 
+	params := lo.Reduce(lo.Keys(c.Request.URL.Query()), func(result map[string]string, key string, index int) map[string]string {
+		result[key] = c.Request.URL.Query().Get(key)
+		return result
+	}, map[string]string{})
 	if len(params) == 0 {
-		log.Println("易支付回调参数为空")
+		return nil, fmt.Errorf("empty callback params")
+	}
+	return params, nil
+}
+
+func EpayNotify(c *gin.Context) {
+	params, err := parseEpayCallbackParams(c)
+	if err != nil {
+		log.Println("epay notify parse failed:", err)
 		_, _ = c.Writer.Write([]byte("fail"))
 		return
 	}
+
 	client := GetEpayClient()
 	if client == nil {
-		log.Println("易支付回调失败 未找到配置信息")
-		_, err := c.Writer.Write([]byte("fail"))
-		if err != nil {
-			log.Println("易支付回调写入失败")
-		}
+		log.Println("epay notify failed: payment config missing")
+		_, _ = c.Writer.Write([]byte("fail"))
 		return
 	}
 	verifyInfo, err := client.Verify(params)
-	if err == nil && verifyInfo.VerifyStatus {
-		_, err := c.Writer.Write([]byte("success"))
-		if err != nil {
-			log.Println("易支付回调写入失败")
-		}
-	} else {
-		_, err := c.Writer.Write([]byte("fail"))
-		if err != nil {
-			log.Println("易支付回调写入失败")
-		}
-		log.Println("易支付回调签名验证失败")
+	if err != nil || !verifyInfo.VerifyStatus {
+		log.Println("epay notify signature verification failed")
+		_, _ = c.Writer.Write([]byte("fail"))
+		return
+	}
+	if verifyInfo.TradeStatus != epay.StatusTradeSuccess {
+		log.Printf("epay notify unexpected trade status: %v", verifyInfo)
+		_, _ = c.Writer.Write([]byte("fail"))
 		return
 	}
 
+	LockOrder(verifyInfo.ServiceTradeNo)
+	defer UnlockOrder(verifyInfo.ServiceTradeNo)
+	if err := model.CompleteTopUpByTradeNo(verifyInfo.ServiceTradeNo, "epay"); err != nil {
+		log.Printf("epay notify complete order failed: trade_no=%s err=%s", verifyInfo.ServiceTradeNo, err.Error())
+		_, _ = c.Writer.Write([]byte("fail"))
+		return
+	}
+
+	_, _ = c.Writer.Write([]byte("success"))
+}
+
+func EpayReturn(c *gin.Context) {
+	failURL := system_setting.ServerAddress + "/console/topup?pay=fail"
+	successURL := system_setting.ServerAddress + "/console/topup?pay=success"
+	pendingURL := system_setting.ServerAddress + "/console/topup?pay=pending"
+
+	params, err := parseEpayCallbackParams(c)
+	if err != nil {
+		c.Redirect(http.StatusFound, failURL)
+		return
+	}
+
+	client := GetEpayClient()
+	if client == nil {
+		c.Redirect(http.StatusFound, failURL)
+		return
+	}
+	verifyInfo, err := client.Verify(params)
+	if err != nil || !verifyInfo.VerifyStatus {
+		c.Redirect(http.StatusFound, failURL)
+		return
+	}
 	if verifyInfo.TradeStatus == epay.StatusTradeSuccess {
-		log.Println(verifyInfo)
 		LockOrder(verifyInfo.ServiceTradeNo)
 		defer UnlockOrder(verifyInfo.ServiceTradeNo)
-		topUp := model.GetTopUpByTradeNo(verifyInfo.ServiceTradeNo)
-		if topUp == nil {
-			log.Printf("易支付回调未找到订单: %v", verifyInfo)
+		if err := model.CompleteTopUpByTradeNo(verifyInfo.ServiceTradeNo, "epay_return"); err != nil {
+			log.Printf("epay return complete order failed: trade_no=%s err=%s", verifyInfo.ServiceTradeNo, err.Error())
+			c.Redirect(http.StatusFound, failURL)
 			return
 		}
-		if topUp.Status == common.TopUpStatusPending {
-			// 回调确认后先落订单完成时间，后续返佣台账会基于 complete_time 计算业务日期（biz_date）。
-			topUp.Status = common.TopUpStatusSuccess
-			topUp.CompleteTime = common.GetTimestamp()
-			err := topUp.Update()
-			if err != nil {
-				log.Printf("易支付回调更新订单失败: %v", topUp)
-				return
-			}
-			//user, _ := model.GetUserById(topUp.UserId, false)
-			//user.Quota += topUp.Amount * 500000
-			dAmount := decimal.NewFromInt(int64(topUp.Amount))
-			dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-			quotaToAdd := int(dAmount.Mul(dQuotaPerUnit).IntPart())
-			err = model.IncreaseUserQuota(topUp.UserId, quotaToAdd, true)
-			if err != nil {
-				log.Printf("易支付回调更新用户失败: %v", topUp)
-				return
-			}
-			log.Printf("易支付回调更新用户成功 %v", topUp)
-			model.RecordLog(topUp.UserId, model.LogTypeTopup, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%f", logger.LogQuota(quotaToAdd), topUp.Money))
-			// 只记录返佣台账，实际到账由 T+1 结算任务处理。
-			if enqueueErr := model.EnqueueInviteCommissionFromTopUp(topUp, quotaToAdd); enqueueErr != nil {
-				common.SysError("enqueue invite commission (epay) failed: " + enqueueErr.Error())
-			}
-		}
-	} else {
-		log.Printf("易支付异常回调: %v", verifyInfo)
+		c.Redirect(http.StatusFound, successURL)
+		return
 	}
+	c.Redirect(http.StatusFound, pendingURL)
 }
 
 func RequestAmount(c *gin.Context) {
@@ -347,18 +361,13 @@ func RequestAmount(c *gin.Context) {
 func GetUserTopUps(c *gin.Context) {
 	userId := c.GetInt("id")
 	pageInfo := common.GetPageQuery(c)
-	keyword := c.Query("keyword")
-
-	var (
-		topups []*model.TopUp
-		total  int64
-		err    error
-	)
-	if keyword != "" {
-		topups, total, err = model.SearchUserTopUps(userId, keyword, pageInfo)
-	} else {
-		topups, total, err = model.GetUserTopUps(userId, pageInfo)
+	params := model.TopUpSearchParams{
+		Keyword:       c.Query("keyword"),
+		Status:        c.Query("status"),
+		PaymentMethod: c.Query("payment_method"),
 	}
+
+	topups, total, err := model.GetUserTopUpsByParams(userId, params, pageInfo)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -369,21 +378,17 @@ func GetUserTopUps(c *gin.Context) {
 	common.ApiSuccess(c, pageInfo)
 }
 
-// GetAllTopUps 管理员获取全平台充值记录
+// GetAllTopUps returns all platform top-up records for admins.
 func GetAllTopUps(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
-	keyword := c.Query("keyword")
-
-	var (
-		topups []*model.TopUp
-		total  int64
-		err    error
-	)
-	if keyword != "" {
-		topups, total, err = model.SearchAllTopUps(keyword, pageInfo)
-	} else {
-		topups, total, err = model.GetAllTopUps(pageInfo)
+	params := model.TopUpSearchParams{
+		Keyword:       c.Query("keyword"),
+		Username:      c.Query("username"),
+		Status:        c.Query("status"),
+		PaymentMethod: c.Query("payment_method"),
 	}
+
+	topups, total, err := model.GetAllTopUpsByParams(params, pageInfo)
 	if err != nil {
 		common.ApiError(c, err)
 		return

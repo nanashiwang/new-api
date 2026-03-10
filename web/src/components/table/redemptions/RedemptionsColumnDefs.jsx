@@ -105,9 +105,24 @@ export const getRedemptionsColumns = ({
       },
     },
     {
+      title: t('权益类型'),
+      dataIndex: 'benefit_type',
+      render: (text) => {
+        const benefitType = text || 'quota';
+        return (
+          <Tag color={benefitType === 'subscription' ? 'blue' : 'grey'} shape='circle'>
+            {benefitType === 'subscription' ? t('套餐') : t('额度')}
+          </Tag>
+        );
+      },
+    },
+    {
       title: t('额度'),
       dataIndex: 'quota',
-      render: (text) => {
+      render: (text, record) => {
+        if ((record?.benefit_type || 'quota') === 'subscription') {
+          return <div>{record?.plan_title || `#${record?.plan_id || '-'}`}</div>;
+        }
         return (
           <div>
             <Tag color='grey' shape='circle'>
