@@ -17,8 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Button,
   Card,
   Empty,
   SideSheet,
@@ -38,26 +39,37 @@ import CardTable from '../../../common/ui/CardTable';
 
 const { Text } = Typography;
 
-const UserInviteRelationsSheet = ({ visible, onCancel, user, t }) => {
+const initialRelations = {
+  user: null,
+  inviter: null,
+  invitees: {
+    items: [],
+    total: 0,
+    page: 1,
+    page_size: 10,
+  },
+  invite_income_summary: {
+    direct_total_quota: 0,
+    recharge_total_quota: 0,
+    total_quota: 0,
+  },
+};
+
+const UserInviteRelationsSheet = ({
+  visible,
+  onCancel,
+  user,
+  onNavigateUser,
+  onBack,
+  canGoBack = false,
+  t,
+}) => {
   const isMobile = useIsMobile();
   const [loading, setLoading] = useState(false);
-  const [relations, setRelations] = useState({
-    user: null,
-    inviter: null,
-    invitees: {
-      items: [],
-      total: 0,
-      page: 1,
-      page_size: 10,
-    },
-    invite_income_summary: {
-      direct_total_quota: 0,
-      recharge_total_quota: 0,
-      total_quota: 0,
-    },
-  });
+  const [relations, setRelations] = useState(initialRelations);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const latestRequestRef = useRef(0);
 
   // 按用户维度查询邀请关系：
   // 1. 当前用户基本信息
@@ -67,6 +79,8 @@ const UserInviteRelationsSheet = ({ visible, onCancel, user, t }) => {
     if (!user?.id) {
       return;
     }
+    const requestId = latestRequestRef.current + 1;
+    latestRequestRef.current = requestId;
     setLoading(true);
     try {
       const res = await API.get(`/api/user/${user.id}/invite-relations`, {
@@ -76,6 +90,9 @@ const UserInviteRelationsSheet = ({ visible, onCancel, user, t }) => {
         },
       });
       const { success, message, data } = res.data || {};
+      if (latestRequestRef.current !== requestId) {
+        return;
+      }
       if (!success) {
         showError(message || t('加载失败'));
         return;
@@ -96,19 +113,27 @@ const UserInviteRelationsSheet = ({ visible, onCancel, user, t }) => {
         },
       });
     } catch (error) {
-      showError(t('请求失败'));
+      if (latestRequestRef.current === requestId) {
+        showError(t('请求失败'));
+      }
     } finally {
-      setLoading(false);
+      if (latestRequestRef.current === requestId) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
     if (!visible) {
+      latestRequestRef.current += 1;
+      setRelations(initialRelations);
+      setLoading(false);
       return;
     }
     // 每次打开抽屉重置分页，确保不同用户之间不会共享上一次翻页状态。
     setPage(1);
     setPageSize(10);
+    setRelations(initialRelations);
     loadRelations(1, 10);
   }, [visible, user?.id]);
 
@@ -205,6 +230,9 @@ const UserInviteRelationsSheet = ({ visible, onCancel, user, t }) => {
   const inviteesTotal = Number(relations?.invitees?.total || 0);
   const relationUser = relations?.user || user || null;
   const relationInviter = relations?.inviter || null;
+  const inviterDisplayName = relationInviter
+    ? `${relationInviter?.id} / ${relationInviter?.username || '-'}`
+    : '';
 
   return (
     <SideSheet
@@ -219,14 +247,35 @@ const UserInviteRelationsSheet = ({ visible, onCancel, user, t }) => {
         <div className='p-3 space-y-3'>
           <Card className='!rounded-2xl shadow-sm border-0'>
             <div className='flex flex-col gap-2'>
+              {canGoBack ? (
+                <div>
+                  <Button
+                    type='tertiary'
+                    theme='borderless'
+                    size='small'
+                    className='!px-0'
+                    onClick={onBack}
+                  >
+                    {t('返回上一级')}
+                  </Button>
+                </div>
+              ) : null}
               <Text strong>
                 {t('当前用户')}：{relationUser?.id || '-'} /{' '}
                 {relationUser?.username || '-'}
               </Text>
               {relationInviter ? (
                 <Text>
-                  {t('邀请人')}：{relationInviter?.id} /{' '}
-                  {relationInviter?.username || '-'}
+                  {t('邀请人')}：
+                  <Button
+                    type='tertiary'
+                    theme='borderless'
+                    size='small'
+                    className='!px-0'
+                    onClick={() => onNavigateUser?.(relationInviter)}
+                  >
+                    {inviterDisplayName}
+                  </Button>
                 </Text>
               ) : (
                 <Text type='tertiary'>{t('无邀请人')}</Text>

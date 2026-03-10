@@ -224,7 +224,13 @@ const renderSubscriptionStatus = (record, t, showUserSubscriptionsModal) => {
 /**
  * Render invite information
  */
-const renderInviteInfo = (text, record, t, showInviteRelationsModal) => {
+const renderInviteInfo = (
+  text,
+  record,
+  t,
+  showInviteRelationsModal,
+  openInviteRelationsUser,
+) => {
   const inviterText =
     record.inviter_id === 0
       ? t('无邀请人')
@@ -240,9 +246,28 @@ const renderInviteInfo = (text, record, t, showInviteRelationsModal) => {
         <Tag color='white' shape='circle' className='!text-xs'>
           {t('收益')}: {renderQuota(record.aff_history_quota)}
         </Tag>
-        <Tag color='white' shape='circle' className='!text-xs'>
-          {inviterText}
-        </Tag>
+        {record.inviter_id > 0 ? (
+          <Button
+            type='tertiary'
+            size='small'
+            theme='borderless'
+            className='!px-0'
+            onClick={() =>
+              openInviteRelationsUser?.({
+                id: record.inviter_id,
+                username: record.inviter_username || '',
+              })
+            }
+          >
+            <Tag color='white' shape='circle' className='!text-xs cursor-pointer'>
+              {inviterText}
+            </Tag>
+          </Button>
+        ) : (
+          <Tag color='white' shape='circle' className='!text-xs'>
+            {inviterText}
+          </Tag>
+        )}
         <Button
           type='tertiary'
           size='small'
@@ -373,6 +398,7 @@ export const getUsersColumns = ({
   showResetTwoFAModal,
   showUserSubscriptionsModal,
   showInviteRelationsModal,
+  openInviteRelationsUser,
 }) => {
   return [
     {
@@ -426,7 +452,13 @@ export const getUsersColumns = ({
       title: t('邀请信息'),
       dataIndex: 'invite',
       render: (text, record, index) =>
-        renderInviteInfo(text, record, t, showInviteRelationsModal),
+        renderInviteInfo(
+          text,
+          record,
+          t,
+          showInviteRelationsModal,
+          openInviteRelationsUser,
+        ),
     },
     {
       title: '',

@@ -504,6 +504,7 @@
     "发现文档地址（Discovery URL，可选）": "发现文档地址（Discovery URL，可选）",
     "发行者 URL（Issuer URL）": "发行者 URL（Issuer URL）",
     "返回登录": "Retour à la connexion",
+    "返回上一级": "Retour au niveau précédent",
     "返回修改": "Revenir pour modifier",
     "访问 io.net 控制台的 API Keys 页面": "Visit the API Keys page of the io.net console",
     "访问模型部署功能需要先启用 io.net 部署服务": "Accessing model deployment features requires enabling the io.net deployment service first",

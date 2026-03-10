@@ -34,6 +34,12 @@ import ResetTwoFAModal from './modals/ResetTwoFAModal';
 import UserSubscriptionsModal from './modals/UserSubscriptionsModal';
 import UserInviteRelationsSheet from './modals/UserInviteRelationsSheet';
 
+const initialInviteRelationsState = {
+  visible: false,
+  currentUser: null,
+  historyStack: [],
+};
+
 const UsersTable = (usersData) => {
   const {
     users,
@@ -66,8 +72,9 @@ const UsersTable = (usersData) => {
   const [showResetTwoFAModal, setShowResetTwoFAModal] = useState(false);
   const [showUserSubscriptionsModal, setShowUserSubscriptionsModal] =
     useState(false);
-  const [showInviteRelationsSheet, setShowInviteRelationsSheet] =
-    useState(false);
+  const [inviteRelationsState, setInviteRelationsState] = useState(
+    initialInviteRelationsState,
+  );
 
   // Modal handlers
   const showPromoteUserModal = (user) => {
@@ -107,8 +114,56 @@ const UsersTable = (usersData) => {
   };
 
   const showInviteRelationsUserModal = (user) => {
-    setModalUser(user);
-    setShowInviteRelationsSheet(true);
+    if (!user?.id) {
+      return;
+    }
+    setInviteRelationsState({
+      visible: true,
+      currentUser: user,
+      historyStack: [user],
+    });
+  };
+
+  const navigateInviteRelationsTargetUser = (user) => {
+    if (!user?.id) {
+      return;
+    }
+    setInviteRelationsState((prev) => {
+      if (!prev.visible) {
+        return {
+          visible: true,
+          currentUser: user,
+          historyStack: [user],
+        };
+      }
+      if (prev.currentUser?.id === user.id) {
+        return prev;
+      }
+      return {
+        ...prev,
+        visible: true,
+        currentUser: user,
+        historyStack: [...prev.historyStack, user],
+      };
+    });
+  };
+
+  const closeInviteRelationsSheet = () => {
+    setInviteRelationsState(initialInviteRelationsState);
+  };
+
+  const goBackInviteRelationsUser = () => {
+    setInviteRelationsState((prev) => {
+      if (prev.historyStack.length <= 1) {
+        return prev;
+      }
+      const nextHistoryStack = prev.historyStack.slice(0, -1);
+      return {
+        ...prev,
+        currentUser: nextHistoryStack[nextHistoryStack.length - 1] || null,
+        historyStack: nextHistoryStack,
+      };
+    });
   };
 
   // Modal confirm handlers
@@ -151,6 +206,7 @@ const UsersTable = (usersData) => {
       showResetTwoFAModal: showResetTwoFAUserModal,
       showUserSubscriptionsModal: showUserSubscriptionsUserModal,
       showInviteRelationsModal: showInviteRelationsUserModal,
+      openInviteRelationsUser: showInviteRelationsUserModal,
     });
   }, [
     t,
@@ -274,9 +330,12 @@ const UsersTable = (usersData) => {
       />
 
       <UserInviteRelationsSheet
-        visible={showInviteRelationsSheet}
-        onCancel={() => setShowInviteRelationsSheet(false)}
-        user={modalUser}
+        visible={inviteRelationsState.visible}
+        onCancel={closeInviteRelationsSheet}
+        user={inviteRelationsState.currentUser}
+        onNavigateUser={navigateInviteRelationsTargetUser}
+        onBack={goBackInviteRelationsUser}
+        canGoBack={inviteRelationsState.historyStack.length > 1}
         t={t}
       />
     </>
