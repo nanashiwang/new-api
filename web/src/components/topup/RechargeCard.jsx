@@ -549,10 +549,10 @@ const RechargeCard = ({
                 <Button
                   type='primary'
                   theme='solid'
-                  onClick={topUp}
+                  onClick={() => topUp()}
                   loading={isSubmitting}
                 >
-                  {t('兑换额度')}
+                  {t('立即兑换')}
                 </Button>
               </div>
             }

@@ -27,8 +27,9 @@ import {
   renderQuotaWithAmount,
   copy,
   getQuotaPerUnit,
+  timestamp2string,
 } from '../../helpers';
-import { Modal, Toast } from '@douyinfe/semi-ui';
+import { Modal, Select, Toast } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
@@ -86,6 +87,15 @@ const TopUp = () => {
 
   // 计费弹窗状态
   const [openHistory, setOpenHistory] = useState(false);
+  const [redeemTargetModalOpen, setRedeemTargetModalOpen] = useState(false);
+  const [redeemTargetOptions, setRedeemTargetOptions] = useState([]);
+  const [redeemTargetPlanTitle, setRedeemTargetPlanTitle] = useState('');
+  const [selectedRenewTargetId, setSelectedRenewTargetId] = useState(0);
+
+  // 套餐兑换方式选择弹窗状态
+  const [purchaseModeModalOpen, setPurchaseModeModalOpen] = useState(false);
+  const [purchaseModePlanTitle, setPurchaseModePlanTitle] = useState('');
+  const [selectedPurchaseMode, setSelectedPurchaseMode] = useState('stack');
 
   // 订阅状态
   const [subscriptionPlans, setSubscriptionPlans] = useState([]);
@@ -106,33 +116,75 @@ const TopUp = () => {
     discount: {},
   });
 
-  const topUp = async () => {
+  const topUp = async (renewTargetSubscriptionId = 0, purchaseMode = '') => {
     if (redemptionCode === '') {
       showInfo(t('请输入兑换码！'));
       return;
     }
     setIsSubmitting(true);
     try {
-      const res = await API.post('/api/user/topup', {
+      const payload = {
         key: redemptionCode,
-      });
+        renew_target_subscription_id: renewTargetSubscriptionId || 0,
+      };
+      if (purchaseMode) {
+        payload.purchase_mode = purchaseMode;
+      }
+      // 统一兑换接口同时支持余额码与套餐码，前端不再根据入口拆两套逻辑。
+      const res = await API.post('/api/user/redeem', payload);
       const { success, message, data } = res.data;
       if (success) {
         showSuccess(t('兑换成功！'));
-        Modal.success({
-          title: t('兑换成功！'),
-          content: t('成功兑换额度：') + renderQuota(data),
-          centered: true,
-        });
-        if (userState.user) {
-          const updatedUser = {
-            ...userState.user,
-            quota: userState.user.quota + data,
-          };
-          userDispatch({ type: 'login', payload: updatedUser });
+        if (data?.benefit_type === 'subscription') {
+          // 套餐兑换后主要是刷新订阅态，而不是直接改本地余额。
+          Modal.success({
+            title: t('套餐兑换成功！'),
+            content:
+              data?.action_summary ||
+              t('已成功兑换套餐：') + (data?.plan_title || '-'),
+            centered: true,
+          });
+          await getSubscriptionSelf();
+        } else {
+          // 余额码仍然保留旧体验：弹出额度到账提示，并乐观更新本地余额展示。
+          Modal.success({
+            title: t('兑换成功！'),
+            content: t('成功兑换额度：') + renderQuota(data?.quota_added || 0),
+            centered: true,
+          });
+          if (userState.user) {
+            const updatedUser = {
+              ...userState.user,
+              quota: userState.user.quota + (data?.quota_added || 0),
+            };
+            userDispatch({ type: 'login', payload: updatedUser });
+          }
         }
         setRedemptionCode('');
+        setRedeemTargetModalOpen(false);
+        setRedeemTargetOptions([]);
+        setRedeemTargetPlanTitle('');
+        setSelectedRenewTargetId(0);
+        setPurchaseModeModalOpen(false);
+        setPurchaseModePlanTitle('');
+        setSelectedPurchaseMode('stack');
       } else {
+        // 套餐码未指定兑换方式时，弹出选择框让用户选择叠加或续费。
+        if (data?.code === 'redeem_select_purchase_mode') {
+          setPurchaseModePlanTitle(data?.plan_title || '');
+          setSelectedPurchaseMode('stack');
+          setPurchaseModeModalOpen(true);
+          return;
+        }
+        // 同套餐存在多条可续费订阅时，弹出选择框，由用户决定续到哪一条。
+        if (data?.code === 'redeem_select_renew_target') {
+          const options = (data?.options || []).map((item) => item?.subscription).filter(Boolean);
+          setRedeemTargetOptions(options);
+          setRedeemTargetPlanTitle(data?.plan_title || '');
+          setSelectedRenewTargetId(Number(options?.[0]?.id || 0));
+          setRedeemTargetModalOpen(true);
+          return;
+        }
         showError(message);
       }
     } catch (err) {
@@ -731,6 +783,68 @@ const TopUp = () => {
             <p>{t('是否确认充值？')}</p>
           </>
         )}
+      </Modal>
+
+      {/* 兑换码续费目标选择弹窗 */}
+      <Modal
+        title={t('选择续费目标')}
+        visible={redeemTargetModalOpen}
+        onOk={() => topUp(selectedRenewTargetId, selectedPurchaseMode || 'renew')}
+        onCancel={() => {
+          setRedeemTargetModalOpen(false);
+          setRedeemTargetOptions([]);
+          setRedeemTargetPlanTitle('');
+          setSelectedRenewTargetId(0);
+        }}
+        size='small'
+        centered
+        confirmLoading={isSubmitting}
+      >
+        <p>
+          {t('当前套餐存在多条可续费订阅，请选择要续费的目标')}：
+          {redeemTargetPlanTitle || '-'}
+        </p>
+        <Select
+          value={selectedRenewTargetId}
+          onChange={(value) => setSelectedRenewTargetId(Number(value || 0))}
+          style={{ width: '100%' }}
+          optionList={redeemTargetOptions.map((sub) => ({
+            label: `${t('订阅')} #${sub.id} · ${t('到期时间')} ${timestamp2string(sub.end_time)}`,
+            value: sub.id,
+          }))}
+        />
+      </Modal>
+
+      {/* 套餐码兑换方式选择弹窗 */}
+      <Modal
+        title={t('选择兑换方式')}
+        visible={purchaseModeModalOpen}
+        onOk={() => {
+          setPurchaseModeModalOpen(false);
+          topUp(0, selectedPurchaseMode);
+        }}
+        onCancel={() => {
+          setPurchaseModeModalOpen(false);
+          setPurchaseModePlanTitle('');
+          setSelectedPurchaseMode('stack');
+        }}
+        size='small'
+        centered
+        confirmLoading={isSubmitting}
+      >
+        <p>
+          {t('您正在兑换套餐')}：{purchaseModePlanTitle || '-'}
+        </p>
+        <p>{t('请选择兑换方式')}：</p>
+        <Select
+          value={selectedPurchaseMode}
+          onChange={(value) => setSelectedPurchaseMode(value)}
+          style={{ width: '100%' }}
+          optionList={[
+            { label: t('叠加（新增一条订阅）'), value: 'stack' },
+            { label: t('续费（延长现有订阅）'), value: 'renew' },
+          ]}
+        />
       </Modal>
 
       {/* 主布局区域 */}

@@ -130,7 +130,7 @@ func EnqueueInviteCommissionFromRedemptionTx(tx *gorm.DB, redemption *Redemption
 	}
 	// 仅信任 redemption.id；其余字段统一从数据库读取，避免调用方传入伪造数据。
 	dbRedemption := &Redemption{}
-	if err := tx.Select("id", "used_user_id", "quota", "redeemed_time", "status").
+	if err := tx.Select("id", "used_user_id", "quota", "redeemed_time", "status", "benefit_type", "plan_id").
 		First(dbRedemption, "id = ?", redemption.Id).Error; err != nil {
 		return err
 	}
@@ -139,9 +139,47 @@ func EnqueueInviteCommissionFromRedemptionTx(tx *gorm.DB, redemption *Redemption
 		return nil
 	}
 
+	// 返佣基数随兑换码权益类型变化：余额码按额度，套餐码按当前套餐售价折算。
+	// 这样可以保证“买套餐”和“兑套餐”走同一套返佣口径。
+	baseQuota, err := getRedemptionCommissionBaseQuotaTx(tx, dbRedemption)
+	if err != nil {
+		return err
+	}
 	// redemption.id 全局唯一，作为 trade_no 可保证幂等去重。
 	tradeNo := fmt.Sprintf("redeem:%d", dbRedemption.Id)
-	return enqueueInviteCommissionWithDB(tx, dbRedemption.UsedUserId, tradeNo, dbRedemption.RedeemedTime, dbRedemption.Quota)
+	return enqueueInviteCommissionWithDB(tx, dbRedemption.UsedUserId, tradeNo, dbRedemption.RedeemedTime, baseQuota)
+}
+
+// getRedemptionCommissionBaseQuotaTx 统一计算兑换码返佣基数。
+// 余额码直接使用兑换额度；套餐码按当前套餐售价折算额度。
+func getRedemptionCommissionBaseQuotaTx(tx *gorm.DB, redemption *Redemption) (int, error) {
+	if redemption == nil {
+		return 0, nil
+	}
+	if NormalizeRedemptionBenefitType(redemption.BenefitType) != RedemptionBenefitTypeSubscription {
+		// 余额码保持旧口径：返佣基数直接等于兑换到账额度。
+		return redemption.Quota, nil
+	}
+	if redemption.PlanId <= 0 {
+		return 0, nil
+	}
+	if operation_setting.Price <= 0 {
+		return 0, errors.New("invalid payment price setting")
+	}
+	plan, err := getSubscriptionPlanByIdTx(tx, redemption.PlanId)
+	if err != nil {
+		return 0, err
+	}
+	if plan == nil || plan.PriceAmount <= 0 {
+		// 当前套餐无有效售价时，不再给套餐兑换码产生返佣基数。
+		// 这里选择“不给返佣”而不是报错，是为了避免后台临时调整展示价导致历史码无法兑换。
+		return 0, nil
+	}
+	// 套餐码返佣和付费订阅保持同一套折算公式，避免不同入口口径不一致。
+	dBaseQuota := decimal.NewFromFloat(plan.PriceAmount).
+		Mul(decimal.NewFromFloat(common.QuotaPerUnit)).
+		Div(decimal.NewFromFloat(operation_setting.Price))
+	return int(dBaseQuota.IntPart()), nil
 }
 
 func enqueueInviteCommission(inviteeUserID int, tradeNo string, completeTime int64, baseQuota int) error {

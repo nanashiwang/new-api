@@ -1317,7 +1317,9 @@ func EmailBind(c *gin.Context) {
 }
 
 type topUpRequest struct {
-	Key string `json:"key"`
+	Key                       string `json:"key"`
+	RenewTargetSubscriptionId int    `json:"renew_target_subscription_id"`
+	PurchaseMode              string `json:"purchase_mode"`
 }
 
 var topUpLocks sync.Map
@@ -1389,6 +1391,64 @@ func TopUp(c *gin.Context) {
 		"message": "",
 		"data":    quota,
 	})
+}
+
+// Redeem 提供统一兑换入口，兼容余额码与套餐码两种权益。
+func Redeem(c *gin.Context) {
+	id := c.GetInt("id")
+	lock := getTopUpLock(id)
+	if !lock.TryLock() {
+		common.ApiErrorI18n(c, i18n.MsgUserTopUpProcessing)
+		return
+	}
+	defer lock.Unlock()
+
+	req := topUpRequest{}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	result, err := model.RedeemWithOptions(req.Key, id, req.RenewTargetSubscriptionId, req.PurchaseMode)
+	if err != nil {
+		if needTargetErr, ok := err.(*model.RedeemNeedRenewTargetError); ok {
+			// 多条可续费订阅时，由前端弹出选择器让用户自己决定续到哪一条。
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": needTargetErr.Error(),
+				"data": gin.H{
+					"code":       "redeem_select_renew_target",
+					"plan_id":    needTargetErr.PlanId,
+					"plan_title": needTargetErr.PlanTitle,
+					"options":    needTargetErr.Options,
+				},
+			})
+			return
+		}
+		if selectModeErr, ok := err.(*model.RedeemNeedSelectPurchaseModeError); ok {
+			// 套餐码未指定兑换方式时，返回特殊响应让前端弹出选择框。
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": selectModeErr.Error(),
+				"data": gin.H{
+					"code":       "redeem_select_purchase_mode",
+					"plan_id":    selectModeErr.PlanId,
+					"plan_title": selectModeErr.PlanTitle,
+				},
+			})
+			return
+		}
+		if errors.Is(err, model.ErrRedeemFailed) {
+			// 对外统一返回兑换失败文案，避免把内部细节直接暴露给前端。
+			common.ApiErrorI18n(c, i18n.MsgRedeemFailed)
+			return
+		}
+		common.ApiError(c, err)
+		return
+	}
+
+	// 统一兑换接口直接返回结构化结果，让前端根据权益类型自行处理展示和刷新。
+	common.ApiSuccess(c, result)
 }
 
 type UpdateUserSettingRequest struct {

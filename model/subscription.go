@@ -1845,3 +1845,89 @@ func PostConsumeUserSubscriptionDelta(userSubscriptionId int, delta int64) error
 		return tx.Save(&sub).Error
 	})
 }
+
+// bindSubscriptionWithOptionsTx 在指定事务内复用套餐绑定逻辑。
+// 该方法供非支付场景使用，例如管理员直绑、兑换码兑换等。
+func bindSubscriptionWithOptionsTx(tx *gorm.DB, userId int, plan *SubscriptionPlan, mode string, purchaseQuantity int, renewTargetSubscriptionId int, source string) (string, error) {
+	if tx == nil {
+		return "", errors.New("tx is nil")
+	}
+	if userId <= 0 || plan == nil || plan.Id <= 0 {
+		return "", errors.New("invalid userId or plan")
+	}
+	if purchaseQuantity <= 0 {
+		purchaseQuantity = 1
+	}
+	if strings.TrimSpace(source) == "" {
+		source = "order"
+	}
+
+	// renew_extend 模式下需要记住第一次创建/命中的订阅，后续份数都顺延到同一条订阅上。
+	renewTargetForExtend := 0
+	// 所有非支付发放入口都先锁用户，避免和支付回调、管理员操作并发改订阅。
+	if err := lockUserForSubscriptionMutationTx(tx, userId); err != nil {
+		return "", err
+	}
+	if mode == SubscriptionPurchaseModeRenewExtend {
+		activeSubs, err := getActiveUserSubscriptionsByPlanTx(tx, userId, plan.Id, 0)
+		if err != nil {
+			return "", err
+		}
+		if len(activeSubs) > 0 {
+			renewTargetForExtend = activeSubs[0].Id
+		}
+	}
+
+	for i := 0; i < purchaseQuantity; i++ {
+		switch mode {
+		case SubscriptionPurchaseModeRenew:
+			// renew 只允许续到现有生效订阅，不允许“没有目标时自动新建”。
+			_, renewed, err := renewUserSubscriptionByPlanTx(tx, userId, plan, renewTargetSubscriptionId)
+			if err != nil {
+				return "", err
+			}
+			if !renewed {
+				if renewTargetSubscriptionId > 0 {
+					return "", errors.New("续费目标订阅不存在或已失效")
+				}
+				return "", errors.New("无可续费的同规格订阅")
+			}
+		case SubscriptionPurchaseModeRenewExtend:
+			if renewTargetForExtend > 0 {
+				// renew_extend 的核心语义是“始终顺到同一条订阅上”。
+				_, renewed, renewErr := renewUserSubscriptionByPlanTx(tx, userId, plan, renewTargetForExtend)
+				if renewErr != nil {
+					return "", renewErr
+				}
+				if !renewed {
+					return "", errors.New("续费式顺延失败")
+				}
+				continue
+			}
+			createdSub, createErr := createUserSubscriptionFromPlanTx(tx, userId, plan, source, true)
+			if createErr != nil {
+				return "", createErr
+			}
+			// 第一次没有可顺延订阅时，先创建一条，再把后续份数都续到这条上。
+			renewTargetForExtend = createdSub.Id
+		default:
+			// stack 语义最直接：每份都新增一条订阅实例。
+			if _, err := createUserSubscriptionFromPlanTx(tx, userId, plan, source, true); err != nil {
+				return "", err
+			}
+		}
+	}
+
+	modeLabel := "叠加"
+	if mode == SubscriptionPurchaseModeRenew {
+		modeLabel = "续费"
+	} else if mode == SubscriptionPurchaseModeRenewExtend {
+		modeLabel = "续费式购买"
+	}
+	resultMessage := fmt.Sprintf("已按%s方式添加 %d 份套餐", modeLabel, purchaseQuantity)
+	if strings.TrimSpace(plan.UpgradeGroup) != "" {
+		_ = UpdateUserGroupCache(userId, plan.UpgradeGroup)
+		return fmt.Sprintf("%s，用户分组将升级到 %s", resultMessage, plan.UpgradeGroup), nil
+	}
+	return resultMessage, nil
+}
