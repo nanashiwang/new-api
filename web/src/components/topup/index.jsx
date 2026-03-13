@@ -31,6 +31,7 @@ import {
 } from '../../helpers';
 import { Modal, Select, Toast } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
+import { useDebouncedCallback } from 'use-debounce';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
 
@@ -57,7 +58,6 @@ const TopUp = () => {
   const [enableOnlineTopUp, setEnableOnlineTopUp] = useState(
     statusState?.status?.enable_online_topup || false,
   );
-  const [priceRatio, setPriceRatio] = useState(statusState?.status?.price || 1);
 
   const [enableStripeTopUp, setEnableStripeTopUp] = useState(
     statusState?.status?.enable_stripe_topup || false,
@@ -79,6 +79,7 @@ const TopUp = () => {
   const [payMethods, setPayMethods] = useState([]);
 
   const affFetchedRef = useRef(false);
+  const amountRequestRef = useRef(0);
 
   // 邀请状态
   const [affLink, setAffLink] = useState('');
@@ -178,7 +179,9 @@ const TopUp = () => {
         }
         // 同套餐存在多条可续费订阅时，弹出选择框，由用户决定续到哪一条。
         if (data?.code === 'redeem_select_renew_target') {
-          const options = (data?.options || []).map((item) => item?.subscription).filter(Boolean);
+          const options = (data?.options || [])
+            .map((item) => item?.subscription)
+            .filter(Boolean);
           setRedeemTargetOptions(options);
           setRedeemTargetPlanTitle(data?.plan_title || '');
           setSelectedRenewTargetId(Number(options?.[0]?.id || 0));
@@ -202,6 +205,139 @@ const TopUp = () => {
     window.open(topUpLink, '_blank');
   };
 
+  const isPayMethodUsable = (
+    paymentMethod,
+    amountValue,
+    methods = payMethods,
+    options = {},
+  ) => {
+    const {
+      onlineEnabled = enableOnlineTopUp,
+      stripeEnabled = enableStripeTopUp,
+    } = options;
+    if (!paymentMethod) {
+      return false;
+    }
+    const payMethod = methods.find((method) => method.type === paymentMethod);
+    if (!payMethod) {
+      return false;
+    }
+    const isStripe = payMethod.type === 'stripe';
+    if ((isStripe && !stripeEnabled) || (!isStripe && !onlineEnabled)) {
+      return false;
+    }
+    const minTopupVal = Number(payMethod.min_topup) || 0;
+    return Number(amountValue || 0) >= minTopupVal;
+  };
+
+  const resolvePreviewPayMethod = (
+    amountValue,
+    preferredMethod = payWay,
+    methods = payMethods,
+    options = {},
+  ) => {
+    if (isPayMethodUsable(preferredMethod, amountValue, methods, options)) {
+      return preferredMethod;
+    }
+    const nextMethod = methods.find((method) =>
+      isPayMethodUsable(method.type, amountValue, methods, options),
+    );
+    return nextMethod?.type || '';
+  };
+
+  const fetchQuotedAmount = async (
+    value,
+    paymentMethod = payWay,
+    options = {},
+  ) => {
+    const {
+      showErrorToast = false,
+      methods = payMethods,
+      onlineEnabled = enableOnlineTopUp,
+      stripeEnabled = enableStripeTopUp,
+    } = options;
+    const normalizedValue = Number(value ?? topUpCount);
+    const resolvedPayMethod = resolvePreviewPayMethod(
+      normalizedValue,
+      paymentMethod,
+      methods,
+      {
+        onlineEnabled,
+        stripeEnabled,
+      },
+    );
+
+    if (!resolvedPayMethod) {
+      setAmount(0);
+      return 0;
+    }
+
+    if (resolvedPayMethod !== payWay) {
+      setPayWay(resolvedPayMethod);
+    }
+
+    const requestId = amountRequestRef.current + 1;
+    amountRequestRef.current = requestId;
+    setAmountLoading(true);
+
+    try {
+      const endpoint =
+        resolvedPayMethod === 'stripe'
+          ? '/api/user/stripe/amount'
+          : '/api/user/amount';
+      const res = await API.post(endpoint, {
+        amount: parseFloat(normalizedValue),
+      });
+
+      if (requestId !== amountRequestRef.current) {
+        return null;
+      }
+
+      if (res !== undefined) {
+        const { message, data } = res.data;
+        if (message === 'success') {
+          const quotedAmount = parseFloat(data);
+          setAmount(quotedAmount);
+          return quotedAmount;
+        }
+
+        setAmount(0);
+        if (showErrorToast) {
+          const errorMsg = typeof data === 'string' ? data : t('获取金额失败');
+          Toast.error({ content: errorMsg, id: 'getAmount' });
+        }
+        return 0;
+      }
+
+      if (showErrorToast) {
+        showError(t('获取金额失败'));
+      }
+      return 0;
+    } catch (err) {
+      if (requestId === amountRequestRef.current) {
+        setAmount(0);
+        if (showErrorToast) {
+          showError(t('获取金额失败'));
+        }
+      }
+      return null;
+    } finally {
+      if (requestId === amountRequestRef.current) {
+        setAmountLoading(false);
+      }
+    }
+  };
+
+  const debouncedGetAmount = useDebouncedCallback((value, options = {}) => {
+    fetchQuotedAmount(value, options.paymentMethod || payWay, options);
+  }, 400);
+
+  useEffect(() => {
+    return () => {
+      debouncedGetAmount.cancel();
+    };
+  }, [debouncedGetAmount]);
+
   const preTopUp = async (payment) => {
     if (payment === 'stripe') {
       if (!enableStripeTopUp) {
@@ -218,16 +354,20 @@ const TopUp = () => {
     setPayWay(payment);
     setPaymentLoading(true);
     try {
-      if (payment === 'stripe') {
-        await getStripeAmount();
-      } else {
-        await getAmount();
-      }
+      debouncedGetAmount.cancel();
+      const quotedAmount = await fetchQuotedAmount(topUpCount, payment, {
+        showErrorToast: true,
+      });
 
       if (topUpCount < minTopUp) {
         showError(t('充值数量不能小于') + minTopUp);
         return;
       }
+
+      if (quotedAmount === null || quotedAmount <= 0) {
+        return;
+      }
+
       setOpen(true);
     } catch (error) {
       showError(t('获取金额失败'));
@@ -237,15 +377,22 @@ const TopUp = () => {
   };
 
   const onlineTopUp = async () => {
+    if (!payWay) {
+      showError(t('请选择支付方式'));
+      return;
+    }
+
+    debouncedGetAmount.cancel();
+
     if (payWay === 'stripe') {
       // Stripe 支付分支
       if (amount === 0) {
-        await getStripeAmount();
+        await getStripeAmount(undefined, { showErrorToast: true });
       }
     } else {
       // 常规支付分支
       if (amount === 0) {
-        await getAmount();
+        await getAmount(undefined, { showErrorToast: true });
       }
     }
 
@@ -525,8 +672,22 @@ const TopUp = () => {
             setPresetAmounts(generatePresetAmounts(minTopUpValue));
           }
 
-          // 初始化应付金额预览。
-          getAmount(minTopUpValue);
+          // 初始化应付金额预览，统一使用后端计价结果。
+          const initialPayMethod = resolvePreviewPayMethod(
+            minTopUpValue,
+            payMethods[0]?.type || '',
+            payMethods,
+            {
+              onlineEnabled: enableOnlineTopUp,
+              stripeEnabled: enableStripeTopUp,
+            },
+          );
+          setPayWay(initialPayMethod);
+          fetchQuotedAmount(minTopUpValue, initialPayMethod, {
+            methods: payMethods,
+            onlineEnabled: enableOnlineTopUp,
+            stripeEnabled: enableStripeTopUp,
+          });
         } catch (e) {
           console.log('解析支付方式失败:', e);
           setPayMethods([]);
@@ -610,67 +771,27 @@ const TopUp = () => {
       // setMinTopUp(minTopUpValue);
       // setTopUpCount(minTopUpValue);
       setTopUpLink(statusState.status.top_up_link || '');
-      setPriceRatio(statusState.status.price || 1);
 
       setStatusLoading(false);
     }
   }, [statusState?.status]);
 
   const renderAmount = () => {
-    return amount + ' ' + t('元');
+    return `${Number(amount || 0).toFixed(2)} ${t('元')}`;
   };
 
-  const getAmount = async (value) => {
-    if (value === undefined) {
-      value = topUpCount;
-    }
-    setAmountLoading(true);
-    try {
-      const res = await API.post('/api/user/amount', {
-        amount: parseFloat(value),
-      });
-      if (res !== undefined) {
-        const { message, data } = res.data;
-        if (message === 'success') {
-          setAmount(parseFloat(data));
-        } else {
-          setAmount(0);
-          Toast.error({ content: '错误：' + data, id: 'getAmount' });
-        }
-      } else {
-        showError(res);
-      }
-    } catch (err) {
-      console.log(err);
-    }
-    setAmountLoading(false);
+  const getAmount = async (value, options = {}) => {
+    debouncedGetAmount.cancel();
+    return fetchQuotedAmount(value, options.paymentMethod || payWay, options);
   };
 
-  const getStripeAmount = async (value) => {
-    if (value === undefined) {
-      value = topUpCount;
-    }
-    setAmountLoading(true);
-    try {
-      const res = await API.post('/api/user/stripe/amount', {
-        amount: parseFloat(value),
-      });
-      if (res !== undefined) {
-        const { message, data } = res.data;
-        if (message === 'success') {
-          setAmount(parseFloat(data));
-        } else {
-          setAmount(0);
-          Toast.error({ content: '错误：' + data, id: 'getAmount' });
-        }
-      } else {
-        showError(res);
-      }
-    } catch (err) {
-      console.log(err);
-    } finally {
-      setAmountLoading(false);
-    }
+  const scheduleAmountRefresh = (value, options = {}) => {
+    debouncedGetAmount(value, options);
+  };
+
+  const getStripeAmount = async (value, options = {}) => {
+    debouncedGetAmount.cancel();
+    return fetchQuotedAmount(value, 'stripe', options);
   };
 
   const handleCancel = () => {
@@ -698,11 +819,7 @@ const TopUp = () => {
   const selectPresetAmount = (preset) => {
     setTopUpCount(preset.value);
     setSelectedPreset(preset.value);
-
-    // 计算折扣后的实际应付金额。
-    const discount = preset.discount || topupInfo.discount[preset.value] || 1.0;
-    const discountedAmount = preset.value * priceRatio * discount;
-    setAmount(discountedAmount);
+    getAmount(preset.value);
   };
 
   // 格式化大数字展示。
@@ -789,7 +906,9 @@ const TopUp = () => {
       <Modal
         title={t('选择续费目标')}
         visible={redeemTargetModalOpen}
-        onOk={() => topUp(selectedRenewTargetId, selectedPurchaseMode || 'renew')}
+        onOk={() =>
+          topUp(selectedRenewTargetId, selectedPurchaseMode || 'renew')
+        }
         onCancel={() => {
           setRedeemTargetModalOpen(false);
           setRedeemTargetOptions([]);
@@ -860,11 +979,11 @@ const TopUp = () => {
           selectedPreset={selectedPreset}
           selectPresetAmount={selectPresetAmount}
           formatLargeNumber={formatLargeNumber}
-          priceRatio={priceRatio}
           topUpCount={topUpCount}
           minTopUp={minTopUp}
           renderQuotaWithAmount={renderQuotaWithAmount}
           getAmount={getAmount}
+          scheduleAmountRefresh={scheduleAmountRefresh}
           setTopUpCount={setTopUpCount}
           setSelectedPreset={setSelectedPreset}
           renderAmount={renderAmount}

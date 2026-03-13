@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Modal, Typography, Card, Skeleton } from '@douyinfe/semi-ui';
+import { Modal, Typography, Card, Spin } from '@douyinfe/semi-ui';
 import { SiAlipay, SiWechat, SiStripe } from 'react-icons/si';
 import { CreditCard } from 'lucide-react';
 
@@ -75,9 +75,7 @@ const PaymentConfirmModal = ({
               <Text strong className='text-slate-700 dark:text-slate-200'>
                 {t('实付金额')}：
               </Text>
-              {amountLoading ? (
-                <Skeleton.Title style={{ width: '60px', height: '16px' }} />
-              ) : (
+              <div className='flex flex-col items-end'>
                 <div className='flex items-baseline space-x-2'>
                   <Text strong className='font-bold' style={{ color: 'red' }}>
                     {renderAmount()}
@@ -88,7 +86,21 @@ const PaymentConfirmModal = ({
                     </Text>
                   )}
                 </div>
-              )}
+                <div className='mt-1 min-h-[20px] flex items-center justify-end'>
+                  {amountLoading ? (
+                    <>
+                      <Spin size='small' />
+                      <Text
+                        size='small'
+                        type='tertiary'
+                        className='ml-2 text-right'
+                      >
+                        {t('价格重新计算中...')}
+                      </Text>
+                    </>
+                  ) : null}
+                </div>
+              </div>
             </div>
             {hasDiscount && !amountLoading && (
               <>
