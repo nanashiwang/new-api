@@ -68,6 +68,7 @@ const PageLayout = () => {
     location.pathname !== '/console/playground';
 
   const isConsoleRoute = location.pathname.startsWith('/console');
+  const isStandalonePage = location.pathname === '/usage';
   const showSider = isConsoleRoute && (!isMobile || drawerOpen);
 
   useEffect(() => {
@@ -118,6 +119,15 @@ const PageLayout = () => {
       i18n.changeLanguage(savedLang);
     }
   }, [i18n]);
+
+  if (isStandalonePage) {
+    return (
+      <>
+        <App />
+        <ToastContainer />
+      </>
+    );
+  }
 
   return (
     <Layout

@@ -53,6 +53,20 @@ const Navigation = ({
         );
       }
 
+      if (link.openInNewTab) {
+        return (
+          <a
+            key={link.itemKey}
+            href={link.to}
+            target='_blank'
+            rel='noopener noreferrer'
+            className={commonLinkClasses}
+          >
+            {linkContent}
+          </a>
+        );
+      }
+
       let targetPath = link.to;
       if (link.itemKey === 'console' && !userState.user) {
         targetPath = '/login';

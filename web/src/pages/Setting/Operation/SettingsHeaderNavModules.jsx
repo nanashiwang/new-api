@@ -44,10 +44,11 @@ export default function SettingsHeaderNavModules(props) {
     console: true,
     pricing: {
       enabled: true,
-      requireAuth: false, // 默认不需要登录鉴权
+      requireAuth: false,
     },
     docs: true,
     about: true,
+    usage: false,
   });
 
   // 处理顶栏模块配置变更
@@ -88,6 +89,7 @@ export default function SettingsHeaderNavModules(props) {
       },
       docs: true,
       about: true,
+      usage: false,
     };
     setHeaderNavModules(defaultModules);
     showSuccess(t('已重置为默认配置'));
@@ -154,6 +156,7 @@ export default function SettingsHeaderNavModules(props) {
           },
           docs: true,
           about: true,
+          usage: false,
         };
         setHeaderNavModules(defaultModules);
       }
@@ -187,6 +190,11 @@ export default function SettingsHeaderNavModules(props) {
       key: 'about',
       title: t('关于'),
       description: t('关于系统的详细信息'),
+    },
+    {
+      key: 'usage',
+      title: t('额度查询'),
+      description: t('公开 Key 额度查询页面'),
     },
   ];
 
