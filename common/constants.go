@@ -197,6 +197,10 @@ var (
 	GlobalWebRateLimitNum      int
 	GlobalWebRateLimitDuration int64
 
+	PublicTokenUsageRateLimitEnable   bool
+	PublicTokenUsageRateLimitNum      int
+	PublicTokenUsageRateLimitDuration int64
+
 	CriticalRateLimitEnable   bool
 	CriticalRateLimitNum            = 20
 	CriticalRateLimitDuration int64 = 20 * 60

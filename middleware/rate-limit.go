@@ -101,6 +101,17 @@ func GlobalAPIRateLimit() func(c *gin.Context) {
 	return defNext
 }
 
+func PublicTokenUsageRateLimit() func(c *gin.Context) {
+	if common.PublicTokenUsageRateLimitEnable {
+		return rateLimitFactory(
+			common.PublicTokenUsageRateLimitNum,
+			common.PublicTokenUsageRateLimitDuration,
+			"PU",
+		)
+	}
+	return defNext
+}
+
 func CriticalRateLimit() func(c *gin.Context) {
 	if common.CriticalRateLimitEnable {
 		return rateLimitFactory(common.CriticalRateLimitNum, common.CriticalRateLimitDuration, "CT")

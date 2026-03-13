@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
@@ -245,7 +246,6 @@ func GetTokenUsage(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgTokenGetInfoFailed)
 		return
 	}
-
 	expiredAt := token.ExpiredTime
 	if expiredAt == -1 {
 		expiredAt = 0
@@ -271,6 +271,232 @@ func GetTokenUsage(c *gin.Context) {
 			"package_used_quota":      token.PackageUsedQuota,
 			"package_next_reset_time": token.PackageNextResetTime,
 			"expires_at":              expiredAt,
+		},
+	})
+}
+
+func isPublicTokenUsageEnabled() bool {
+	common.OptionMapRWMutex.RLock()
+	defer common.OptionMapRWMutex.RUnlock()
+	raw, ok := common.OptionMap["HeaderNavModules"]
+	if !ok || raw == "" {
+		return false
+	}
+	var modules map[string]interface{}
+	if err := common.Unmarshal([]byte(raw), &modules); err != nil {
+		return false
+	}
+	val, ok := modules["usage"]
+	if !ok {
+		return false
+	}
+	enabled, ok := val.(bool)
+	return ok && enabled
+}
+
+func normalizePublicQueryKeys(keys []string) []string {
+	seen := make(map[string]struct{}, len(keys))
+	normalized := make([]string, 0, len(keys))
+	for _, key := range keys {
+		cleaned := strings.TrimSpace(strings.TrimPrefix(key, "sk-"))
+		if cleaned == "" {
+			continue
+		}
+		if _, ok := seen[cleaned]; ok {
+			continue
+		}
+		seen[cleaned] = struct{}{}
+		normalized = append(normalized, cleaned)
+	}
+	return normalized
+}
+
+func maskPublicTokenKey(key string) string {
+	if len(key) <= 8 {
+		return key
+	}
+	return key[:4] + "..." + key[len(key)-4:]
+}
+
+func getPublicTokenStatsRange(period string) (int64, int64) {
+	now := time.Now()
+	var startTime int64
+	switch period {
+	case "week":
+		startTime = now.AddDate(0, 0, -7).Unix()
+	case "month":
+		startTime = now.AddDate(0, -1, 0).Unix()
+	default:
+		y, m, d := now.Date()
+		startTime = time.Date(y, m, d, 0, 0, 0, 0, now.Location()).Unix()
+	}
+	return startTime, now.Unix()
+}
+
+func parsePublicTokenLogPagination(page int, pageSize int) (int, int) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 10
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	return page, pageSize
+}
+
+func resolvePublicSingleToken(rawKey string) (*model.Token, error) {
+	key := strings.TrimSpace(strings.TrimPrefix(rawKey, "sk-"))
+	if key == "" {
+		return nil, fmt.Errorf("empty key")
+	}
+	return model.GetTokenByKey(key, false)
+}
+
+func buildPublicTokenUsagePayload(token *model.Token) gin.H {
+	expiredAt := token.ExpiredTime
+	if expiredAt == -1 {
+		expiredAt = 0
+	}
+
+	return gin.H{
+		"token_id":                token.Id,
+		"masked_key":              maskPublicTokenKey(token.Key),
+		"name":                    token.Name,
+		"status":                  token.Status,
+		"group":                   token.Group,
+		"total_granted":           token.RemainQuota + token.UsedQuota,
+		"total_used":              token.UsedQuota,
+		"total_available":         token.RemainQuota,
+		"unlimited_quota":         token.UnlimitedQuota,
+		"model_limits_enabled":    token.ModelLimitsEnabled,
+		"model_limits":            token.GetModelLimitsMap(),
+		"package_enabled":         token.PackageEnabled,
+		"package_limit_quota":     token.PackageLimitQuota,
+		"package_period":          token.PackagePeriod,
+		"package_custom_seconds":  token.PackageCustomSeconds,
+		"package_period_mode":     token.PackagePeriodMode,
+		"package_used_quota":      token.PackageUsedQuota,
+		"package_next_reset_time": token.PackageNextResetTime,
+		"expires_at":              expiredAt,
+		"created_time":            token.CreatedTime,
+		"accessed_time":           token.AccessedTime,
+	}
+}
+
+func resolvePublicQueryTokens(keys []string) ([]*model.Token, []string) {
+	normalized := normalizePublicQueryKeys(keys)
+	tokens := make([]*model.Token, 0, len(normalized))
+	invalid := make([]string, 0)
+	for _, key := range normalized {
+		token, err := model.GetTokenByKey(key, false)
+		if err != nil || token == nil {
+			invalid = append(invalid, key)
+			continue
+		}
+		tokens = append(tokens, token)
+	}
+	return tokens, invalid
+}
+
+func buildBatchUsageSummary(tokens []*model.Token, invalid []string) gin.H {
+	totalGranted := 0
+	totalUsed := 0
+	totalAvailable := 0
+	for _, token := range tokens {
+		totalGranted += token.RemainQuota + token.UsedQuota
+		totalUsed += token.UsedQuota
+		totalAvailable += token.RemainQuota
+	}
+
+	return gin.H{
+		"valid_key_count":   len(tokens),
+		"invalid_key_count": len(invalid),
+		"total_granted":     totalGranted,
+		"total_used":        totalUsed,
+		"total_available":   totalAvailable,
+	}
+}
+
+func GetPublicTokenUsage(c *gin.Context) {
+	if !isPublicTokenUsageEnabled() {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"message": "公开令牌查询功能未启用",
+		})
+		return
+	}
+
+	var req struct {
+		Key string `json:"key"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Key == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "请提供有效的 API Key",
+		})
+		return
+	}
+
+	key := strings.TrimPrefix(req.Key, "sk-")
+	token, err := model.GetTokenByKey(key, false)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无效的 API Key",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "ok",
+		"data":    buildPublicTokenUsagePayload(token),
+	})
+}
+
+func GetPublicTokenBatchUsage(c *gin.Context) {
+	if !isPublicTokenUsageEnabled() {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"message": "公开令牌查询功能未启用",
+		})
+		return
+	}
+
+	var req struct {
+		Keys []string `json:"keys"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.Keys) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "请提供有效的 API Key",
+		})
+		return
+	}
+
+	tokens, invalid := resolvePublicQueryTokens(req.Keys)
+	if len(tokens) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无效的 API Key",
+		})
+		return
+	}
+
+	items := make([]gin.H, 0, len(tokens))
+	for _, token := range tokens {
+		items = append(items, buildPublicTokenUsagePayload(token))
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "ok",
+		"data": gin.H{
+			"summary":      buildBatchUsageSummary(tokens, invalid),
+			"tokens":       items,
+			"invalid_keys": invalid,
 		},
 	})
 }
@@ -593,5 +819,208 @@ func ManageTokenBatch(c *gin.Context) {
 		"failed_count":  len(failed),
 		"updated":       updated,
 		"failed":        failed,
+	})
+}
+
+func GetPublicTokenStats(c *gin.Context) {
+	if !isPublicTokenUsageEnabled() {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"message": "公开令牌查询功能未启用",
+		})
+		return
+	}
+
+	var req struct {
+		Key    string `json:"key"`
+		Period string `json:"period"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Key == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "请提供有效的 API Key",
+		})
+		return
+	}
+
+	token, err := resolvePublicSingleToken(req.Key)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无效的 API Key",
+		})
+		return
+	}
+
+	startTime, endTime := getPublicTokenStatsRange(req.Period)
+	tokenIDs := []int{token.Id}
+	stat, _ := model.SumUsedQuotaByTokenIDs(tokenIDs, startTime, endTime)
+	tokenUsage, _ := model.SumUsedTokenDetailsByTokenIDs(tokenIDs, startTime, endTime)
+	tokenDistribution, _ := model.SumPublicTokenDistributionByTokenIDs(tokenIDs, startTime, endTime)
+	requestCount, _ := model.CountLogsByTokenIDs(tokenIDs, startTime, endTime)
+	modelStats, _ := model.GetModelStatsByTokenIDs(tokenIDs, startTime, endTime)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"period_quota":         stat.Quota,
+			"period_request_count": requestCount,
+			"period_token_count":   tokenUsage.PromptTokens + tokenUsage.CompletionTokens,
+			"prompt_tokens":        tokenUsage.PromptTokens,
+			"completion_tokens":    tokenUsage.CompletionTokens,
+			"total_tokens":         tokenUsage.PromptTokens + tokenUsage.CompletionTokens,
+			"token_distribution":   tokenDistribution,
+			"rpm":                  stat.Rpm,
+			"tpm":                  stat.Tpm,
+			"model_stats":          modelStats,
+		},
+	})
+}
+
+func GetPublicTokenBatchStats(c *gin.Context) {
+	if !isPublicTokenUsageEnabled() {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"message": "公开令牌查询功能未启用",
+		})
+		return
+	}
+
+	var req struct {
+		Keys   []string `json:"keys"`
+		Period string   `json:"period"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.Keys) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "请提供有效的 API Key",
+		})
+		return
+	}
+
+	tokens, invalid := resolvePublicQueryTokens(req.Keys)
+	if len(tokens) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无效的 API Key",
+		})
+		return
+	}
+
+	startTime, endTime := getPublicTokenStatsRange(req.Period)
+	tokenIDs := make([]int, 0, len(tokens))
+	for _, token := range tokens {
+		tokenIDs = append(tokenIDs, token.Id)
+	}
+
+	stat, _ := model.SumUsedQuotaByTokenIDs(tokenIDs, startTime, endTime)
+	tokenUsage, _ := model.SumUsedTokenDetailsByTokenIDs(tokenIDs, startTime, endTime)
+	tokenDistribution, _ := model.SumPublicTokenDistributionByTokenIDs(tokenIDs, startTime, endTime)
+	requestCount, _ := model.CountLogsByTokenIDs(tokenIDs, startTime, endTime)
+	modelStats, _ := model.GetModelStatsByTokenIDs(tokenIDs, startTime, endTime)
+	batchSummary := buildBatchUsageSummary(tokens, invalid)
+
+	keyStats := make([]gin.H, 0, len(tokens))
+	for _, token := range tokens {
+		singleIDs := []int{token.Id}
+		keyStat, _ := model.SumUsedQuotaByTokenIDs(singleIDs, startTime, endTime)
+		keyUsage, _ := model.SumUsedTokenDetailsByTokenIDs(singleIDs, startTime, endTime)
+		keyDistribution, _ := model.SumPublicTokenDistributionByTokenIDs(singleIDs, startTime, endTime)
+		keyRequestCount, _ := model.CountLogsByTokenIDs(singleIDs, startTime, endTime)
+		keyModelStats, _ := model.GetModelStatsByTokenIDs(singleIDs, startTime, endTime)
+
+		item := buildPublicTokenUsagePayload(token)
+		item["period_quota"] = keyStat.Quota
+		item["period_request_count"] = keyRequestCount
+		item["period_token_count"] = keyUsage.PromptTokens + keyUsage.CompletionTokens
+		item["prompt_tokens"] = keyUsage.PromptTokens
+		item["completion_tokens"] = keyUsage.CompletionTokens
+		item["total_tokens"] = keyUsage.PromptTokens + keyUsage.CompletionTokens
+		item["token_distribution"] = keyDistribution
+		item["model_stats"] = keyModelStats
+		keyStats = append(keyStats, item)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"summary": gin.H{
+				"valid_key_count":      len(tokens),
+				"invalid_key_count":    len(invalid),
+				"total_granted":        batchSummary["total_granted"],
+				"total_used":           batchSummary["total_used"],
+				"total_available":      batchSummary["total_available"],
+				"period_quota":         stat.Quota,
+				"period_request_count": requestCount,
+				"prompt_tokens":        tokenUsage.PromptTokens,
+				"completion_tokens":    tokenUsage.CompletionTokens,
+				"total_tokens":         tokenUsage.PromptTokens + tokenUsage.CompletionTokens,
+				"token_distribution":   tokenDistribution,
+				"rpm":                  stat.Rpm,
+				"tpm":                  stat.Tpm,
+			},
+			"token_distribution":   tokenDistribution,
+			"model_stats":          modelStats,
+			"key_stats":            keyStats,
+			"invalid_keys":         invalid,
+			"period_quota":         stat.Quota,
+			"period_request_count": requestCount,
+			"prompt_tokens":        tokenUsage.PromptTokens,
+			"completion_tokens":    tokenUsage.CompletionTokens,
+			"total_tokens":         tokenUsage.PromptTokens + tokenUsage.CompletionTokens,
+			"rpm":                  stat.Rpm,
+			"tpm":                  stat.Tpm,
+		},
+	})
+}
+
+func GetPublicTokenLogs(c *gin.Context) {
+	if !isPublicTokenUsageEnabled() {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"message": "公开令牌查询功能未启用",
+		})
+		return
+	}
+
+	var req struct {
+		Key      string `json:"key"`
+		Period   string `json:"period"`
+		Page     int    `json:"page"`
+		PageSize int    `json:"page_size"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Key) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "请提供有效的 API Key",
+		})
+		return
+	}
+
+	token, err := resolvePublicSingleToken(req.Key)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无效的 API Key",
+		})
+		return
+	}
+
+	page, pageSize := parsePublicTokenLogPagination(req.Page, req.PageSize)
+	startTime, endTime := getPublicTokenStatsRange(req.Period)
+	items, total, err := model.GetPublicTokenLogsByTokenIDs([]int{token.Id}, startTime, endTime, (page-1)*pageSize, pageSize)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"items":     items,
+			"total":     total,
+			"page":      page,
+			"page_size": pageSize,
+		},
 	})
 }

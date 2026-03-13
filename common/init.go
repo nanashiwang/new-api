@@ -117,6 +117,10 @@ func InitEnv() {
 	GlobalWebRateLimitNum = GetEnvOrDefault("GLOBAL_WEB_RATE_LIMIT", 60)
 	GlobalWebRateLimitDuration = int64(GetEnvOrDefault("GLOBAL_WEB_RATE_LIMIT_DURATION", 180))
 
+	PublicTokenUsageRateLimitEnable = GetEnvOrDefaultBool("PUBLIC_TOKEN_USAGE_RATE_LIMIT_ENABLE", true)
+	PublicTokenUsageRateLimitNum = GetEnvOrDefault("PUBLIC_TOKEN_USAGE_RATE_LIMIT", 90)
+	PublicTokenUsageRateLimitDuration = int64(GetEnvOrDefault("PUBLIC_TOKEN_USAGE_RATE_LIMIT_DURATION", 20*60))
+
 	CriticalRateLimitEnable = GetEnvOrDefaultBool("CRITICAL_RATE_LIMIT_ENABLE", true)
 	CriticalRateLimitNum = GetEnvOrDefault("CRITICAL_RATE_LIMIT", 20)
 	CriticalRateLimitDuration = int64(GetEnvOrDefault("CRITICAL_RATE_LIMIT_DURATION", 20*60))

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -39,6 +40,25 @@ type Log struct {
 	Other            string `json:"other"`
 }
 
+type PublicTokenLogItem struct {
+	Id               int    `json:"id"`
+	CreatedAt        int64  `json:"created_at"`
+	ModelName        string `json:"model_name"`
+	Quota            int    `json:"quota"`
+	PromptTokens     int    `json:"prompt_tokens"`
+	CompletionTokens int    `json:"completion_tokens"`
+	CacheReadTokens  int    `json:"cache_read_tokens"`
+	CacheWriteTokens int    `json:"cache_write_tokens"`
+	UseTime          int    `json:"use_time"`
+	IsStream         bool   `json:"is_stream"`
+	Content          string `json:"content"`
+}
+
+type publicTokenLogQueryRow struct {
+	PublicTokenLogItem
+	Other string `gorm:"column:other"`
+}
+
 // don't use iota, avoid change log type value
 const (
 	LogTypeUnknown = 0
@@ -69,6 +89,60 @@ func GetLogByTokenId(tokenId int) (logs []*Log, err error) {
 	err = LOG_DB.Model(&Log{}).Where("token_id = ?", tokenId).Order("id desc").Limit(common.MaxRecentItems).Find(&logs).Error
 	formatUserLogs(logs, 0)
 	return logs, err
+}
+
+func GetPublicTokenLogsByTokenIDs(tokenIDs []int, startTimestamp int64, endTimestamp int64, offset int, limit int) (items []PublicTokenLogItem, total int64, err error) {
+	if len(tokenIDs) == 0 {
+		return items, 0, nil
+	}
+
+	if offset < 0 {
+		offset = 0
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	countQuery := LOG_DB.Model(&Log{}).
+		Where("type = ?", LogTypeConsume).
+		Where("token_id IN ?", tokenIDs)
+	rows := make([]publicTokenLogQueryRow, 0, limit)
+	dataQuery := LOG_DB.Model(&Log{}).
+		Select("id, created_at, model_name, quota, prompt_tokens, completion_tokens, use_time, is_stream, content, other").
+		Where("type = ?", LogTypeConsume).
+		Where("token_id IN ?", tokenIDs)
+
+	if startTimestamp != 0 {
+		countQuery = countQuery.Where("created_at >= ?", startTimestamp)
+		dataQuery = dataQuery.Where("created_at >= ?", startTimestamp)
+	}
+	if endTimestamp != 0 {
+		countQuery = countQuery.Where("created_at <= ?", endTimestamp)
+		dataQuery = dataQuery.Where("created_at <= ?", endTimestamp)
+	}
+
+	if err = countQuery.Count(&total).Error; err != nil {
+		common.SysError("failed to count public token logs: " + err.Error())
+		return items, 0, errors.New("查询调用明细失败")
+	}
+
+	if err = dataQuery.Order("id desc").Offset(offset).Limit(limit).Find(&rows).Error; err != nil {
+		common.SysError("failed to query public token logs: " + err.Error())
+		return items, 0, errors.New("查询调用明细失败")
+	}
+
+	items = make([]PublicTokenLogItem, 0, len(rows))
+	for i := range rows {
+		row := rows[i]
+		row.Content = strings.TrimSpace(row.Content)
+		row.CacheReadTokens, row.CacheWriteTokens = getPromptCacheSummaryFromOther(row.Other)
+		items = append(items, row.PublicTokenLogItem)
+	}
+
+	return items, total, nil
 }
 
 func RecordLog(userId int, logType int, content string) {
@@ -454,6 +528,289 @@ func SumUsedToken(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	}
 	tx.Where("type = ?", LogTypeConsume).Scan(&token)
 	return token
+}
+
+type ModelStat struct {
+	ModelName        string `json:"model" gorm:"column:model_name"`
+	Count            int    `json:"count"`
+	PromptTokens     int    `json:"prompt_tokens"`
+	CompletionTokens int    `json:"completion_tokens"`
+	Quota            int    `json:"quota"`
+}
+
+type TokenUsageTokens struct {
+	PromptTokens     int `json:"prompt_tokens" gorm:"column:prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens" gorm:"column:completion_tokens"`
+}
+
+type PublicTokenDistribution struct {
+	InputTokens            int  `json:"input_tokens"`
+	CompletionTokens       int  `json:"completion_tokens"`
+	CacheReadTokens        int  `json:"cache_read_tokens"`
+	CacheCreationTokens    int  `json:"cache_creation_tokens"`
+	TotalTokens            int  `json:"total_tokens"`
+	CacheCreationSupported bool `json:"cache_creation_supported"`
+}
+
+type tokenUsageLogRow struct {
+	PromptTokens     int    `gorm:"column:prompt_tokens"`
+	CompletionTokens int    `gorm:"column:completion_tokens"`
+	Other            string `gorm:"column:other"`
+}
+
+type tokenUsageOtherInfo struct {
+	CacheTokens           int    `json:"cache_tokens"`
+	CacheCreationTokens   int    `json:"cache_creation_tokens"`
+	CacheCreationTokens5m int    `json:"cache_creation_tokens_5m"`
+	CacheCreationTokens1h int    `json:"cache_creation_tokens_1h"`
+	Claude                bool   `json:"claude"`
+	UsageSemantic         string `json:"usage_semantic"`
+}
+
+func sumCacheCreationTokens(other tokenUsageOtherInfo) int {
+	if other.CacheCreationTokens > 0 {
+		return other.CacheCreationTokens
+	}
+	return other.CacheCreationTokens5m + other.CacheCreationTokens1h
+}
+
+func supportsCacheCreationUsage(rawOther string, other tokenUsageOtherInfo) bool {
+	if other.Claude || strings.EqualFold(other.UsageSemantic, "anthropic") {
+		return true
+	}
+	if rawOther == "" {
+		return false
+	}
+	return strings.Contains(rawOther, "\"cache_creation_tokens\"") ||
+		strings.Contains(rawOther, "\"cache_creation_tokens_5m\"") ||
+		strings.Contains(rawOther, "\"cache_creation_tokens_1h\"")
+}
+
+func getPromptCacheSummaryFromOther(rawOther string) (cacheReadTokens int, cacheWriteTokens int) {
+	if rawOther == "" {
+		return 0, 0
+	}
+
+	other := tokenUsageOtherInfo{}
+	if err := common.UnmarshalJsonStr(rawOther, &other); err != nil {
+		return 0, 0
+	}
+
+	cacheReadTokens = other.CacheTokens
+	if cacheReadTokens < 0 {
+		cacheReadTokens = 0
+	}
+
+	cacheWriteTokens = sumCacheCreationTokens(other)
+	if cacheWriteTokens < 0 {
+		cacheWriteTokens = 0
+	}
+
+	return cacheReadTokens, cacheWriteTokens
+}
+
+func normalizeInputTokens(promptTokens, cacheReadTokens, cacheCreationTokens int, other tokenUsageOtherInfo) int {
+	if other.Claude || strings.EqualFold(other.UsageSemantic, "anthropic") {
+		if promptTokens < 0 {
+			return 0
+		}
+		return promptTokens
+	}
+
+	inputTokens := promptTokens - cacheReadTokens - cacheCreationTokens
+	if inputTokens < 0 {
+		return 0
+	}
+	return inputTokens
+}
+
+func aggregatePublicTokenDistributionRows(rows []tokenUsageLogRow) PublicTokenDistribution {
+	distribution := PublicTokenDistribution{}
+
+	for _, row := range rows {
+		other := tokenUsageOtherInfo{}
+		if row.Other != "" {
+			_ = common.UnmarshalJsonStr(row.Other, &other)
+		}
+
+		cacheReadTokens := other.CacheTokens
+		if cacheReadTokens < 0 {
+			cacheReadTokens = 0
+		}
+		cacheCreationTokens := sumCacheCreationTokens(other)
+		if cacheCreationTokens < 0 {
+			cacheCreationTokens = 0
+		}
+		inputTokens := normalizeInputTokens(row.PromptTokens, cacheReadTokens, cacheCreationTokens, other)
+
+		distribution.InputTokens += inputTokens
+		distribution.CompletionTokens += row.CompletionTokens
+		distribution.CacheReadTokens += cacheReadTokens
+		distribution.CacheCreationTokens += cacheCreationTokens
+		if !distribution.CacheCreationSupported && supportsCacheCreationUsage(row.Other, other) {
+			distribution.CacheCreationSupported = true
+		}
+	}
+
+	distribution.TotalTokens = distribution.InputTokens +
+		distribution.CompletionTokens +
+		distribution.CacheReadTokens +
+		distribution.CacheCreationTokens
+
+	return distribution
+}
+
+func SumPublicTokenDistributionByTokenIDs(tokenIDs []int, startTimestamp int64, endTimestamp int64) (distribution PublicTokenDistribution, err error) {
+	if len(tokenIDs) == 0 {
+		return distribution, nil
+	}
+
+	rows := make([]tokenUsageLogRow, 0)
+	tx := LOG_DB.Table("logs").
+		Select("prompt_tokens, completion_tokens, other").
+		Where("type = ?", LogTypeConsume).
+		Where("token_id IN ?", tokenIDs)
+
+	if startTimestamp != 0 {
+		tx = tx.Where("created_at >= ?", startTimestamp)
+	}
+	if endTimestamp != 0 {
+		tx = tx.Where("created_at <= ?", endTimestamp)
+	}
+
+	if err := tx.Scan(&rows).Error; err != nil {
+		common.SysError("failed to query public token distribution by token ids: " + err.Error())
+		return distribution, errors.New("查询统计数据失败")
+	}
+
+	return aggregatePublicTokenDistributionRows(rows), nil
+}
+
+func GetModelStatsByTokenName(tokenName string, startTimestamp int64, endTimestamp int64) ([]ModelStat, error) {
+	var stats []ModelStat
+	tx := LOG_DB.Table("logs").
+		Select("model_name, count(*) as count, sum(prompt_tokens) as prompt_tokens, sum(completion_tokens) as completion_tokens, sum(quota) as quota").
+		Where("type = ?", LogTypeConsume).
+		Where("token_name = ?", tokenName)
+	if startTimestamp != 0 {
+		tx = tx.Where("created_at >= ?", startTimestamp)
+	}
+	if endTimestamp != 0 {
+		tx = tx.Where("created_at <= ?", endTimestamp)
+	}
+	err := tx.Group("model_name").Order("quota DESC").Find(&stats).Error
+	return stats, err
+}
+
+func SumUsedQuotaByTokenIDs(tokenIDs []int, startTimestamp int64, endTimestamp int64) (stat Stat, err error) {
+	if len(tokenIDs) == 0 {
+		return stat, nil
+	}
+
+	tx := LOG_DB.Table("logs").Select("COALESCE(sum(quota), 0) quota")
+	rpmTpmQuery := LOG_DB.Table("logs").Select("count(*) rpm, COALESCE(sum(prompt_tokens), 0) + COALESCE(sum(completion_tokens), 0) tpm")
+
+	tx = tx.Where("type = ?", LogTypeConsume).Where("token_id IN ?", tokenIDs)
+	rpmTpmQuery = rpmTpmQuery.Where("type = ?", LogTypeConsume).Where("token_id IN ?", tokenIDs)
+
+	if startTimestamp != 0 {
+		tx = tx.Where("created_at >= ?", startTimestamp)
+	}
+	if endTimestamp != 0 {
+		tx = tx.Where("created_at <= ?", endTimestamp)
+	}
+
+	rpmTpmQuery = rpmTpmQuery.Where("created_at >= ?", time.Now().Add(-60*time.Second).Unix())
+
+	if err := tx.Scan(&stat).Error; err != nil {
+		common.SysError("failed to query log stat by token ids: " + err.Error())
+		return stat, errors.New("查询统计数据失败")
+	}
+	if err := rpmTpmQuery.Scan(&stat).Error; err != nil {
+		common.SysError("failed to query rpm/tpm stat by token ids: " + err.Error())
+		return stat, errors.New("查询统计数据失败")
+	}
+
+	return stat, nil
+}
+
+func SumUsedTokenDetailsByTokenIDs(tokenIDs []int, startTimestamp int64, endTimestamp int64) (tokens TokenUsageTokens, err error) {
+	if len(tokenIDs) == 0 {
+		return tokens, nil
+	}
+
+	tx := LOG_DB.Table("logs").
+		Select("COALESCE(sum(prompt_tokens), 0) as prompt_tokens, COALESCE(sum(completion_tokens), 0) as completion_tokens").
+		Where("type = ?", LogTypeConsume).
+		Where("token_id IN ?", tokenIDs)
+
+	if startTimestamp != 0 {
+		tx = tx.Where("created_at >= ?", startTimestamp)
+	}
+	if endTimestamp != 0 {
+		tx = tx.Where("created_at <= ?", endTimestamp)
+	}
+
+	if err := tx.Scan(&tokens).Error; err != nil {
+		common.SysError("failed to query token usage by token ids: " + err.Error())
+		return tokens, errors.New("查询统计数据失败")
+	}
+
+	return tokens, nil
+}
+
+func GetModelStatsByTokenIDs(tokenIDs []int, startTimestamp int64, endTimestamp int64) ([]ModelStat, error) {
+	var stats []ModelStat
+	if len(tokenIDs) == 0 {
+		return stats, nil
+	}
+
+	tx := LOG_DB.Table("logs").
+		Select("model_name, count(*) as count, COALESCE(sum(prompt_tokens), 0) as prompt_tokens, COALESCE(sum(completion_tokens), 0) as completion_tokens, COALESCE(sum(quota), 0) as quota").
+		Where("type = ?", LogTypeConsume).
+		Where("token_id IN ?", tokenIDs)
+	if startTimestamp != 0 {
+		tx = tx.Where("created_at >= ?", startTimestamp)
+	}
+	if endTimestamp != 0 {
+		tx = tx.Where("created_at <= ?", endTimestamp)
+	}
+	err := tx.Group("model_name").Order("quota DESC").Find(&stats).Error
+	return stats, err
+}
+
+func CountLogsByTokenName(tokenName string, startTimestamp int64, endTimestamp int64) (int64, error) {
+	var count int64
+	tx := LOG_DB.Table("logs").
+		Where("type = ?", LogTypeConsume).
+		Where("token_name = ?", tokenName)
+	if startTimestamp != 0 {
+		tx = tx.Where("created_at >= ?", startTimestamp)
+	}
+	if endTimestamp != 0 {
+		tx = tx.Where("created_at <= ?", endTimestamp)
+	}
+	err := tx.Count(&count).Error
+	return count, err
+}
+
+func CountLogsByTokenIDs(tokenIDs []int, startTimestamp int64, endTimestamp int64) (int64, error) {
+	var count int64
+	if len(tokenIDs) == 0 {
+		return 0, nil
+	}
+
+	tx := LOG_DB.Table("logs").
+		Where("type = ?", LogTypeConsume).
+		Where("token_id IN ?", tokenIDs)
+	if startTimestamp != 0 {
+		tx = tx.Where("created_at >= ?", startTimestamp)
+	}
+	if endTimestamp != 0 {
+		tx = tx.Where("created_at <= ?", endTimestamp)
+	}
+	err := tx.Count(&count).Error
+	return count, err
 }
 
 func DeleteOldLog(ctx context.Context, targetTimestamp int64, limit int) (int64, error) {
