@@ -3,17 +3,117 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/cachex"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/gin-gonic/gin"
+	"github.com/samber/hot"
 )
+
+const publicTokenStatsCacheTTL = 30 * time.Second
+
+type publicTokenStatsSnapshot struct {
+	Stat              model.Stat                          `json:"stat"`
+	TokenUsage        model.TokenUsageTokens              `json:"token_usage"`
+	TokenDistribution model.PublicTokenDistribution       `json:"token_distribution"`
+	RequestCount      int64                               `json:"request_count"`
+	ModelStats        []model.ModelStat                   `json:"model_stats"`
+	PerToken          map[int]publicTokenPerTokenSnapshot `json:"per_token"`
+}
+
+type publicTokenPerTokenSnapshot struct {
+	Stat              model.Stat                    `json:"stat"`
+	TokenUsage        model.TokenUsageTokens        `json:"token_usage"`
+	TokenDistribution model.PublicTokenDistribution `json:"token_distribution"`
+	RequestCount      int64                         `json:"request_count"`
+	ModelStats        []model.ModelStat             `json:"model_stats"`
+}
+
+var (
+	publicTokenStatsCacheOnce sync.Once
+	publicTokenStatsCache     *cachex.HybridCache[publicTokenStatsSnapshot]
+)
+
+func getPublicTokenStatsCache() *cachex.HybridCache[publicTokenStatsSnapshot] {
+	publicTokenStatsCacheOnce.Do(func() {
+		publicTokenStatsCache = cachex.NewHybridCache[publicTokenStatsSnapshot](cachex.HybridCacheConfig[publicTokenStatsSnapshot]{
+			Namespace:  cachex.Namespace("public_token_stats"),
+			Redis:      common.RDB,
+			RedisCodec: cachex.JSONCodec[publicTokenStatsSnapshot]{},
+			RedisEnabled: func() bool {
+				return common.RedisEnabled
+			},
+			Memory: func() *hot.HotCache[string, publicTokenStatsSnapshot] {
+				return hot.NewHotCache[string, publicTokenStatsSnapshot](hot.LRU, 256).Build()
+			},
+		})
+	})
+	return publicTokenStatsCache
+}
+
+func buildPublicTokenStatsCacheKey(tokenIDs []int, startTime int64, endTime int64) string {
+	sorted := append([]int(nil), tokenIDs...)
+	sort.Ints(sorted)
+	parts := make([]string, 0, len(sorted))
+	for _, tokenID := range sorted {
+		parts = append(parts, strconv.Itoa(tokenID))
+	}
+	return fmt.Sprintf("%s:%d:%d", strings.Join(parts, ","), startTime, endTime)
+}
+
+func loadPublicTokenStatsSnapshot(tokenIDs []int, startTime int64, endTime int64) publicTokenStatsSnapshot {
+	cacheKey := buildPublicTokenStatsCacheKey(tokenIDs, startTime, endTime)
+	if cached, found, err := getPublicTokenStatsCache().Get(cacheKey); err == nil && found {
+		return cached
+	}
+
+	snapshot := publicTokenStatsSnapshot{
+		PerToken: make(map[int]publicTokenPerTokenSnapshot, len(tokenIDs)),
+	}
+	if stat, err := model.SumUsedQuotaByTokenIDs(tokenIDs, startTime, endTime); err == nil {
+		snapshot.Stat = stat
+	}
+	if tokenUsage, err := model.SumUsedTokenDetailsByTokenIDs(tokenIDs, startTime, endTime); err == nil {
+		snapshot.TokenUsage = tokenUsage
+	}
+	if tokenDistribution, err := model.SumPublicTokenDistributionByTokenIDs(tokenIDs, startTime, endTime); err == nil {
+		snapshot.TokenDistribution = tokenDistribution
+	}
+	if requestCount, err := model.CountLogsByTokenIDs(tokenIDs, startTime, endTime); err == nil {
+		snapshot.RequestCount = requestCount
+	}
+	if modelStats, err := model.GetModelStatsByTokenIDs(tokenIDs, startTime, endTime); err == nil {
+		snapshot.ModelStats = modelStats
+	}
+
+	perTokenStats, _ := model.SumUsedQuotaByTokenIDsMap(tokenIDs, startTime, endTime)
+	perTokenUsage, _ := model.SumUsedTokenDetailsByTokenIDsMap(tokenIDs, startTime, endTime)
+	perTokenDistribution, _ := model.SumPublicTokenDistributionByTokenIDsMap(tokenIDs, startTime, endTime)
+	perTokenCounts, _ := model.CountLogsByTokenIDsMap(tokenIDs, startTime, endTime)
+	perTokenModelStats, _ := model.GetModelStatsByTokenIDsMap(tokenIDs, startTime, endTime)
+
+	for _, tokenID := range tokenIDs {
+		snapshot.PerToken[tokenID] = publicTokenPerTokenSnapshot{
+			Stat:              perTokenStats[tokenID],
+			TokenUsage:        perTokenUsage[tokenID],
+			TokenDistribution: perTokenDistribution[tokenID],
+			RequestCount:      perTokenCounts[tokenID],
+			ModelStats:        perTokenModelStats[tokenID],
+		}
+	}
+
+	_ = getPublicTokenStatsCache().SetWithTTL(cacheKey, snapshot, publicTokenStatsCacheTTL)
+	return snapshot
+}
 
 func GetAllTokens(c *gin.Context) {
 	userId := c.GetInt("id")
@@ -710,13 +810,8 @@ func DeleteTokenBatch(c *gin.Context) {
 	})
 }
 
-// ManageTokenBatch 统一处理令牌批量管理动作。
-//
-// 设计要点：
-// 1. 一个接口同时支持 enable / disable / delete，便于前端复用；
-// 2. 按“部分成功”模型执行：单条失败不影响其他令牌；
-// 3. 返回成功数、失败数、失败明细，便于前端给出明确反馈；
-// 4. 严格限定只能操作当前用户自己的令牌（通过 userId + tokenId 查询约束）。
+// ManageTokenBatch 处理令牌批量启用、禁用和删除。
+// 这里按“部分成功”返回结果，单条失败不会中断整批请求。
 func ManageTokenBatch(c *gin.Context) {
 	req := TokenBatchManageRequest{}
 	if err := c.ShouldBindJSON(&req); err != nil || len(req.Ids) == 0 {
@@ -752,7 +847,7 @@ func ManageTokenBatch(c *gin.Context) {
 		}
 		seen[id] = struct{}{}
 
-		// 只能读取到“当前用户自己的令牌”，从根源避免跨用户越权操作。
+		// 只处理当前用户自己的令牌，避免跨用户操作。
 		token, err := model.GetTokenByIds(id, userId)
 		if err != nil || token == nil || token.Id == 0 {
 			failed = append(failed, gin.H{
@@ -854,25 +949,21 @@ func GetPublicTokenStats(c *gin.Context) {
 
 	startTime, endTime := getPublicTokenStatsRange(req.Period)
 	tokenIDs := []int{token.Id}
-	stat, _ := model.SumUsedQuotaByTokenIDs(tokenIDs, startTime, endTime)
-	tokenUsage, _ := model.SumUsedTokenDetailsByTokenIDs(tokenIDs, startTime, endTime)
-	tokenDistribution, _ := model.SumPublicTokenDistributionByTokenIDs(tokenIDs, startTime, endTime)
-	requestCount, _ := model.CountLogsByTokenIDs(tokenIDs, startTime, endTime)
-	modelStats, _ := model.GetModelStatsByTokenIDs(tokenIDs, startTime, endTime)
+	snapshot := loadPublicTokenStatsSnapshot(tokenIDs, startTime, endTime)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"period_quota":         stat.Quota,
-			"period_request_count": requestCount,
-			"period_token_count":   tokenUsage.PromptTokens + tokenUsage.CompletionTokens,
-			"prompt_tokens":        tokenUsage.PromptTokens,
-			"completion_tokens":    tokenUsage.CompletionTokens,
-			"total_tokens":         tokenUsage.PromptTokens + tokenUsage.CompletionTokens,
-			"token_distribution":   tokenDistribution,
-			"rpm":                  stat.Rpm,
-			"tpm":                  stat.Tpm,
-			"model_stats":          modelStats,
+			"period_quota":         snapshot.Stat.Quota,
+			"period_request_count": snapshot.RequestCount,
+			"period_token_count":   snapshot.TokenUsage.PromptTokens + snapshot.TokenUsage.CompletionTokens,
+			"prompt_tokens":        snapshot.TokenUsage.PromptTokens,
+			"completion_tokens":    snapshot.TokenUsage.CompletionTokens,
+			"total_tokens":         snapshot.TokenUsage.PromptTokens + snapshot.TokenUsage.CompletionTokens,
+			"token_distribution":   snapshot.TokenDistribution,
+			"rpm":                  snapshot.Stat.Rpm,
+			"tpm":                  snapshot.Stat.Tpm,
+			"model_stats":          snapshot.ModelStats,
 		},
 	})
 }
@@ -913,31 +1004,21 @@ func GetPublicTokenBatchStats(c *gin.Context) {
 		tokenIDs = append(tokenIDs, token.Id)
 	}
 
-	stat, _ := model.SumUsedQuotaByTokenIDs(tokenIDs, startTime, endTime)
-	tokenUsage, _ := model.SumUsedTokenDetailsByTokenIDs(tokenIDs, startTime, endTime)
-	tokenDistribution, _ := model.SumPublicTokenDistributionByTokenIDs(tokenIDs, startTime, endTime)
-	requestCount, _ := model.CountLogsByTokenIDs(tokenIDs, startTime, endTime)
-	modelStats, _ := model.GetModelStatsByTokenIDs(tokenIDs, startTime, endTime)
+	snapshot := loadPublicTokenStatsSnapshot(tokenIDs, startTime, endTime)
 	batchSummary := buildBatchUsageSummary(tokens, invalid)
 
 	keyStats := make([]gin.H, 0, len(tokens))
 	for _, token := range tokens {
-		singleIDs := []int{token.Id}
-		keyStat, _ := model.SumUsedQuotaByTokenIDs(singleIDs, startTime, endTime)
-		keyUsage, _ := model.SumUsedTokenDetailsByTokenIDs(singleIDs, startTime, endTime)
-		keyDistribution, _ := model.SumPublicTokenDistributionByTokenIDs(singleIDs, startTime, endTime)
-		keyRequestCount, _ := model.CountLogsByTokenIDs(singleIDs, startTime, endTime)
-		keyModelStats, _ := model.GetModelStatsByTokenIDs(singleIDs, startTime, endTime)
-
+		keySnapshot := snapshot.PerToken[token.Id]
 		item := buildPublicTokenUsagePayload(token)
-		item["period_quota"] = keyStat.Quota
-		item["period_request_count"] = keyRequestCount
-		item["period_token_count"] = keyUsage.PromptTokens + keyUsage.CompletionTokens
-		item["prompt_tokens"] = keyUsage.PromptTokens
-		item["completion_tokens"] = keyUsage.CompletionTokens
-		item["total_tokens"] = keyUsage.PromptTokens + keyUsage.CompletionTokens
-		item["token_distribution"] = keyDistribution
-		item["model_stats"] = keyModelStats
+		item["period_quota"] = keySnapshot.Stat.Quota
+		item["period_request_count"] = keySnapshot.RequestCount
+		item["period_token_count"] = keySnapshot.TokenUsage.PromptTokens + keySnapshot.TokenUsage.CompletionTokens
+		item["prompt_tokens"] = keySnapshot.TokenUsage.PromptTokens
+		item["completion_tokens"] = keySnapshot.TokenUsage.CompletionTokens
+		item["total_tokens"] = keySnapshot.TokenUsage.PromptTokens + keySnapshot.TokenUsage.CompletionTokens
+		item["token_distribution"] = keySnapshot.TokenDistribution
+		item["model_stats"] = keySnapshot.ModelStats
 		keyStats = append(keyStats, item)
 	}
 
@@ -950,26 +1031,19 @@ func GetPublicTokenBatchStats(c *gin.Context) {
 				"total_granted":        batchSummary["total_granted"],
 				"total_used":           batchSummary["total_used"],
 				"total_available":      batchSummary["total_available"],
-				"period_quota":         stat.Quota,
-				"period_request_count": requestCount,
-				"prompt_tokens":        tokenUsage.PromptTokens,
-				"completion_tokens":    tokenUsage.CompletionTokens,
-				"total_tokens":         tokenUsage.PromptTokens + tokenUsage.CompletionTokens,
-				"token_distribution":   tokenDistribution,
-				"rpm":                  stat.Rpm,
-				"tpm":                  stat.Tpm,
+				"period_quota":         snapshot.Stat.Quota,
+				"period_request_count": snapshot.RequestCount,
+				"prompt_tokens":        snapshot.TokenUsage.PromptTokens,
+				"completion_tokens":    snapshot.TokenUsage.CompletionTokens,
+				"total_tokens":         snapshot.TokenUsage.PromptTokens + snapshot.TokenUsage.CompletionTokens,
+				"token_distribution":   snapshot.TokenDistribution,
+				"rpm":                  snapshot.Stat.Rpm,
+				"tpm":                  snapshot.Stat.Tpm,
 			},
-			"token_distribution":   tokenDistribution,
-			"model_stats":          modelStats,
-			"key_stats":            keyStats,
-			"invalid_keys":         invalid,
-			"period_quota":         stat.Quota,
-			"period_request_count": requestCount,
-			"prompt_tokens":        tokenUsage.PromptTokens,
-			"completion_tokens":    tokenUsage.CompletionTokens,
-			"total_tokens":         tokenUsage.PromptTokens + tokenUsage.CompletionTokens,
-			"rpm":                  stat.Rpm,
-			"tpm":                  stat.Tpm,
+			"token_distribution": snapshot.TokenDistribution,
+			"model_stats":        snapshot.ModelStats,
+			"key_stats":          keyStats,
+			"invalid_keys":       invalid,
 		},
 	})
 }

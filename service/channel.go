@@ -149,3 +149,28 @@ func IsQuotaRelatedError(err *types.NewAPIError) bool {
 
 	return false
 }
+
+func IsChannelModelMismatchError(err *types.NewAPIError) bool {
+	if err == nil {
+		return false
+	}
+
+	lowerMessage := strings.ToLower(err.Error())
+	if strings.Contains(lowerMessage, "stream must be set to true") {
+		return true
+	}
+	if strings.Contains(lowerMessage, "model is not supported when using codex with a chatgpt account") {
+		return true
+	}
+	if strings.Contains(lowerMessage, "endpoint not supported") {
+		return true
+	}
+	if strings.Contains(lowerMessage, "only /v1/responses") && strings.Contains(lowerMessage, "codex channel") {
+		return true
+	}
+	if strings.Contains(lowerMessage, "not supported") && strings.Contains(lowerMessage, "codex") {
+		return true
+	}
+
+	return false
+}

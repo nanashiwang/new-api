@@ -553,9 +553,30 @@ type PublicTokenDistribution struct {
 }
 
 type tokenUsageLogRow struct {
+	TokenID          int    `gorm:"column:token_id"`
 	PromptTokens     int    `gorm:"column:prompt_tokens"`
 	CompletionTokens int    `gorm:"column:completion_tokens"`
 	Other            string `gorm:"column:other"`
+}
+
+type tokenStatRow struct {
+	TokenID int `gorm:"column:token_id"`
+	Stat
+}
+
+type tokenUsageRow struct {
+	TokenID int `gorm:"column:token_id"`
+	TokenUsageTokens
+}
+
+type tokenCountRow struct {
+	TokenID int   `gorm:"column:token_id"`
+	Count   int64 `gorm:"column:count"`
+}
+
+type tokenModelStatRow struct {
+	TokenID int `gorm:"column:token_id"`
+	ModelStat
 }
 
 type tokenUsageOtherInfo struct {
@@ -686,6 +707,39 @@ func SumPublicTokenDistributionByTokenIDs(tokenIDs []int, startTimestamp int64, 
 	return aggregatePublicTokenDistributionRows(rows), nil
 }
 
+func SumPublicTokenDistributionByTokenIDsMap(tokenIDs []int, startTimestamp int64, endTimestamp int64) (map[int]PublicTokenDistribution, error) {
+	distributionByID := make(map[int]PublicTokenDistribution, len(tokenIDs))
+	if len(tokenIDs) == 0 {
+		return distributionByID, nil
+	}
+
+	rows := make([]tokenUsageLogRow, 0)
+	tx := LOG_DB.Table("logs").
+		Select("token_id, prompt_tokens, completion_tokens, other").
+		Where("type = ?", LogTypeConsume).
+		Where("token_id IN ?", tokenIDs)
+	if startTimestamp != 0 {
+		tx = tx.Where("created_at >= ?", startTimestamp)
+	}
+	if endTimestamp != 0 {
+		tx = tx.Where("created_at <= ?", endTimestamp)
+	}
+
+	if err := tx.Scan(&rows).Error; err != nil {
+		common.SysError("failed to query grouped public token distribution by token ids: " + err.Error())
+		return distributionByID, errors.New("查询统计数据失败")
+	}
+
+	rowsByID := make(map[int][]tokenUsageLogRow, len(tokenIDs))
+	for _, row := range rows {
+		rowsByID[row.TokenID] = append(rowsByID[row.TokenID], row)
+	}
+	for tokenID, tokenRows := range rowsByID {
+		distributionByID[tokenID] = aggregatePublicTokenDistributionRows(tokenRows)
+	}
+	return distributionByID, nil
+}
+
 func GetModelStatsByTokenName(tokenName string, startTimestamp int64, endTimestamp int64) ([]ModelStat, error) {
 	var stats []ModelStat
 	tx := LOG_DB.Table("logs").
@@ -734,6 +788,33 @@ func SumUsedQuotaByTokenIDs(tokenIDs []int, startTimestamp int64, endTimestamp i
 	return stat, nil
 }
 
+func SumUsedQuotaByTokenIDsMap(tokenIDs []int, startTimestamp int64, endTimestamp int64) (map[int]Stat, error) {
+	stats := make(map[int]Stat, len(tokenIDs))
+	if len(tokenIDs) == 0 {
+		return stats, nil
+	}
+
+	rows := make([]tokenStatRow, 0, len(tokenIDs))
+	tx := LOG_DB.Table("logs").
+		Select("token_id, COALESCE(sum(quota), 0) as quota").
+		Where("type = ?", LogTypeConsume).
+		Where("token_id IN ?", tokenIDs)
+	if startTimestamp != 0 {
+		tx = tx.Where("created_at >= ?", startTimestamp)
+	}
+	if endTimestamp != 0 {
+		tx = tx.Where("created_at <= ?", endTimestamp)
+	}
+	if err := tx.Group("token_id").Scan(&rows).Error; err != nil {
+		common.SysError("failed to query grouped log stat by token ids: " + err.Error())
+		return stats, errors.New("查询统计数据失败")
+	}
+	for _, row := range rows {
+		stats[row.TokenID] = row.Stat
+	}
+	return stats, nil
+}
+
 func SumUsedTokenDetailsByTokenIDs(tokenIDs []int, startTimestamp int64, endTimestamp int64) (tokens TokenUsageTokens, err error) {
 	if len(tokenIDs) == 0 {
 		return tokens, nil
@@ -759,6 +840,33 @@ func SumUsedTokenDetailsByTokenIDs(tokenIDs []int, startTimestamp int64, endTime
 	return tokens, nil
 }
 
+func SumUsedTokenDetailsByTokenIDsMap(tokenIDs []int, startTimestamp int64, endTimestamp int64) (map[int]TokenUsageTokens, error) {
+	tokensByID := make(map[int]TokenUsageTokens, len(tokenIDs))
+	if len(tokenIDs) == 0 {
+		return tokensByID, nil
+	}
+
+	rows := make([]tokenUsageRow, 0, len(tokenIDs))
+	tx := LOG_DB.Table("logs").
+		Select("token_id, COALESCE(sum(prompt_tokens), 0) as prompt_tokens, COALESCE(sum(completion_tokens), 0) as completion_tokens").
+		Where("type = ?", LogTypeConsume).
+		Where("token_id IN ?", tokenIDs)
+	if startTimestamp != 0 {
+		tx = tx.Where("created_at >= ?", startTimestamp)
+	}
+	if endTimestamp != 0 {
+		tx = tx.Where("created_at <= ?", endTimestamp)
+	}
+	if err := tx.Group("token_id").Scan(&rows).Error; err != nil {
+		common.SysError("failed to query grouped token usage by token ids: " + err.Error())
+		return tokensByID, errors.New("查询统计数据失败")
+	}
+	for _, row := range rows {
+		tokensByID[row.TokenID] = row.TokenUsageTokens
+	}
+	return tokensByID, nil
+}
+
 func GetModelStatsByTokenIDs(tokenIDs []int, startTimestamp int64, endTimestamp int64) ([]ModelStat, error) {
 	var stats []ModelStat
 	if len(tokenIDs) == 0 {
@@ -777,6 +885,32 @@ func GetModelStatsByTokenIDs(tokenIDs []int, startTimestamp int64, endTimestamp 
 	}
 	err := tx.Group("model_name").Order("quota DESC").Find(&stats).Error
 	return stats, err
+}
+
+func GetModelStatsByTokenIDsMap(tokenIDs []int, startTimestamp int64, endTimestamp int64) (map[int][]ModelStat, error) {
+	statsByID := make(map[int][]ModelStat, len(tokenIDs))
+	if len(tokenIDs) == 0 {
+		return statsByID, nil
+	}
+
+	rows := make([]tokenModelStatRow, 0)
+	tx := LOG_DB.Table("logs").
+		Select("token_id, model_name, count(*) as count, COALESCE(sum(prompt_tokens), 0) as prompt_tokens, COALESCE(sum(completion_tokens), 0) as completion_tokens, COALESCE(sum(quota), 0) as quota").
+		Where("type = ?", LogTypeConsume).
+		Where("token_id IN ?", tokenIDs)
+	if startTimestamp != 0 {
+		tx = tx.Where("created_at >= ?", startTimestamp)
+	}
+	if endTimestamp != 0 {
+		tx = tx.Where("created_at <= ?", endTimestamp)
+	}
+	if err := tx.Group("token_id, model_name").Order("quota DESC").Scan(&rows).Error; err != nil {
+		return statsByID, err
+	}
+	for _, row := range rows {
+		statsByID[row.TokenID] = append(statsByID[row.TokenID], row.ModelStat)
+	}
+	return statsByID, nil
 }
 
 func CountLogsByTokenName(tokenName string, startTimestamp int64, endTimestamp int64) (int64, error) {
@@ -811,6 +945,32 @@ func CountLogsByTokenIDs(tokenIDs []int, startTimestamp int64, endTimestamp int6
 	}
 	err := tx.Count(&count).Error
 	return count, err
+}
+
+func CountLogsByTokenIDsMap(tokenIDs []int, startTimestamp int64, endTimestamp int64) (map[int]int64, error) {
+	counts := make(map[int]int64, len(tokenIDs))
+	if len(tokenIDs) == 0 {
+		return counts, nil
+	}
+
+	rows := make([]tokenCountRow, 0, len(tokenIDs))
+	tx := LOG_DB.Table("logs").
+		Select("token_id, count(*) as count").
+		Where("type = ?", LogTypeConsume).
+		Where("token_id IN ?", tokenIDs)
+	if startTimestamp != 0 {
+		tx = tx.Where("created_at >= ?", startTimestamp)
+	}
+	if endTimestamp != 0 {
+		tx = tx.Where("created_at <= ?", endTimestamp)
+	}
+	if err := tx.Group("token_id").Scan(&rows).Error; err != nil {
+		return counts, err
+	}
+	for _, row := range rows {
+		counts[row.TokenID] = row.Count
+	}
+	return counts, nil
 }
 
 func DeleteOldLog(ctx context.Context, targetTimestamp int64, limit int) (int64, error) {

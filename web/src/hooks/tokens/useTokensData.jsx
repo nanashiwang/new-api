@@ -52,6 +52,7 @@ export const useTokensData = (openFluentNotification) => {
     id: undefined,
   });
   const clearEditingTokenTimerRef = useRef(null);
+  const requestCounter = useRef(0);
 
   // UI 状态
   const [compactMode, setCompactMode] = useTableCompactMode('tokens');
@@ -167,6 +168,7 @@ export const useTokensData = (openFluentNotification) => {
 
   // 加载 Token 列表
   const loadTokens = async (page = 1, size = pageSize) => {
+    const reqId = ++requestCounter.current;
     setLoading(true);
     setSearchMode(false);
     const res = await API.get('/api/token/', {
@@ -175,13 +177,18 @@ export const useTokensData = (openFluentNotification) => {
         size,
       },
     });
+    if (reqId !== requestCounter.current) {
+      return;
+    }
     const { success, message, data } = res.data;
     if (success) {
       syncPageData(data);
     } else {
       showError(message);
     }
-    setLoading(false);
+    if (reqId === requestCounter.current) {
+      setLoading(false);
+    }
   };
 
   // 刷新函数
@@ -296,6 +303,7 @@ export const useTokensData = (openFluentNotification) => {
       await loadTokens(normalizedPage, normalizedSize);
       return;
     }
+    const reqId = ++requestCounter.current;
     setSearching(true);
     // 通过 params 构造查询，避免手写 URL 拼接与转义遗漏。
     const params = {
@@ -338,6 +346,9 @@ export const useTokensData = (openFluentNotification) => {
       params.used_balance_max = searchUsedBalanceMax;
     }
     const res = await API.get('/api/token/search', { params });
+    if (reqId !== requestCounter.current) {
+      return;
+    }
     const { success, message, data } = res.data;
     if (success) {
       setSearchMode(true);
@@ -345,7 +356,9 @@ export const useTokensData = (openFluentNotification) => {
     } else {
       showError(message);
     }
-    setSearching(false);
+    if (reqId === requestCounter.current) {
+      setSearching(false);
+    }
   };
 
   // 分页处理函数

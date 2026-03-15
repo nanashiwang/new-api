@@ -38,6 +38,7 @@ import TokensActions from './TokensActions';
 import TokensFilters from './TokensFilters';
 import TokensDescription from './TokensDescription';
 import EditTokenModal from './modals/EditTokenModal';
+import TokenTestModal from './modals/TokenTestModal';
 import { useTokensData } from '../../../hooks/tokens/useTokensData';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 import { createCardProPagination } from '../../../helpers/utils';
@@ -60,6 +61,8 @@ function TokensPage() {
   const [selectedModel, setSelectedModel] = useState('');
   const [fluentNoticeOpen, setFluentNoticeOpen] = useState(false);
   const [prefillKey, setPrefillKey] = useState('');
+  const [showTestModal, setShowTestModal] = useState(false);
+  const [testingToken, setTestingToken] = useState(null);
 
   // Keep latest data for handlers inside notifications
   useEffect(() => {
@@ -365,6 +368,14 @@ function TokensPage() {
         visiable={showEdit}
         handleClose={closeEdit}
       />
+      <TokenTestModal
+        visible={showTestModal}
+        token={testingToken}
+        onCancel={() => {
+          setShowTestModal(false);
+          setTestingToken(null);
+        }}
+      />
 
       <CardPro
         type='type1'
@@ -414,7 +425,13 @@ function TokensPage() {
         })}
         t={tokensData.t}
       >
-        <TokensTable {...tokensData} />
+        <TokensTable
+          {...tokensData}
+          openTestModal={(token) => {
+            setTestingToken(token);
+            setShowTestModal(true);
+          }}
+        />
       </CardPro>
     </>
   );

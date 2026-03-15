@@ -20,9 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import {
   Button,
-  Dropdown,
   Space,
-  SplitButtonGroup,
   Tag,
   AvatarGroup,
   Avatar,
@@ -38,10 +36,8 @@ import {
   renderGroup,
   renderQuota,
   getModelCategories,
-  showError,
 } from '../../../helpers';
 import {
-  IconTreeTriangleDown,
   IconCopy,
   IconEyeOpened,
   IconEyeClosed,
@@ -469,63 +465,22 @@ const renderTokenName = (text, record, t) => {
 const renderOperations = (
   text,
   record,
-  onOpenLink,
+  openTestModal,
   setEditingToken,
   setShowEdit,
   manageToken,
   refresh,
   t,
 ) => {
-  let chatsArray = [];
-  try {
-    const raw = localStorage.getItem('chats');
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      for (let i = 0; i < parsed.length; i++) {
-        const item = parsed[i];
-        const name = Object.keys(item)[0];
-        if (!name) continue;
-        chatsArray.push({
-          node: 'item',
-          key: i,
-          name,
-          value: item[name],
-          onClick: () => onOpenLink(name, item[name], record),
-        });
-      }
-    }
-  } catch (_) {
-    showError(t('聊天链接配置错误，请联系管理员'));
-  }
-
   return (
     <Space wrap>
-      <SplitButtonGroup
-        className='overflow-hidden'
-        aria-label={t('项目操作按钮组')}
+      <Button
+        size='small'
+        type='tertiary'
+        onClick={() => openTestModal(record)}
       >
-        <Button
-          size='small'
-          type='tertiary'
-          onClick={() => {
-            if (chatsArray.length === 0) {
-              showError(t('请联系管理员配置聊天链接'));
-            } else {
-              const first = chatsArray[0];
-              onOpenLink(first.name, first.value, record);
-            }
-          }}
-        >
-          {t('聊天')}
-        </Button>
-        <Dropdown trigger='click' position='bottomRight' menu={chatsArray}>
-          <Button
-            type='tertiary'
-            icon={<IconTreeTriangleDown />}
-            size='small'
-          ></Button>
-        </Dropdown>
-      </SplitButtonGroup>
+        {t('测试')}
+      </Button>
 
       {record.status === 1 ? (
         <Button
@@ -589,7 +544,7 @@ export const getTokensColumns = ({
   setShowKeys,
   copyText,
   manageToken,
-  onOpenLink,
+  openTestModal,
   setEditingToken,
   setShowEdit,
   refresh,
@@ -670,7 +625,7 @@ export const getTokensColumns = ({
         renderOperations(
           text,
           record,
-          onOpenLink,
+          openTestModal,
           setEditingToken,
           setShowEdit,
           manageToken,

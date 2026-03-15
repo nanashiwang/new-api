@@ -21,6 +21,7 @@ import React, { useEffect, useState, useContext, useRef } from 'react';
 import {
   API,
   showError,
+  showInfo,
   showSuccess,
   timestamp2string,
   renderGroupOption,
@@ -122,31 +123,59 @@ const EditTokenModal = (props) => {
     }
   };
 
-  const loadModels = async () => {
-    let res = await API.get(`/api/user/models`);
+  const buildModelOptions = (data) => {
+    const categories = getModelCategories(t);
+    return data.map((model) => {
+      let icon = null;
+      for (const [key, category] of Object.entries(categories)) {
+        if (key !== 'all' && category.filter({ model_name: model })) {
+          icon = category.icon;
+          break;
+        }
+      }
+      return {
+        label: (
+          <span className='flex items-center gap-1'>
+            {icon}
+            {model}
+          </span>
+        ),
+        value: model,
+      };
+    });
+  };
+
+  const syncModelLimitsWithOptions = (optionList, shouldNotify = false) => {
+    if (!formApiRef.current) return;
+    const allowedValues = new Set(optionList.map((item) => item.value));
+    const currentValues = formApiRef.current.getValue('model_limits') || [];
+    const nextValues = currentValues.filter((model) => allowedValues.has(model));
+    if (nextValues.length === currentValues.length) return;
+    formApiRef.current.setValue('model_limits', nextValues);
+    if (loadedTokenValuesRef.current) {
+      loadedTokenValuesRef.current = {
+        ...loadedTokenValuesRef.current,
+        model_limits: nextValues,
+      };
+    }
+    if (shouldNotify) {
+      showInfo(t('已自动移除当前分组不可用的模型限制'));
+    }
+  };
+
+  const loadModels = async (groupValue = '', shouldNotify = false) => {
+    let res = await API.get(`/api/token/models`, {
+      params: {
+        group: groupValue,
+      },
+    });
     const { success, message, data } = res.data;
     if (success) {
-      const categories = getModelCategories(t);
-      let localModelOptions = data.map((model) => {
-        let icon = null;
-        for (const [key, category] of Object.entries(categories)) {
-          if (key !== 'all' && category.filter({ model_name: model })) {
-            icon = category.icon;
-            break;
-          }
-        }
-        return {
-          label: (
-            <span className='flex items-center gap-1'>
-              {icon}
-              {model}
-            </span>
-          ),
-          value: model,
-        };
-      });
+      const localModelOptions = buildModelOptions(Array.isArray(data) ? data : []);
       setModels(localModelOptions);
+      syncModelLimitsWithOptions(localModelOptions, shouldNotify);
     } else {
+      setModels([]);
       showError(t(message));
     }
   };
@@ -195,6 +224,7 @@ const EditTokenModal = (props) => {
       data.package_limit_amount = quotaToUSDAmount(data.package_limit_quota || 0);
       loadedTokenValuesRef.current = { ...getInitValues(), ...data };
       applyLoadedTokenValues();
+      await loadModels(data.group || '');
       setTokenMode(data.package_enabled ? 'package' : 'standard');
     } else {
       showError(message);
@@ -209,7 +239,7 @@ const EditTokenModal = (props) => {
         formApiRef.current.setValues(getInitValues());
       }
     }
-    loadModels();
+    loadModels(props.editingToken.group || '');
     loadGroups();
   }, [props.editingToken.id]);
 
@@ -221,6 +251,7 @@ const EditTokenModal = (props) => {
         loadedTokenValuesRef.current = null;
         formApiRef.current?.setValues(getInitValues());
         setTokenMode('standard');
+        loadModels('');
       }
     } else {
       loadedTokenValuesRef.current = null;
@@ -328,6 +359,11 @@ const EditTokenModal = (props) => {
     return result;
   };
 
+  const sanitizeModelLimits = (modelLimits) => {
+    const allowedValues = new Set(models.map((item) => item.value));
+    return (modelLimits || []).filter((model) => allowedValues.has(model));
+  };
+
   const submit = async (values) => {
     setLoading(true);
     if (isEdit) {
@@ -344,6 +380,7 @@ const EditTokenModal = (props) => {
         setLoading(false);
         return;
       }
+      localInputs.model_limits = sanitizeModelLimits(localInputs.model_limits);
       delete localInputs.remain_amount;
       delete localInputs.package_limit_amount;
       if (localInputs.expired_time !== -1) {
@@ -387,6 +424,7 @@ const EditTokenModal = (props) => {
           setLoading(false);
           break;
         }
+        localInputs.model_limits = sanitizeModelLimits(localInputs.model_limits);
 
         if (localInputs.expired_time !== -1) {
           let time = Date.parse(localInputs.expired_time);
@@ -482,6 +520,11 @@ const EditTokenModal = (props) => {
           getFormApi={(api) => {
             formApiRef.current = api;
             applyLoadedTokenValues();
+          }}
+          onValueChange={(values) => {
+            if (Object.prototype.hasOwnProperty.call(values, 'group')) {
+              loadModels(values.group || '', true);
+            }
           }}
           onSubmit={submit}
           onSubmitFail={(errs) => {
