@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import { useRef, useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Modal } from '@douyinfe/semi-ui';
 import {
@@ -27,6 +27,8 @@ import {
   showError,
   showSuccess,
   timestamp2string,
+  renderQuota,
+  renderNumber,
   getLogOther,
   copy,
   renderClaudeLogContent,
@@ -34,12 +36,10 @@ import {
   renderAudioModelPrice,
   renderClaudeModelPrice,
   renderModelPrice,
-  renderTaskBillingProcess,
+  renderTieredModelPrice,
 } from '../../helpers';
 import { ITEMS_PER_PAGE } from '../../constants';
 import { useTableCompactMode } from '../common/useTableCompactMode';
-import ParamOverrideEntry from '../../components/table/usage-logs/components/ParamOverrideEntry';
-import { renderRouteDecisionContent } from '../../components/table/usage-logs/routeDecision';
 
 export const useLogsData = () => {
   const { t } = useTranslation();
@@ -62,7 +62,7 @@ export const useLogsData = () => {
     DETAILS: 'details',
   };
 
-  // 基础状态
+  // Basic state
   const [logs, setLogs] = useState([]);
   const [expandData, setExpandData] = useState({});
   const [showStat, setShowStat] = useState(false);
@@ -72,8 +72,6 @@ export const useLogsData = () => {
   const [logCount, setLogCount] = useState(0);
   const [pageSize, setPageSize] = useState(ITEMS_PER_PAGE);
   const [logType, setLogType] = useState(0);
-  const requestCounter = useRef(0);
-  const topUsersRequestCounter = useRef(0);
 
   // User and admin
   const isAdminUser = isAdmin();
@@ -89,12 +87,9 @@ export const useLogsData = () => {
   const [stat, setStat] = useState({
     quota: 0,
     token: 0,
-    cache_hit_rate: 0,
-    cache_global_rate: 0,
   });
-  const [groupOptions, setGroupOptions] = useState([]);
 
-  // 表单状态
+  // Form state
   const [formApi, setFormApi] = useState(null);
   let now = new Date();
   const formInitValues = {
@@ -110,71 +105,6 @@ export const useLogsData = () => {
     ],
     logType: '0',
   };
-
-  // Column visibility state
-  const [visibleColumns, setVisibleColumns] = useState({});
-  const [showColumnSelector, setShowColumnSelector] = useState(false);
-  const [billingDisplayMode, setBillingDisplayMode] = useState(() => {
-    const savedMode = localStorage.getItem(BILLING_DISPLAY_MODE_STORAGE_KEY);
-    if (savedMode === 'price' || savedMode === 'ratio') {
-      return savedMode;
-    }
-    return localStorage.getItem('quota_display_type') === 'TOKENS'
-      ? 'ratio'
-      : 'price';
-  });
-
-  // Compact mode
-  const [compactMode, setCompactMode] = useTableCompactMode('logs');
-
-  // User info modal state
-  const [showUserInfo, setShowUserInfoModal] = useState(false);
-  const [userInfoData, setUserInfoData] = useState(null);
-
-  // Channel affinity usage cache stats modal state (admin only)
-  const [
-    showChannelAffinityUsageCacheModal,
-    setShowChannelAffinityUsageCacheModal,
-  ] = useState(false);
-  const [channelAffinityUsageCacheTarget, setChannelAffinityUsageCacheTarget] =
-    useState(null);
-  const [showParamOverrideModal, setShowParamOverrideModal] = useState(false);
-  const [paramOverrideTarget, setParamOverrideTarget] = useState(null);
-  const [showTopUsersDrawer, setShowTopUsersDrawer] = useState(false);
-  const [topUsersLoading, setTopUsersLoading] = useState(false);
-  const [topUsersData, setTopUsersData] = useState({
-    by_quota: [],
-    by_requests: [],
-  });
-  const [topUsersViewMode, setTopUsersViewMode] = useState('both');
-  const [topUsersQuotaOrder, setTopUsersQuotaOrder] = useState('desc');
-  const [topUsersRequestOrder, setTopUsersRequestOrder] = useState('desc');
-  const [topUsersLimit, setTopUsersLimit] = useState(10);
-
-  // Load saved column preferences from localStorage
-  useEffect(() => {
-    const savedColumns = localStorage.getItem(STORAGE_KEY);
-    if (savedColumns) {
-      try {
-        const parsed = JSON.parse(savedColumns);
-        const defaults = getDefaultColumnVisibility();
-        const merged = { ...defaults, ...parsed };
-
-        // For non-admin users, force-hide admin-only columns (does not touch admin settings)
-        if (!isAdminUser) {
-          merged[COLUMN_KEYS.CHANNEL] = false;
-          merged[COLUMN_KEYS.USERNAME] = false;
-          merged[COLUMN_KEYS.RETRY] = false;
-        }
-        setVisibleColumns(merged);
-      } catch (e) {
-        console.error('Failed to parse saved column preferences', e);
-        initDefaultColumns();
-      }
-    } else {
-      initDefaultColumns();
-    }
-  }, []);
 
   // Get default column visibility based on user role
   const getDefaultColumnVisibility = () => {
@@ -195,6 +125,63 @@ export const useLogsData = () => {
       [COLUMN_KEYS.DETAILS]: true,
     };
   };
+
+  const getInitialVisibleColumns = () => {
+    const defaults = getDefaultColumnVisibility();
+    const savedColumns = localStorage.getItem(STORAGE_KEY);
+
+    if (!savedColumns) {
+      return defaults;
+    }
+
+    try {
+      const parsed = JSON.parse(savedColumns);
+      const merged = { ...defaults, ...parsed };
+
+      if (!isAdminUser) {
+        merged[COLUMN_KEYS.CHANNEL] = false;
+        merged[COLUMN_KEYS.USERNAME] = false;
+        merged[COLUMN_KEYS.RETRY] = false;
+      }
+
+      return merged;
+    } catch (e) {
+      console.error('Failed to parse saved column preferences', e);
+      return defaults;
+    }
+  };
+
+  const getInitialBillingDisplayMode = () => {
+    const savedMode = localStorage.getItem(BILLING_DISPLAY_MODE_STORAGE_KEY);
+    if (savedMode === 'price' || savedMode === 'ratio') {
+      return savedMode;
+    }
+    return localStorage.getItem('quota_display_type') === 'TOKENS'
+      ? 'ratio'
+      : 'price';
+  };
+
+  // Column visibility state
+  const [visibleColumns, setVisibleColumns] = useState(getInitialVisibleColumns);
+  const [showColumnSelector, setShowColumnSelector] = useState(false);
+  const [billingDisplayMode, setBillingDisplayMode] = useState(
+    getInitialBillingDisplayMode,
+  );
+
+  // Compact mode
+  const [compactMode, setCompactMode] = useTableCompactMode('logs');
+
+  // User info modal state
+  const [showUserInfo, setShowUserInfoModal] = useState(false);
+  const [userInfoData, setUserInfoData] = useState(null);
+
+  // Channel affinity usage cache stats modal state (admin only)
+  const [
+    showChannelAffinityUsageCacheModal,
+    setShowChannelAffinityUsageCacheModal,
+  ] = useState(false);
+  const [channelAffinityUsageCacheTarget, setChannelAffinityUsageCacheTarget] =
+    useState(null);
 
   // Initialize default column visibility
   const initDefaultColumns = () => {
@@ -270,94 +257,6 @@ export const useLogsData = () => {
     };
   };
 
-  const fetchGroupOptions = async () => {
-    try {
-      const endpoint = isAdminUser ? '/api/group/' : '/api/user/self/groups';
-      const res = await API.get(endpoint);
-      const source = res?.data?.data;
-      if (!source) {
-        setGroupOptions([]);
-        return;
-      }
-      if (Array.isArray(source)) {
-        setGroupOptions(
-          source.map((group) => ({
-            label: group,
-            value: group,
-          })),
-        );
-        return;
-      }
-      setGroupOptions(
-        Object.entries(source).map(([group, meta]) => ({
-          label: meta?.desc ? `${group} (${meta.desc})` : group,
-          value: group,
-        })),
-      );
-    } catch (error) {
-      showError(error?.message || t('获取组列表失败'));
-    }
-  };
-
-  const loadTopUsers = async () => {
-    if (!isAdminUser) {
-      return;
-    }
-    const reqId = ++topUsersRequestCounter.current;
-    const {
-      username,
-      token_name,
-      model_name,
-      start_timestamp,
-      end_timestamp,
-      channel,
-      group,
-      request_id,
-    } = getFormValues();
-
-    setTopUsersLoading(true);
-    try {
-      const localStartTimestamp = Date.parse(start_timestamp) / 1000;
-      const localEndTimestamp = Date.parse(end_timestamp) / 1000;
-      const url = `/api/log/top-users?username=${username}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&channel=${channel}&group=${group}&request_id=${request_id}&view_mode=${topUsersViewMode}&quota_order=${topUsersQuotaOrder}&request_order=${topUsersRequestOrder}&limit=${topUsersLimit}`;
-      const res = await API.get(encodeURI(url));
-      if (reqId !== topUsersRequestCounter.current) {
-        return;
-      }
-      const { success, message, data } = res.data || {};
-      if (success) {
-        setTopUsersData({
-          by_quota: data?.by_quota || [],
-          by_requests: data?.by_requests || [],
-        });
-      } else {
-        showError(message || t('获取大用户榜单失败'));
-      }
-    } catch (error) {
-      if (reqId !== topUsersRequestCounter.current) {
-        return;
-      }
-      showError(error?.message || t('获取大用户榜单失败'));
-    } finally {
-      if (reqId === topUsersRequestCounter.current) {
-        setTopUsersLoading(false);
-      }
-    }
-  };
-
-  const openTopUsersDrawer = () => {
-    setShowTopUsersDrawer(true);
-  };
-
-  const selectTopUser = async (username) => {
-    if (!formApi || !username) {
-      return;
-    }
-    formApi.setValue('username', username);
-    setShowTopUsersDrawer(false);
-    await refresh();
-  };
-
   // Statistics functions
   const getLogSelfStat = async () => {
     const {
@@ -366,13 +265,12 @@ export const useLogsData = () => {
       start_timestamp,
       end_timestamp,
       group,
-      request_id,
       logType: formLogType,
     } = getFormValues();
     const currentLogType = formLogType !== undefined ? formLogType : logType;
     let localStartTimestamp = Date.parse(start_timestamp) / 1000;
     let localEndTimestamp = Date.parse(end_timestamp) / 1000;
-    let url = `/api/log/self/stat?type=${currentLogType}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&group=${group}&request_id=${request_id}`;
+    let url = `/api/log/self/stat?type=${currentLogType}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&group=${group}`;
     url = encodeURI(url);
     let res = await API.get(url);
     const { success, message, data } = res.data;
@@ -392,13 +290,12 @@ export const useLogsData = () => {
       end_timestamp,
       channel,
       group,
-      request_id,
       logType: formLogType,
     } = getFormValues();
     const currentLogType = formLogType !== undefined ? formLogType : logType;
     let localStartTimestamp = Date.parse(start_timestamp) / 1000;
     let localEndTimestamp = Date.parse(end_timestamp) / 1000;
-    let url = `/api/log/stat?type=${currentLogType}&username=${username}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&channel=${channel}&group=${group}&request_id=${request_id}`;
+    let url = `/api/log/stat?type=${currentLogType}&username=${username}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&channel=${channel}&group=${group}`;
     url = encodeURI(url);
     let res = await API.get(url);
     const { success, message, data } = res.data;
@@ -447,20 +344,6 @@ export const useLogsData = () => {
       key_fp: a.key_fp || '',
     });
     setShowChannelAffinityUsageCacheModal(true);
-  };
-
-  const openParamOverrideModal = (log, other) => {
-    const lines = Array.isArray(other?.po) ? other.po.filter(Boolean) : [];
-    if (lines.length === 0) {
-      return;
-    }
-    setParamOverrideTarget({
-      lines,
-      modelName: log?.model_name || '',
-      requestId: log?.request_id || '',
-      requestPath: other?.request_path || '',
-    });
-    setShowParamOverrideModal(true);
   };
 
   // Format logs data
@@ -525,43 +408,14 @@ export const useLogsData = () => {
         });
       }
       if (logs[i].type === 2) {
-        expandDataLocal.push({
-          key: t('日志详情'),
-          value: other?.claude
-            ? renderClaudeLogContent(
-                other?.model_ratio,
-                other.completion_ratio,
-                other.model_price,
-                other.group_ratio,
-                other?.user_group_ratio,
-                other.cache_ratio || 1.0,
-                other.cache_creation_ratio || 1.0,
-                other.cache_creation_tokens_5m || 0,
-                other.cache_creation_ratio_5m ||
-                  other.cache_creation_ratio ||
-                  1.0,
-                other.cache_creation_tokens_1h || 0,
-                other.cache_creation_ratio_1h ||
-                  other.cache_creation_ratio ||
-                  1.0,
-                billingDisplayMode,
-              )
-            : renderLogContent(
-                other?.model_ratio,
-                other.completion_ratio,
-                other.model_price,
-                other.group_ratio,
-                other?.user_group_ratio,
-                other.cache_ratio || 1.0,
-                false,
-                1.0,
-                other.web_search || false,
-                other.web_search_call_count || 0,
-                other.file_search || false,
-                other.file_search_call_count || 0,
-                billingDisplayMode,
-              ),
-        });
+        if (other?.billing_mode !== 'tiered_expr') {
+          expandDataLocal.push({
+            key: t('日志详情'),
+            value: other?.claude
+              ? renderClaudeLogContent({ ...other, displayMode: billingDisplayMode })
+              : renderLogContent({ ...other, displayMode: billingDisplayMode }),
+          });
+        }
         if (logs[i]?.content) {
           expandDataLocal.push({
             key: t('其他详情'),
@@ -597,77 +451,19 @@ export const useLogsData = () => {
           Boolean(other?.violation_fee_marker);
 
         let content = '';
-        if (!isViolationFeeLog) {
-          const isTaskLog = other?.is_task === true || other?.task_id != null;
-          if (isTaskLog && other?.model_price === -1) {
-            content = renderTaskBillingProcess(other, logs[i].content);
-          } else if (other?.ws || other?.audio) {
-            content = renderAudioModelPrice(
-              other?.text_input,
-              other?.text_output,
-              other?.model_ratio,
-              other?.model_price,
-              other?.completion_ratio,
-              other?.audio_input,
-              other?.audio_output,
-              other?.audio_ratio,
-              other?.audio_completion_ratio,
-              other?.group_ratio,
-              other?.user_group_ratio,
-              other?.cache_tokens || 0,
-              other?.cache_ratio || 1.0,
-              billingDisplayMode,
-            );
+        if (!isViolationFeeLog && other?.billing_mode !== 'tiered_expr') {
+          const logOpts = {
+            ...other,
+            prompt_tokens: logs[i].prompt_tokens,
+            completion_tokens: logs[i].completion_tokens,
+            displayMode: billingDisplayMode,
+          };
+          if (other?.ws || other?.audio) {
+            content = renderAudioModelPrice(logOpts);
           } else if (other?.claude) {
-            content = renderClaudeModelPrice(
-              logs[i].prompt_tokens,
-              logs[i].completion_tokens,
-              other.model_ratio,
-              other.model_price,
-              other.completion_ratio,
-              other.group_ratio,
-              other?.user_group_ratio,
-              other.cache_tokens || 0,
-              other.cache_ratio || 1.0,
-              other.cache_creation_tokens || 0,
-              other.cache_creation_ratio || 1.0,
-              other.cache_creation_tokens_5m || 0,
-              other.cache_creation_ratio_5m ||
-                other.cache_creation_ratio ||
-                1.0,
-              other.cache_creation_tokens_1h || 0,
-              other.cache_creation_ratio_1h ||
-                other.cache_creation_ratio ||
-                1.0,
-              billingDisplayMode,
-            );
+            content = renderClaudeModelPrice(logOpts);
           } else {
-            content = renderModelPrice(
-              logs[i].prompt_tokens,
-              logs[i].completion_tokens,
-              other?.model_ratio,
-              other?.model_price,
-              other?.completion_ratio,
-              other?.group_ratio,
-              other?.user_group_ratio,
-              other?.cache_tokens || 0,
-              other?.cache_ratio || 1.0,
-              other?.image || false,
-              other?.image_ratio || 0,
-              other?.image_output || 0,
-              other?.web_search || false,
-              other?.web_search_call_count || 0,
-              other?.web_search_price || 0,
-              other?.file_search || false,
-              other?.file_search_call_count || 0,
-              other?.file_search_price || 0,
-              other?.audio_input_seperate_price || false,
-              other?.audio_input_token_count || 0,
-              other?.audio_input_price || 0,
-              other?.image_generation_call || false,
-              other?.image_generation_call_price || 0,
-              billingDisplayMode,
-            );
+            content = renderModelPrice(logOpts);
           }
           expandDataLocal.push({
             key: t('计费过程'),
@@ -680,65 +476,15 @@ export const useLogsData = () => {
             value: other.reasoning_effort,
           });
         }
-        if (other?.billing_mode === 'tiered_expr') {
+        if (other?.billing_mode === 'tiered_expr' && other?.expr_b64) {
           expandDataLocal.push({
-            key: t('计费方式'),
-            value: t('阶梯计费'),
+            key: t('计费过程'),
+            value: renderTieredModelPrice({
+              ...other,
+              prompt_tokens: logs[i].prompt_tokens,
+              completion_tokens: logs[i].completion_tokens,
+            }),
           });
-          if (other?.group_ratio !== undefined) {
-            const gr = other.group_ratio;
-            expandDataLocal.push({
-              key: t('分组倍率'),
-              value: typeof gr === 'number' ? gr.toFixed(4) : String(gr ?? '-'),
-            });
-          }
-          if (other?.rule_version !== undefined) {
-            expandDataLocal.push({
-              key: t('规则版本'),
-              value: String(other.rule_version),
-            });
-          }
-          if (other?.estimated_env) {
-            expandDataLocal.push({
-              key: t('预估环境'),
-              value: `prompt=${other.estimated_env.prompt_tokens ?? 0}, completion=${other.estimated_env.completion_tokens ?? 0}`,
-            });
-          }
-          if (other?.actual_env) {
-            expandDataLocal.push({
-              key: t('实际环境'),
-              value: `prompt=${other.actual_env.prompt_tokens ?? 0}, completion=${other.actual_env.completion_tokens ?? 0}`,
-            });
-          }
-          if (other?.estimated_quota_after_group !== undefined) {
-            expandDataLocal.push({
-              key: t('预估额度'),
-              value: String(other.estimated_quota_after_group),
-            });
-          }
-          if (other?.actual_quota_after_group !== undefined) {
-            expandDataLocal.push({
-              key: t('实际额度'),
-              value: String(other.actual_quota_after_group),
-            });
-          }
-          expandDataLocal.push({
-            key: t('跨阶梯'),
-            value: other?.crossed_tier ? t('是') : t('否'),
-          });
-          if (Array.isArray(other?.breakdown) && other.breakdown.length > 0) {
-            const breakdownText = other.breakdown.map((item, idx) =>
-              `[${idx}] ${item.token_type} | tokens=${item.tokens_in_tier} | cost=${item.unit_cost} | flat=${item.flat_fee} | sub=${item.subtotal}`
-            ).join('\n');
-            expandDataLocal.push({
-              key: t('计费明细'),
-              value: (
-                <div style={{ whiteSpace: 'pre-line', fontFamily: 'monospace', fontSize: 12 }}>
-                  {breakdownText}
-                </div>
-              ),
-            });
-          }
         }
       }
       if (logs[i].type === 6) {
@@ -764,62 +510,6 @@ export const useLogsData = () => {
           key: t('请求路径'),
           value: other.request_path,
         });
-      }
-      if (isAdminUser && other?.stream_status) {
-        const ss = other.stream_status;
-        const isOk = ss.status === 'ok';
-        let streamValue = `${isOk ? '✓ ' + t('正常') : '✗ ' + t('异常')} (${ss.end_reason || 'unknown'})`;
-        if (ss.error_count > 0) {
-          streamValue += ` [${t('软错误')}: ${ss.error_count}]`;
-        }
-        if (ss.end_error) {
-          streamValue += ` - ${ss.end_error}`;
-        }
-        expandDataLocal.push({
-          key: t('流状态'),
-          value: streamValue,
-        });
-        if (Array.isArray(ss.errors) && ss.errors.length > 0) {
-          expandDataLocal.push({
-            key: t('流错误详情'),
-            value: (
-              <div
-                style={{
-                  maxWidth: 600,
-                  whiteSpace: 'pre-line',
-                  wordBreak: 'break-word',
-                  lineHeight: 1.6,
-                }}
-              >
-                {ss.errors.join('\n')}
-              </div>
-            ),
-          });
-        }
-      }
-      if (isAdminUser && Array.isArray(other?.po) && other.po.length > 0) {
-        expandDataLocal.push({
-          key: t('参数覆盖'),
-          value: (
-            <ParamOverrideEntry
-              count={other.po.length}
-              t={t}
-              onOpen={(event) => {
-                event.stopPropagation();
-                openParamOverrideModal(logs[i], other);
-              }}
-            />
-          ),
-        });
-      }
-      if (isAdminUser && (logs[i].type === 2 || logs[i].type === 5)) {
-        const routeDecisionContent = renderRouteDecisionContent(logs[i], other, t);
-        if (routeDecisionContent) {
-          expandDataLocal.push({
-            key: t('路由决策说明'),
-            value: routeDecisionContent,
-          });
-        }
       }
       if (other?.billing_source === 'subscription') {
         const planId = other?.subscription_plan_id;
@@ -888,77 +578,6 @@ export const useLogsData = () => {
           value: localCountMode,
         });
       }
-      if (isAdminUser && logs[i].type === 1) {
-        const adminInfo = other?.admin_info;
-        if (adminInfo) {
-          if (adminInfo.payment_method) {
-            expandDataLocal.push({
-              key: t('订单支付方式'),
-              value: adminInfo.payment_method,
-            });
-          }
-          if (adminInfo.callback_payment_method) {
-            expandDataLocal.push({
-              key: t('回调支付方式'),
-              value: adminInfo.callback_payment_method,
-            });
-          }
-          if (adminInfo.caller_ip) {
-            expandDataLocal.push({
-              key: t('回调调用者IP'),
-              value: adminInfo.caller_ip,
-            });
-          }
-          if (adminInfo.server_ip) {
-            expandDataLocal.push({
-              key: t('服务器IP'),
-              value: adminInfo.server_ip,
-            });
-          }
-          if (adminInfo.version) {
-            expandDataLocal.push({
-              key: t('系统版本'),
-              value: adminInfo.version,
-            });
-          }
-        } else {
-          expandDataLocal.push({
-            key: t('审计信息'),
-            value: (
-              <span style={{ color: 'var(--semi-color-warning)' }}>
-                {t(
-                  '该记录由旧版本实例写入，缺少审计信息，建议将实例升级至最新版本以便记录服务器IP、回调IP、支付方式与系统版本等审计字段。',
-                )}
-              </span>
-            ),
-          });
-        }
-      }
-      if (isAdminUser && logs[i].type === 3 && other?.admin_info) {
-        const adminInfo = other.admin_info;
-        const hasUsername =
-          adminInfo.admin_username !== undefined &&
-          adminInfo.admin_username !== null &&
-          adminInfo.admin_username !== '';
-        const hasId =
-          adminInfo.admin_id !== undefined &&
-          adminInfo.admin_id !== null &&
-          adminInfo.admin_id !== '';
-        if (hasUsername || hasId) {
-          let operatorValue = '';
-          if (hasUsername && hasId) {
-            operatorValue = `${adminInfo.admin_username} (ID: ${adminInfo.admin_id})`;
-          } else if (hasUsername) {
-            operatorValue = String(adminInfo.admin_username);
-          } else {
-            operatorValue = `ID: ${adminInfo.admin_id}`;
-          }
-          expandDataLocal.push({
-            key: t('操作管理员'),
-            value: operatorValue,
-          });
-        }
-      }
       expandDatesLocal[logs[i].key] = expandDataLocal;
     }
 
@@ -968,7 +587,6 @@ export const useLogsData = () => {
 
   // Load logs function
   const loadLogs = async (startIdx, pageSize, customLogType = null) => {
-    const reqId = ++requestCounter.current;
     setLoading(true);
 
     let url = '';
@@ -1000,9 +618,6 @@ export const useLogsData = () => {
     }
     url = encodeURI(url);
     const res = await API.get(url);
-    if (reqId !== requestCounter.current) {
-      return;
-    }
     const { success, message, data } = res.data;
     if (success) {
       const newPageData = data.items;
@@ -1014,12 +629,10 @@ export const useLogsData = () => {
     } else {
       showError(message);
     }
-    if (reqId === requestCounter.current) {
-      setLoading(false);
-    }
+    setLoading(false);
   };
 
-  // 分页处理函数
+  // Page handlers
   const handlePageChange = (page) => {
     setActivePage(page);
     loadLogs(page, pageSize).then((r) => {});
@@ -1036,17 +649,14 @@ export const useLogsData = () => {
       });
   };
 
-  // 刷新函数
+  // Refresh function
   const refresh = async () => {
     setActivePage(1);
-    await handleEyeClick();
+    handleEyeClick();
     await loadLogs(1, pageSize);
-    if (showTopUsersDrawer) {
-      await loadTopUsers();
-    }
   };
 
-  // 复制文本函数
+  // Copy text function
   const copyText = async (e, text) => {
     e.stopPropagation();
     if (await copy(text)) {
@@ -1056,40 +666,17 @@ export const useLogsData = () => {
     }
   };
 
-  // 初始化数据
+  // Initialize data
   useEffect(() => {
     const localPageSize =
       parseInt(localStorage.getItem('page-size')) || ITEMS_PER_PAGE;
     setPageSize(localPageSize);
-    fetchGroupOptions().catch((reason) => {
-      showError(reason?.message || reason || t('获取组列表失败'));
-    });
     loadLogs(activePage, localPageSize)
       .then()
       .catch((reason) => {
         showError(reason);
       });
   }, []);
-
-  useEffect(() => {
-    if (showTopUsersDrawer) {
-      loadTopUsers().catch((reason) => {
-        showError(reason?.message || reason || t('获取大用户榜单失败'));
-      });
-    }
-  }, [
-    showTopUsersDrawer,
-    topUsersViewMode,
-    topUsersQuotaOrder,
-    topUsersRequestOrder,
-    topUsersLimit,
-  ]);
-
-  useEffect(() => {
-    if (logs.length > 0) {
-      setLogsFormat([...logs]);
-    }
-  }, [billingDisplayMode]);
 
   // Initialize statistics when formApi is available
   useEffect(() => {
@@ -1106,7 +693,7 @@ export const useLogsData = () => {
   };
 
   return {
-    // 基础状态
+    // Basic state
     logs,
     expandData,
     showStat,
@@ -1118,9 +705,8 @@ export const useLogsData = () => {
     logType,
     stat,
     isAdminUser,
-    groupOptions,
 
-    // 表单状态
+    // Form state
     formApi,
     setFormApi,
     formInitValues,
@@ -1152,27 +738,8 @@ export const useLogsData = () => {
     setShowChannelAffinityUsageCacheModal,
     channelAffinityUsageCacheTarget,
     openChannelAffinityUsageCacheModal,
-    showParamOverrideModal,
-    setShowParamOverrideModal,
-    paramOverrideTarget,
-    showTopUsersDrawer,
-    setShowTopUsersDrawer,
-    topUsersLoading,
-    topUsersData,
-    topUsersViewMode,
-    setTopUsersViewMode,
-    topUsersQuotaOrder,
-    setTopUsersQuotaOrder,
-    topUsersRequestOrder,
-    setTopUsersRequestOrder,
-    topUsersLimit,
-    setTopUsersLimit,
-    openTopUsersDrawer,
-    selectTopUser,
-    refreshTopUsers: loadTopUsers,
-    currentTopUsersLogType: getFormValues().logType,
 
-    // 函数集合
+    // Functions
     loadLogs,
     handlePageChange,
     handlePageSizeChange,
@@ -1182,9 +749,8 @@ export const useLogsData = () => {
     setLogsFormat,
     hasExpandableRows,
     setLogType,
-    openParamOverrideModal,
 
-    // 国际化
+    // Translation
     t,
   };
 };

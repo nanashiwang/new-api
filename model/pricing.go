@@ -9,6 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 )
@@ -30,6 +31,8 @@ type Pricing struct {
 	CacheCreationRatio     float64                 `json:"cache_creation_ratio"`
 	EnableGroup            []string                `json:"enable_groups"`
 	SupportedEndpointTypes []constant.EndpointType `json:"supported_endpoint_types"`
+	BillingMode            string                  `json:"billing_mode,omitempty"`
+	BillingExpr            string                  `json:"billing_expr,omitempty"`
 	PricingVersion         string                  `json:"pricing_version,omitempty"`
 }
 
@@ -316,6 +319,12 @@ func updatePricing() {
 			pricing.CompletionRatio = ratio_setting.GetCompletionRatio(model)
 			pricing.QuotaType = 0
 			applyPricingCacheSupport(&pricing, model)
+		}
+		if billingMode := billing_setting.GetBillingMode(model); billingMode == "tiered_expr" {
+			pricing.BillingMode = billingMode
+			if expr, ok := billing_setting.GetBillingExpr(model); ok {
+				pricing.BillingExpr = expr
+			}
 		}
 		pricingMap = append(pricingMap, pricing)
 	}

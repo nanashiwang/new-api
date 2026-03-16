@@ -1,7 +1,7 @@
 package service
 
 import (
-	"strconv"
+	"encoding/base64"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -76,93 +76,7 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	appendRequestPath(ctx, relayInfo, other)
 	appendRequestConversionChain(relayInfo, other)
 	appendBillingInfo(relayInfo, other)
-	appendParamOverrideInfo(relayInfo, other)
-	appendStreamStatus(relayInfo, other)
 	return other
-}
-
-func appendParamOverrideInfo(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
-	if relayInfo == nil || other == nil || len(relayInfo.ParamOverrideAudit) == 0 {
-		return
-	}
-	other["po"] = relayInfo.ParamOverrideAudit
-}
-
-func appendStreamStatus(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
-	if relayInfo == nil || other == nil || !relayInfo.IsStream || relayInfo.StreamStatus == nil {
-		return
-	}
-	ss := relayInfo.StreamStatus
-	status := "ok"
-	if !ss.IsNormalEnd() || ss.HasErrors() {
-		status = "error"
-	}
-
-	streamInfo := map[string]interface{}{
-		"status":     status,
-		"end_reason": string(ss.EndReason),
-	}
-	if ss.EndError != nil {
-		streamInfo["end_error"] = ss.EndError.Error()
-	}
-	if ss.ErrorCount > 0 {
-		streamInfo["error_count"] = ss.ErrorCount
-		messages := make([]string, 0, len(ss.Errors))
-		for _, entry := range ss.Errors {
-			messages = append(messages, entry.Message)
-		}
-		streamInfo["errors"] = messages
-	}
-	other["stream_status"] = streamInfo
-}
-
-func normalizeUsageCostUSD(cost any) (float64, bool) {
-	switch value := cost.(type) {
-	case nil:
-		return 0, false
-	case float64:
-		return value, value >= 0
-	case float32:
-		return float64(value), value >= 0
-	case int:
-		return float64(value), value >= 0
-	case int64:
-		return float64(value), value >= 0
-	case int32:
-		return float64(value), value >= 0
-	case uint:
-		return float64(value), value >= 0
-	case uint64:
-		return float64(value), value >= 0
-	case uint32:
-		return float64(value), value >= 0
-	case string:
-		parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
-		if err != nil || parsed < 0 {
-			return 0, false
-		}
-		return parsed, true
-	default:
-		parsed, err := strconv.ParseFloat(strings.TrimSpace(common.Interface2String(value)), 64)
-		if err != nil || parsed < 0 {
-			return 0, false
-		}
-		return parsed, true
-	}
-}
-
-func AppendUsageCost(other map[string]interface{}, cost any) {
-	if other == nil {
-		return
-	}
-	costUSD, ok := normalizeUsageCostUSD(cost)
-	if !ok {
-		return
-	}
-	other["upstream_cost"] = costUSD
-	other["upstream_cost_reported"] = true
-	other["upstream_cost_currency"] = "USD"
-	other["upstream_cost_source"] = "provider"
 }
 
 func appendBillingInfo(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
@@ -303,41 +217,17 @@ func GenerateMjOtherInfo(relayInfo *relaycommon.RelayInfo, priceData types.Price
 	return other
 }
 
-func GenerateTieredOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, result *billingexpr.TieredResult) map[string]interface{} {
-	other := make(map[string]interface{})
-	other["billing_mode"] = "tiered_expr"
-
+// InjectTieredBillingInfo overlays tiered billing fields onto an existing
+// module-specific other map. Call this after GenerateTextOtherInfo /
+// GenerateClaudeOtherInfo / etc. when the request used tiered_expr billing.
+func InjectTieredBillingInfo(other map[string]interface{}, relayInfo *relaycommon.RelayInfo, result *billingexpr.TieredResult) {
 	snap := relayInfo.TieredBillingSnapshot
-	if snap != nil {
-		other["group_ratio"] = snap.GroupRatio
-		other["expr_hash"] = snap.ExprHash
-		other["estimated_prompt_tokens"] = snap.EstimatedPromptTokens
-		other["estimated_completion_tokens"] = snap.EstimatedCompletionTokens
-		other["estimated_quota_before_group"] = snap.EstimatedQuotaBeforeGroup
-		other["estimated_quota_after_group"] = snap.EstimatedQuotaAfterGroup
-		other["estimated_tier"] = snap.EstimatedTier
+	if snap == nil {
+		return
 	}
-
+	other["billing_mode"] = "tiered_expr"
+	other["expr_b64"] = base64.StdEncoding.EncodeToString([]byte(snap.ExprString))
 	if result != nil {
-		other["actual_quota_before_group"] = result.ActualQuotaBeforeGroup
-		other["actual_quota_after_group"] = result.ActualQuotaAfterGroup
 		other["matched_tier"] = result.MatchedTier
-		other["crossed_tier"] = result.CrossedTier
 	}
-
-	other["frt"] = float64(relayInfo.FirstResponseTime.UnixMilli() - relayInfo.StartTime.UnixMilli())
-	if relayInfo.IsModelMapped {
-		other["is_model_mapped"] = true
-		other["upstream_model_name"] = relayInfo.UpstreamModelName
-	}
-
-	adminInfo := make(map[string]interface{})
-	adminInfo["use_channel"] = ctx.GetStringSlice("use_channel")
-	AppendChannelAffinityAdminInfo(ctx, adminInfo)
-	other["admin_info"] = adminInfo
-
-	appendRequestPath(ctx, relayInfo, other)
-	appendRequestConversionChain(relayInfo, other)
-	appendBillingInfo(relayInfo, other)
-	return other
 }
