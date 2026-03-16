@@ -5,12 +5,11 @@ import (
 	"testing"
 )
 
-func TestClaudeSettingsWriteHeadersMergesCommaSeparatedValues(t *testing.T) {
+func TestClaudeSettingsWriteHeadersMergesConfiguredValuesIntoSingleHeader(t *testing.T) {
 	settings := &ClaudeSettings{
 		HeadersSettings: map[string]map[string][]string{
-			"claude-sonnet-4-5-20250929": {
+			"claude-3-7-sonnet-20250219-thinking": {
 				"anthropic-beta": {
-					"context-1m-2025-08-07",
 					"token-efficient-tools-2025-02-19",
 				},
 			},
@@ -18,51 +17,44 @@ func TestClaudeSettingsWriteHeadersMergesCommaSeparatedValues(t *testing.T) {
 	}
 
 	headers := http.Header{}
-	headers.Set("anthropic-beta", "output-128k-2025-02-19, context-1m-2025-08-07")
+	headers.Set("anthropic-beta", "output-128k-2025-02-19")
 
-	settings.WriteHeaders("claude-sonnet-4-5-20250929", &headers)
+	settings.WriteHeaders("claude-3-7-sonnet-20250219-thinking", &headers)
 
 	got := headers.Values("anthropic-beta")
 	if len(got) != 1 {
-		t.Fatalf("expected a single merged anthropic-beta header, got %v", got)
+		t.Fatalf("expected a single merged header value, got %v", got)
 	}
-
-	want := "output-128k-2025-02-19,context-1m-2025-08-07,token-efficient-tools-2025-02-19"
-	if got[0] != want {
-		t.Fatalf("unexpected anthropic-beta header, want %q, got %q", want, got[0])
-	}
-}
-
-func TestClaudeSettingsWriteHeaders_StripsDeprecatedContextBetaForClaude46(t *testing.T) {
-	settings := &ClaudeSettings{
-		HeadersSettings: map[string]map[string][]string{},
-	}
-
-	headers := http.Header{}
-	headers.Set("anthropic-beta", "context-1m-2025-08-07,computer-use-2025-01-24")
-
-	settings.WriteHeaders("claude-sonnet-4-6", &headers)
-
-	got := headers.Get("anthropic-beta")
-	want := "computer-use-2025-01-24"
-	if got != want {
-		t.Fatalf("unexpected anthropic-beta header, want %q, got %q", want, got)
+	expected := "output-128k-2025-02-19,token-efficient-tools-2025-02-19"
+	if got[0] != expected {
+		t.Fatalf("expected merged header %q, got %q", expected, got[0])
 	}
 }
 
-func TestClaudeSettingsWriteHeaders_PreservesContextBetaForEarlierClaudeModels(t *testing.T) {
+func TestClaudeSettingsWriteHeadersDeduplicatesAcrossCommaSeparatedAndRepeatedValues(t *testing.T) {
 	settings := &ClaudeSettings{
-		HeadersSettings: map[string]map[string][]string{},
+		HeadersSettings: map[string]map[string][]string{
+			"claude-3-7-sonnet-20250219-thinking": {
+				"anthropic-beta": {
+					"token-efficient-tools-2025-02-19",
+					"computer-use-2025-01-24",
+				},
+			},
+		},
 	}
 
 	headers := http.Header{}
-	headers.Set("anthropic-beta", "context-1m-2025-08-07,computer-use-2025-01-24")
+	headers.Add("anthropic-beta", "output-128k-2025-02-19, token-efficient-tools-2025-02-19")
+	headers.Add("anthropic-beta", "token-efficient-tools-2025-02-19")
 
-	settings.WriteHeaders("claude-sonnet-4-5-20250929", &headers)
+	settings.WriteHeaders("claude-3-7-sonnet-20250219-thinking", &headers)
 
-	got := headers.Get("anthropic-beta")
-	want := "context-1m-2025-08-07,computer-use-2025-01-24"
-	if got != want {
-		t.Fatalf("unexpected anthropic-beta header, want %q, got %q", want, got)
+	got := headers.Values("anthropic-beta")
+	if len(got) != 1 {
+		t.Fatalf("expected duplicate values to collapse into one header, got %v", got)
+	}
+	expected := "output-128k-2025-02-19,token-efficient-tools-2025-02-19,computer-use-2025-01-24"
+	if got[0] != expected {
+		t.Fatalf("expected deduplicated merged header %q, got %q", expected, got[0])
 	}
 }

@@ -17,8 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
+  Banner,
   Button,
   Card,
   Checkbox,
@@ -48,6 +49,7 @@ import {
   useModelPricingEditorState,
 } from '../hooks/useModelPricingEditorState';
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
+import TieredPricingEditor from './TieredPricingEditor';
 
 const { Text } = Typography;
 const EMPTY_CANDIDATE_MODEL_NAMES = [];
@@ -119,11 +121,11 @@ export default function ModelPricingEditor({
     selectedWarnings,
     previewRows,
     isOptionalFieldEnabled,
-    isCompletionRatioReadOnly,
     handleOptionalFieldToggle,
     handleNumericFieldChange,
     handleBillingModeChange,
-    handleOfficialCompletionRatioOverrideChange,
+    handleBillingExprChange,
+    handleRequestRuleExprChange,
     handleSubmit,
     addModel,
     deleteModel,
@@ -135,6 +137,15 @@ export default function ModelPricingEditor({
     candidateModelNames,
     filterMode,
   });
+
+  const getExprModeLabel = useCallback((model) => {
+    if (model?.billingMode !== 'tiered_expr') {
+      return '';
+    }
+    return (model.billingExpr || '').includes('tier(')
+      ? t('阶梯计费')
+      : t('表达式计费');
+  }, [t]);
 
   const columns = useMemo(
     () => [
@@ -176,10 +187,20 @@ export default function ModelPricingEditor({
         dataIndex: 'billingMode',
         key: 'billingMode',
         render: (_, record) => (
-          <Tag color={record.billingMode === 'per-request' ? 'teal' : 'violet'}>
+          <Tag
+            color={
+              record.billingMode === 'per-request'
+                ? 'teal'
+                : record.billingMode === 'tiered_expr'
+                  ? 'amber'
+                  : 'violet'
+            }
+          >
             {record.billingMode === 'per-request'
               ? t('按次计费')
-              : t('按量计费')}
+              : record.billingMode === 'tiered_expr'
+                ? getExprModeLabel(record)
+                : t('按量计费')}
           </Tag>
         ),
       },
@@ -209,6 +230,7 @@ export default function ModelPricingEditor({
     [
       allowDeleteModel,
       deleteModel,
+      getExprModeLabel,
       selectedModelName,
       selectedModelNames,
       setSelectedModelName,
@@ -227,12 +249,6 @@ export default function ModelPricingEditor({
     selectedRowKeys: selectedModelNames,
     onChange: (selectedRowKeys) => setSelectedModelNames(selectedRowKeys),
   };
-
-  const completionReadOnly = isCompletionRatioReadOnly(selectedModel);
-  const completionFieldVisible =
-    selectedModel?.canOverrideCompletionRatio ||
-    completionReadOnly ||
-    isOptionalFieldEnabled(selectedModel, 'completionPrice');
 
   return (
     <>
@@ -356,15 +372,24 @@ export default function ModelPricingEditor({
           </Card>
 
           <Card
-            key={selectedModel ? selectedModel.name : 'empty-model-pricing-editor'}
             style={isMobile ? { order: 1 } : undefined}
             title={selectedModel ? selectedModel.name : t('模型计费编辑器')}
             headerExtraContent={
               selectedModel ? (
-                <Tag color='blue'>
+                <Tag
+                  color={
+                    selectedModel.billingMode === 'per-request'
+                      ? 'teal'
+                      : selectedModel.billingMode === 'tiered_expr'
+                        ? 'amber'
+                        : 'blue'
+                  }
+                >
                   {selectedModel.billingMode === 'per-request'
                     ? t('按次计费')
-                    : t('按量计费')}
+                    : selectedModel.billingMode === 'tiered_expr'
+                      ? getExprModeLabel(selectedModel)
+                      : t('按量计费')}
                 </Tag>
               ) : null
             }
@@ -389,10 +414,11 @@ export default function ModelPricingEditor({
                   >
                     <Radio value='per-token'>{t('按量计费')}</Radio>
                     <Radio value='per-request'>{t('按次计费')}</Radio>
+                    <Radio value='tiered_expr'>{t('表达式/阶梯计费')}</Radio>
                   </RadioGroup>
                   <div className='mt-2 text-xs text-gray-500'>
                     {t(
-                      '这个界面默认按价格填写，保存时会自动换算回后端需要的倍率 JSON。',
+                      '普通按量/按次直接填价格就行；如果价格要跟请求参数或请求头联动，请切到表达式/阶梯计费。',
                     )}
                   </div>
                 </div>
@@ -423,6 +449,14 @@ export default function ModelPricingEditor({
                     onChange={(value) => handleNumericFieldChange('fixedPrice', value)}
                     extraText={t('适合 MJ / 任务类等按次收费模型。')}
                   />
+                ) : selectedModel.billingMode === 'tiered_expr' ? (
+                  <TieredPricingEditor
+                    model={selectedModel}
+                    onExprChange={handleBillingExprChange}
+                    requestRuleExpr={selectedModel.requestRuleExpr}
+                    onRequestRuleExprChange={handleRequestRuleExprChange}
+                    t={t}
+                  />
                 ) : (
                   <>
                     <Card
@@ -439,45 +473,22 @@ export default function ModelPricingEditor({
                         placeholder={t('输入 $/1M tokens')}
                         onChange={(value) => handleNumericFieldChange('inputPrice', value)}
                       />
-
-                      {selectedModel.canOverrideCompletionRatio ? (
-                        <div
-                          style={{
-                            marginBottom: 16,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            gap: 12,
-                          }}
-                        >
-                          <div>
-                            <div style={{ fontWeight: 500 }}>
-                              {t('覆盖官方价格')}
-                            </div>
-                            <div className='mt-1 text-xs text-gray-500'>
-                              {completionReadOnly
-                                ? t('开启后可覆盖当前官方补全价格')
-                                : t('当前已启用覆盖官方价格')}
-                            </div>
-                          </div>
-                          <Switch
-                            checked={!!selectedModel.overrideOfficialCompletionRatio}
-                            onChange={handleOfficialCompletionRatioOverrideChange}
-                          />
-                        </div>
-                      ) : null}
-
-                      {completionReadOnly ? (
-                        <PriceInput
-                          label={t('补全倍率')}
-                          value={selectedModel.lockedCompletionRatio || ''}
-                          placeholder=''
-                          onChange={() => {}}
-                          suffix=''
-                          disabled
+                      {selectedModel.completionRatioLocked ? (
+                        <Banner
+                          type='warning'
+                          bordered
+                          fullMode={false}
+                          closeIcon={null}
+                          style={{ marginBottom: 12 }}
+                          title={t('补全价格已锁定')}
+                          description={t(
+                            '该模型补全倍率由后端固定为 {{ratio}}。补全价格不能在这里修改。',
+                            {
+                              ratio: selectedModel.lockedCompletionRatio || '-',
+                            },
+                          )}
                         />
                       ) : null}
-
                       <PriceInput
                         label={t('补全价格')}
                         value={selectedModel.completionPrice}
@@ -486,27 +497,34 @@ export default function ModelPricingEditor({
                           handleNumericFieldChange('completionPrice', value)
                         }
                         headerAction={
-                          selectedModel.canOverrideCompletionRatio ||
-                          completionReadOnly ? null : (
-                            <Switch
-                              size='small'
-                              checked={isOptionalFieldEnabled(
-                                selectedModel,
-                                'completionPrice',
-                              )}
-                              onChange={(checked) =>
-                                handleOptionalFieldToggle('completionPrice', checked)
-                              }
-                            />
-                          )
+                          <Switch
+                            size='small'
+                            checked={isOptionalFieldEnabled(
+                              selectedModel,
+                              'completionPrice',
+                            )}
+                            disabled={selectedModel.completionRatioLocked}
+                            onChange={(checked) =>
+                              handleOptionalFieldToggle('completionPrice', checked)
+                            }
+                          />
                         }
-                        hidden={!completionFieldVisible}
+                        hidden={
+                          !isOptionalFieldEnabled(selectedModel, 'completionPrice')
+                        }
                         disabled={
-                          !hasValue(selectedModel.inputPrice) || completionReadOnly
+                          !hasValue(selectedModel.inputPrice) ||
+                          selectedModel.completionRatioLocked
                         }
                         extraText={
-                          !selectedModel.canOverrideCompletionRatio &&
-                                !isOptionalFieldEnabled(
+                          selectedModel.completionRatioLocked
+                            ? t(
+                                '后端固定倍率：{{ratio}}。该字段仅展示换算后的价格。',
+                                {
+                                  ratio: selectedModel.lockedCompletionRatio || '-',
+                                },
+                              )
+                            : !isOptionalFieldEnabled(
                                   selectedModel,
                                   'completionPrice',
                                 )
