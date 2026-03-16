@@ -11,9 +11,28 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel/openrouter"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/reasonmap"
+
+	"github.com/gin-gonic/gin"
 )
 
-func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.RelayInfo) (*dto.GeneralOpenAIRequest, error) {
+const claudeToOpenAIReasoningMapOption = "ClaudeToOpenAIReasoningMap"
+
+var defaultClaudeToOpenAIReasoningMap = map[string]string{
+	"low":    "low",
+	"medium": "medium",
+	"high":   "high",
+	"max":    "xhigh",
+}
+
+var allowedOpenAIReasoningEfforts = map[string]struct{}{
+	"minimal": {},
+	"low":     {},
+	"medium":  {},
+	"high":    {},
+	"xhigh":   {},
+}
+
+func ClaudeToOpenAIRequest(c *gin.Context, claudeRequest dto.ClaudeRequest, info *relaycommon.RelayInfo) (*dto.GeneralOpenAIRequest, error) {
 	openAIRequest := dto.GeneralOpenAIRequest{
 		Model:       claudeRequest.Model,
 		MaxTokens:   claudeRequest.MaxTokens,
@@ -29,12 +48,15 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 			reasoning := openrouter.RequestReasoning{
 				MaxTokens: claudeRequest.Thinking.GetBudgetTokens(),
 			}
-			reasoningJSON, err := json.Marshal(reasoning)
+			reasoningJSON, err := common.Marshal(reasoning)
 			if err != nil {
 				return nil, fmt.Errorf("failed to marshal reasoning: %w", err)
 			}
 			openAIRequest.Reasoning = reasoningJSON
 		} else {
+			if effort := mapClaudeThinkingToOpenAIReasoningEffort(claudeRequest.Thinking); effort != "" {
+				openAIRequest.ReasoningEffort = effort
+			}
 			thinkingSuffix := "-thinking"
 			if strings.HasSuffix(info.OriginModelName, thinkingSuffix) &&
 				!strings.HasSuffix(openAIRequest.Model, thinkingSuffix) {
@@ -135,12 +157,16 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 					}
 					mediaMessages = append(mediaMessages, message)
 				case "image":
-					// Handle image conversion (base64 to URL or keep as is)
-					imageData := fmt.Sprintf("data:%s;base64,%s", mediaMsg.Source.MediaType, mediaMsg.Source.Data)
-					//textContent += fmt.Sprintf("[Image: %s]", imageData)
+					imageURL, err := ClaudeImageSourceToMessageImageURL(c, mediaMsg.Source)
+					if err != nil {
+						return nil, fmt.Errorf("convert claude image: %w", err)
+					}
+					if imageURL == nil {
+						continue
+					}
 					mediaMessage := dto.MediaContent{
 						Type:     "image_url",
-						ImageUrl: &dto.MessageImageUrl{Url: imageData},
+						ImageUrl: imageURL,
 					}
 					mediaMessages = append(mediaMessages, mediaMessage)
 				case "tool_use":
@@ -169,8 +195,8 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 						oaiToolMessage.SetStringContent(mediaMsg.GetStringContent())
 					} else {
 						mediaContents := mediaMsg.ParseMediaContent()
-						encodeJson, _ := common.Marshal(mediaContents)
-						oaiToolMessage.SetStringContent(string(encodeJson))
+						encodeJSON, _ := common.Marshal(mediaContents)
+						oaiToolMessage.SetStringContent(string(encodeJSON))
 					}
 					openAIMessages = append(openAIMessages, oaiToolMessage)
 				}
@@ -192,6 +218,65 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 	openAIRequest.Messages = openAIMessages
 
 	return &openAIRequest, nil
+}
+
+func mapClaudeThinkingToOpenAIReasoningEffort(thinking *dto.Thinking) string {
+	level := inferClaudeThinkingLevel(thinking)
+	if level == "" {
+		return ""
+	}
+	return getClaudeToOpenAIReasoningMap()[level]
+}
+
+func inferClaudeThinkingLevel(thinking *dto.Thinking) string {
+	if thinking == nil || thinking.Type != "enabled" {
+		return ""
+	}
+
+	budgetTokens := thinking.GetBudgetTokens()
+	if budgetTokens <= 0 {
+		return "medium"
+	}
+	if budgetTokens <= 1280 {
+		return "low"
+	}
+	if budgetTokens <= 2048 {
+		return "medium"
+	}
+	if budgetTokens <= 4096 {
+		return "high"
+	}
+	return "max"
+}
+
+func getClaudeToOpenAIReasoningMap() map[string]string {
+	mapping := make(map[string]string, len(defaultClaudeToOpenAIReasoningMap))
+	for key, value := range defaultClaudeToOpenAIReasoningMap {
+		mapping[key] = value
+	}
+
+	common.OptionMapRWMutex.RLock()
+	raw := strings.TrimSpace(common.OptionMap[claudeToOpenAIReasoningMapOption])
+	common.OptionMapRWMutex.RUnlock()
+	if raw == "" {
+		return mapping
+	}
+
+	var stored map[string]string
+	if err := common.UnmarshalJsonStr(raw, &stored); err != nil {
+		common.SysError(fmt.Sprintf("invalid %s option: %v", claudeToOpenAIReasoningMapOption, err))
+		return mapping
+	}
+	for key, value := range stored {
+		if _, ok := mapping[key]; !ok {
+			continue
+		}
+		if _, ok := allowedOpenAIReasoningEfforts[value]; !ok {
+			continue
+		}
+		mapping[key] = value
+	}
+	return mapping
 }
 
 func generateStopBlock(index int) *dto.ClaudeResponse {
