@@ -34,6 +34,7 @@ import { useSetTheme, useTheme } from '../../context/Theme';
 import ThemeToggle from '../../components/layout/headerbar/ThemeToggle';
 import LanguageSelector from '../../components/layout/headerbar/LanguageSelector';
 import CardTable from '../../components/common/ui/CardTable';
+import { useLatestRequestGuard } from '../../hooks/common/useLatestRequestGuard';
 import './usage.css';
 
 const { Title, Text } = Typography;
@@ -328,6 +329,9 @@ export default function Usage() {
   const [detailTotal, setDetailTotal] = useState(0);
   const [detailPage, setDetailPage] = useState(1);
   const [detailPageSize, setDetailPageSize] = useState(10);
+  const usageRequestGuard = useLatestRequestGuard();
+  const statsRequestGuard = useLatestRequestGuard();
+  const detailRequestGuard = useLatestRequestGuard();
 
   const enabled = useMemo(() => {
     try {
@@ -409,13 +413,14 @@ export default function Usage() {
   }, []);
 
   const resetDetailLogs = useCallback(() => {
+    detailRequestGuard.createRequestId();
     setDetailOpen(false);
     setDetailLoading(false);
     setDetailRows([]);
     setDetailTotal(0);
     setDetailPage(1);
     setDetailPageSize(10);
-  }, []);
+  }, [detailRequestGuard]);
 
   const fetchDetailLogs = useCallback(
     async (
@@ -426,6 +431,7 @@ export default function Usage() {
     ) => {
       const nextKey = keyOverride || activeSingleKey;
       if (!nextKey) return;
+      const requestId = detailRequestGuard.createRequestId();
       setDetailLoading(true);
       try {
         const res = await API.post('/api/usage/public_token/logs', {
@@ -437,18 +443,25 @@ export default function Usage() {
         if (!res.data?.success) {
           throw new Error(res.data?.message || t('加载调用明细失败'));
         }
+        if (!detailRequestGuard.isLatestRequest(requestId)) {
+          return;
+        }
         const payload = res.data?.data || {};
         setDetailRows(payload.items || []);
         setDetailTotal(Number(payload.total || 0));
         setDetailPage(Number(payload.page || page));
         setDetailPageSize(Number(payload.page_size || pageSize));
       } catch {
-        showError(t('加载调用明细失败'));
+        if (detailRequestGuard.isLatestRequest(requestId)) {
+          showError(t('加载调用明细失败'));
+        }
       } finally {
-        setDetailLoading(false);
+        if (detailRequestGuard.isLatestRequest(requestId)) {
+          setDetailLoading(false);
+        }
       }
     },
-    [activeSingleKey, detailPageSize, period, t],
+    [activeSingleKey, detailPageSize, detailRequestGuard, period, t],
   );
 
   const runQuery = useCallback(
@@ -458,6 +471,7 @@ export default function Usage() {
       if (mode === 'single' && keys.length !== 1)
         return showWarning(t('单一模式仅支持一个 Key'));
 
+      const requestId = usageRequestGuard.createRequestId();
       setLoading(true);
       setUsageData(null);
       setStatsData(null);
@@ -472,23 +486,32 @@ export default function Usage() {
           API.post(usageEndpoint, usagePayload),
           fetchStats(mode, keys, nextPeriod).catch(() => null),
         ]);
+        if (!usageRequestGuard.isLatestRequest(requestId)) {
+          return;
+        }
         if (!usageRes.data?.success)
           return showError(usageRes.data?.message || t('查询失败'));
         setUsageData({ mode, queryKeys: keys, ...usageRes.data.data });
         setStatsData(nextStats);
       } catch {
-        showError(t('查询失败，请稍后重试'));
+        if (usageRequestGuard.isLatestRequest(requestId)) {
+          showError(t('查询失败，请稍后重试'));
+        }
       } finally {
-        setLoading(false);
+        if (usageRequestGuard.isLatestRequest(requestId)) {
+          setLoading(false);
+        }
       }
     },
-    [fetchStats, period, queryValue, resetDetailLogs, t],
+    [fetchStats, period, queryValue, resetDetailLogs, t, usageRequestGuard],
   );
 
   const handlePeriodChange = useCallback(
     async (nextPeriod) => {
       setPeriod(nextPeriod);
+      detailRequestGuard.createRequestId();
       if (!usageData?.queryKeys?.length) return;
+      const requestId = statsRequestGuard.createRequestId();
       setStatsLoading(true);
       try {
         const nextStats = await fetchStats(
@@ -496,6 +519,9 @@ export default function Usage() {
           usageData.queryKeys,
           nextPeriod,
         );
+        if (!statsRequestGuard.isLatestRequest(requestId)) {
+          return;
+        }
         setStatsData(nextStats);
         if (usageData.mode === 'single' && detailOpen) {
           await fetchDetailLogs(
@@ -506,12 +532,25 @@ export default function Usage() {
           );
         }
       } catch {
-        showWarning(t('统计数据暂时不可用，已保留基础额度信息'));
+        if (statsRequestGuard.isLatestRequest(requestId)) {
+          showWarning(t('统计数据暂时不可用，已保留基础额度信息'));
+        }
       } finally {
-        setStatsLoading(false);
+        if (statsRequestGuard.isLatestRequest(requestId)) {
+          setStatsLoading(false);
+        }
       }
     },
-    [detailOpen, detailPageSize, fetchDetailLogs, fetchStats, t, usageData],
+    [
+      detailOpen,
+      detailPageSize,
+      fetchDetailLogs,
+      fetchStats,
+      detailRequestGuard,
+      statsRequestGuard,
+      t,
+      usageData,
+    ],
   );
 
   const singleStatus =

@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import { useState, useEffect } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { API, showError, showSuccess } from '../../helpers';
 import { ITEMS_PER_PAGE } from '../../constants';
@@ -76,6 +76,7 @@ export const useUsersData = () => {
   const [advancedFilters, setAdvancedFilters] = useState(
     getInitialAdvancedFilters,
   );
+  const requestCounter = useRef(0);
 
   // 弹窗状态
   const [showAddUser, setShowAddUser] = useState(false);
@@ -163,6 +164,7 @@ export const useUsersData = () => {
     idSortOrder = '',
     balanceSortOrder = '',
   ) => {
+    const reqId = ++requestCounter.current;
     setLoading(true);
     try {
       const params = {
@@ -176,6 +178,9 @@ export const useUsersData = () => {
         params.balance_sort_order = balanceSortOrder;
       }
       const res = await API.get('/api/user/', { params });
+      if (reqId !== requestCounter.current) {
+        return;
+      }
       const { success, message, data } = res.data;
       if (success) {
         const newPageData = data.items;
@@ -187,9 +192,13 @@ export const useUsersData = () => {
       }
     } catch (error) {
       // 网络/后端报错时始终退出 loading，避免转圈不止。
-      showError(error?.message || t('请求失败'));
+      if (reqId === requestCounter.current) {
+        showError(error?.message || t('请求失败'));
+      }
     } finally {
-      setLoading(false);
+      if (reqId === requestCounter.current) {
+        setLoading(false);
+      }
     }
   };
 
@@ -253,6 +262,7 @@ export const useUsersData = () => {
     }
     // 搜索分支也必须控制 loading 状态：
     // 首次加载可能因已保存的高级筛选进入该分支，loading 必须重置为 false。
+    const reqId = ++requestCounter.current;
     setLoading(true);
     setSearching(true);
     try {
@@ -320,6 +330,9 @@ export const useUsersData = () => {
         params.used_balance_max = resolvedAdvanced.searchUsedBalanceMax;
       }
       const res = await API.get('/api/user/search', { params });
+      if (reqId !== requestCounter.current) {
+        return;
+      }
       const { success, message, data } = res.data;
       if (success) {
         const newPageData = data.items;
@@ -330,10 +343,14 @@ export const useUsersData = () => {
         showError(message);
       }
     } catch (error) {
-      showError(error?.message || t('请求失败'));
+      if (reqId === requestCounter.current) {
+        showError(error?.message || t('请求失败'));
+      }
     } finally {
-      setSearching(false);
-      setLoading(false);
+      if (reqId === requestCounter.current) {
+        setSearching(false);
+        setLoading(false);
+      }
     }
   };
 

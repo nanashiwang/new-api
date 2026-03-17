@@ -33,6 +33,7 @@ import {
   getSystemName,
   showError,
   setStatusData,
+  setUserData,
 } from '../../helpers';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
@@ -77,11 +78,28 @@ const PageLayout = () => {
     }
   }, [isMobile, drawerOpen, collapsed, setCollapsed]);
 
-  const loadUser = () => {
-    let user = localStorage.getItem('user');
-    if (user) {
-      let data = JSON.parse(user);
+  const loadUser = async () => {
+    const storedUser = localStorage.getItem('user');
+    if (!storedUser) {
+      return;
+    }
+
+    try {
+      const data = JSON.parse(storedUser);
       userDispatch({ type: 'login', payload: data });
+    } catch (error) {
+      // Ignore broken local cache and try refreshing from the server below.
+    }
+
+    try {
+      const res = await API.get('/api/user/self');
+      const { success, data } = res.data || {};
+      if (success && data) {
+        userDispatch({ type: 'login', payload: data });
+        setUserData(data);
+      }
+    } catch (error) {
+      // Keep the current local cache to avoid blocking the page on refresh failure.
     }
   };
 
@@ -101,7 +119,7 @@ const PageLayout = () => {
   };
 
   useEffect(() => {
-    loadUser();
+    loadUser().catch(console.error);
     loadStatus().catch(console.error);
     let systemName = getSystemName();
     if (systemName) {

@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import { useState, useEffect } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Modal } from '@douyinfe/semi-ui';
 import {
@@ -71,6 +71,7 @@ export const useLogsData = () => {
   const [logCount, setLogCount] = useState(0);
   const [pageSize, setPageSize] = useState(ITEMS_PER_PAGE);
   const [logType, setLogType] = useState(0);
+  const requestCounter = useRef(0);
 
   // User and admin
   const isAdminUser = isAdmin();
@@ -635,6 +636,7 @@ export const useLogsData = () => {
 
   // Load logs function
   const loadLogs = async (startIdx, pageSize, customLogType = null) => {
+    const reqId = ++requestCounter.current;
     setLoading(true);
 
     let url = '';
@@ -666,6 +668,9 @@ export const useLogsData = () => {
     }
     url = encodeURI(url);
     const res = await API.get(url);
+    if (reqId !== requestCounter.current) {
+      return;
+    }
     const { success, message, data } = res.data;
     if (success) {
       const newPageData = data.items;
@@ -677,7 +682,9 @@ export const useLogsData = () => {
     } else {
       showError(message);
     }
-    setLoading(false);
+    if (reqId === requestCounter.current) {
+      setLoading(false);
+    }
   };
 
   // 分页处理函数

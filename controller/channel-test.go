@@ -37,9 +37,27 @@ import (
 )
 
 type testResult struct {
-	context     *gin.Context
-	localErr    error
-	newAPIError *types.NewAPIError
+	context      *gin.Context
+	localErr     error
+	newAPIError  *types.NewAPIError
+	info         *relaycommon.RelayInfo
+	usage        *dto.Usage
+	priceData    types.PriceData
+	responseBody []byte
+}
+
+type testExecutionOptions struct {
+	enableBilling bool
+	isChannelTest bool
+}
+
+type channelStyleTestExecution struct {
+	modelName    string
+	requestPath  string
+	endpointType string
+	relayFormat  types.RelayFormat
+	request      dto.Request
+	isStream     bool
 }
 
 func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointType string) string {
@@ -56,7 +74,467 @@ func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointTyp
 	return normalized
 }
 
-func testChannel(channel *model.Channel, testModel string, endpointType string, isStream bool) testResult {
+func shouldUseAnthropicMessagesPath(channel *model.Channel, modelName string) bool {
+	if !strings.Contains(strings.ToLower(modelName), "claude") || channel == nil {
+		return false
+	}
+	switch channel.Type {
+	case constant.ChannelTypeAnthropic, constant.ChannelTypeAws:
+		return true
+	default:
+		return false
+	}
+}
+
+func resolveTestRequestPath(channel *model.Channel, modelName, endpointType string) (string, string) {
+	endpointType = normalizeChannelTestEndpoint(channel, modelName, endpointType)
+	requestPath := "/v1/chat/completions"
+
+	if endpointType != "" {
+		if endpointInfo, ok := common.GetDefaultEndpointInfo(constant.EndpointType(endpointType)); ok {
+			return endpointInfo.Path, endpointType
+		}
+		return requestPath, endpointType
+	}
+
+	if strings.Contains(strings.ToLower(modelName), "rerank") {
+		requestPath = "/v1/rerank"
+	}
+
+	if strings.Contains(strings.ToLower(modelName), "embedding") ||
+		strings.HasPrefix(modelName, "m3e") ||
+		strings.Contains(modelName, "bge-") ||
+		strings.Contains(modelName, "embed") ||
+		(channel != nil && channel.Type == constant.ChannelTypeMokaAI) {
+		requestPath = "/v1/embeddings"
+	}
+
+	if channel != nil && channel.Type == constant.ChannelTypeVolcEngine && strings.Contains(modelName, "seedream") {
+		requestPath = "/v1/images/generations"
+	}
+
+	if shouldUseAnthropicMessagesPath(channel, modelName) {
+		requestPath = "/v1/messages"
+	}
+
+	if strings.Contains(strings.ToLower(modelName), "codex") {
+		requestPath = "/v1/responses"
+	}
+
+	if strings.HasSuffix(modelName, ratio_setting.CompactModelSuffix) {
+		requestPath = "/v1/responses/compact"
+	}
+
+	return requestPath, endpointType
+}
+
+func shouldUseResponsesPathForTest(channel *model.Channel, modelName, endpointType string) bool {
+	if channel == nil || strings.TrimSpace(endpointType) != "" {
+		return false
+	}
+	if !common.IsOpenAITextModel(modelName) {
+		return false
+	}
+	return service.ShouldChatCompletionsUseResponsesWithChannelSetting(channel.GetSetting(), channel.Id, channel.Type, modelName)
+}
+
+func shouldAutoStreamChannelTest(modelName string, requestPath string, endpointType string) bool {
+	if endpointType != "" {
+		switch constant.EndpointType(endpointType) {
+		case constant.EndpointTypeAnthropic, constant.EndpointTypeOpenAIResponse:
+			return true
+		default:
+			return false
+		}
+	}
+
+	switch requestPath {
+	case "/v1/messages", "/v1/responses":
+		return true
+	case "/v1/chat/completions":
+		return common.IsOpenAITextModel(modelName)
+	default:
+		return false
+	}
+}
+
+func buildChannelStyleTestExecution(channel *model.Channel, modelName, endpointType string, streamOverride *bool) channelStyleTestExecution {
+	requestPath, resolvedEndpointType := resolveTestRequestPath(channel, modelName, endpointType)
+	if requestPath == "/v1/chat/completions" && shouldUseResponsesPathForTest(channel, modelName, resolvedEndpointType) {
+		requestPath = "/v1/responses"
+		resolvedEndpointType = string(constant.EndpointTypeOpenAIResponse)
+	}
+
+	isStream := shouldAutoStreamChannelTest(modelName, requestPath, resolvedEndpointType)
+	if streamOverride != nil {
+		isStream = *streamOverride
+	}
+	if strings.HasPrefix(requestPath, "/v1/responses/compact") {
+		modelName = ratio_setting.WithCompactModelSuffix(modelName)
+	}
+
+	return channelStyleTestExecution{
+		modelName:    modelName,
+		requestPath:  requestPath,
+		endpointType: resolvedEndpointType,
+		relayFormat:  resolveRelayFormatForTest(requestPath, resolvedEndpointType),
+		request:      buildRelayExecutionTestRequest(modelName, requestPath, resolvedEndpointType, channel, isStream),
+		isStream:     isStream,
+	}
+}
+
+func resolveRelayFormatForTest(requestPath string, endpointType string) types.RelayFormat {
+	if endpointType != "" {
+		switch constant.EndpointType(endpointType) {
+		case constant.EndpointTypeOpenAI:
+			return types.RelayFormatOpenAI
+		case constant.EndpointTypeOpenAIResponse:
+			return types.RelayFormatOpenAIResponses
+		case constant.EndpointTypeOpenAIResponseCompact:
+			return types.RelayFormatOpenAIResponsesCompaction
+		case constant.EndpointTypeAnthropic:
+			return types.RelayFormatClaude
+		case constant.EndpointTypeGemini:
+			return types.RelayFormatGemini
+		case constant.EndpointTypeJinaRerank:
+			return types.RelayFormatRerank
+		case constant.EndpointTypeImageGeneration:
+			return types.RelayFormatOpenAIImage
+		case constant.EndpointTypeEmbeddings:
+			return types.RelayFormatEmbedding
+		default:
+			return types.RelayFormatOpenAI
+		}
+	}
+
+	switch {
+	case requestPath == "/v1/embeddings":
+		return types.RelayFormatEmbedding
+	case requestPath == "/v1/images/generations":
+		return types.RelayFormatOpenAIImage
+	case requestPath == "/v1/messages":
+		return types.RelayFormatClaude
+	case strings.Contains(requestPath, "/v1beta/models"):
+		return types.RelayFormatGemini
+	case requestPath == "/v1/rerank" || requestPath == "/rerank":
+		return types.RelayFormatRerank
+	case requestPath == "/v1/responses":
+		return types.RelayFormatOpenAIResponses
+	case strings.HasPrefix(requestPath, "/v1/responses/compact"):
+		return types.RelayFormatOpenAIResponsesCompaction
+	default:
+		return types.RelayFormatOpenAI
+	}
+}
+
+func executeChannelStyleTest(
+	c *gin.Context,
+	recorder *httptest.ResponseRecorder,
+	channel *model.Channel,
+	testModel string,
+	endpointType string,
+	request dto.Request,
+	relayFormat types.RelayFormat,
+	isStream bool,
+	options testExecutionOptions,
+) (result testResult) {
+	var relayInfo *relaycommon.RelayInfo
+	billingStarted := false
+	defer func() {
+		if options.enableBilling && billingStarted && result.localErr != nil && relayInfo != nil && relayInfo.Billing != nil {
+			relayInfo.Billing.Refund(c)
+		}
+	}()
+
+	info, err := relaycommon.GenRelayInfo(c, relayFormat, request, nil)
+	if err != nil {
+		result.context = c
+		result.localErr = err
+		result.newAPIError = types.NewError(err, types.ErrorCodeGenRelayInfoFailed)
+		return
+	}
+	relayInfo = info
+	relayInfo.IsChannelTest = options.isChannelTest
+	relayInfo.InitChannelMeta(c)
+
+	err = helper.ModelMappedHelper(c, relayInfo, request)
+	if err != nil {
+		result.context = c
+		result.info = relayInfo
+		result.localErr = err
+		result.newAPIError = types.NewError(err, types.ErrorCodeChannelModelMappedError)
+		return
+	}
+
+	testModel = relayInfo.UpstreamModelName
+	request.SetModelName(testModel)
+
+	meta := request.GetTokenCountMeta()
+	promptTokens := 0
+	if options.enableBilling {
+		promptTokens, err = service.EstimateRequestToken(c, meta, relayInfo)
+		if err != nil {
+			result.context = c
+			result.info = relayInfo
+			result.localErr = err
+			result.newAPIError = types.NewError(err, types.ErrorCodeCountTokenFailed)
+			return
+		}
+		relayInfo.SetEstimatePromptTokens(promptTokens)
+	}
+
+	priceData, err := helper.ModelPriceHelper(c, relayInfo, promptTokens, meta)
+	if err != nil {
+		result.context = c
+		result.info = relayInfo
+		result.localErr = err
+		result.newAPIError = types.NewError(err, types.ErrorCodeModelPriceError)
+		return
+	}
+
+	if options.enableBilling && !priceData.FreeModel {
+		apiErr := service.PreConsumeBilling(c, priceData.QuotaToPreConsume, relayInfo)
+		if apiErr != nil {
+			result.context = c
+			result.info = relayInfo
+			result.localErr = apiErr.Err
+			result.newAPIError = apiErr
+			return
+		}
+		billingStarted = true
+	}
+
+	apiType, _ := common.ChannelType2APIType(channel.Type)
+	if relayInfo.RelayMode == relayconstant.RelayModeResponsesCompact &&
+		apiType != constant.APITypeOpenAI &&
+		apiType != constant.APITypeCodex {
+		err = fmt.Errorf("responses compaction test only supports openai/codex channels, got api type %d", apiType)
+		result.context = c
+		result.info = relayInfo
+		result.localErr = err
+		result.newAPIError = types.NewError(err, types.ErrorCodeInvalidApiType)
+		return
+	}
+	adaptor := relay.GetAdaptor(apiType)
+	if adaptor == nil {
+		err = fmt.Errorf("invalid api type: %d, adaptor is nil", apiType)
+		result.context = c
+		result.info = relayInfo
+		result.localErr = err
+		result.newAPIError = types.NewError(err, types.ErrorCodeInvalidApiType)
+		return
+	}
+
+	common.SysLog(fmt.Sprintf("testing channel %d with model %s , info %+v ", channel.Id, testModel, relayInfo.ToString()))
+	adaptor.Init(relayInfo)
+
+	var convertedRequest any
+	switch relayInfo.RelayMode {
+	case relayconstant.RelayModeEmbeddings:
+		if embeddingReq, ok := request.(*dto.EmbeddingRequest); ok {
+			convertedRequest, err = adaptor.ConvertEmbeddingRequest(c, relayInfo, *embeddingReq)
+		} else {
+			err = errors.New("invalid embedding request type")
+			result.context = c
+			result.info = relayInfo
+			result.localErr = err
+			result.newAPIError = types.NewError(err, types.ErrorCodeConvertRequestFailed)
+			return
+		}
+	case relayconstant.RelayModeImagesGenerations:
+		if imageReq, ok := request.(*dto.ImageRequest); ok {
+			convertedRequest, err = adaptor.ConvertImageRequest(c, relayInfo, *imageReq)
+		} else {
+			err = errors.New("invalid image request type")
+			result.context = c
+			result.info = relayInfo
+			result.localErr = err
+			result.newAPIError = types.NewError(err, types.ErrorCodeConvertRequestFailed)
+			return
+		}
+	case relayconstant.RelayModeRerank:
+		if rerankReq, ok := request.(*dto.RerankRequest); ok {
+			convertedRequest, err = adaptor.ConvertRerankRequest(c, relayInfo.RelayMode, *rerankReq)
+		} else {
+			err = errors.New("invalid rerank request type")
+			result.context = c
+			result.info = relayInfo
+			result.localErr = err
+			result.newAPIError = types.NewError(err, types.ErrorCodeConvertRequestFailed)
+			return
+		}
+	case relayconstant.RelayModeResponses:
+		if responseReq, ok := request.(*dto.OpenAIResponsesRequest); ok {
+			convertedRequest, err = adaptor.ConvertOpenAIResponsesRequest(c, relayInfo, *responseReq)
+		} else {
+			err = errors.New("invalid response request type")
+			result.context = c
+			result.info = relayInfo
+			result.localErr = err
+			result.newAPIError = types.NewError(err, types.ErrorCodeConvertRequestFailed)
+			return
+		}
+	case relayconstant.RelayModeResponsesCompact:
+		switch req := request.(type) {
+		case *dto.OpenAIResponsesCompactionRequest:
+			convertedRequest, err = adaptor.ConvertOpenAIResponsesRequest(c, relayInfo, dto.OpenAIResponsesRequest{
+				Model:              req.Model,
+				Input:              req.Input,
+				Instructions:       req.Instructions,
+				PreviousResponseID: req.PreviousResponseID,
+			})
+		case *dto.OpenAIResponsesRequest:
+			convertedRequest, err = adaptor.ConvertOpenAIResponsesRequest(c, relayInfo, *req)
+		default:
+			err = errors.New("invalid response compaction request type")
+			result.context = c
+			result.info = relayInfo
+			result.localErr = err
+			result.newAPIError = types.NewError(err, types.ErrorCodeConvertRequestFailed)
+			return
+		}
+	default:
+		if generalReq, ok := request.(*dto.GeneralOpenAIRequest); ok {
+			convertedRequest, err = adaptor.ConvertOpenAIRequest(c, relayInfo, generalReq)
+		} else if claudeReq, ok := request.(*dto.ClaudeRequest); ok {
+			convertedRequest, err = adaptor.ConvertClaudeRequest(c, relayInfo, claudeReq)
+		} else {
+			err = errors.New("invalid general request type")
+			result.context = c
+			result.info = relayInfo
+			result.localErr = err
+			result.newAPIError = types.NewError(err, types.ErrorCodeConvertRequestFailed)
+			return
+		}
+	}
+
+	if err != nil {
+		result.context = c
+		result.info = relayInfo
+		result.localErr = err
+		result.newAPIError = types.NewError(err, types.ErrorCodeConvertRequestFailed)
+		return
+	}
+
+	jsonData, err := common.Marshal(convertedRequest)
+	if err != nil {
+		result.context = c
+		result.info = relayInfo
+		result.localErr = err
+		result.newAPIError = types.NewError(err, types.ErrorCodeJsonMarshalFailed)
+		return
+	}
+
+	if len(relayInfo.ParamOverride) > 0 {
+		jsonData, err = relaycommon.ApplyParamOverride(jsonData, relayInfo.ParamOverride, relaycommon.BuildParamOverrideContext(relayInfo))
+		if err != nil {
+			result.context = c
+			result.info = relayInfo
+			result.localErr = err
+			result.newAPIError = types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid)
+			return
+		}
+	}
+
+	requestBody := bytes.NewBuffer(jsonData)
+	c.Request.Body = io.NopCloser(bytes.NewBuffer(jsonData))
+	resp, err := adaptor.DoRequest(c, relayInfo, requestBody)
+	if err != nil {
+		result.context = c
+		result.info = relayInfo
+		result.localErr = err
+		result.newAPIError = types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
+		return
+	}
+
+	var httpResp *http.Response
+	if resp != nil {
+		httpResp = resp.(*http.Response)
+		if httpResp.StatusCode != http.StatusOK {
+			err = service.RelayErrorHandler(c.Request.Context(), httpResp, true)
+			common.SysError(fmt.Sprintf(
+				"channel test bad response: channel_id=%d name=%s type=%d model=%s endpoint_type=%s status=%d err=%v",
+				channel.Id,
+				channel.Name,
+				channel.Type,
+				testModel,
+				endpointType,
+				httpResp.StatusCode,
+				err,
+			))
+			result.context = c
+			result.info = relayInfo
+			result.localErr = err
+			result.newAPIError = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+			return
+		}
+	}
+
+	usageAny, respErr := adaptor.DoResponse(c, httpResp, relayInfo)
+	if respErr != nil {
+		result.context = c
+		result.info = relayInfo
+		result.localErr = respErr
+		result.newAPIError = respErr
+		return
+	}
+
+	usage, usageErr := coerceTestUsage(usageAny, isStream, relayInfo.GetEstimatePromptTokens())
+	if usageErr != nil {
+		result.context = c
+		result.info = relayInfo
+		result.localErr = usageErr
+		result.newAPIError = types.NewOpenAIError(usageErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+		return
+	}
+
+	respBody, err := readTestResponseBody(recorder.Result().Body, isStream)
+	if err != nil {
+		result.context = c
+		result.info = relayInfo
+		result.usage = usage
+		result.priceData = priceData
+		result.localErr = err
+		result.newAPIError = types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
+		return
+	}
+	if bodyErr := detectErrorFromTestResponseBody(respBody); bodyErr != nil {
+		result.context = c
+		result.info = relayInfo
+		result.usage = usage
+		result.priceData = priceData
+		result.responseBody = respBody
+		result.localErr = bodyErr
+		result.newAPIError = types.NewOpenAIError(bodyErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+		return
+	}
+
+	if usage.PromptTokens > 0 {
+		relayInfo.SetEstimatePromptTokens(usage.PromptTokens)
+	}
+
+	if options.enableBilling {
+		if err = relay.FinalizeTestConsumeQuota(c, relayInfo, usage); err != nil {
+			result.context = c
+			result.info = relayInfo
+			result.usage = usage
+			result.priceData = priceData
+			result.responseBody = respBody
+			result.localErr = err
+			result.newAPIError = types.NewError(err, types.ErrorCodeModelPriceError)
+			return
+		}
+	}
+
+	result.context = c
+	result.info = relayInfo
+	result.usage = usage
+	result.priceData = priceData
+	result.responseBody = respBody
+	return
+}
+
+func testChannel(channel *model.Channel, testModel string, endpointType string, streamOverride *bool) testResult {
 	tik := time.Now()
 	var unsupportedTestChannelTypes = []int{
 		constant.ChannelTypeMidjourney,
@@ -91,53 +569,11 @@ func testChannel(channel *model.Channel, testModel string, endpointType string, 
 		}
 	}
 
-	endpointType = normalizeChannelTestEndpoint(channel, testModel, endpointType)
-
-	requestPath := "/v1/chat/completions"
-
-	// 如果指定了端点类型，使用指定的端点类型
-	if endpointType != "" {
-		if endpointInfo, ok := common.GetDefaultEndpointInfo(constant.EndpointType(endpointType)); ok {
-			requestPath = endpointInfo.Path
-		}
-	} else {
-		// 如果没有指定端点类型，使用原有的自动检测逻辑
-
-		if strings.Contains(strings.ToLower(testModel), "rerank") {
-			requestPath = "/v1/rerank"
-		}
-
-		// 先判断是否为 Embedding 模型
-		if strings.Contains(strings.ToLower(testModel), "embedding") ||
-			strings.HasPrefix(testModel, "m3e") || // m3e 系列模型
-			strings.Contains(testModel, "bge-") || // bge 系列模型
-			strings.Contains(testModel, "embed") ||
-			channel.Type == constant.ChannelTypeMokaAI { // 其他 embedding 模型
-			requestPath = "/v1/embeddings" // 修改请求路径
-		}
-
-		// VolcEngine 图像生成模型
-		if channel.Type == constant.ChannelTypeVolcEngine && strings.Contains(testModel, "seedream") {
-			requestPath = "/v1/images/generations"
-		}
-
-		// responses-only models
-		if strings.Contains(strings.ToLower(testModel), "codex") {
-			requestPath = "/v1/responses"
-		}
-
-		// responses compaction models (must use /v1/responses/compact)
-		if strings.HasSuffix(testModel, ratio_setting.CompactModelSuffix) {
-			requestPath = "/v1/responses/compact"
-		}
-	}
-	if strings.HasPrefix(requestPath, "/v1/responses/compact") {
-		testModel = ratio_setting.WithCompactModelSuffix(testModel)
-	}
+	execution := buildChannelStyleTestExecution(channel, testModel, endpointType, streamOverride)
 
 	c.Request = &http.Request{
 		Method: "POST",
-		URL:    &url.URL{Path: requestPath}, // 使用动态路径
+		URL:    &url.URL{Path: execution.requestPath}, // 使用动态路径
 		Body:   nil,
 		Header: make(http.Header),
 	}
@@ -153,12 +589,15 @@ func testChannel(channel *model.Channel, testModel string, endpointType string, 
 
 	//c.Request.Header.Set("Authorization", "Bearer "+channel.Key)
 	c.Request.Header.Set("Content-Type", "application/json")
+	if execution.isStream {
+		c.Request.Header.Set("Accept", "text/event-stream")
+	}
 	c.Set("channel", channel.Type)
 	c.Set("base_url", channel.GetBaseURL())
 	group, _ := model.GetUserGroup(1, false)
 	c.Set("group", group)
 
-	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, testModel)
+	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, execution.modelName)
 	if newAPIError != nil {
 		return testResult{
 			context:     c,
@@ -166,301 +605,18 @@ func testChannel(channel *model.Channel, testModel string, endpointType string, 
 			newAPIError: newAPIError,
 		}
 	}
-
-	// Determine relay format based on endpoint type or request path
-	var relayFormat types.RelayFormat
-	if endpointType != "" {
-		// 根据指定的端点类型设置 relayFormat
-		switch constant.EndpointType(endpointType) {
-		case constant.EndpointTypeOpenAI:
-			relayFormat = types.RelayFormatOpenAI
-		case constant.EndpointTypeOpenAIResponse:
-			relayFormat = types.RelayFormatOpenAIResponses
-		case constant.EndpointTypeOpenAIResponseCompact:
-			relayFormat = types.RelayFormatOpenAIResponsesCompaction
-		case constant.EndpointTypeAnthropic:
-			relayFormat = types.RelayFormatClaude
-		case constant.EndpointTypeGemini:
-			relayFormat = types.RelayFormatGemini
-		case constant.EndpointTypeJinaRerank:
-			relayFormat = types.RelayFormatRerank
-		case constant.EndpointTypeImageGeneration:
-			relayFormat = types.RelayFormatOpenAIImage
-		case constant.EndpointTypeEmbeddings:
-			relayFormat = types.RelayFormatEmbedding
-		default:
-			relayFormat = types.RelayFormatOpenAI
-		}
-	} else {
-		// 根据请求路径自动检测
-		relayFormat = types.RelayFormatOpenAI
-		if c.Request.URL.Path == "/v1/embeddings" {
-			relayFormat = types.RelayFormatEmbedding
-		}
-		if c.Request.URL.Path == "/v1/images/generations" {
-			relayFormat = types.RelayFormatOpenAIImage
-		}
-		if c.Request.URL.Path == "/v1/messages" {
-			relayFormat = types.RelayFormatClaude
-		}
-		if strings.Contains(c.Request.URL.Path, "/v1beta/models") {
-			relayFormat = types.RelayFormatGemini
-		}
-		if c.Request.URL.Path == "/v1/rerank" || c.Request.URL.Path == "/rerank" {
-			relayFormat = types.RelayFormatRerank
-		}
-		if c.Request.URL.Path == "/v1/responses" {
-			relayFormat = types.RelayFormatOpenAIResponses
-		}
-		if strings.HasPrefix(c.Request.URL.Path, "/v1/responses/compact") {
-			relayFormat = types.RelayFormatOpenAIResponsesCompaction
-		}
+	execResult := executeChannelStyleTest(c, w, channel, execution.modelName, execution.endpointType, execution.request, execution.relayFormat, execution.isStream, testExecutionOptions{
+		enableBilling: false,
+		isChannelTest: true,
+	})
+	if execResult.localErr != nil {
+		return execResult
 	}
 
-	request := buildTestRequest(testModel, endpointType, channel, isStream)
-
-	info, err := relaycommon.GenRelayInfo(c, relayFormat, request, nil)
-
-	if err != nil {
-		return testResult{
-			context:     c,
-			localErr:    err,
-			newAPIError: types.NewError(err, types.ErrorCodeGenRelayInfoFailed),
-		}
-	}
-
-	info.IsChannelTest = true
-	info.InitChannelMeta(c)
-
-	err = helper.ModelMappedHelper(c, info, request)
-	if err != nil {
-		return testResult{
-			context:     c,
-			localErr:    err,
-			newAPIError: types.NewError(err, types.ErrorCodeChannelModelMappedError),
-		}
-	}
-
-	testModel = info.UpstreamModelName
-	// 更新请求中的模型名称
-	request.SetModelName(testModel)
-
-	apiType, _ := common.ChannelType2APIType(channel.Type)
-	if info.RelayMode == relayconstant.RelayModeResponsesCompact &&
-		apiType != constant.APITypeOpenAI &&
-		apiType != constant.APITypeCodex {
-		return testResult{
-			context:     c,
-			localErr:    fmt.Errorf("responses compaction test only supports openai/codex channels, got api type %d", apiType),
-			newAPIError: types.NewError(fmt.Errorf("unsupported api type: %d", apiType), types.ErrorCodeInvalidApiType),
-		}
-	}
-	adaptor := relay.GetAdaptor(apiType)
-	if adaptor == nil {
-		return testResult{
-			context:     c,
-			localErr:    fmt.Errorf("invalid api type: %d, adaptor is nil", apiType),
-			newAPIError: types.NewError(fmt.Errorf("invalid api type: %d, adaptor is nil", apiType), types.ErrorCodeInvalidApiType),
-		}
-	}
-
-	//// 创建一个用于日志的 info 副本，移除 ApiKey
-	//logInfo := info
-	//logInfo.ApiKey = ""
-	common.SysLog(fmt.Sprintf("testing channel %d with model %s , info %+v ", channel.Id, testModel, info.ToString()))
-
-	priceData, err := helper.ModelPriceHelper(c, info, 0, request.GetTokenCountMeta())
-	if err != nil {
-		return testResult{
-			context:     c,
-			localErr:    err,
-			newAPIError: types.NewError(err, types.ErrorCodeModelPriceError),
-		}
-	}
-
-	adaptor.Init(info)
-
-	var convertedRequest any
-	// 根据 RelayMode 选择正确的转换函数
-	switch info.RelayMode {
-	case relayconstant.RelayModeEmbeddings:
-		// Embedding 请求 - request 已经是正确的类型
-		if embeddingReq, ok := request.(*dto.EmbeddingRequest); ok {
-			convertedRequest, err = adaptor.ConvertEmbeddingRequest(c, info, *embeddingReq)
-		} else {
-			return testResult{
-				context:     c,
-				localErr:    errors.New("invalid embedding request type"),
-				newAPIError: types.NewError(errors.New("invalid embedding request type"), types.ErrorCodeConvertRequestFailed),
-			}
-		}
-	case relayconstant.RelayModeImagesGenerations:
-		// 图像生成请求 - request 已经是正确的类型
-		if imageReq, ok := request.(*dto.ImageRequest); ok {
-			convertedRequest, err = adaptor.ConvertImageRequest(c, info, *imageReq)
-		} else {
-			return testResult{
-				context:     c,
-				localErr:    errors.New("invalid image request type"),
-				newAPIError: types.NewError(errors.New("invalid image request type"), types.ErrorCodeConvertRequestFailed),
-			}
-		}
-	case relayconstant.RelayModeRerank:
-		// Rerank 请求 - request 已经是正确的类型
-		if rerankReq, ok := request.(*dto.RerankRequest); ok {
-			convertedRequest, err = adaptor.ConvertRerankRequest(c, info.RelayMode, *rerankReq)
-		} else {
-			return testResult{
-				context:     c,
-				localErr:    errors.New("invalid rerank request type"),
-				newAPIError: types.NewError(errors.New("invalid rerank request type"), types.ErrorCodeConvertRequestFailed),
-			}
-		}
-	case relayconstant.RelayModeResponses:
-		// Response 请求 - request 已经是正确的类型
-		if responseReq, ok := request.(*dto.OpenAIResponsesRequest); ok {
-			convertedRequest, err = adaptor.ConvertOpenAIResponsesRequest(c, info, *responseReq)
-		} else {
-			return testResult{
-				context:     c,
-				localErr:    errors.New("invalid response request type"),
-				newAPIError: types.NewError(errors.New("invalid response request type"), types.ErrorCodeConvertRequestFailed),
-			}
-		}
-	case relayconstant.RelayModeResponsesCompact:
-		// Response compaction request - convert to OpenAIResponsesRequest before adapting
-		switch req := request.(type) {
-		case *dto.OpenAIResponsesCompactionRequest:
-			convertedRequest, err = adaptor.ConvertOpenAIResponsesRequest(c, info, dto.OpenAIResponsesRequest{
-				Model:              req.Model,
-				Input:              req.Input,
-				Instructions:       req.Instructions,
-				PreviousResponseID: req.PreviousResponseID,
-			})
-		case *dto.OpenAIResponsesRequest:
-			convertedRequest, err = adaptor.ConvertOpenAIResponsesRequest(c, info, *req)
-		default:
-			return testResult{
-				context:     c,
-				localErr:    errors.New("invalid response compaction request type"),
-				newAPIError: types.NewError(errors.New("invalid response compaction request type"), types.ErrorCodeConvertRequestFailed),
-			}
-		}
-	default:
-		// Chat/Completion 等其他请求类型
-		if generalReq, ok := request.(*dto.GeneralOpenAIRequest); ok {
-			convertedRequest, err = adaptor.ConvertOpenAIRequest(c, info, generalReq)
-		} else {
-			return testResult{
-				context:     c,
-				localErr:    errors.New("invalid general request type"),
-				newAPIError: types.NewError(errors.New("invalid general request type"), types.ErrorCodeConvertRequestFailed),
-			}
-		}
-	}
-
-	if err != nil {
-		return testResult{
-			context:     c,
-			localErr:    err,
-			newAPIError: types.NewError(err, types.ErrorCodeConvertRequestFailed),
-		}
-	}
-	jsonData, err := json.Marshal(convertedRequest)
-	if err != nil {
-		return testResult{
-			context:     c,
-			localErr:    err,
-			newAPIError: types.NewError(err, types.ErrorCodeJsonMarshalFailed),
-		}
-	}
-
-	//jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings)
-	//if err != nil {
-	//	return testResult{
-	//		context:     c,
-	//		localErr:    err,
-	//		newAPIError: types.NewError(err, types.ErrorCodeConvertRequestFailed),
-	//	}
-	//}
-
-	if len(info.ParamOverride) > 0 {
-		jsonData, err = relaycommon.ApplyParamOverride(jsonData, info.ParamOverride, relaycommon.BuildParamOverrideContext(info))
-		if err != nil {
-			return testResult{
-				context:     c,
-				localErr:    err,
-				newAPIError: types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid),
-			}
-		}
-	}
-
-	requestBody := bytes.NewBuffer(jsonData)
-	c.Request.Body = io.NopCloser(bytes.NewBuffer(jsonData))
-	resp, err := adaptor.DoRequest(c, info, requestBody)
-	if err != nil {
-		return testResult{
-			context:     c,
-			localErr:    err,
-			newAPIError: types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError),
-		}
-	}
-	var httpResp *http.Response
-	if resp != nil {
-		httpResp = resp.(*http.Response)
-		if httpResp.StatusCode != http.StatusOK {
-			err := service.RelayErrorHandler(c.Request.Context(), httpResp, true)
-			common.SysError(fmt.Sprintf(
-				"channel test bad response: channel_id=%d name=%s type=%d model=%s endpoint_type=%s status=%d err=%v",
-				channel.Id,
-				channel.Name,
-				channel.Type,
-				testModel,
-				endpointType,
-				httpResp.StatusCode,
-				err,
-			))
-			return testResult{
-				context:     c,
-				localErr:    err,
-				newAPIError: types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError),
-			}
-		}
-	}
-	usageA, respErr := adaptor.DoResponse(c, httpResp, info)
-	if respErr != nil {
-		return testResult{
-			context:     c,
-			localErr:    respErr,
-			newAPIError: respErr,
-		}
-	}
-	usage, usageErr := coerceTestUsage(usageA, isStream, info.GetEstimatePromptTokens())
-	if usageErr != nil {
-		return testResult{
-			context:     c,
-			localErr:    usageErr,
-			newAPIError: types.NewOpenAIError(usageErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError),
-		}
-	}
-	result := w.Result()
-	respBody, err := readTestResponseBody(result.Body, isStream)
-	if err != nil {
-		return testResult{
-			context:     c,
-			localErr:    err,
-			newAPIError: types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError),
-		}
-	}
-	if bodyErr := detectErrorFromTestResponseBody(respBody); bodyErr != nil {
-		return testResult{
-			context:     c,
-			localErr:    bodyErr,
-			newAPIError: types.NewOpenAIError(bodyErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError),
-		}
-	}
-	info.SetEstimatePromptTokens(usage.PromptTokens)
-
+	info := execResult.info
+	usage := execResult.usage
+	priceData := execResult.priceData
+	respBody := execResult.responseBody
 	quota := 0
 	if !priceData.UsePrice {
 		quota = usage.PromptTokens + int(math.Round(float64(usage.CompletionTokens)*priceData.CompletionRatio))
@@ -491,9 +647,13 @@ func testChannel(channel *model.Channel, testModel string, endpointType string, 
 	})
 	common.SysLog(fmt.Sprintf("testing channel #%d, response: \n%s", channel.Id, string(respBody)))
 	return testResult{
-		context:     c,
-		localErr:    nil,
-		newAPIError: nil,
+		context:      c,
+		localErr:     nil,
+		newAPIError:  nil,
+		info:         info,
+		usage:        usage,
+		priceData:    priceData,
+		responseBody: respBody,
 	}
 }
 
@@ -608,7 +768,7 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 			return &dto.ImageRequest{
 				Model:  model,
 				Prompt: "a cute cat",
-				N:      1,
+				N:      common.GetPointer[uint](1),
 				Size:   "1024x1024",
 			}
 		case constant.EndpointTypeJinaRerank:
@@ -624,7 +784,7 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 			return &dto.OpenAIResponsesRequest{
 				Model:  model,
 				Input:  json.RawMessage(`[{"role":"user","content":"hi"}]`),
-				Stream: isStream,
+				Stream: common.GetPointer(isStream),
 			}
 		case constant.EndpointTypeOpenAIResponseCompact:
 			// 返回 OpenAIResponsesCompactionRequest
@@ -640,14 +800,14 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 			}
 			req := &dto.GeneralOpenAIRequest{
 				Model:  model,
-				Stream: isStream,
+				Stream: common.GetPointer(isStream),
 				Messages: []dto.Message{
 					{
 						Role:    "user",
 						Content: "hi",
 					},
 				},
-				MaxTokens: maxTokens,
+				MaxTokens: common.GetPointer(maxTokens),
 			}
 			if isStream {
 				req.StreamOptions = &dto.StreamOptions{IncludeUsage: true}
@@ -690,14 +850,14 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 		return &dto.OpenAIResponsesRequest{
 			Model:  model,
 			Input:  json.RawMessage(`[{"role":"user","content":"hi"}]`),
-			Stream: isStream,
+			Stream: common.GetPointer(isStream),
 		}
 	}
 
 	// Chat/Completion 请求 - 返回 GeneralOpenAIRequest
 	testRequest := &dto.GeneralOpenAIRequest{
 		Model:  model,
-		Stream: isStream,
+		Stream: common.GetPointer(isStream),
 		Messages: []dto.Message{
 			{
 				Role:    "user",
@@ -710,15 +870,15 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 	}
 
 	if strings.HasPrefix(model, "o") {
-		testRequest.MaxCompletionTokens = 16
+		testRequest.MaxCompletionTokens = common.GetPointer[uint](16)
 	} else if strings.Contains(model, "thinking") {
 		if !strings.Contains(model, "claude") {
-			testRequest.MaxTokens = 50
+			testRequest.MaxTokens = common.GetPointer[uint](50)
 		}
 	} else if strings.Contains(model, "gemini") {
-		testRequest.MaxTokens = 3000
+		testRequest.MaxTokens = common.GetPointer[uint](3000)
 	} else {
-		testRequest.MaxTokens = 16
+		testRequest.MaxTokens = common.GetPointer[uint](16)
 	}
 
 	return testRequest
@@ -745,9 +905,13 @@ func TestChannel(c *gin.Context) {
 	//}()
 	testModel := c.Query("model")
 	endpointType := c.Query("endpoint_type")
-	isStream, _ := strconv.ParseBool(c.Query("stream"))
+	var streamOverride *bool
+	if streamValue, ok := c.GetQuery("stream"); ok {
+		isStream, _ := strconv.ParseBool(streamValue)
+		streamOverride = common.GetPointer(isStream)
+	}
 	tik := time.Now()
-	result := testChannel(channel, testModel, endpointType, isStream)
+	result := testChannel(channel, testModel, endpointType, streamOverride)
 	if result.localErr != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -809,7 +973,7 @@ func testAllChannels(notify bool) error {
 			}
 			isChannelEnabled := channel.Status == common.ChannelStatusEnabled
 			tik := time.Now()
-			result := testChannel(channel, "", "", false)
+			result := testChannel(channel, "", "", nil)
 			tok := time.Now()
 			milliseconds := tok.Sub(tik).Milliseconds()
 

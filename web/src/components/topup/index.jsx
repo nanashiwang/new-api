@@ -27,6 +27,7 @@ import {
   renderQuotaWithAmount,
   copy,
   getQuotaPerUnit,
+  setUserData,
   timestamp2string,
 } from '../../helpers';
 import { Modal, Select, Toast } from '@douyinfe/semi-ui';
@@ -520,6 +521,7 @@ const TopUp = () => {
     const { success, message, data } = res.data;
     if (success) {
       userDispatch({ type: 'login', payload: data });
+      setUserData(data);
     } else {
       showError(message);
     }

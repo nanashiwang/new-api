@@ -634,6 +634,10 @@ func GetSelf(c *gin.Context) {
 
 	// 获取用户设置并提取sidebar_modules
 	userSetting := user.GetSetting()
+	currentQuota := user.Quota
+	if quota, quotaErr := model.GetUserQuota(id, false); quotaErr == nil {
+		currentQuota = quota
+	}
 
 	// 构建响应数据，包含用户信息和权限
 	responseData := map[string]interface{}{
@@ -649,7 +653,7 @@ func GetSelf(c *gin.Context) {
 		"wechat_id":         user.WeChatId,
 		"telegram_id":       user.TelegramId,
 		"group":             user.Group,
-		"quota":             user.Quota,
+		"quota":             currentQuota,
 		"used_quota":        user.UsedQuota,
 		"request_count":     user.RequestCount,
 		"aff_code":          user.AffCode,
@@ -1102,21 +1106,8 @@ type ManageBatchRequest struct {
 	Action string `json:"action"`
 }
 
-// applyManageAction 统一封装“单个用户管理动作”的执行逻辑。
-//
-// 设计目的：
-// 1. 复用给单用户接口（/api/user/manage）和批量接口（/api/user/manage/batch）；
-// 2. 保证两条路径的业务规则完全一致，避免出现“单个可操作但批量不可操作”之类分叉；
-// 3. 将“动作判定 + 状态更新 + 删除行为”集中在一个函数里，降低后续改动成本。
-//
-// 参数说明：
-// - user: 已加载完成的目标用户（调用方负责先查询）。
-// - action: 动作类型，支持 enable/disable/delete/promote/demote。
-// - myRole: 当前操作者角色（用于 root 级别操作判定）。
-//
-// 返回说明：
-// - nil: 动作执行成功。
-// - error: 动作非法、权限不足或数据库写入失败。
+// applyManageAction 处理单个用户的管理动作。
+// 单用户和批量接口都会走这里，避免两边规则不一致。
 func applyManageAction(user *model.User, action string, myRole int) error {
 	normalizedAction := strings.ToLower(strings.TrimSpace(action))
 	switch normalizedAction {
@@ -1203,13 +1194,8 @@ func ManageUser(c *gin.Context) {
 	return
 }
 
-// ManageUserBatch 管理员批量执行用户管理动作。
-//
-// 行为约定（关键）：
-// 1. 支持“部分成功”语义：某些用户失败不会影响其他用户继续执行；
-// 2. 返回 success_count / failed_count 与失败明细，前端可直接展示“成功X失败Y”；
-// 3. 对重复 ID 做去重，避免同一用户在一次请求内被重复操作；
-// 4. 对每个目标用户都执行独立权限校验，保证安全边界与单操作一致。
+// ManageUserBatch 批量执行用户管理动作。
+// 每个用户单独校验并返回结果，方便前端直接展示成功和失败明细。
 func ManageUserBatch(c *gin.Context) {
 	req := ManageBatchRequest{}
 	if err := c.ShouldBindJSON(&req); err != nil || len(req.Ids) == 0 {
@@ -1261,7 +1247,7 @@ func ManageUserBatch(c *gin.Context) {
 			continue
 		}
 
-		// 复用统一动作逻辑，确保单个与批量规则完全一致。
+		// 单用户和批量操作共用同一套规则。
 		if err := applyManageAction(&user, action, myRole); err != nil {
 			failed = append(failed, gin.H{
 				"id":      id,
@@ -1452,17 +1438,18 @@ func Redeem(c *gin.Context) {
 }
 
 type UpdateUserSettingRequest struct {
-	QuotaWarningType           string  `json:"notify_type"`
-	QuotaWarningThreshold      float64 `json:"quota_warning_threshold"`
-	WebhookUrl                 string  `json:"webhook_url,omitempty"`
-	WebhookSecret              string  `json:"webhook_secret,omitempty"`
-	NotificationEmail          string  `json:"notification_email,omitempty"`
-	BarkUrl                    string  `json:"bark_url,omitempty"`
-	GotifyUrl                  string  `json:"gotify_url,omitempty"`
-	GotifyToken                string  `json:"gotify_token,omitempty"`
-	GotifyPriority             int     `json:"gotify_priority,omitempty"`
-	AcceptUnsetModelRatioModel bool    `json:"accept_unset_model_ratio_model"`
-	RecordIpLog                bool    `json:"record_ip_log"`
+	QuotaWarningType                 string  `json:"notify_type"`
+	QuotaWarningThreshold            float64 `json:"quota_warning_threshold"`
+	WebhookUrl                       string  `json:"webhook_url,omitempty"`
+	WebhookSecret                    string  `json:"webhook_secret,omitempty"`
+	NotificationEmail                string  `json:"notification_email,omitempty"`
+	BarkUrl                          string  `json:"bark_url,omitempty"`
+	GotifyUrl                        string  `json:"gotify_url,omitempty"`
+	GotifyToken                      string  `json:"gotify_token,omitempty"`
+	GotifyPriority                   int     `json:"gotify_priority,omitempty"`
+	UpstreamModelUpdateNotifyEnabled bool    `json:"upstream_model_update_notify_enabled,omitempty"`
+	AcceptUnsetModelRatioModel       bool    `json:"accept_unset_model_ratio_model"`
+	RecordIpLog                      bool    `json:"record_ip_log"`
 }
 
 func UpdateUserSetting(c *gin.Context) {
@@ -1553,13 +1540,11 @@ func UpdateUserSetting(c *gin.Context) {
 		return
 	}
 
-	// 构建设置
-	settings := dto.UserSetting{
-		NotifyType:            req.QuotaWarningType,
-		QuotaWarningThreshold: req.QuotaWarningThreshold,
-		AcceptUnsetRatioModel: req.AcceptUnsetModelRatioModel,
-		RecordIpLog:           req.RecordIpLog,
-	}
+	settings := user.GetSetting()
+	settings.NotifyType = req.QuotaWarningType
+	settings.QuotaWarningThreshold = req.QuotaWarningThreshold
+	settings.AcceptUnsetRatioModel = req.AcceptUnsetModelRatioModel
+	settings.RecordIpLog = req.RecordIpLog
 
 	// 如果是webhook类型,添加webhook相关设置
 	if req.QuotaWarningType == dto.NotifyTypeWebhook {
@@ -1589,6 +1574,10 @@ func UpdateUserSetting(c *gin.Context) {
 		} else {
 			settings.GotifyPriority = req.GotifyPriority
 		}
+	}
+
+	if c.GetInt("role") >= common.RoleAdminUser {
+		settings.UpstreamModelUpdateNotifyEnabled = req.UpstreamModelUpdateNotifyEnabled
 	}
 
 	// 更新用户设置

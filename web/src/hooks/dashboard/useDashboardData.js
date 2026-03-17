@@ -20,10 +20,17 @@ For commercial licensing, please contact support@quantumnous.com
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { API, isAdmin, showError, timestamp2string } from '../../helpers';
+import {
+  API,
+  isAdmin,
+  setUserData,
+  showError,
+  timestamp2string,
+} from '../../helpers';
 import { getDefaultTime, getInitialTimestamp } from '../../helpers/dashboard';
 import { TIME_OPTIONS } from '../../constants/dashboard.constants';
 import { useIsMobile } from '../common/useIsMobile';
+import { useLatestRequestGuard } from '../common/useLatestRequestGuard';
 import { useMinimumLoadingTime } from '../common/useMinimumLoadingTime';
 
 export const useDashboardData = (userState, userDispatch, statusState) => {
@@ -31,6 +38,8 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const initialized = useRef(false);
+  const quotaRequestGuard = useLatestRequestGuard();
+  const uptimeRequestGuard = useLatestRequestGuard();
 
   // ========== 基础状态 ==========
   const [loading, setLoading] = useState(false);
@@ -157,6 +166,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
 
   // ========== API 调用函数 ==========
   const loadQuotaData = useCallback(async () => {
+    const requestId = quotaRequestGuard.createRequestId();
     setLoading(true);
     try {
       let url = '';
@@ -171,6 +181,9 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
       }
 
       const res = await API.get(url);
+      if (!quotaRequestGuard.isLatestRequest(requestId)) {
+        return [];
+      }
       const { success, message, data } = res.data;
       if (success) {
         setQuotaData(data);
@@ -189,14 +202,20 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
         return [];
       }
     } finally {
-      setLoading(false);
+      if (quotaRequestGuard.isLatestRequest(requestId)) {
+        setLoading(false);
+      }
     }
-  }, [inputs, dataExportDefaultTime, isAdminUser, now]);
+  }, [dataExportDefaultTime, inputs, isAdminUser, now, quotaRequestGuard]);
 
   const loadUptimeData = useCallback(async () => {
+    const requestId = uptimeRequestGuard.createRequestId();
     setUptimeLoading(true);
     try {
       const res = await API.get('/api/uptime/status');
+      if (!uptimeRequestGuard.isLatestRequest(requestId)) {
+        return;
+      }
       const { success, message, data } = res.data;
       if (success) {
         setUptimeData(data || []);
@@ -209,15 +228,18 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     } catch (err) {
       console.error(err);
     } finally {
-      setUptimeLoading(false);
+      if (uptimeRequestGuard.isLatestRequest(requestId)) {
+        setUptimeLoading(false);
+      }
     }
-  }, [activeUptimeTab]);
+  }, [activeUptimeTab, uptimeRequestGuard]);
 
   const getUserData = useCallback(async () => {
     let res = await API.get(`/api/user/self`);
     const { success, message, data } = res.data;
     if (success) {
       userDispatch({ type: 'login', payload: data });
+      setUserData(data);
     } else {
       showError(message);
     }

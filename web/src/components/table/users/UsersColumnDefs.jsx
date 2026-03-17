@@ -32,7 +32,7 @@ import { IconMore } from '@douyinfe/semi-icons';
 import { renderGroup, renderNumber, renderQuota } from '../../../helpers';
 
 /**
- * Render user role
+ * 渲染用户角色。
  */
 const renderRole = (role, t) => {
   switch (role) {
@@ -64,7 +64,7 @@ const renderRole = (role, t) => {
 };
 
 /**
- * Render username with remark
+ * 渲染用户名，存在备注时一并展示。
  */
 const renderUsername = (text, record) => {
   const remark = record.remark;
@@ -93,7 +93,7 @@ const renderUsername = (text, record) => {
 };
 
 /**
- * Render user statistics
+ * 渲染用户状态和调用次数。
  */
 const renderStatistics = (text, record, showEnableDisableModal, t) => {
   const isDeleted = record.DeletedAt !== null;
@@ -170,7 +170,7 @@ const renderQuotaUsage = (text, record, t) => {
   );
 };
 
-// 将已用额度独立成列，提升用量可见性。
+// 已用额度单独展示，查余额时更直观。
 const renderUsedQuota = (text, record) => {
   const used = parseInt(record.used_quota) || 0;
   return (
@@ -181,8 +181,7 @@ const renderUsedQuota = (text, record) => {
 };
 
 /**
- * 渲染订阅状态项。
- * 即使用户没有生效订阅也可点击，方便管理员直接进入管理。
+ * 渲染订阅状态，没有生效订阅时也允许直接点进去管理。
  */
 const renderSubscriptionStatus = (record, t, showUserSubscriptionsModal) => {
   const activeCount = Number(record?.active_subscription_count || 0);
@@ -222,7 +221,7 @@ const renderSubscriptionStatus = (record, t, showUserSubscriptionsModal) => {
 };
 
 /**
- * Render invite information
+ * 渲染邀请相关信息。
  */
 const renderInviteInfo = (
   text,
@@ -282,7 +281,7 @@ const renderInviteInfo = (
 };
 
 /**
- * Render operations column
+ * 渲染操作列。
  */
 const renderOperations = (
   text,

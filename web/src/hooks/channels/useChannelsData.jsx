@@ -35,6 +35,8 @@ import {
 } from '../../constants';
 import { useIsMobile } from '../common/useIsMobile';
 import { useTableCompactMode } from '../common/useTableCompactMode';
+import { useChannelUpstreamUpdates } from './useChannelUpstreamUpdates';
+import { parseUpstreamUpdateMeta } from './upstreamUpdateUtils';
 import { Modal, Button } from '@douyinfe/semi-ui';
 import { openCodexUsageModal } from '../../components/table/channels/modals/CodexUsageModal';
 
@@ -230,16 +232,27 @@ export const useChannelsData = () => {
   };
 
   // Data formatting
+  const decorateChannelRecord = (channel) => {
+    if (!channel || typeof channel !== 'object') {
+      return channel;
+    }
+    return {
+      ...channel,
+      upstreamUpdateMeta: parseUpstreamUpdateMeta(channel.settings),
+    };
+  };
+
   const setChannelFormat = (channels, enableTagMode) => {
     let channelDates = [];
     let channelTags = {};
 
     for (let i = 0; i < channels.length; i++) {
-      channels[i].key = '' + channels[i].id;
+      const currentChannel = decorateChannelRecord(channels[i]);
+      currentChannel.key = '' + currentChannel.id;
       if (!enableTagMode) {
-        channelDates.push(channels[i]);
+        channelDates.push(currentChannel);
       } else {
-        let tag = channels[i].tag ? channels[i].tag : '';
+        let tag = currentChannel.tag ? currentChannel.tag : '';
         let tagIndex = channelTags[tag];
         let tagChannelDates = undefined;
 
@@ -263,25 +276,25 @@ export const useChannelsData = () => {
         }
 
         if (tagChannelDates.priority === -1) {
-          tagChannelDates.priority = channels[i].priority;
+          tagChannelDates.priority = currentChannel.priority;
         } else {
-          if (tagChannelDates.priority !== channels[i].priority) {
+          if (tagChannelDates.priority !== currentChannel.priority) {
             tagChannelDates.priority = '';
           }
         }
 
         if (tagChannelDates.weight === -1) {
-          tagChannelDates.weight = channels[i].weight;
+          tagChannelDates.weight = currentChannel.weight;
         } else {
-          if (tagChannelDates.weight !== channels[i].weight) {
+          if (tagChannelDates.weight !== currentChannel.weight) {
             tagChannelDates.weight = '';
           }
         }
 
         if (tagChannelDates.group === '') {
-          tagChannelDates.group = channels[i].group;
+          tagChannelDates.group = currentChannel.group;
         } else {
-          let channelGroupsStr = channels[i].group;
+          let channelGroupsStr = currentChannel.group;
           channelGroupsStr.split(',').forEach((item, index) => {
             if (tagChannelDates.group.indexOf(item) === -1) {
               tagChannelDates.group += ',' + item;
@@ -289,12 +302,32 @@ export const useChannelsData = () => {
           });
         }
 
-        tagChannelDates.children.push(channels[i]);
-        if (channels[i].status === 1) {
+        tagChannelDates.children.push(currentChannel);
+        if (currentChannel.upstreamUpdateMeta?.enabled) {
+          tagChannelDates.upstreamUpdateMeta =
+            tagChannelDates.upstreamUpdateMeta || {
+              enabled: true,
+              pendingAddModels: [],
+              pendingRemoveModels: [],
+            };
+          tagChannelDates.upstreamUpdateMeta.pendingAddModels = Array.from(
+            new Set([
+              ...tagChannelDates.upstreamUpdateMeta.pendingAddModels,
+              ...(currentChannel.upstreamUpdateMeta.pendingAddModels || []),
+            ]),
+          );
+          tagChannelDates.upstreamUpdateMeta.pendingRemoveModels = Array.from(
+            new Set([
+              ...tagChannelDates.upstreamUpdateMeta.pendingRemoveModels,
+              ...(currentChannel.upstreamUpdateMeta.pendingRemoveModels || []),
+            ]),
+          );
+        }
+        if (currentChannel.status === 1) {
           tagChannelDates.status = 1;
         }
-        tagChannelDates.used_quota += channels[i].used_quota;
-        tagChannelDates.response_time += channels[i].response_time;
+        tagChannelDates.used_quota += currentChannel.used_quota;
+        tagChannelDates.response_time += currentChannel.response_time;
         tagChannelDates.response_time = tagChannelDates.response_time / 2;
       }
     }
@@ -324,7 +357,6 @@ export const useChannelsData = () => {
 
     const { searchKeyword, searchGroup, searchModel } = getFormValues();
     if (searchKeyword !== '' || searchGroup !== '' || searchModel !== '') {
-      setLoading(true);
       await searchChannels(
         enableTagMode,
         typeKey,
@@ -333,7 +365,6 @@ export const useChannelsData = () => {
         pageSize,
         idSort,
       );
-      setLoading(false);
       return;
     }
 
@@ -377,6 +408,8 @@ export const useChannelsData = () => {
     sortFlag = idSort,
   ) => {
     const { searchKeyword, searchGroup, searchModel } = getFormValues();
+    const reqId = ++requestCounter.current;
+    setLoading(true);
     setSearching(true);
     try {
       if (searchKeyword === '' && searchGroup === '' && searchModel === '') {
@@ -396,6 +429,9 @@ export const useChannelsData = () => {
       const res = await API.get(
         `/api/channel/search?keyword=${searchKeyword}&group=${searchGroup}&model=${searchModel}&id_sort=${sortFlag}&tag_mode=${enableTagMode}&p=${page}&page_size=${pageSz}${typeParam}${statusParam}`,
       );
+      if (reqId !== requestCounter.current) {
+        return;
+      }
       const { success, message, data } = res.data;
       if (success) {
         const { items = [], total = 0, type_counts = {} } = data;
@@ -411,7 +447,10 @@ export const useChannelsData = () => {
         showError(message);
       }
     } finally {
-      setSearching(false);
+      if (reqId === requestCounter.current) {
+        setSearching(false);
+        setLoading(false);
+      }
     }
   };
 
@@ -1098,6 +1137,11 @@ export const useChannelsData = () => {
     // 可选择性保留测试结果，这里不清空以便用户查看
   };
 
+  const upstreamUpdates = useChannelUpstreamUpdates({
+    t,
+    refresh,
+  });
+
   // Type counts
   const channelTypeCounts = useMemo(() => {
     if (Object.keys(typeCounts).length > 0) return typeCounts;
@@ -1203,6 +1247,9 @@ export const useChannelsData = () => {
     // Helpers
     t,
     isMobile,
+
+    // Upstream updates
+    ...upstreamUpdates,
 
     // 函数集合
     loadChannels,

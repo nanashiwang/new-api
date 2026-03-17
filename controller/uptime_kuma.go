@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/setting/console_setting"
@@ -21,8 +22,16 @@ const (
 	uptimeKeySuffix  = "_24"
 	apiStatusPath    = "/api/status-page/"
 	apiHeartbeatPath = "/api/status-page/heartbeat/"
+	uptimeCacheTTL   = 60 * time.Second
 )
 
+var uptimeStatusCache struct {
+	mu        sync.RWMutex
+	data      []UptimeGroupResult
+	expiresAt time.Time
+}
+
+// Monitor 是前端 uptime 面板使用的单个监控项。
 type Monitor struct {
 	Name   string  `json:"name"`
 	Uptime float64 `json:"uptime"`
@@ -35,6 +44,7 @@ type UptimeGroupResult struct {
 	Monitors     []Monitor `json:"monitors"`
 }
 
+// getAndDecode 发起 GET 请求并把响应解码到目标结构中。
 func getAndDecode(ctx context.Context, client *http.Client, url string, dest interface{}) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -54,6 +64,7 @@ func getAndDecode(ctx context.Context, client *http.Client, url string, dest int
 	return json.NewDecoder(resp.Body).Decode(dest)
 }
 
+// fetchGroupData 并发拉取单个分组的状态页和心跳数据，再整理成前端需要的结构。
 func fetchGroupData(ctx context.Context, client *http.Client, groupConfig map[string]interface{}) UptimeGroupResult {
 	url, _ := groupConfig["url"].(string)
 	slug, _ := groupConfig["slug"].(string)
@@ -105,6 +116,7 @@ func fetchGroupData(ctx context.Context, client *http.Client, groupConfig map[st
 			continue
 		}
 
+		// 状态页和心跳接口的数据来源不同，这里按 monitor ID 合并。
 		for _, m := range pg.MonitorList {
 			monitor := Monitor{
 				Name:  m.Name,
@@ -128,6 +140,7 @@ func fetchGroupData(ctx context.Context, client *http.Client, groupConfig map[st
 	return result
 }
 
+// GetUptimeKumaStatus 聚合所有配置分组的 uptime 状态，并在短时间内复用缓存结果。
 func GetUptimeKumaStatus(c *gin.Context) {
 	groups := console_setting.GetUptimeKumaGroups()
 	if len(groups) == 0 {
@@ -135,6 +148,16 @@ func GetUptimeKumaStatus(c *gin.Context) {
 		return
 	}
 
+	uptimeStatusCache.mu.RLock()
+	cachedData := uptimeStatusCache.data
+	cacheExpiresAt := uptimeStatusCache.expiresAt
+	uptimeStatusCache.mu.RUnlock()
+	if len(cachedData) > 0 && time.Now().Before(cacheExpiresAt) {
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": cachedData})
+		return
+	}
+
+	// 缓存过期后再并发拉取所有分组，避免每次请求都打到 Uptime Kuma。
 	ctx, cancel := context.WithTimeout(c.Request.Context(), requestTimeout)
 	defer cancel()
 
@@ -151,5 +174,9 @@ func GetUptimeKumaStatus(c *gin.Context) {
 	}
 
 	g.Wait()
+	uptimeStatusCache.mu.Lock()
+	uptimeStatusCache.data = results
+	uptimeStatusCache.expiresAt = time.Now().Add(uptimeCacheTTL)
+	uptimeStatusCache.mu.Unlock()
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": results})
 }
