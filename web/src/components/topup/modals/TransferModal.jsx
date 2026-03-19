@@ -20,6 +20,18 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import { Modal, Typography, Input, InputNumber } from '@douyinfe/semi-ui';
 import { CreditCard } from 'lucide-react';
+import { getCurrencyConfig } from '../../../helpers';
+import { quotaToDisplayAmount } from '../../../helpers/quota';
+
+const roundCurrencyAmountUp = (amount) => {
+  const numericAmount = Number(amount || 0);
+  return Math.ceil((numericAmount + Number.EPSILON) * 100) / 100;
+};
+
+const roundCurrencyAmountDown = (amount) => {
+  const numericAmount = Number(amount || 0);
+  return Math.floor((numericAmount + Number.EPSILON) * 100) / 100;
+};
 
 const TransferModal = ({
   t,
@@ -32,6 +44,17 @@ const TransferModal = ({
   transferAmount,
   setTransferAmount,
 }) => {
+  const currencyConfig = getCurrencyConfig();
+  const isTokenDisplay = currencyConfig.type === 'TOKENS';
+  const minTransferAmount = isTokenDisplay
+    ? getQuotaPerUnit()
+    : roundCurrencyAmountUp(quotaToDisplayAmount(getQuotaPerUnit()));
+  const maxTransferAmount = isTokenDisplay
+    ? userState?.user?.aff_quota || 0
+    : roundCurrencyAmountDown(
+        quotaToDisplayAmount(userState?.user?.aff_quota || 0),
+      );
+
   return (
     <Modal
       title={
@@ -59,13 +82,20 @@ const TransferModal = ({
         </div>
         <div>
           <Typography.Text strong className='block mb-2'>
-            {t('划转额度')} · {t('最低') + renderQuota(getQuotaPerUnit())}
+            {(isTokenDisplay ? t('划转额度') : t('金额')) +
+              ' · ' +
+              t('最低') +
+              renderQuota(getQuotaPerUnit())}
           </Typography.Text>
           <InputNumber
-            min={getQuotaPerUnit()}
-            max={userState?.user?.aff_quota || 0}
+            min={minTransferAmount}
+            max={maxTransferAmount}
             value={transferAmount}
             onChange={(value) => setTransferAmount(value)}
+            placeholder={isTokenDisplay ? undefined : t('输入金额')}
+            prefix={isTokenDisplay ? undefined : currencyConfig.symbol}
+            precision={isTokenDisplay ? undefined : 2}
+            step={isTokenDisplay ? undefined : 0.01}
             className='w-full !rounded-lg'
           />
         </div>

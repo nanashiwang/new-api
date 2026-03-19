@@ -23,6 +23,7 @@ import {
   showError,
   showInfo,
   showSuccess,
+  getCurrencyConfig,
   renderQuota,
   renderQuotaWithAmount,
   copy,
@@ -30,6 +31,10 @@ import {
   setUserData,
   timestamp2string,
 } from '../../helpers';
+import {
+  displayAmountToQuota,
+  quotaToDisplayAmount,
+} from '../../helpers/quota';
 import { Modal, Select, Toast } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { useDebouncedCallback } from 'use-debounce';
@@ -41,6 +46,11 @@ import InvitationCard from './InvitationCard';
 import TransferModal from './modals/TransferModal';
 import PaymentConfirmModal from './modals/PaymentConfirmModal';
 import TopupHistoryModal from './modals/TopupHistoryModal';
+
+const roundCurrencyAmountUp = (amount) => {
+  const numericAmount = Number(amount || 0);
+  return Math.ceil((numericAmount + Number.EPSILON) * 100) / 100;
+};
 
 const TopUp = () => {
   const { t } = useTranslation();
@@ -85,7 +95,12 @@ const TopUp = () => {
   // 邀请状态
   const [affLink, setAffLink] = useState('');
   const [openTransfer, setOpenTransfer] = useState(false);
-  const [transferAmount, setTransferAmount] = useState(0);
+  const [transferAmount, setTransferAmount] = useState(() => {
+    const minTransferAmount = quotaToDisplayAmount(getQuotaPerUnit());
+    return getCurrencyConfig().type === 'TOKENS'
+      ? minTransferAmount
+      : roundCurrencyAmountUp(minTransferAmount);
+  });
 
   // 计费弹窗状态
   const [openHistory, setOpenHistory] = useState(false);
@@ -725,12 +740,13 @@ const TopUp = () => {
 
   // 划转邀请额度。
   const transfer = async () => {
-    if (transferAmount < getQuotaPerUnit()) {
+    const transferQuota = displayAmountToQuota(transferAmount);
+    if (transferQuota < getQuotaPerUnit()) {
       showError(t('划转金额最低为') + ' ' + renderQuota(getQuotaPerUnit()));
       return;
     }
     const res = await API.post(`/api/user/aff_transfer`, {
-      quota: transferAmount,
+      quota: transferQuota,
     });
     const { success, message } = res.data;
     if (success) {
@@ -751,8 +767,19 @@ const TopUp = () => {
   useEffect(() => {
     // 始终刷新用户数据，确保余额与统计准确。
     getUserQuota().then();
-    setTransferAmount(getQuotaPerUnit());
   }, []);
+
+  useEffect(() => {
+    if (!openTransfer) {
+      return;
+    }
+    const minTransferAmount = quotaToDisplayAmount(getQuotaPerUnit());
+    setTransferAmount(
+      getCurrencyConfig().type === 'TOKENS'
+        ? minTransferAmount
+        : roundCurrencyAmountUp(minTransferAmount),
+    );
+  }, [openTransfer]);
 
   useEffect(() => {
     if (affFetchedRef.current) return;
