@@ -79,7 +79,7 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 	if req.Model == "" {
 		return nil, errors.New("model is required")
 	}
-	if req.N > 1 {
+	if req.N != nil && *req.N > 1 {
 		return nil, fmt.Errorf("n>1 is not supported in responses compatibility mode")
 	}
 
@@ -354,10 +354,15 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 		parallelToolCallsRaw, _ = common.Marshal(*req.ParallelTooCalls)
 	}
 
+	var promptCacheKeyRaw json.RawMessage
+	if strings.TrimSpace(req.PromptCacheKey) != "" {
+		promptCacheKeyRaw, _ = common.Marshal(req.PromptCacheKey)
+	}
+
 	textRaw := convertChatResponseFormatToResponsesText(req.ResponseFormat)
 
 	maxOutputTokens := req.MaxTokens
-	if req.MaxCompletionTokens > maxOutputTokens {
+	if req.MaxCompletionTokens != nil && (maxOutputTokens == nil || *req.MaxCompletionTokens > *maxOutputTokens) {
 		maxOutputTokens = req.MaxCompletionTokens
 	}
 	// OpenAI Responses API rejects max_output_tokens < 16 when explicitly provided.
@@ -365,26 +370,30 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 	//	maxOutputTokens = 16
 	//}
 
-	var topP *float64
-	if req.TopP != 0 {
-		topP = common.GetPointer(req.TopP)
-	}
+	topP := req.TopP
+	topLogProbs := req.TopLogProbs
 
 	out := &dto.OpenAIResponsesRequest{
-		Model:             req.Model,
-		Input:             inputRaw,
-		Instructions:      instructionsRaw,
-		MaxOutputTokens:   maxOutputTokens,
-		Stream:            req.Stream,
-		Temperature:       req.Temperature,
-		Text:              textRaw,
-		ToolChoice:        toolChoiceRaw,
-		Tools:             toolsRaw,
-		TopP:              topP,
-		User:              req.User,
-		ParallelToolCalls: parallelToolCallsRaw,
-		Store:             req.Store,
-		Metadata:          req.Metadata,
+		Model:                req.Model,
+		Input:                inputRaw,
+		Instructions:         instructionsRaw,
+		MaxOutputTokens:      maxOutputTokens,
+		TopLogProbs:          topLogProbs,
+		Stream:               req.Stream,
+		StreamOptions:        req.StreamOptions,
+		Temperature:          req.Temperature,
+		Text:                 textRaw,
+		ToolChoice:           toolChoiceRaw,
+		Tools:                toolsRaw,
+		TopP:                 topP,
+		User:                 req.User,
+		ParallelToolCalls:    parallelToolCallsRaw,
+		ServiceTier:          req.ServiceTier,
+		SafetyIdentifier:     req.SafetyIdentifier,
+		Store:                req.Store,
+		PromptCacheKey:       promptCacheKeyRaw,
+		PromptCacheRetention: req.PromptCacheRetention,
+		Metadata:             req.Metadata,
 	}
 
 	if req.ReasoningEffort != "" {

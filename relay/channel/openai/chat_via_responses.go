@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -70,6 +71,9 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		usage = service.ResponseText2Usage(c, text, info.UpstreamModelName, info.GetEstimatePromptTokens())
 		chatResp.Usage = *usage
 	}
+	if len(chatResp.Choices) > 0 {
+		service.SetResponsesBridgeResult(c, responsesResp.ID, chatResp.Choices[0].Message)
+	}
 
 	var responseBody []byte
 	switch info.RelayFormat {
@@ -102,13 +106,14 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	model := info.UpstreamModelName
 
 	var (
-		usage       = &dto.Usage{}
-		outputText  strings.Builder
-		usageText   strings.Builder
-		sentStart   bool
-		sentStop    bool
-		sawToolCall bool
-		streamErr   *types.NewAPIError
+		usage            = &dto.Usage{}
+		outputText       strings.Builder
+		usageText        strings.Builder
+		sentStart        bool
+		sentStop         bool
+		sawToolCall      bool
+		streamErr        *types.NewAPIError
+		upstreamResponse string
 	)
 
 	toolCallIndexByID := make(map[string]int)
@@ -310,6 +315,9 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		switch streamResp.Type {
 		case "response.created":
 			if streamResp.Response != nil {
+				if streamResp.Response.ID != "" {
+					upstreamResponse = streamResp.Response.ID
+				}
 				if streamResp.Response.Model != "" {
 					model = streamResp.Response.Model
 				}
@@ -435,6 +443,9 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 
 		case "response.completed":
 			if streamResp.Response != nil {
+				if streamResp.Response.ID != "" {
+					upstreamResponse = streamResp.Response.ID
+				}
 				if streamResp.Response.Model != "" {
 					model = streamResp.Response.Model
 				}
@@ -534,6 +545,39 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 
 	if info.RelayFormat == types.RelayFormatOpenAI {
 		helper.Done(c)
+	}
+	if upstreamResponse != "" {
+		assistantMessage := dto.Message{Role: "assistant"}
+		if outputText.Len() > 0 {
+			assistantMessage.SetStringContent(outputText.String())
+		}
+		if sawToolCall {
+			type orderedToolCall struct {
+				index int
+				call  dto.ToolCallRequest
+			}
+			var toolCalls []orderedToolCall
+			for callID, index := range toolCallIndexByID {
+				toolCall := dto.ToolCallRequest{
+					ID:   callID,
+					Type: "function",
+					Function: dto.FunctionRequest{
+						Name:      toolCallNameByID[callID],
+						Arguments: toolCallArgsByID[callID],
+					},
+				}
+				toolCalls = append(toolCalls, orderedToolCall{index: index, call: toolCall})
+			}
+			sort.Slice(toolCalls, func(i, j int) bool {
+				return toolCalls[i].index < toolCalls[j].index
+			})
+			normalizedToolCalls := make([]dto.ToolCallRequest, 0, len(toolCalls))
+			for _, item := range toolCalls {
+				normalizedToolCalls = append(normalizedToolCalls, item.call)
+			}
+			assistantMessage.SetToolCalls(normalizedToolCalls)
+		}
+		service.SetResponsesBridgeResult(c, upstreamResponse, assistantMessage)
 	}
 	return usage, nil
 }

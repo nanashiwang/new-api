@@ -221,6 +221,16 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 
+		if service.IsChannelModelMismatchError(newAPIError) {
+			if _, ok := c.Get("specific_channel_id"); ok {
+				break
+			}
+			retryParam.ExcludeChannels = append(retryParam.ExcludeChannels, channel.Id)
+			retryParam.ResetRetryNextTry()
+			logger.LogInfo(c, fmt.Sprintf("跳过不兼容渠道并继续重试：channel=%d model=%s err=%s", channel.Id, relayInfo.OriginModelName, newAPIError.Error()))
+			continue
+		}
+
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
 
 		allowSameChannelFailover := common.QuotaStabilityEnabled &&
@@ -272,15 +282,15 @@ func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
 	}
 	switch r := request.(type) {
 	case *dto.GeneralOpenAIRequest:
-		if r.MaxCompletionTokens > r.MaxTokens {
-			meta.MaxTokens = int(r.MaxCompletionTokens)
-		} else {
-			meta.MaxTokens = int(r.MaxTokens)
-		}
+		meta.MaxTokens = int(r.GetMaxTokens())
 	case *dto.OpenAIResponsesRequest:
-		meta.MaxTokens = int(r.MaxOutputTokens)
+		if r.MaxOutputTokens != nil {
+			meta.MaxTokens = int(*r.MaxOutputTokens)
+		}
 	case *dto.ClaudeRequest:
-		meta.MaxTokens = int(r.MaxTokens)
+		if r.MaxTokens != nil {
+			meta.MaxTokens = int(*r.MaxTokens)
+		}
 	case *dto.ImageRequest:
 		// Pricing for image requests depends on ImagePriceRatio; safe to compute even when CountToken is disabled.
 		return r.GetTokenCountMeta()
@@ -347,6 +357,9 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	}
 	if code < 100 || code > 599 {
 		return true
+	}
+	if operation_setting.IsAlwaysSkipRetryCode(openaiErr.GetErrorCode()) {
+		return false
 	}
 	return operation_setting.ShouldRetryByStatusCode(code)
 }

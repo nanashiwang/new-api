@@ -56,7 +56,7 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 	}
 
 	// 如果不支持StreamOptions，将StreamOptions设置为nil
-	if !info.SupportStreamOptions || !request.Stream {
+	if !info.SupportStreamOptions || !request.IsStream(c) {
 		request.StreamOptions = nil
 	} else {
 		// 如果支持StreamOptions，且请求中没有设置StreamOptions，根据配置文件设置StreamOptions
@@ -79,7 +79,7 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 	if info.RelayMode == relayconstant.RelayModeChatCompletions &&
 		!passThroughGlobal &&
 		!info.ChannelSetting.PassThroughBodyEnabled &&
-		service.ShouldChatCompletionsUseResponsesGlobal(info.ChannelId, info.ChannelType, info.OriginModelName) {
+		service.ShouldChatCompletionsUseResponsesWithChannelSetting(info.ChannelSetting, info.ChannelId, info.ChannelType, info.OriginModelName) {
 		applySystemPromptIfNeeded(c, info, request)
 		usage, newApiErr := chatCompletionsViaResponses(c, info, adaptor, request)
 		if newApiErr != nil {

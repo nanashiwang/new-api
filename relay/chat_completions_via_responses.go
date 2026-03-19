@@ -13,6 +13,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -69,33 +70,65 @@ func applySystemPromptIfNeeded(c *gin.Context, info *relaycommon.RelayInfo, requ
 	}
 }
 
+func shouldRemoveDisabledFieldsInResponsesBridge(info *relaycommon.RelayInfo) bool {
+	if info == nil {
+		return false
+	}
+	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
+		return false
+	}
+	settings := info.ChannelOtherSettings
+	return !settings.AllowServiceTier || !settings.AllowInferenceGeo || settings.DisableStore || !settings.AllowSafetyIdentifier || !settings.AllowIncludeObfuscation
+}
+
 func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, adaptor channel.Adaptor, request *dto.GeneralOpenAIRequest) (*dto.Usage, *types.NewAPIError) {
 	overrideCtx := relaycommon.BuildParamOverrideContext(info)
-	chatJSON, err := common.Marshal(request)
+	shouldRemoveDisabledFields := shouldRemoveDisabledFieldsInResponsesBridge(info)
+
+	overriddenChatReq, err := common.DeepCopy(request)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 	}
-
-	chatJSON, err = relaycommon.RemoveDisabledFields(chatJSON, info.ChannelOtherSettings, info.ChannelSetting.PassThroughBodyEnabled)
-	if err != nil {
-		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-	}
-
-	if len(info.ParamOverride) > 0 {
-		chatJSON, err = relaycommon.ApplyParamOverride(chatJSON, info.ParamOverride, overrideCtx)
+	if shouldRemoveDisabledFields || len(info.ParamOverride) > 0 {
+		chatJSON, err := common.Marshal(request)
 		if err != nil {
+			return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+
+		if shouldRemoveDisabledFields {
+			chatJSON, err = relaycommon.RemoveDisabledFields(chatJSON, info.ChannelOtherSettings, info.ChannelSetting.PassThroughBodyEnabled)
+			if err != nil {
+				return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			}
+		}
+
+		if len(info.ParamOverride) > 0 {
+			chatJSON, err = relaycommon.ApplyParamOverride(chatJSON, info.ParamOverride, overrideCtx)
+			if err != nil {
+				return nil, types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid, types.ErrOptionWithSkipRetry())
+			}
+		}
+
+		if err := common.Unmarshal(chatJSON, overriddenChatReq); err != nil {
 			return nil, types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid, types.ErrOptionWithSkipRetry())
 		}
 	}
 
-	var overriddenChatReq dto.GeneralOpenAIRequest
-	if err := common.Unmarshal(chatJSON, &overriddenChatReq); err != nil {
-		return nil, types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid, types.ErrOptionWithSkipRetry())
+	requestForResponses := overriddenChatReq
+	sessionMatch, err := service.ApplyResponsesSessionBridge(info, overriddenChatReq)
+	if err != nil {
+		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+	}
+	if sessionMatch != nil && sessionMatch.Trimmed != nil {
+		requestForResponses = sessionMatch.Trimmed
 	}
 
-	responsesReq, err := service.ChatCompletionsRequestToResponsesRequest(&overriddenChatReq)
+	responsesReq, err := service.ChatCompletionsRequestToResponsesRequest(requestForResponses)
 	if err != nil {
 		return nil, types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	}
+	if sessionMatch != nil {
+		responsesReq.PreviousResponseID = sessionMatch.ResponseID
 	}
 	info.AppendRequestConversion(types.RelayFormatOpenAIResponses)
 
@@ -120,9 +153,11 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 	}
 
-	jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings, info.ChannelSetting.PassThroughBodyEnabled)
-	if err != nil {
-		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+	if shouldRemoveDisabledFields {
+		jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings, info.ChannelSetting.PassThroughBodyEnabled)
+		if err != nil {
+			return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
 	}
 
 	var httpResp *http.Response
@@ -150,6 +185,9 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 			service.ResetStatusCode(newApiErr, statusCodeMappingStr)
 			return nil, newApiErr
 		}
+		if bridgeResult, ok := service.GetResponsesBridgeResult(c); ok {
+			_ = service.StoreResponsesSessionBridge(info, overriddenChatReq, bridgeResult.AssistantMessage, bridgeResult.ResponseID)
+		}
 		return usage, nil
 	}
 
@@ -157,6 +195,9 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 	if newApiErr != nil {
 		service.ResetStatusCode(newApiErr, statusCodeMappingStr)
 		return nil, newApiErr
+	}
+	if bridgeResult, ok := service.GetResponsesBridgeResult(c); ok {
+		_ = service.StoreResponsesSessionBridge(info, overriddenChatReq, bridgeResult.AssistantMessage, bridgeResult.ResponseID)
 	}
 	return usage, nil
 }
