@@ -12,30 +12,37 @@ import (
 )
 
 type Token struct {
-	Id                   int            `json:"id"`
-	UserId               int            `json:"user_id" gorm:"index"`
-	Key                  string         `json:"key" gorm:"type:char(48);uniqueIndex"`
-	Status               int            `json:"status" gorm:"default:1"`
-	Name                 string         `json:"name" gorm:"index" `
-	CreatedTime          int64          `json:"created_time" gorm:"bigint"`
-	AccessedTime         int64          `json:"accessed_time" gorm:"bigint"`
-	ExpiredTime          int64          `json:"expired_time" gorm:"bigint;default:-1"` // -1 means never expired
-	RemainQuota          int            `json:"remain_quota" gorm:"default:0"`
-	UnlimitedQuota       bool           `json:"unlimited_quota"`
-	ModelLimitsEnabled   bool           `json:"model_limits_enabled"`
-	ModelLimits          string         `json:"model_limits" gorm:"type:varchar(1024);default:''"`
-	AllowIps             *string        `json:"allow_ips" gorm:"default:''"`
-	UsedQuota            int            `json:"used_quota" gorm:"default:0"` // used quota
-	Group                string         `json:"group" gorm:"default:''"`
-	CrossGroupRetry      bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
-	PackageEnabled       bool           `json:"package_enabled" gorm:"default:false"`
-	PackageLimitQuota    int            `json:"package_limit_quota" gorm:"default:0"`
-	PackagePeriod        string         `json:"package_period" gorm:"type:varchar(16);default:'none'"`
-	PackageCustomSeconds int64          `json:"package_custom_seconds" gorm:"type:bigint;default:0"`
-	PackageUsedQuota     int            `json:"package_used_quota" gorm:"default:0"`
-	PackageNextResetTime int64          `json:"package_next_reset_time" gorm:"bigint;default:0"`
-	PackagePeriodMode    string         `json:"package_period_mode" gorm:"type:varchar(16);default:'relative'"`
-	DeletedAt            gorm.DeletedAt `gorm:"index"`
+	Id                      int            `json:"id"`
+	UserId                  int            `json:"user_id" gorm:"index"`
+	Key                     string         `json:"key" gorm:"type:char(48);uniqueIndex"`
+	Status                  int            `json:"status" gorm:"default:1"`
+	Name                    string         `json:"name" gorm:"index" `
+	SourceType              string         `json:"source_type" gorm:"type:varchar(32);default:'';index"`
+	BillingMode             string         `json:"billing_mode" gorm:"type:varchar(32);default:''"`
+	SellableTokenProductId  int            `json:"sellable_token_product_id" gorm:"type:int;default:0;index"`
+	SellableTokenIssuanceId int            `json:"sellable_token_issuance_id" gorm:"type:int;default:0;index"`
+	CreatedTime             int64          `json:"created_time" gorm:"bigint"`
+	AccessedTime            int64          `json:"accessed_time" gorm:"bigint"`
+	ExpiredTime             int64          `json:"expired_time" gorm:"bigint;default:-1"` // -1 means never expired
+	RemainQuota             int            `json:"remain_quota" gorm:"default:0"`
+	UnlimitedQuota          bool           `json:"unlimited_quota"`
+	ModelLimitsEnabled      bool           `json:"model_limits_enabled"`
+	ModelLimits             string         `json:"model_limits" gorm:"type:varchar(1024);default:''"`
+	AllowIps                *string        `json:"allow_ips" gorm:"default:''"`
+	UsedQuota               int            `json:"used_quota" gorm:"default:0"` // used quota
+	Group                   string         `json:"group" gorm:"default:''"`
+	CrossGroupRetry         bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
+	MaxConcurrency          int            `json:"max_concurrency" gorm:"type:int;default:0"`
+	WindowRequestLimit      int            `json:"window_request_limit" gorm:"type:int;default:0"`
+	WindowSeconds           int64          `json:"window_seconds" gorm:"type:bigint;default:0"`
+	PackageEnabled          bool           `json:"package_enabled" gorm:"default:false"`
+	PackageLimitQuota       int            `json:"package_limit_quota" gorm:"default:0"`
+	PackagePeriod           string         `json:"package_period" gorm:"type:varchar(16);default:'none'"`
+	PackageCustomSeconds    int64          `json:"package_custom_seconds" gorm:"type:bigint;default:0"`
+	PackageUsedQuota        int            `json:"package_used_quota" gorm:"default:0"`
+	PackageNextResetTime    int64          `json:"package_next_reset_time" gorm:"bigint;default:0"`
+	PackagePeriodMode       string         `json:"package_period_mode" gorm:"type:varchar(16);default:'relative'"`
+	DeletedAt               gorm.DeletedAt `gorm:"index"`
 }
 
 func normalizeTokenSort(sortBy string, sortOrder string) (string, string) {
@@ -345,8 +352,10 @@ func (token *Token) Update() (err error) {
 			})
 		}
 	}()
-	err = DB.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
-		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry",
+	err = DB.Model(token).Select("name", "status", "source_type", "billing_mode",
+		"sellable_token_product_id", "sellable_token_issuance_id", "expired_time", "remain_quota",
+		"unlimited_quota", "model_limits_enabled", "model_limits", "allow_ips", "group",
+		"cross_group_retry", "max_concurrency", "window_request_limit", "window_seconds",
 		"package_enabled", "package_limit_quota", "package_period", "package_custom_seconds",
 		"package_used_quota", "package_next_reset_time", "package_period_mode").Updates(token).Error
 	return err
@@ -470,6 +479,9 @@ func DecreaseTokenQuota(id int, key string, quota int) (err error) {
 	if err != nil {
 		return err
 	}
+	if token.UnlimitedQuota {
+		return updateTokenUsageOnly(id, quota)
+	}
 	if token.PackageEnabled {
 		return decreaseTokenQuotaWithPackage(token, quota)
 	}
@@ -488,15 +500,28 @@ func DecreaseTokenQuota(id int, key string, quota int) (err error) {
 	return decreaseTokenQuota(id, quota)
 }
 
-func decreaseTokenQuota(id int, quota int) (err error) {
-	err = DB.Model(&Token{}).Where("id = ?", id).Updates(
-		map[string]interface{}{
+func updateTokenUsageOnly(id int, quota int) error {
+	return DB.Model(&Token{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"used_quota":    gorm.Expr("used_quota + ?", quota),
+		"accessed_time": common.GetTimestamp(),
+	}).Error
+}
+
+func decreaseTokenQuota(id int, quota int) error {
+	result := DB.Model(&Token{}).
+		Where("id = ? AND remain_quota >= ?", id, quota).
+		Updates(map[string]interface{}{
 			"remain_quota":  gorm.Expr("remain_quota - ?", quota),
 			"used_quota":    gorm.Expr("used_quota + ?", quota),
 			"accessed_time": common.GetTimestamp(),
-		},
-	).Error
-	return err
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("token quota insufficient or token not found")
+	}
+	return nil
 }
 
 func getTokenForQuotaAdjust(tokenId int, key string) (*Token, error) {

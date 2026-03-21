@@ -258,6 +258,9 @@ func migrateDB() error {
 		&PasskeyCredential{},
 		&Option{},
 		&Redemption{},
+		&SellableTokenProduct{},
+		&SellableTokenOrder{},
+		&SellableTokenIssuance{},
 		&Ability{},
 		&Log{},
 		&Midjourney{},
@@ -272,6 +275,7 @@ func migrateDB() error {
 		&TwoFABackupCode{},
 		&Checkin{},
 		&SubscriptionOrder{},
+		&SubscriptionIssuance{},
 		&UserSubscription{},
 		&SubscriptionPreConsumeRecord{},
 		&InviteCommissionLedger{},
@@ -284,6 +288,9 @@ func migrateDB() error {
 	}
 	if common.UsingSQLite {
 		if err := ensureTokenColumnsSQLite(); err != nil {
+			return err
+		}
+		if err := ensureRedemptionColumnsSQLite(); err != nil {
 			return err
 		}
 		if err := ensureSubscriptionPlanTableSQLite(); err != nil {
@@ -314,6 +321,9 @@ func migrateDBFast() error {
 		{&PasskeyCredential{}, "PasskeyCredential"},
 		{&Option{}, "Option"},
 		{&Redemption{}, "Redemption"},
+		{&SellableTokenProduct{}, "SellableTokenProduct"},
+		{&SellableTokenOrder{}, "SellableTokenOrder"},
+		{&SellableTokenIssuance{}, "SellableTokenIssuance"},
 		{&Ability{}, "Ability"},
 		{&Log{}, "Log"},
 		{&Midjourney{}, "Midjourney"},
@@ -328,6 +338,7 @@ func migrateDBFast() error {
 		{&TwoFABackupCode{}, "TwoFABackupCode"},
 		{&Checkin{}, "Checkin"},
 		{&SubscriptionOrder{}, "SubscriptionOrder"},
+		{&SubscriptionIssuance{}, "SubscriptionIssuance"},
 		{&UserSubscription{}, "UserSubscription"},
 		{&SubscriptionPreConsumeRecord{}, "SubscriptionPreConsumeRecord"},
 		{&InviteCommissionLedger{}, "InviteCommissionLedger"},
@@ -360,6 +371,9 @@ func migrateDBFast() error {
 	}
 	if common.UsingSQLite {
 		if err := ensureTokenColumnsSQLite(); err != nil {
+			return err
+		}
+		if err := ensureRedemptionColumnsSQLite(); err != nil {
 			return err
 		}
 		if err := ensureSubscriptionPlanTableSQLite(); err != nil {
@@ -522,6 +536,13 @@ func ensureTokenColumnsSQLite() error {
 		existing[c.Name] = struct{}{}
 	}
 	required := []sqliteColumnDef{
+		{Name: "source_type", DDL: "`source_type` varchar(32) DEFAULT ''"},
+		{Name: "billing_mode", DDL: "`billing_mode` varchar(32) DEFAULT ''"},
+		{Name: "sellable_token_product_id", DDL: "`sellable_token_product_id` integer DEFAULT 0"},
+		{Name: "sellable_token_issuance_id", DDL: "`sellable_token_issuance_id` integer DEFAULT 0"},
+		{Name: "max_concurrency", DDL: "`max_concurrency` integer DEFAULT 0"},
+		{Name: "window_request_limit", DDL: "`window_request_limit` integer DEFAULT 0"},
+		{Name: "window_seconds", DDL: "`window_seconds` bigint DEFAULT 0"},
 		{Name: "package_enabled", DDL: "`package_enabled` numeric DEFAULT 0"},
 		{Name: "package_limit_quota", DDL: "`package_limit_quota` integer DEFAULT 0"},
 		{Name: "package_period", DDL: "`package_period` varchar(16) DEFAULT 'none'"},
@@ -529,6 +550,39 @@ func ensureTokenColumnsSQLite() error {
 		{Name: "package_used_quota", DDL: "`package_used_quota` integer DEFAULT 0"},
 		{Name: "package_next_reset_time", DDL: "`package_next_reset_time` bigint DEFAULT 0"},
 		{Name: "package_period_mode", DDL: "`package_period_mode` varchar(16) DEFAULT 'relative'"},
+	}
+	for _, col := range required {
+		if _, ok := existing[col.Name]; ok {
+			continue
+		}
+		if err := DB.Exec("ALTER TABLE `" + tableName + "` ADD COLUMN " + col.DDL).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ensureRedemptionColumnsSQLite() error {
+	if !common.UsingSQLite {
+		return nil
+	}
+	tableName := "redemptions"
+	if !DB.Migrator().HasTable(tableName) {
+		return nil
+	}
+	var cols []struct {
+		Name string `gorm:"column:name"`
+	}
+	if err := DB.Raw("PRAGMA table_info(`" + tableName + "`)").Scan(&cols).Error; err != nil {
+		return err
+	}
+	existing := make(map[string]struct{}, len(cols))
+	for _, c := range cols {
+		existing[c.Name] = struct{}{}
+	}
+	required := []sqliteColumnDef{
+		{Name: "benefit_type", DDL: "`benefit_type` varchar(32) NOT NULL DEFAULT 'quota'"},
+		{Name: "sellable_token_product_id", DDL: "`sellable_token_product_id` integer DEFAULT 0"},
 	}
 	for _, col := range required {
 		if _, ok := existing[col.Name]; ok {

@@ -858,7 +858,7 @@ func (channel *Channel) ValidateSettings() error {
 			return err
 		}
 	}
-	return nil
+	return channelParams.Validate()
 }
 
 func (channel *Channel) GetSetting() dto.ChannelSettings {

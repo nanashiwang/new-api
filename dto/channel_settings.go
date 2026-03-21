@@ -1,12 +1,97 @@
 package dto
 
+import "fmt"
+
+type ChatCompletionsToResponsesMode string
+
+const (
+	ChatCompletionsToResponsesModeInherit  ChatCompletionsToResponsesMode = "inherit"
+	ChatCompletionsToResponsesModeEnabled  ChatCompletionsToResponsesMode = "enabled"
+	ChatCompletionsToResponsesModeDisabled ChatCompletionsToResponsesMode = "disabled"
+)
+
+func NormalizeChatCompletionsToResponsesMode(mode ChatCompletionsToResponsesMode) ChatCompletionsToResponsesMode {
+	switch mode {
+	case "", ChatCompletionsToResponsesModeInherit:
+		return ChatCompletionsToResponsesModeInherit
+	case ChatCompletionsToResponsesModeEnabled:
+		return ChatCompletionsToResponsesModeEnabled
+	case ChatCompletionsToResponsesModeDisabled:
+		return ChatCompletionsToResponsesModeDisabled
+	default:
+		return ChatCompletionsToResponsesModeInherit
+	}
+}
+
+type ClaudeImageTransportMode string
+
+const (
+	ClaudeImageTransportModeInherit ClaudeImageTransportMode = "inherit"
+	ClaudeImageTransportModeAuto    ClaudeImageTransportMode = "auto"
+	ClaudeImageTransportModeData    ClaudeImageTransportMode = "data"
+	ClaudeImageTransportModeBridge  ClaudeImageTransportMode = "bridge"
+)
+
+func NormalizeClaudeImageTransportMode(mode ClaudeImageTransportMode) ClaudeImageTransportMode {
+	switch mode {
+	case "", ClaudeImageTransportModeInherit:
+		return ClaudeImageTransportModeInherit
+	case ClaudeImageTransportModeAuto:
+		return ClaudeImageTransportModeAuto
+	case ClaudeImageTransportModeData:
+		return ClaudeImageTransportModeData
+	case ClaudeImageTransportModeBridge:
+		return ClaudeImageTransportModeBridge
+	default:
+		return ClaudeImageTransportModeInherit
+	}
+}
+
 type ChannelSettings struct {
-	ForceFormat            bool   `json:"force_format,omitempty"`
-	ThinkingToContent      bool   `json:"thinking_to_content,omitempty"`
-	Proxy                  string `json:"proxy"`
-	PassThroughBodyEnabled bool   `json:"pass_through_body_enabled,omitempty"`
-	SystemPrompt           string `json:"system_prompt,omitempty"`
-	SystemPromptOverride   bool   `json:"system_prompt_override,omitempty"`
+	ForceFormat                    bool                           `json:"force_format,omitempty"`
+	ThinkingToContent              bool                           `json:"thinking_to_content,omitempty"`
+	Proxy                          string                         `json:"proxy"`
+	PassThroughBodyEnabled         bool                           `json:"pass_through_body_enabled,omitempty"`
+	SystemPrompt                   string                         `json:"system_prompt,omitempty"`
+	SystemPromptOverride           bool                           `json:"system_prompt_override,omitempty"`
+	ChatCompletionsToResponsesMode ChatCompletionsToResponsesMode `json:"chat_completions_to_responses_mode,omitempty"`
+	ClaudeImageTransportMode       ClaudeImageTransportMode       `json:"claude_image_transport_mode,omitempty"`
+}
+
+func (s ChannelSettings) Validate() error {
+	if err := s.ValidateChatCompletionsToResponsesMode(); err != nil {
+		return err
+	}
+	if err := s.ValidateClaudeImageTransportMode(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s ChannelSettings) ValidateChatCompletionsToResponsesMode() error {
+	switch s.ChatCompletionsToResponsesMode {
+	case "", ChatCompletionsToResponsesModeInherit, ChatCompletionsToResponsesModeEnabled, ChatCompletionsToResponsesModeDisabled:
+		return nil
+	default:
+		return fmt.Errorf("invalid chat_completions_to_responses_mode: %s", s.ChatCompletionsToResponsesMode)
+	}
+}
+
+func (s ChannelSettings) GetChatCompletionsToResponsesMode() ChatCompletionsToResponsesMode {
+	return NormalizeChatCompletionsToResponsesMode(s.ChatCompletionsToResponsesMode)
+}
+
+func (s ChannelSettings) ValidateClaudeImageTransportMode() error {
+	switch s.ClaudeImageTransportMode {
+	case "", ClaudeImageTransportModeInherit, ClaudeImageTransportModeAuto, ClaudeImageTransportModeData, ClaudeImageTransportModeBridge:
+		return nil
+	default:
+		return fmt.Errorf("invalid claude_image_transport_mode: %s", s.ClaudeImageTransportMode)
+	}
+}
+
+func (s ChannelSettings) GetClaudeImageTransportMode() ClaudeImageTransportMode {
+	return NormalizeClaudeImageTransportMode(s.ClaudeImageTransportMode)
 }
 
 type VertexKeyType string
@@ -19,21 +104,27 @@ const (
 type AwsKeyType string
 
 const (
-	AwsKeyTypeAKSK   AwsKeyType = "ak_sk" // 默认
+	AwsKeyTypeAKSK   AwsKeyType = "ak_sk" // default
 	AwsKeyTypeApiKey AwsKeyType = "api_key"
 )
 
 type ChannelOtherSettings struct {
-	AzureResponsesVersion   string        `json:"azure_responses_version,omitempty"`
-	VertexKeyType           VertexKeyType `json:"vertex_key_type,omitempty"` // "json" or "api_key"
-	OpenRouterEnterprise    *bool         `json:"openrouter_enterprise,omitempty"`
-	ClaudeBetaQuery         bool          `json:"claude_beta_query,omitempty"`         // Claude 渠道是否强制追加 ?beta=true
-	AllowServiceTier        bool          `json:"allow_service_tier,omitempty"`        // 是否允许 service_tier 透传（默认过滤以避免额外计费）
-	AllowInferenceGeo       bool          `json:"allow_inference_geo,omitempty"`       // 是否允许 inference_geo 透传（仅 Claude，默认过滤以满足数据驻留合规）
-	DisableStore            bool          `json:"disable_store,omitempty"`             // 是否禁用 store 透传（默认允许透传，禁用后可能导致 Codex 无法使用）
-	AllowSafetyIdentifier   bool          `json:"allow_safety_identifier,omitempty"`   // 是否允许 safety_identifier 透传（默认过滤以保护用户隐私）
-	AllowIncludeObfuscation bool          `json:"allow_include_obfuscation,omitempty"` // 是否允许 stream_options.include_obfuscation 透传（默认过滤以避免关闭流混淆保护）
-	AwsKeyType              AwsKeyType    `json:"aws_key_type,omitempty"`
+	AzureResponsesVersion                 string        `json:"azure_responses_version,omitempty"`
+	VertexKeyType                         VertexKeyType `json:"vertex_key_type,omitempty"` // "json" or "api_key"
+	OpenRouterEnterprise                  *bool         `json:"openrouter_enterprise,omitempty"`
+	ClaudeBetaQuery                       bool          `json:"claude_beta_query,omitempty"`         // Claude channel always appends ?beta=true
+	AllowServiceTier                      bool          `json:"allow_service_tier,omitempty"`        // Allow service_tier passthrough.
+	AllowInferenceGeo                     bool          `json:"allow_inference_geo,omitempty"`       // Allow inference_geo passthrough for Claude.
+	DisableStore                          bool          `json:"disable_store,omitempty"`             // Disable store passthrough when enabled.
+	AllowSafetyIdentifier                 bool          `json:"allow_safety_identifier,omitempty"`   // Allow safety_identifier passthrough.
+	AllowIncludeObfuscation               bool          `json:"allow_include_obfuscation,omitempty"` // Allow stream_options.include_obfuscation passthrough.
+	AwsKeyType                            AwsKeyType    `json:"aws_key_type,omitempty"`
+	UpstreamModelUpdateCheckEnabled       bool          `json:"upstream_model_update_check_enabled,omitempty"`        // Detect upstream model updates.
+	UpstreamModelUpdateAutoSyncEnabled    bool          `json:"upstream_model_update_auto_sync_enabled,omitempty"`    // Auto sync upstream model updates.
+	UpstreamModelUpdateLastCheckTime      int64         `json:"upstream_model_update_last_check_time,omitempty"`      // Last detection time.
+	UpstreamModelUpdateLastDetectedModels []string      `json:"upstream_model_update_last_detected_models,omitempty"` // Models that can be added.
+	UpstreamModelUpdateLastRemovedModels  []string      `json:"upstream_model_update_last_removed_models,omitempty"`  // Models that can be removed.
+	UpstreamModelUpdateIgnoredModels      []string      `json:"upstream_model_update_ignored_models,omitempty"`       // Manually ignored models.
 }
 
 func (s *ChannelOtherSettings) IsOpenRouterEnterprise() bool {

@@ -205,6 +205,9 @@ var (
 	CriticalRateLimitNum            = 20
 	CriticalRateLimitDuration int64 = 20 * 60
 
+	RegisterRateLimitNum            = 10
+	RegisterRateLimitDuration int64 = 60 * 60 // 10 次/小时/IP
+
 	UploadRateLimitNum            = 10
 	UploadRateLimitDuration int64 = 60
 

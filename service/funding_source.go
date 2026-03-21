@@ -139,3 +139,14 @@ func refundWithRetry(fn func() error) error {
 	}
 	return lastErr
 }
+
+// TokenFunding is used by token-only billing; user wallet and subscription are untouched.
+type TokenFunding struct{}
+
+func (t *TokenFunding) Source() string { return BillingSourceToken }
+
+func (t *TokenFunding) PreConsume(amount int) error { return nil }
+
+func (t *TokenFunding) Settle(delta int) error { return nil }
+
+func (t *TokenFunding) Refund() error { return nil }

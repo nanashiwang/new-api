@@ -113,6 +113,8 @@ func main() {
 	service.StartSubscriptionQuotaResetTask()
 	// 邀请充值返佣结算任务（T+1 日批）。
 	service.StartInviteCommissionSettlementTask()
+	// 渠道上游模型更新巡检任务。
+	controller.StartChannelUpstreamModelUpdateTask()
 
 	// Wire task polling adaptor factory (breaks service -> relay import cycle)
 	service.GetTaskAdaptorFunc = func(platform constant.TaskPlatform) service.TaskPollingAdaptor {

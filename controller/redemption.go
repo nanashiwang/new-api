@@ -99,6 +99,7 @@ func AddRedemption(c *gin.Context) {
 			BenefitType:                  model.NormalizeRedemptionBenefitType(redemption.BenefitType),
 			Quota:                        redemption.Quota,
 			PlanId:                       redemption.PlanId,
+			SellableTokenProductId:       redemption.SellableTokenProductId,
 			SubscriptionPurchaseMode:     model.NormalizeSubscriptionPurchaseMode(redemption.SubscriptionPurchaseMode),
 			SubscriptionPurchaseQuantity: redemption.SubscriptionPurchaseQuantity,
 			ExpiredTime:                  redemption.ExpiredTime,
@@ -169,6 +170,7 @@ func UpdateRedemption(c *gin.Context) {
 		cleanRedemption.BenefitType = model.NormalizeRedemptionBenefitType(redemption.BenefitType)
 		cleanRedemption.Quota = redemption.Quota
 		cleanRedemption.PlanId = redemption.PlanId
+		cleanRedemption.SellableTokenProductId = redemption.SellableTokenProductId
 		cleanRedemption.SubscriptionPurchaseMode = model.NormalizeSubscriptionPurchaseMode(redemption.SubscriptionPurchaseMode)
 		cleanRedemption.SubscriptionPurchaseQuantity = redemption.SubscriptionPurchaseQuantity
 		cleanRedemption.ExpiredTime = redemption.ExpiredTime
@@ -244,11 +246,31 @@ func validateRedemptionPayload(redemption *model.Redemption) error {
 			return err
 		}
 		redemption.Quota = 0
+		redemption.SellableTokenProductId = 0
+		return nil
+	}
+
+	if benefitType == model.RedemptionBenefitTypeSellableToken {
+		if redemption.SellableTokenProductId <= 0 {
+			return errors.New("可售令牌兑换码必须选择有效商品")
+		}
+		product, err := model.GetSellableTokenProductById(redemption.SellableTokenProductId)
+		if err != nil {
+			return err
+		}
+		if err := model.ValidateSellableTokenProductAvailability(product); err != nil {
+			return err
+		}
+		redemption.Quota = 0
+		redemption.PlanId = 0
+		redemption.SubscriptionPurchaseMode = model.SubscriptionPurchaseModeStack
+		redemption.SubscriptionPurchaseQuantity = 1
 		return nil
 	}
 
 	// 余额码沿用旧逻辑，统一清空套餐相关字段，避免脏数据落库。
 	redemption.PlanId = 0
+	redemption.SellableTokenProductId = 0
 	redemption.SubscriptionPurchaseMode = model.SubscriptionPurchaseModeStack
 	redemption.SubscriptionPurchaseQuantity = 1
 	if redemption.Quota <= 0 {

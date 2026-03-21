@@ -9,6 +9,7 @@ import (
 
 const (
 	TokenPackagePeriodNone    = "none"
+	TokenPackagePeriodHourly  = "hourly"
 	TokenPackagePeriodDaily   = "daily"
 	TokenPackagePeriodWeekly  = "weekly"
 	TokenPackagePeriodMonthly = "monthly"
@@ -20,6 +21,8 @@ const (
 
 func NormalizeTokenPackagePeriod(period string) string {
 	switch strings.ToLower(strings.TrimSpace(period)) {
+	case TokenPackagePeriodHourly:
+		return TokenPackagePeriodHourly
 	case TokenPackagePeriodDaily:
 		return TokenPackagePeriodDaily
 	case TokenPackagePeriodWeekly:
@@ -45,6 +48,12 @@ func NormalizeTokenPackagePeriodMode(mode string) string {
 func calcNextTokenPackageResetTime(base time.Time, period string, customSeconds int64, periodMode string) (int64, error) {
 	periodMode = NormalizeTokenPackagePeriodMode(periodMode)
 	switch NormalizeTokenPackagePeriod(period) {
+	case TokenPackagePeriodHourly:
+		if periodMode == TokenPackagePeriodModeRelative {
+			return base.Add(time.Hour).Unix(), nil
+		}
+		next := base.Truncate(time.Hour).Add(time.Hour)
+		return next.Unix(), nil
 	case TokenPackagePeriodDaily:
 		if periodMode == TokenPackagePeriodModeRelative {
 			return base.Add(24 * time.Hour).Unix(), nil
@@ -111,6 +120,28 @@ func ValidateTokenPackageConfig(token *Token) error {
 	}
 	if token.PackageNextResetTime < 0 {
 		token.PackageNextResetTime = 0
+	}
+	return nil
+}
+
+func ValidateTokenRuntimeLimitConfig(token *Token) error {
+	if token == nil {
+		return errors.New("token is nil")
+	}
+	if token.MaxConcurrency < 0 {
+		return errors.New("并发上限不能小于 0")
+	}
+	if token.WindowRequestLimit < 0 {
+		return errors.New("窗口请求上限不能小于 0")
+	}
+	if token.WindowSeconds < 0 {
+		return errors.New("窗口时长不能小于 0")
+	}
+	if token.WindowRequestLimit > 0 && token.WindowSeconds <= 0 {
+		return errors.New("设置请求窗口限制时，窗口时长必须大于 0")
+	}
+	if token.WindowSeconds > 0 && token.WindowRequestLimit <= 0 {
+		return errors.New("设置窗口时长时，请同时设置窗口请求上限")
 	}
 	return nil
 }

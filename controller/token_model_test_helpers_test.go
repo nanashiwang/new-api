@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -77,6 +78,17 @@ func seedTokenModelHelperData(t *testing.T) {
 	}
 	if err := model.DB.Create(&abilities).Error; err != nil {
 		t.Fatalf("seed abilities: %v", err)
+	}
+}
+
+func seedTokenModelHelperUser(t *testing.T) {
+	t.Helper()
+
+	users := []model.User{
+		{Id: 1, Username: "user1", Group: "default", Status: common.UserStatusEnabled},
+	}
+	if err := model.DB.Create(&users).Error; err != nil {
+		t.Fatalf("seed users: %v", err)
 	}
 }
 
@@ -339,5 +351,108 @@ func TestCreateInternalJSONContext_UsesStreamAcceptHeader(t *testing.T) {
 	ctx, _ := createInternalJSONContext(parent, http.MethodPost, "/v1/responses", nil, tokenTestAcceptHeader(true))
 	if got := ctx.Request.Header.Get("Accept"); got != "text/event-stream" {
 		t.Fatalf("unexpected accept header: %s", got)
+	}
+}
+
+func TestTokenTestRuntimeLimit_AppliesConcurrencyLimit(t *testing.T) {
+	setupTokenModelHelperDB(t)
+	seedTokenModelHelperUser(t)
+
+	token := &model.Token{
+		Id:             101,
+		UserId:         1,
+		Group:          "default",
+		MaxConcurrency: 1,
+	}
+
+	ctx1, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx1.Request = httptest.NewRequest(http.MethodPost, "/api/token/test/101", nil)
+	if err := prepareOwnedTokenContext(ctx1, token); err != nil {
+		t.Fatalf("prepare first context: %v", err)
+	}
+	release1, err := middleware.AcquireTokenRuntimeLimit(ctx1)
+	if err != nil {
+		t.Fatalf("acquire first runtime limit: %v", err)
+	}
+	defer release1()
+
+	concurrency, err := middleware.QueryTokenConcurrency(token.Id)
+	if err != nil {
+		t.Fatalf("query concurrency: %v", err)
+	}
+	if concurrency != 1 {
+		t.Fatalf("unexpected concurrency after first acquire: %d", concurrency)
+	}
+
+	ctx2, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx2.Request = httptest.NewRequest(http.MethodPost, "/api/token/test/101", nil)
+	if err := prepareOwnedTokenContext(ctx2, token); err != nil {
+		t.Fatalf("prepare second context: %v", err)
+	}
+	_, err = middleware.AcquireTokenRuntimeLimit(ctx2)
+	if err == nil {
+		t.Fatal("expected second acquire to hit concurrency limit")
+	}
+	runtimeErr, ok := err.(*middleware.TokenRuntimeLimitError)
+	if !ok {
+		t.Fatalf("expected runtime limit error, got %T", err)
+	}
+	if runtimeErr.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("unexpected status code: %d", runtimeErr.StatusCode)
+	}
+	if !strings.Contains(runtimeErr.Error(), "并发已达到上限 1") {
+		t.Fatalf("unexpected error message: %v", runtimeErr)
+	}
+}
+
+func TestTokenTestRuntimeLimit_AppliesWindowLimit(t *testing.T) {
+	setupTokenModelHelperDB(t)
+	seedTokenModelHelperUser(t)
+
+	token := &model.Token{
+		Id:                 102,
+		UserId:             1,
+		Group:              "default",
+		WindowRequestLimit: 1,
+		WindowSeconds:      60,
+	}
+
+	ctx1, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx1.Request = httptest.NewRequest(http.MethodPost, "/api/token/test/102", nil)
+	if err := prepareOwnedTokenContext(ctx1, token); err != nil {
+		t.Fatalf("prepare first context: %v", err)
+	}
+	release1, err := middleware.AcquireTokenRuntimeLimit(ctx1)
+	if err != nil {
+		t.Fatalf("acquire first runtime limit: %v", err)
+	}
+	release1()
+
+	count, _, _, err := middleware.QueryTokenWindowStatus(token.Id, token.WindowSeconds)
+	if err != nil {
+		t.Fatalf("query window status: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("unexpected window count after first acquire: %d", count)
+	}
+
+	ctx2, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx2.Request = httptest.NewRequest(http.MethodPost, "/api/token/test/102", nil)
+	if err := prepareOwnedTokenContext(ctx2, token); err != nil {
+		t.Fatalf("prepare second context: %v", err)
+	}
+	_, err = middleware.AcquireTokenRuntimeLimit(ctx2)
+	if err == nil {
+		t.Fatal("expected second acquire to hit window limit")
+	}
+	runtimeErr, ok := err.(*middleware.TokenRuntimeLimitError)
+	if !ok {
+		t.Fatalf("expected runtime limit error, got %T", err)
+	}
+	if runtimeErr.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("unexpected status code: %d", runtimeErr.StatusCode)
+	}
+	if !strings.Contains(runtimeErr.Error(), "60 秒内的请求数已达到上限 1") {
+		t.Fatalf("unexpected error message: %v", runtimeErr)
 	}
 }

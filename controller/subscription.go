@@ -85,6 +85,10 @@ func GetSubscriptionSelf(c *gin.Context) {
 	if err != nil {
 		activeSubscriptions = []model.SubscriptionSummary{}
 	}
+	pendingIssuances, err := model.ListSubscriptionIssuancesByUser(userId, model.SubscriptionIssuanceStatusPending)
+	if err != nil {
+		pendingIssuances = []*model.SubscriptionIssuance{}
+	}
 	// active_quantity_by_plan：后端统一计算“每个套餐当前未过期份数”，
 	// 供前端直接展示动态可买上限，避免前后端算法漂移。
 	activeQuantityByPlan := buildActiveQuantityByPlan(activeSubscriptions)
@@ -93,7 +97,81 @@ func GetSubscriptionSelf(c *gin.Context) {
 		"billing_preference":      pref,
 		"subscriptions":           activeSubscriptions, // 全部生效订阅
 		"all_subscriptions":       allSubscriptions,    // 全部订阅（含已过期）
+		"pending_issuances":       pendingIssuances,
 		"active_quantity_by_plan": activeQuantityByPlan,
+	})
+}
+
+func ListSubscriptionIssuances(c *gin.Context) {
+	userId := c.GetInt("id")
+	status := strings.TrimSpace(c.Query("status"))
+	issuances, err := model.ListSubscriptionIssuancesByUser(userId, status)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	for _, issuance := range issuances {
+		if issuance == nil {
+			continue
+		}
+		if err := model.ResolveSubscriptionIssuanceDetails(issuance); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	}
+	common.ApiSuccess(c, issuances)
+}
+
+func GetSubscriptionIssuance(c *gin.Context) {
+	userId := c.GetInt("id")
+	issuanceId, _ := strconv.Atoi(c.Param("id"))
+	issuance, err := model.GetSubscriptionIssuanceByIdForUser(issuanceId, userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := model.ResolveSubscriptionIssuanceDetails(issuance); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"issuance": issuance})
+}
+
+type confirmSubscriptionIssuanceRequest struct {
+	PurchaseMode              string `json:"purchase_mode"`
+	RenewTargetSubscriptionId int    `json:"renew_target_subscription_id"`
+}
+
+func ConfirmSubscriptionIssuance(c *gin.Context) {
+	userId := c.GetInt("id")
+	issuanceId, _ := strconv.Atoi(c.Param("id"))
+	var req confirmSubscriptionIssuanceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	var (
+		issuance *model.SubscriptionIssuance
+		summary  string
+	)
+	err := model.DB.Transaction(func(tx *gorm.DB) error {
+		var confirmErr error
+		issuance, summary, confirmErr = model.ConfirmSubscriptionIssuanceTx(
+			tx,
+			issuanceId,
+			userId,
+			req.PurchaseMode,
+			req.RenewTargetSubscriptionId,
+		)
+		return confirmErr
+	})
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{
+		"issuance": issuance,
+		"message":  summary,
 	})
 }
 
@@ -453,8 +531,22 @@ func AdminListUserSubscriptions(c *gin.Context) {
 	if err != nil {
 		activeSubs = []model.SubscriptionSummary{}
 	}
+	issuances, err := model.ListSubscriptionIssuancesByUser(userId, "")
+	if err != nil {
+		issuances = []*model.SubscriptionIssuance{}
+	}
+	for _, issuance := range issuances {
+		if issuance == nil {
+			continue
+		}
+		if err := model.ResolveSubscriptionIssuanceDetails(issuance); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	}
 	common.ApiSuccess(c, gin.H{
 		"subscriptions":           subs,
+		"issuances":               issuances,
 		"active_quantity_by_plan": buildActiveQuantityByPlan(activeSubs),
 	})
 }

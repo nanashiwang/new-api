@@ -56,8 +56,13 @@ type User struct {
 	// 生效套餐元数据（仅用于用户管理列表响应，不落库）：
 	// - HasActiveSubscription：当前是否存在生效套餐
 	// - ActiveSubscriptionCount：当前生效套餐条数
-	HasActiveSubscription   bool `json:"has_active_subscription" gorm:"-"`
-	ActiveSubscriptionCount int  `json:"active_subscription_count" gorm:"-"`
+	HasActiveSubscription            bool `json:"has_active_subscription" gorm:"-"`
+	ActiveSubscriptionCount          int  `json:"active_subscription_count" gorm:"-"`
+	PendingSubscriptionIssuanceCount int  `json:"pending_subscription_issuance_count" gorm:"-"`
+	// 可售令牌元数据（仅用于用户管理列表响应，不落库）
+	HasSellableToken             bool `json:"has_sellable_token" gorm:"-"`
+	ActiveSellableTokenCount     int  `json:"active_sellable_token_count" gorm:"-"`
+	PendingSellableIssuanceCount int  `json:"pending_sellable_issuance_count" gorm:"-"`
 	// 邀请关系视图的派生字段（仅用于接口响应，不落库）：
 	// 1) 直接收益：按当前配置口径（QuotaForInviter）估算每个被邀请人贡献；
 	// 2) 充值返佣：从返佣台账（InviteCommissionLedger）按 invitee 聚合已结算金额；
@@ -304,7 +309,11 @@ func GetAllUsers(pageInfo *common.PageInfo, sortBy string, sortOrder string, idS
 		return nil, 0, err
 	}
 	// 当前页批量补充“生效套餐”统计，避免前端逐行请求造成 N+1。
-	if err = attachUserSubscriptionMetadata(tx, users); err != nil {
+	if err = AttachUserSubscriptionMetadata(tx, users); err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
+	if err = AttachUserSellableTokenMetadata(tx, users); err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
@@ -455,16 +464,20 @@ func SearchUsersWithParams(params UserSearchParams) ([]*User, int64, error) {
 		return nil, 0, err
 	}
 
-	if err = attachUserInviteMetadata(tx, users); err != nil {
+	if err = AttachUserInviteMetadata(tx, users); err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
-	if err = attachUserSubscriptionMetadata(tx, users); err != nil {
+	if err = AttachUserSubscriptionMetadata(tx, users); err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
+	if err = AttachUserSellableTokenMetadata(tx, users); err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
 
-	// 提交事务
+	// Commit transaction
 	if err = tx.Commit().Error; err != nil {
 		return nil, 0, err
 	}
@@ -472,7 +485,7 @@ func SearchUsersWithParams(params UserSearchParams) ([]*User, int64, error) {
 	return users, total, nil
 }
 
-func attachUserInviteMetadata(tx *gorm.DB, users []*User) error {
+func AttachUserInviteMetadata(tx *gorm.DB, users []*User) error {
 	if len(users) == 0 {
 		return nil
 	}
@@ -519,7 +532,7 @@ func attachUserInviteMetadata(tx *gorm.DB, users []*User) error {
 	return nil
 }
 
-func attachUserSubscriptionMetadata(tx *gorm.DB, users []*User) error {
+func AttachUserSubscriptionMetadata(tx *gorm.DB, users []*User) error {
 	if len(users) == 0 {
 		return nil
 	}
@@ -532,6 +545,7 @@ func attachUserSubscriptionMetadata(tx *gorm.DB, users []*User) error {
 		// 先写入默认值，确保“无套餐”用户也有明确响应字段。
 		user.ActiveSubscriptionCount = 0
 		user.HasActiveSubscription = false
+		user.PendingSubscriptionIssuanceCount = 0
 	}
 	if len(userIDs) == 0 {
 		return nil
@@ -550,10 +564,28 @@ func attachUserSubscriptionMetadata(tx *gorm.DB, users []*User) error {
 		Scan(&counts).Error; err != nil {
 		return err
 	}
+	type pendingIssuanceCount struct {
+		UserId int `gorm:"column:user_id"`
+		Count  int `gorm:"column:cnt"`
+	}
+	var pendingCounts []pendingIssuanceCount
+	if tx.Migrator().HasTable(&SubscriptionIssuance{}) {
+		if err := tx.Model(&SubscriptionIssuance{}).
+			Select("user_id, COUNT(*) AS cnt").
+			Where("user_id IN ? AND status = ?", userIDs, SubscriptionIssuanceStatusPending).
+			Group("user_id").
+			Scan(&pendingCounts).Error; err != nil {
+			return err
+		}
+	}
 
 	countByUserID := make(map[int]int, len(counts))
 	for _, row := range counts {
 		countByUserID[row.UserId] = row.ActiveCount
+	}
+	pendingByUserID := make(map[int]int, len(pendingCounts))
+	for _, row := range pendingCounts {
+		pendingByUserID[row.UserId] = row.Count
 	}
 	for _, user := range users {
 		if user == nil {
@@ -561,7 +593,70 @@ func attachUserSubscriptionMetadata(tx *gorm.DB, users []*User) error {
 		}
 		activeCount := countByUserID[user.Id]
 		user.ActiveSubscriptionCount = activeCount
-		user.HasActiveSubscription = activeCount > 0
+		user.PendingSubscriptionIssuanceCount = pendingByUserID[user.Id]
+		user.HasActiveSubscription = activeCount > 0 || user.PendingSubscriptionIssuanceCount > 0
+	}
+	return nil
+}
+
+func AttachUserSellableTokenMetadata(tx *gorm.DB, users []*User) error {
+	if len(users) == 0 {
+		return nil
+	}
+	userIDs := make([]int, 0, len(users))
+	for _, user := range users {
+		if user == nil {
+			continue
+		}
+		userIDs = append(userIDs, user.Id)
+		user.HasSellableToken = false
+		user.ActiveSellableTokenCount = 0
+		user.PendingSellableIssuanceCount = 0
+	}
+	if len(userIDs) == 0 {
+		return nil
+	}
+
+	type countRow struct {
+		UserId int `gorm:"column:user_id"`
+		Count  int `gorm:"column:cnt"`
+	}
+	var tokenCounts []countRow
+	if tx.Migrator().HasTable(&Token{}) && tx.Migrator().HasColumn(&Token{}, "source_type") {
+		if err := tx.Model(&Token{}).
+			Select("user_id, COUNT(*) AS cnt").
+			Where("user_id IN ? AND source_type = ?", userIDs, TokenSourceTypeSellableToken).
+			Group("user_id").
+			Scan(&tokenCounts).Error; err != nil {
+			return err
+		}
+	}
+	var pendingCounts []countRow
+	if tx.Migrator().HasTable(&SellableTokenIssuance{}) {
+		if err := tx.Model(&SellableTokenIssuance{}).
+			Select("user_id, COUNT(*) AS cnt").
+			Where("user_id IN ? AND status = ?", userIDs, SellableTokenIssuanceStatusPending).
+			Group("user_id").
+			Scan(&pendingCounts).Error; err != nil {
+			return err
+		}
+	}
+
+	tokenCountByUserID := make(map[int]int, len(tokenCounts))
+	for _, row := range tokenCounts {
+		tokenCountByUserID[row.UserId] = row.Count
+	}
+	pendingCountByUserID := make(map[int]int, len(pendingCounts))
+	for _, row := range pendingCounts {
+		pendingCountByUserID[row.UserId] = row.Count
+	}
+	for _, user := range users {
+		if user == nil {
+			continue
+		}
+		user.ActiveSellableTokenCount = tokenCountByUserID[user.Id]
+		user.PendingSellableIssuanceCount = pendingCountByUserID[user.Id]
+		user.HasSellableToken = user.ActiveSellableTokenCount > 0 || user.PendingSellableIssuanceCount > 0
 	}
 	return nil
 }
@@ -872,7 +967,12 @@ func (user *User) TransferAffQuotaToQuota(quota int) error {
 	}
 
 	// 提交事务
-	return tx.Commit().Error
+	if err := tx.Commit().Error; err != nil {
+		return err
+	}
+	// 用事务后的准确值覆盖 Redis 缓存，避免返回旧余额
+	_ = updateUserQuotaCache(user.Id, user.Quota)
+	return nil
 }
 
 func (user *User) Insert(inviterId int) error {

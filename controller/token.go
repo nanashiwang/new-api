@@ -11,6 +11,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/cachex"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -363,6 +364,9 @@ func GetTokenUsage(c *gin.Context) {
 			"unlimited_quota":         token.UnlimitedQuota,
 			"model_limits":            token.GetModelLimitsMap(),
 			"model_limits_enabled":    token.ModelLimitsEnabled,
+			"max_concurrency":         token.MaxConcurrency,
+			"window_request_limit":    token.WindowRequestLimit,
+			"window_seconds":          token.WindowSeconds,
 			"package_enabled":         token.PackageEnabled,
 			"package_limit_quota":     token.PackageLimitQuota,
 			"package_period":          token.PackagePeriod,
@@ -460,12 +464,15 @@ func buildPublicTokenUsagePayload(token *model.Token) gin.H {
 		expiredAt = 0
 	}
 
-	return gin.H{
+	payload := gin.H{
 		"token_id":                token.Id,
 		"masked_key":              maskPublicTokenKey(token.Key),
 		"name":                    token.Name,
 		"status":                  token.Status,
 		"group":                   token.Group,
+		"max_concurrency":         token.MaxConcurrency,
+		"window_request_limit":    token.WindowRequestLimit,
+		"window_seconds":          token.WindowSeconds,
 		"total_granted":           token.RemainQuota + token.UsedQuota,
 		"total_used":              token.UsedQuota,
 		"total_available":         token.RemainQuota,
@@ -483,6 +490,65 @@ func buildPublicTokenUsagePayload(token *model.Token) gin.H {
 		"created_time":            token.CreatedTime,
 		"accessed_time":           token.AccessedTime,
 	}
+
+	payload["runtime_status"] = queryTokenRuntimeStatus(token)
+	return payload
+}
+
+func queryTokenRuntimeStatus(token *model.Token) gin.H {
+	status := gin.H{}
+
+	if token.MaxConcurrency > 0 {
+		concurrency, err := middleware.QueryTokenConcurrency(token.Id)
+		if err == nil {
+			status["current_concurrency"] = concurrency
+		}
+	}
+
+	if token.WindowRequestLimit > 0 && token.WindowSeconds > 0 {
+		count, windowEndMs, serverNowMs, err := middleware.QueryTokenWindowStatus(token.Id, token.WindowSeconds)
+		if err == nil {
+			status["window_used"] = count
+			status["window_end_ms"] = windowEndMs
+			status["server_now_ms"] = serverNowMs
+		}
+	}
+
+	return status
+}
+
+// GetTokensRuntimeStatus returns real-time runtime status for a batch of token IDs.
+func GetTokensRuntimeStatus(c *gin.Context) {
+	var req struct {
+		TokenIDs []int `json:"token_ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.TokenIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "请提供有效的 token_ids",
+		})
+		return
+	}
+
+	if len(req.TokenIDs) > 100 {
+		req.TokenIDs = req.TokenIDs[:100]
+	}
+
+	userID := c.GetInt("id")
+	results := make(map[string]gin.H, len(req.TokenIDs))
+
+	for _, tokenID := range req.TokenIDs {
+		token, err := model.GetTokenById(tokenID)
+		if err != nil || token == nil || token.UserId != userID {
+			continue
+		}
+		results[strconv.Itoa(tokenID)] = queryTokenRuntimeStatus(token)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    results,
+	})
 }
 
 func resolvePublicQueryTokens(keys []string) ([]*model.Token, []string) {
@@ -616,6 +682,10 @@ func AddToken(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	if err := model.ValidateTokenRuntimeLimitConfig(&token); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	// 非无限额度时，检查额度值是否超出有效范围
 	if !token.UnlimitedQuota {
 		if token.RemainQuota < 0 {
@@ -662,6 +732,9 @@ func AddToken(c *gin.Context) {
 		AllowIps:             token.AllowIps,
 		Group:                token.Group,
 		CrossGroupRetry:      token.CrossGroupRetry,
+		MaxConcurrency:       token.MaxConcurrency,
+		WindowRequestLimit:   token.WindowRequestLimit,
+		WindowSeconds:        token.WindowSeconds,
 		PackageEnabled:       token.PackageEnabled,
 		PackageLimitQuota:    token.PackageLimitQuota,
 		PackagePeriod:        token.PackagePeriod,
@@ -718,6 +791,10 @@ func UpdateToken(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	if err := model.ValidateTokenRuntimeLimitConfig(&token); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	if !token.UnlimitedQuota {
 		if token.RemainQuota < 0 {
 			common.ApiErrorI18n(c, i18n.MsgTokenQuotaNegative)
@@ -747,27 +824,38 @@ func UpdateToken(c *gin.Context) {
 	if statusOnly != "" {
 		cleanToken.Status = token.Status
 	} else {
-		// If you add more fields, please also update token.Update()
 		cleanToken.Name = token.Name
-		cleanToken.ExpiredTime = token.ExpiredTime
-		cleanToken.RemainQuota = token.RemainQuota
-		cleanToken.UnlimitedQuota = token.UnlimitedQuota
-		cleanToken.ModelLimitsEnabled = token.ModelLimitsEnabled
-		cleanToken.ModelLimits = token.ModelLimits
-		cleanToken.AllowIps = token.AllowIps
 		cleanToken.Group = token.Group
-		cleanToken.CrossGroupRetry = token.CrossGroupRetry
-		cleanToken.PackageEnabled = token.PackageEnabled
-		cleanToken.PackageLimitQuota = token.PackageLimitQuota
-		cleanToken.PackagePeriod = token.PackagePeriod
-		cleanToken.PackageCustomSeconds = token.PackageCustomSeconds
-		cleanToken.PackagePeriodMode = token.PackagePeriodMode
-		// 允许管理员/用户在编辑时手动归零该周期已用额度，便于紧急解锁
-		cleanToken.PackageUsedQuota = token.PackageUsedQuota
-		cleanToken.PackageNextResetTime = token.PackageNextResetTime
-		if err := model.ValidateTokenQuotaPackageRelation(cleanToken); err != nil {
-			common.ApiError(c, err)
-			return
+		if cleanToken.SourceType == model.TokenSourceTypeSellableToken {
+			// 可售令牌仅允许修改名称和分组，其余额度/限制字段保持商品下发时的只读状态。
+			if len(cleanToken.Name) > 50 {
+				common.ApiErrorMsg(c, "令牌名称不能超过 50 个字符")
+				return
+			}
+		} else {
+			// If you add more fields, please also update token.Update()
+			cleanToken.ExpiredTime = token.ExpiredTime
+			cleanToken.RemainQuota = token.RemainQuota
+			cleanToken.UnlimitedQuota = token.UnlimitedQuota
+			cleanToken.ModelLimitsEnabled = token.ModelLimitsEnabled
+			cleanToken.ModelLimits = token.ModelLimits
+			cleanToken.AllowIps = token.AllowIps
+			cleanToken.CrossGroupRetry = token.CrossGroupRetry
+			cleanToken.MaxConcurrency = token.MaxConcurrency
+			cleanToken.WindowRequestLimit = token.WindowRequestLimit
+			cleanToken.WindowSeconds = token.WindowSeconds
+			cleanToken.PackageEnabled = token.PackageEnabled
+			cleanToken.PackageLimitQuota = token.PackageLimitQuota
+			cleanToken.PackagePeriod = token.PackagePeriod
+			cleanToken.PackageCustomSeconds = token.PackageCustomSeconds
+			cleanToken.PackagePeriodMode = token.PackagePeriodMode
+			// 允许管理员/用户在编辑时手动归零该周期已用额度，便于紧急解锁
+			cleanToken.PackageUsedQuota = token.PackageUsedQuota
+			cleanToken.PackageNextResetTime = token.PackageNextResetTime
+			if err := model.ValidateTokenQuotaPackageRelation(cleanToken); err != nil {
+				common.ApiError(c, err)
+				return
+			}
 		}
 	}
 	err = cleanToken.Update()

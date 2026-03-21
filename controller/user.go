@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -35,7 +34,7 @@ func Login(c *gin.Context) {
 		return
 	}
 	var loginRequest LoginRequest
-	err := json.NewDecoder(c.Request.Body).Decode(&loginRequest)
+	err := common.DecodeJson(c.Request.Body, &loginRequest)
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
@@ -138,7 +137,7 @@ func Register(c *gin.Context) {
 		return
 	}
 	var user model.User
-	err := json.NewDecoder(c.Request.Body).Decode(&user)
+	err := common.DecodeJson(c.Request.Body, &user)
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
@@ -156,6 +155,7 @@ func Register(c *gin.Context) {
 			common.ApiErrorI18n(c, i18n.MsgUserVerificationCodeError)
 			return
 		}
+		common.DeleteKey(user.Email, common.EmailVerificationPurpose)
 	}
 	exist, err := model.CheckUserExistOrDeleted(user.Username, user.Email)
 	if err != nil {
@@ -164,7 +164,7 @@ func Register(c *gin.Context) {
 		return
 	}
 	if exist {
-		common.ApiErrorI18n(c, i18n.MsgUserExists)
+		common.ApiErrorI18n(c, i18n.MsgUserRegisterFailed)
 		return
 	}
 	affCode := user.AffCode // this code is the inviter's code, not the user's own code
@@ -526,6 +526,11 @@ func GetUser(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionSameLevel)
 		return
 	}
+
+	// 补充套餐和令牌元数据，确保管理页面刷新单行或详情时显示一致。
+	_ = model.AttachUserSubscriptionMetadata(model.DB, []*model.User{user})
+	_ = model.AttachUserSellableTokenMetadata(model.DB, []*model.User{user})
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -757,7 +762,7 @@ func generateDefaultSidebarConfig(userRole int) string {
 	// 普通用户不包含admin区域
 
 	// 转换为JSON字符串
-	configBytes, err := json.Marshal(defaultConfig)
+	configBytes, err := common.Marshal(defaultConfig)
 	if err != nil {
 		common.SysLog("生成默认边栏配置失败: " + err.Error())
 		return ""
@@ -795,7 +800,7 @@ func GetUserModels(c *gin.Context) {
 
 func UpdateUser(c *gin.Context) {
 	var updatedUser model.User
-	err := json.NewDecoder(c.Request.Body).Decode(&updatedUser)
+	err := common.DecodeJson(c.Request.Body, &updatedUser)
 	if err != nil || updatedUser.Id == 0 {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
@@ -832,9 +837,15 @@ func UpdateUser(c *gin.Context) {
 	if originUser.Quota != updatedUser.Quota {
 		model.RecordLog(originUser.Id, model.LogTypeManage, fmt.Sprintf("管理员将用户额度从 %s修改为 %s", logger.LogQuota(originUser.Quota), logger.LogQuota(updatedUser.Quota)))
 	}
+
+	// 补充套餐和令牌元数据，确保管理页面执行更新用户操作后，返回的对象带有完整的状态，防止表格因数据覆盖而显示异常。
+	_ = model.AttachUserSubscriptionMetadata(model.DB, []*model.User{&updatedUser})
+	_ = model.AttachUserSellableTokenMetadata(model.DB, []*model.User{&updatedUser})
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
+		"data":    updatedUser,
 	})
 	return
 }
@@ -879,7 +890,7 @@ func AdminClearUserBinding(c *gin.Context) {
 
 func UpdateSelf(c *gin.Context) {
 	var requestData map[string]interface{}
-	err := json.NewDecoder(c.Request.Body).Decode(&requestData)
+	err := common.DecodeJson(c.Request.Body, &requestData)
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
@@ -943,12 +954,12 @@ func UpdateSelf(c *gin.Context) {
 
 	// 原有的用户信息更新逻辑
 	var user model.User
-	requestDataBytes, err := json.Marshal(requestData)
+	requestDataBytes, err := common.Marshal(requestData)
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}
-	err = json.Unmarshal(requestDataBytes, &user)
+	err = common.Unmarshal(requestDataBytes, &user)
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
@@ -1058,7 +1069,7 @@ func DeleteSelf(c *gin.Context) {
 
 func CreateUser(c *gin.Context) {
 	var user model.User
-	err := json.NewDecoder(c.Request.Body).Decode(&user)
+	err := common.DecodeJson(c.Request.Body, &user)
 	user.Username = strings.TrimSpace(user.Username)
 	if err != nil || user.Username == "" || user.Password == "" {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
@@ -1157,7 +1168,7 @@ func applyManageAction(user *model.User, action string, myRole int) error {
 // ManageUser Only admin user can do this
 func ManageUser(c *gin.Context) {
 	var req ManageRequest
-	err := json.NewDecoder(c.Request.Body).Decode(&req)
+	err := common.DecodeJson(c.Request.Body, &req)
 
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
@@ -1181,10 +1192,21 @@ func ManageUser(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+
+	// 补充套餐和令牌元数据，确保管理页面执行单条禁用/启用等操作后，该行的套餐状态不会因数据覆盖而显示为“无套餐”。
+	_ = model.AttachUserSubscriptionMetadata(model.DB, []*model.User{&user})
+	_ = model.AttachUserSellableTokenMetadata(model.DB, []*model.User{&user})
+
 	clearUser := model.User{
-		Id:     user.Id,
-		Role:   user.Role,
-		Status: user.Status,
+		Id:                               user.Id,
+		Role:                             user.Role,
+		Status:                           user.Status,
+		HasActiveSubscription:            user.HasActiveSubscription,
+		ActiveSubscriptionCount:          user.ActiveSubscriptionCount,
+		PendingSubscriptionIssuanceCount: user.PendingSubscriptionIssuanceCount,
+		HasSellableToken:                 user.HasSellableToken,
+		ActiveSellableTokenCount:         user.ActiveSellableTokenCount,
+		PendingSellableIssuanceCount:     user.PendingSellableIssuanceCount,
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -1210,11 +1232,11 @@ func ManageUserBatch(c *gin.Context) {
 
 	myRole := c.GetInt("role")
 	seen := make(map[int]struct{}, len(req.Ids))
-	updated := make([]gin.H, 0, len(req.Ids))
+	updatedUsers := make([]*model.User, 0, len(req.Ids))
 	failed := make([]gin.H, 0)
 
 	for _, id := range req.Ids {
-		// 输入合法性前置校验，避免无效 ID 进入数据库查询。
+		// ... (previous logic for ID validation, deduplication, and user fetching)
 		if id <= 0 {
 			failed = append(failed, gin.H{
 				"id":      id,
@@ -1222,13 +1244,11 @@ func ManageUserBatch(c *gin.Context) {
 			})
 			continue
 		}
-		// 请求内去重：同一个 ID 仅处理一次，防止重复统计或状态抖动。
 		if _, ok := seen[id]; ok {
 			continue
 		}
 		seen[id] = struct{}{}
 
-		// 读取目标用户（包含软删除用户），与现有单操作行为保持一致。
 		user := model.User{Id: id}
 		model.DB.Unscoped().Where(&user).First(&user)
 		if user.Id == 0 {
@@ -1238,7 +1258,6 @@ func ManageUserBatch(c *gin.Context) {
 			})
 			continue
 		}
-		// 逐条权限校验：管理员不可操作同级/更高级用户（root 除外）。
 		if myRole <= user.Role && myRole != common.RoleRootUser {
 			failed = append(failed, gin.H{
 				"id":      id,
@@ -1247,7 +1266,6 @@ func ManageUserBatch(c *gin.Context) {
 			continue
 		}
 
-		// 单用户和批量操作共用同一套规则。
 		if err := applyManageAction(&user, action, myRole); err != nil {
 			failed = append(failed, gin.H{
 				"id":      id,
@@ -1256,10 +1274,27 @@ func ManageUserBatch(c *gin.Context) {
 			continue
 		}
 
+		updatedUsers = append(updatedUsers, &user)
+	}
+
+	// 批量补充套餐和令牌元数据，确保批量操作（如批量禁用）后前端表格状态同步。
+	if len(updatedUsers) > 0 {
+		_ = model.AttachUserSubscriptionMetadata(model.DB, updatedUsers)
+		_ = model.AttachUserSellableTokenMetadata(model.DB, updatedUsers)
+	}
+
+	updated := make([]gin.H, 0, len(updatedUsers))
+	for _, u := range updatedUsers {
 		updated = append(updated, gin.H{
-			"id":     user.Id,
-			"role":   user.Role,
-			"status": user.Status,
+			"id":                               u.Id,
+			"role":                             u.Role,
+			"status":                           u.Status,
+			"has_active_subscription":            u.HasActiveSubscription,
+			"active_subscription_count":          u.ActiveSubscriptionCount,
+			"pending_subscription_issuance_count": u.PendingSubscriptionIssuanceCount,
+			"has_sellable_token":                 u.HasSellableToken,
+			"active_sellable_token_count":         u.ActiveSellableTokenCount,
+			"pending_sellable_issuance_count":     u.PendingSellableIssuanceCount,
 		})
 	}
 
@@ -1365,6 +1400,18 @@ func TopUp(c *gin.Context) {
 	}
 	quota, err := model.Redeem(req.Key, id)
 	if err != nil {
+		if errors.Is(err, model.ErrRedemptionAlreadyUsed) {
+			common.ApiErrorMsg(c, "此兑换码已有人使用")
+			return
+		}
+		if errors.Is(err, model.ErrRedemptionDisabled) {
+			common.ApiErrorMsg(c, "该兑换码已禁用")
+			return
+		}
+		if errors.Is(err, model.ErrRedemptionExpired) {
+			common.ApiErrorMsg(c, "该兑换码已过期")
+			return
+		}
 		if errors.Is(err, model.ErrRedeemFailed) {
 			common.ApiErrorI18n(c, i18n.MsgRedeemFailed)
 			return
@@ -1424,6 +1471,18 @@ func Redeem(c *gin.Context) {
 			})
 			return
 		}
+		if errors.Is(err, model.ErrRedemptionAlreadyUsed) {
+			common.ApiErrorMsg(c, "此兑换码已有人使用")
+			return
+		}
+		if errors.Is(err, model.ErrRedemptionDisabled) {
+			common.ApiErrorMsg(c, "该兑换码已禁用")
+			return
+		}
+		if errors.Is(err, model.ErrRedemptionExpired) {
+			common.ApiErrorMsg(c, "该兑换码已过期")
+			return
+		}
 		if errors.Is(err, model.ErrRedeemFailed) {
 			// 对外统一返回兑换失败文案，避免把内部细节直接暴露给前端。
 			common.ApiErrorI18n(c, i18n.MsgRedeemFailed)
@@ -1447,7 +1506,7 @@ type UpdateUserSettingRequest struct {
 	GotifyUrl                        string  `json:"gotify_url,omitempty"`
 	GotifyToken                      string  `json:"gotify_token,omitempty"`
 	GotifyPriority                   int     `json:"gotify_priority,omitempty"`
-	UpstreamModelUpdateNotifyEnabled bool    `json:"upstream_model_update_notify_enabled,omitempty"`
+	UpstreamModelUpdateNotifyEnabled *bool   `json:"upstream_model_update_notify_enabled,omitempty"`
 	AcceptUnsetModelRatioModel       bool    `json:"accept_unset_model_ratio_model"`
 	RecordIpLog                      bool    `json:"record_ip_log"`
 }
@@ -1539,12 +1598,24 @@ func UpdateUserSetting(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	existingSettings := user.GetSetting()
+	upstreamModelUpdateNotifyEnabled := existingSettings.UpstreamModelUpdateNotifyEnabled
+	if user.Role >= common.RoleAdminUser && req.UpstreamModelUpdateNotifyEnabled != nil {
+		upstreamModelUpdateNotifyEnabled = *req.UpstreamModelUpdateNotifyEnabled
+	}
 
-	settings := user.GetSetting()
+	settings := existingSettings
 	settings.NotifyType = req.QuotaWarningType
 	settings.QuotaWarningThreshold = req.QuotaWarningThreshold
+	settings.UpstreamModelUpdateNotifyEnabled = upstreamModelUpdateNotifyEnabled
 	settings.AcceptUnsetRatioModel = req.AcceptUnsetModelRatioModel
 	settings.RecordIpLog = req.RecordIpLog
+	settings.WebhookUrl = ""
+	settings.NotificationEmail = ""
+	settings.BarkUrl = ""
+	settings.GotifyUrl = ""
+	settings.GotifyToken = ""
+	settings.GotifyPriority = 0
 
 	// 如果是webhook类型,添加webhook相关设置
 	if req.QuotaWarningType == dto.NotifyTypeWebhook {
@@ -1574,10 +1645,6 @@ func UpdateUserSetting(c *gin.Context) {
 		} else {
 			settings.GotifyPriority = req.GotifyPriority
 		}
-	}
-
-	if c.GetInt("role") >= common.RoleAdminUser {
-		settings.UpstreamModelUpdateNotifyEnabled = req.UpstreamModelUpdateNotifyEnabled
 	}
 
 	// 更新用户设置

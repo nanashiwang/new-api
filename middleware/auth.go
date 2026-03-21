@@ -382,6 +382,11 @@ func SetupContextForToken(c *gin.Context, token *model.Token, parts ...string) e
 		c.Set("token_quota", token.RemainQuota)
 	}
 	common.SetContextKey(c, constant.ContextKeyTokenPackageEnabled, token.PackageEnabled)
+	common.SetContextKey(c, constant.ContextKeyTokenBillingMode, token.BillingMode)
+	common.SetContextKey(c, constant.ContextKeyTokenSourceType, token.SourceType)
+	common.SetContextKey(c, constant.ContextKeyTokenMaxConcurrency, token.MaxConcurrency)
+	common.SetContextKey(c, constant.ContextKeyTokenWindowRequestLimit, token.WindowRequestLimit)
+	common.SetContextKey(c, constant.ContextKeyTokenWindowSeconds, token.WindowSeconds)
 	if token.ModelLimitsEnabled {
 		c.Set("token_model_limit_enabled", true)
 		c.Set("token_model_limit", token.GetModelLimitsMap())

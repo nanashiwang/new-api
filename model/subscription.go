@@ -820,8 +820,7 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string) error {
 	var logMoney float64
 	var logPaymentMethod string
 	var logPurchaseQuantity int
-	var upgradeGroup string
-	var logAction string
+	var logIssuanceId int
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var order SubscriptionOrder
 		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", tradeNo).First(&order).Error; err != nil {
@@ -837,144 +836,21 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string) error {
 		if err != nil {
 			return err
 		}
-		if !plan.Enabled {
-			// 已支付成功的订单即使套餐被禁用也允许完成
-		}
-		mode := NormalizeSubscriptionPurchaseMode(order.PurchaseMode)
-		order.PurchaseMode = mode
 		if order.PurchaseQuantity <= 0 {
 			order.PurchaseQuantity = 1
 		}
-		if err := lockUserForSubscriptionMutationTx(tx, order.UserId); err != nil {
+		issuance := &SubscriptionIssuance{
+			UserId:                    order.UserId,
+			PlanId:                    plan.Id,
+			PlanTitle:                 plan.Title,
+			SourceType:                SubscriptionIssuanceSourceOrder,
+			SourceRef:                 order.TradeNo,
+			PurchaseMode:              normalizeSubscriptionIssuancePurchaseMode(order.PurchaseMode),
+			PurchaseQuantity:          order.PurchaseQuantity,
+			RenewTargetSubscriptionId: order.RenewTargetSubscriptionId,
+		}
+		if err := CreateSubscriptionIssuanceTx(tx, issuance); err != nil {
 			return err
-		}
-		nowUnix := GetDBTimestampTx(tx)
-		activeSubQuery := tx.Where("user_id = ? AND plan_id = ? AND status = ? AND end_time > ?",
-			order.UserId, plan.Id, "active", nowUnix).
-			Order("end_time asc, id asc")
-		if !common.UsingSQLite {
-			activeSubQuery = activeSubQuery.Set("gorm:query_option", "FOR UPDATE")
-		}
-		var activeSubs []UserSubscription
-		if err := activeSubQuery.Find(&activeSubs).Error; err != nil {
-			return err
-		}
-		activeCountBeforeStack := int64(len(activeSubs))
-		activeQuantityBefore := 0
-		for i := range activeSubs {
-			activeQuantityBefore += countRemainingSubscriptionQuantity(&activeSubs[i], plan, nowUnix)
-		}
-		// 订单完成时二次校验动态可买上限，防止“下单后到回调前”并发突破限制。
-		purchaseQuantityMin := plan.PurchaseQuantityMin
-		purchaseQuantityMax := plan.PurchaseQuantityMax
-		if purchaseQuantityMin <= 0 {
-			purchaseQuantityMin = 1
-		}
-		if purchaseQuantityMax <= 0 {
-			purchaseQuantityMax = 12
-		}
-		if purchaseQuantityMax < purchaseQuantityMin {
-			purchaseQuantityMax = purchaseQuantityMin
-		}
-		availableQuantity := purchaseQuantityMax - activeQuantityBefore
-		if availableQuantity < 0 {
-			availableQuantity = 0
-		}
-		if order.PurchaseQuantity > availableQuantity {
-			return fmt.Errorf("购买数量超出上限，当前最多可购买 %d 份", availableQuantity)
-		}
-		// 完成阶段再次校验购买上限，避免并发完成订单时超出历史购买总量。
-		if plan.MaxPurchasePerUser > 0 &&
-			(mode == SubscriptionPurchaseModeStack || mode == SubscriptionPurchaseModeRenewExtend || common.SubscriptionRenewRespectPurchaseLimit) {
-			var totalCount int64
-			if err := tx.Model(&UserSubscription{}).
-				Where("user_id = ? AND plan_id = ?", order.UserId, plan.Id).
-				Count(&totalCount).Error; err != nil {
-				return err
-			}
-			limit := int64(plan.MaxPurchasePerUser)
-			if ((mode == SubscriptionPurchaseModeStack || mode == SubscriptionPurchaseModeRenewExtend) &&
-				totalCount+int64(order.PurchaseQuantity) > limit) ||
-				(mode == SubscriptionPurchaseModeRenew && totalCount >= limit) {
-				return errors.New("已达到该套餐购买上限")
-			}
-		}
-		if (mode == SubscriptionPurchaseModeStack || mode == SubscriptionPurchaseModeRenewExtend) && plan.MaxStackPerUser > 0 {
-			// 在订单完成阶段再次校验叠加上限，避免并发完成导致超卖。
-			addedActiveCount := int64(order.PurchaseQuantity)
-			if mode == SubscriptionPurchaseModeRenewExtend {
-				addedActiveCount = 0
-			}
-			if mode == SubscriptionPurchaseModeRenewExtend && activeCountBeforeStack == 0 {
-				addedActiveCount = 1
-			}
-			if activeCountBeforeStack+addedActiveCount > int64(plan.MaxStackPerUser) {
-				return errors.New("已达到该套餐叠加上限")
-			}
-		}
-		renewExtendTargetSubscriptionId := 0
-		if mode == SubscriptionPurchaseModeRenewExtend && len(activeSubs) > 0 {
-			renewExtendTargetSubscriptionId = activeSubs[0].Id
-		}
-		logAction = "购买"
-		// 按购买份数循环执行，支持“多份续费”与“多份叠加”。
-		for i := 0; i < order.PurchaseQuantity; i++ {
-			switch mode {
-			case SubscriptionPurchaseModeRenew:
-				// 续费模式下，多份购买始终续费同一目标订阅：
-				// - 指定目标：每份都续到该目标，不回退到其他订阅；
-				// - 未指定目标（兼容旧客户端）：每份按最早到期续费。
-				targetId := order.RenewTargetSubscriptionId
-				if targetId > 0 {
-					_, renewed, err := renewUserSubscriptionByPlanTx(tx, order.UserId, plan, targetId)
-					if err != nil {
-						return err
-					}
-					if !renewed {
-						return errors.New("续费目标订阅不存在或已失效")
-					}
-					logAction = "续费"
-					continue
-				}
-				_, renewed, err := renewUserSubscriptionByPlanTx(tx, order.UserId, plan, 0)
-				if err != nil {
-					return err
-				}
-				if renewed {
-					logAction = "续费"
-					continue
-				}
-				// 用户选择续费时，不允许自动改成叠加（新建订阅）。
-				return errors.New("无可续费的同规格订阅")
-			case SubscriptionPurchaseModeRenewExtend:
-				// 续费式购买：
-				// - 有同套餐生效订阅时，按最早到期单条顺延；
-				// - 无生效订阅时，先创建 1 条，再把剩余份数顺延到该条。
-				if renewExtendTargetSubscriptionId > 0 {
-					_, renewed, renewErr := renewUserSubscriptionByPlanTx(tx, order.UserId, plan, renewExtendTargetSubscriptionId)
-					if renewErr != nil {
-						return renewErr
-					}
-					if !renewed {
-						return errors.New("续费式顺延失败")
-					}
-					continue
-				}
-				createdSub, createErr := createUserSubscriptionFromPlanTx(tx, order.UserId, plan, "order", true)
-				if createErr != nil {
-					return createErr
-				}
-				renewExtendTargetSubscriptionId = createdSub.Id
-				upgradeGroup = strings.TrimSpace(plan.UpgradeGroup)
-				continue
-			default:
-				// 叠加模式下，按“购买上限”限制可创建总条数。
-				_, err = createUserSubscriptionFromPlanTx(tx, order.UserId, plan, "order", true)
-				if err != nil {
-					return err
-				}
-				upgradeGroup = strings.TrimSpace(plan.UpgradeGroup)
-			}
 		}
 		if err := upsertSubscriptionTopUpTx(tx, &order); err != nil {
 			return err
@@ -995,19 +871,17 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string) error {
 		logMoney = order.Money
 		logPaymentMethod = order.PaymentMethod
 		logPurchaseQuantity = order.PurchaseQuantity
+		logIssuanceId = issuance.Id
 		return nil
 	})
 	if err != nil {
 		return err
 	}
-	if upgradeGroup != "" && logUserId > 0 {
-		_ = UpdateUserGroupCache(logUserId, upgradeGroup)
-	}
 	if logUserId > 0 {
 		if logPurchaseQuantity <= 0 {
 			logPurchaseQuantity = 1
 		}
-		msg := fmt.Sprintf("订阅%s成功，套餐: %s，份数: %d，支付金额: %.2f，支付方式: %s", logAction, logPlanTitle, logPurchaseQuantity, logMoney, logPaymentMethod)
+		msg := fmt.Sprintf("订阅支付成功，套餐: %s，份数: %d，支付金额: %.2f，支付方式: %s，待发放记录: %d", logPlanTitle, logPurchaseQuantity, logMoney, logPaymentMethod, logIssuanceId)
 		RecordLog(logUserId, LogTypeTopup, msg)
 	}
 	return nil

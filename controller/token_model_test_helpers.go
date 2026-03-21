@@ -80,7 +80,6 @@ func collectGroupModels(groups []string, acceptUnsetRatioModel bool) []string {
 }
 
 func resolveRequestedTokenGroups(userId int, requestedGroup string) ([]string, error) {
-	model.EnsureColumnMetadataInitialized()
 	userCache, err := model.GetUserCache(userId)
 	if err != nil {
 		return nil, err
@@ -397,6 +396,11 @@ func runTokenRelayTest(parent *gin.Context, token *model.Token, modelName string
 	if err := prepareOwnedTokenContext(selectCtx, token); err != nil {
 		return 0, "", err
 	}
+	releaseRuntimeLimit, err := middleware.AcquireTokenRuntimeLimit(selectCtx)
+	if err != nil {
+		return 0, err.Error(), err
+	}
+	defer releaseRuntimeLimit()
 	start := time.Now()
 	retryParam := &service.RetryParam{
 		Ctx:        selectCtx,

@@ -70,12 +70,23 @@ func TestRedeemWithResult_SubscriptionBenefitCreatesSubscriptionAndCommissionLed
 	assert.Equal(t, plan.Title, result.PlanTitle)
 	assert.Equal(t, SubscriptionPurchaseModeStack, result.PurchaseMode)
 	assert.Equal(t, 1, result.PurchaseQuantity)
+	assert.NotZero(t, result.IssuanceId)
+	assert.Contains(t, result.ActionSummary, "待发放")
 
-	var sub UserSubscription
-	require.NoError(t, DB.Where("user_id = ? AND plan_id = ?", invitee.Id, plan.Id).First(&sub).Error)
-	assert.Equal(t, "redemption", sub.Source)
-	assert.EqualValues(t, plan.TotalAmount, sub.AmountTotal)
-	assert.Equal(t, "active", sub.Status)
+	var issuance SubscriptionIssuance
+	require.NoError(t, DB.First(&issuance, "id = ?", result.IssuanceId).Error)
+	assert.Equal(t, invitee.Id, issuance.UserId)
+	assert.Equal(t, plan.Id, issuance.PlanId)
+	assert.Equal(t, plan.Title, issuance.PlanTitle)
+	assert.Equal(t, SubscriptionIssuanceSourceRedeem, issuance.SourceType)
+	assert.Equal(t, fmt.Sprintf("%d", redemption.Id), issuance.SourceRef)
+	assert.Equal(t, SubscriptionIssuanceStatusPending, issuance.Status)
+	assert.Equal(t, SubscriptionPurchaseModeStack, issuance.PurchaseMode)
+	assert.Equal(t, 1, issuance.PurchaseQuantity)
+
+	var subCount int64
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("user_id = ? AND plan_id = ?", invitee.Id, plan.Id).Count(&subCount).Error)
+	assert.EqualValues(t, 0, subCount)
 
 	var ledger InviteCommissionLedger
 	require.NoError(t, DB.Where("topup_trade_no = ? AND inviter_user_id = ?", fmt.Sprintf("redeem:%d", redemption.Id), inviter.Id).First(&ledger).Error)
@@ -103,10 +114,17 @@ func TestRedeemWithResult_SubscriptionBenefitUsesCurrentPlanConfiguration(t *tes
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, "月付套餐-新版", result.PlanTitle)
+	assert.NotZero(t, result.IssuanceId)
 
-	var sub UserSubscription
-	require.NoError(t, DB.Where("user_id = ? AND plan_id = ?", invitee.Id, plan.Id).First(&sub).Error)
-	assert.EqualValues(t, 4321, sub.AmountTotal)
+	var issuance SubscriptionIssuance
+	require.NoError(t, DB.First(&issuance, "id = ?", result.IssuanceId).Error)
+	assert.Equal(t, invitee.Id, issuance.UserId)
+	assert.Equal(t, plan.Id, issuance.PlanId)
+	assert.Equal(t, "月付套餐-新版", issuance.PlanTitle)
+
+	var subCount int64
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("user_id = ? AND plan_id = ?", invitee.Id, plan.Id).Count(&subCount).Error)
+	assert.EqualValues(t, 0, subCount)
 }
 
 func TestRedeem_SubscriptionBenefitRejectedOnLegacyQuotaEndpoint(t *testing.T) {
@@ -125,6 +143,10 @@ func TestRedeem_SubscriptionBenefitRejectedOnLegacyQuotaEndpoint(t *testing.T) {
 	require.NoError(t, DB.Model(&UserSubscription{}).Where("user_id = ?", invitee.Id).Count(&subCount).Error)
 	assert.EqualValues(t, 0, subCount)
 
+	var issuanceCount int64
+	require.NoError(t, DB.Model(&SubscriptionIssuance{}).Where("user_id = ?", invitee.Id).Count(&issuanceCount).Error)
+	assert.EqualValues(t, 0, issuanceCount)
+
 	var refreshed Redemption
 	require.NoError(t, DB.First(&refreshed, "id = ?", redemption.Id).Error)
 	assert.Equal(t, common.RedemptionCodeStatusEnabled, refreshed.Status)
@@ -142,14 +164,23 @@ func TestRedeemWithOptions_SubscriptionRenewCreatesWhenNoActiveSubscription(t *t
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, SubscriptionPurchaseModeRenew, result.PurchaseMode)
+	assert.NotZero(t, result.IssuanceId)
 
-	var sub UserSubscription
-	require.NoError(t, DB.Where("user_id = ? AND plan_id = ?", invitee.Id, plan.Id).First(&sub).Error)
-	assert.Equal(t, "redemption", sub.Source)
-	assert.Equal(t, "active", sub.Status)
+	var issuance SubscriptionIssuance
+	require.NoError(t, DB.First(&issuance, "id = ?", result.IssuanceId).Error)
+	assert.Equal(t, invitee.Id, issuance.UserId)
+	assert.Equal(t, plan.Id, issuance.PlanId)
+	assert.Equal(t, SubscriptionIssuanceSourceRedeem, issuance.SourceType)
+	assert.Equal(t, SubscriptionIssuanceStatusPending, issuance.Status)
+	assert.Equal(t, SubscriptionPurchaseModeRenew, issuance.PurchaseMode)
+	assert.Equal(t, 0, issuance.RenewTargetSubscriptionId)
+
+	var subCount int64
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("user_id = ? AND plan_id = ?", invitee.Id, plan.Id).Count(&subCount).Error)
+	assert.EqualValues(t, 0, subCount)
 }
 
-func TestRedeemWithOptions_SubscriptionRenewRequiresTargetWhenMultipleActiveSubscriptions(t *testing.T) {
+func TestRedeemWithOptions_SubscriptionRenewCreatesPendingIssuanceWithoutImmediateTargetSelection(t *testing.T) {
 	setupRedemptionSubscriptionTest(t)
 
 	plan := createSubscriptionPlanForInviteCommissionTest(t, "续费目标选择套餐", 60, 2600)
@@ -162,18 +193,24 @@ func TestRedeemWithOptions_SubscriptionRenewRequiresTargetWhenMultipleActiveSubs
 	require.NoError(t, DB.Create(first).Error)
 	require.NoError(t, DB.Create(second).Error)
 
-	_, err := RedeemWithOptions(redemption.Key, invitee.Id, 0)
-	require.Error(t, err)
-	needTargetErr, ok := err.(*RedeemNeedRenewTargetError)
-	require.True(t, ok)
-	assert.Equal(t, plan.Id, needTargetErr.PlanId)
-	assert.Len(t, needTargetErr.Options, 2)
-
-	result, err := RedeemWithOptions(redemption.Key, invitee.Id, first.Id)
+	result, err := RedeemWithOptions(redemption.Key, invitee.Id, 0)
 	require.NoError(t, err)
 	require.NotNil(t, result)
+	assert.Equal(t, SubscriptionPurchaseModeRenew, result.PurchaseMode)
+	assert.NotZero(t, result.IssuanceId)
+
+	var issuance SubscriptionIssuance
+	require.NoError(t, DB.First(&issuance, "id = ?", result.IssuanceId).Error)
+	assert.Equal(t, invitee.Id, issuance.UserId)
+	assert.Equal(t, plan.Id, issuance.PlanId)
+	assert.Equal(t, SubscriptionPurchaseModeRenew, issuance.PurchaseMode)
+	assert.Equal(t, 0, issuance.RenewTargetSubscriptionId)
+	assert.Equal(t, SubscriptionIssuanceStatusPending, issuance.Status)
 
 	var refreshedFirst UserSubscription
+	var refreshedSecond UserSubscription
 	require.NoError(t, DB.First(&refreshedFirst, "id = ?", first.Id).Error)
-	assert.True(t, refreshedFirst.EndTime > first.EndTime)
+	require.NoError(t, DB.First(&refreshedSecond, "id = ?", second.Id).Error)
+	assert.Equal(t, first.EndTime, refreshedFirst.EndTime)
+	assert.Equal(t, second.EndTime, refreshedSecond.EndTime)
 }

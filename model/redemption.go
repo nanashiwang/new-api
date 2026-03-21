@@ -15,9 +15,16 @@ import (
 // ErrRedeemFailed is returned when redemption fails due to database error
 var ErrRedeemFailed = errors.New("redeem.failed")
 
+var (
+	ErrRedemptionAlreadyUsed = errors.New("redemption.already_used")
+	ErrRedemptionDisabled    = errors.New("redemption.disabled")
+	ErrRedemptionExpired     = errors.New("redemption.expired")
+)
+
 const (
-	RedemptionBenefitTypeQuota        = "quota"
-	RedemptionBenefitTypeSubscription = "subscription"
+	RedemptionBenefitTypeQuota         = "quota"
+	RedemptionBenefitTypeSubscription  = "subscription"
+	RedemptionBenefitTypeSellableToken = "sellable_token"
 )
 
 type RedemptionResult struct {
@@ -31,8 +38,14 @@ type RedemptionResult struct {
 	// PurchaseMode / PurchaseQuantity 保留套餐兑换时的执行方式，方便前端展示。
 	PurchaseMode     string `json:"purchase_mode"`
 	PurchaseQuantity int    `json:"purchase_quantity"`
-	// ActionSummary 直接复用订阅绑定结果文案，减少前后端各自拼接逻辑。
+	// ActionSummary 同时用于套餐待发放提示与令牌待发放提示。
 	ActionSummary string `json:"action_summary"`
+	// IssuanceId 统一表示“待发放记录 ID”：
+	// - benefit_type=subscription: 套餐待发放记录
+	// - benefit_type=sellable_token: 可售令牌待发放记录
+	IssuanceId  int    `json:"issuance_id"`
+	ProductId   int    `json:"product_id"`
+	ProductName string `json:"product_name"`
 }
 
 // RedeemNeedRenewTargetError 表示套餐兑换码在“续费”模式下命中了多条可续费订阅。
@@ -71,6 +84,7 @@ type Redemption struct {
 	BenefitType                  string `json:"benefit_type" gorm:"type:varchar(32);not null;default:'quota';index"`
 	Quota                        int    `json:"quota" gorm:"default:100"`
 	PlanId                       int    `json:"plan_id" gorm:"type:int;default:0;index"`
+	SellableTokenProductId       int    `json:"sellable_token_product_id" gorm:"type:int;default:0;index"`
 	SubscriptionPurchaseMode     string `json:"subscription_purchase_mode" gorm:"type:varchar(16);not null;default:'stack'"`
 	SubscriptionPurchaseQuantity int    `json:"subscription_purchase_quantity" gorm:"type:int;not null;default:1"`
 	CreatedTime                  int64  `json:"created_time" gorm:"bigint"`
@@ -79,6 +93,7 @@ type Redemption struct {
 	UsedUserId                   int    `json:"used_user_id"`
 	// PlanTitle 仅用于列表展示当前套餐标题，不落库，不保留历史快照。
 	PlanTitle   string         `json:"plan_title" gorm:"-"`
+	ProductName string         `json:"product_name" gorm:"-"`
 	DeletedAt   gorm.DeletedAt `gorm:"index"`
 	ExpiredTime int64          `json:"expired_time" gorm:"bigint"`
 }
@@ -87,6 +102,8 @@ func NormalizeRedemptionBenefitType(benefitType string) string {
 	switch strings.ToLower(strings.TrimSpace(benefitType)) {
 	case RedemptionBenefitTypeSubscription:
 		return RedemptionBenefitTypeSubscription
+	case RedemptionBenefitTypeSellableToken:
+		return RedemptionBenefitTypeSellableToken
 	default:
 		return RedemptionBenefitTypeQuota
 	}
@@ -179,26 +196,26 @@ func GetRedemptionById(id int) (*Redemption, error) {
 func Redeem(key string, userId int) (quota int, err error) {
 	// 旧接口只兼容余额码，先做轻量预判，避免套餐码被旧接口误消费。
 	benefitType, detectErr := getRedemptionBenefitTypeByKey(key)
-	if detectErr == nil && benefitType == RedemptionBenefitTypeSubscription {
-		return 0, errors.New("该兑换码为套餐兑换码，请使用统一兑换接口")
+	if detectErr == nil && benefitType != RedemptionBenefitTypeQuota {
+		return 0, legacyRedeemUnsupportedError(benefitType)
 	}
 	result, err := RedeemWithResult(key, userId)
 	if err != nil {
 		return 0, err
 	}
 	if result.BenefitType != RedemptionBenefitTypeQuota {
-		return 0, errors.New("该兑换码为套餐兑换码，请使用统一兑换接口")
+		return 0, legacyRedeemUnsupportedError(result.BenefitType)
 	}
 	return result.QuotaAdded, nil
 }
 
 func RedeemWithResult(key string, userId int) (*RedemptionResult, error) {
-	return RedeemWithOptions(key, userId, 0, "")
+	return RedeemWithOptions(key, userId, 0)
 }
 
 // RedeemWithOptions 为统一兑换入口提供可选参数。
 // purchaseMode 由用户选择（stack/renew），为空时后端返回特殊响应让前端弹出选择。
-func RedeemWithOptions(key string, userId int, renewTargetSubscriptionId int, purchaseMode string) (*RedemptionResult, error) {
+func RedeemWithOptions(key string, userId int, renewTargetSubscriptionId int, purchaseMode ...string) (*RedemptionResult, error) {
 	if key == "" {
 		return nil, errors.New("未提供兑换码")
 	}
@@ -207,6 +224,10 @@ func RedeemWithOptions(key string, userId int, renewTargetSubscriptionId int, pu
 	}
 	redemption := &Redemption{}
 	result := &RedemptionResult{}
+	selectedPurchaseMode := ""
+	if len(purchaseMode) > 0 {
+		selectedPurchaseMode = purchaseMode[0]
+	}
 
 	// key 是保留字，跨库场景下统一显式处理列名引用。
 	keyCol := "`key`"
@@ -222,27 +243,51 @@ func RedeemWithOptions(key string, userId int, renewTargetSubscriptionId int, pu
 		}
 		// 兑换码最终按数据库里的权益类型执行，避免前端或调用方伪造字段。
 		redemption.BenefitType = NormalizeRedemptionBenefitType(redemption.BenefitType)
-		if redemption.Status != common.RedemptionCodeStatusEnabled {
-			return errors.New("该兑换码已被使用")
+		switch redemption.Status {
+		case common.RedemptionCodeStatusUsed:
+			return ErrRedemptionAlreadyUsed
+		case common.RedemptionCodeStatusDisabled:
+			return ErrRedemptionDisabled
+		case common.RedemptionCodeStatusEnabled:
+		default:
+			return ErrRedeemFailed
 		}
 		if redemption.ExpiredTime != 0 && redemption.ExpiredTime < common.GetTimestamp() {
-			return errors.New("该兑换码已过期")
+			return ErrRedemptionExpired
 		}
 
 		// 返回对象在事务内一次性填满，避免事务提交后再查引入展示与真实发放不一致。
 		result.BenefitType = redemption.BenefitType
 		switch redemption.BenefitType {
 		case RedemptionBenefitTypeSubscription:
-			// 套餐码不直接加余额，而是走现有订阅体系创建/续费套餐。
-			planTitle, actionSummary, redeemErr := redeemSubscriptionBenefitTx(tx, redemption, userId, renewTargetSubscriptionId, purchaseMode)
+			// 套餐码先生成待发放记录，用户稍后再确认叠加/续费目标。
+			planTitle, issuanceId, actionSummary, redeemErr := redeemSubscriptionBenefitTx(tx, redemption, userId, renewTargetSubscriptionId, selectedPurchaseMode)
 			if redeemErr != nil {
 				return redeemErr
 			}
 			result.PlanId = redemption.PlanId
 			result.PlanTitle = planTitle
-			result.PurchaseMode = NormalizeSubscriptionPurchaseMode(purchaseMode)
+			result.PurchaseMode = resolveRedemptionSubscriptionPurchaseMode(redemption, selectedPurchaseMode)
 			result.PurchaseQuantity = normalizeRedemptionSubscriptionPurchaseQuantity(redemption.SubscriptionPurchaseQuantity)
+			result.IssuanceId = issuanceId
 			result.ActionSummary = actionSummary
+		case RedemptionBenefitTypeSellableToken:
+			product, err := MustGetSellableTokenProductAvailableTx(tx, redemption.SellableTokenProductId)
+			if err != nil {
+				return err
+			}
+			issuance := &SellableTokenIssuance{
+				UserId:     userId,
+				ProductId:  product.Id,
+				SourceType: SellableTokenSourceTypeRedeem,
+				SourceId:   redemption.Id,
+			}
+			if err := CreateSellableTokenIssuanceTx(tx, issuance); err != nil {
+				return err
+			}
+			result.IssuanceId = issuance.Id
+			result.ProductId = product.Id
+			result.ProductName = product.Name
 		default:
 			// 余额码保持旧行为：直接把额度加到用户余额。
 			if err := tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota)).Error; err != nil {
@@ -268,12 +313,19 @@ func RedeemWithOptions(key string, userId int, renewTargetSubscriptionId int, pu
 		if _, ok := err.(*RedeemNeedSelectPurchaseModeError); ok {
 			return nil, err
 		}
+		if isRedeemBusinessError(err) {
+			return nil, err
+		}
 		common.SysError("redemption failed: " + err.Error())
 		return nil, ErrRedeemFailed
 	}
 
-	if result.BenefitType == RedemptionBenefitTypeSubscription {
-		RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码兑换套餐 %s，兑换码ID %d", result.PlanTitle, redemption.Id))
+	switch result.BenefitType {
+	case RedemptionBenefitTypeSubscription:
+		RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码领取套餐 %s，兑换码ID %d，待发放记录 %d", result.PlanTitle, redemption.Id, result.IssuanceId))
+		return result, nil
+	case RedemptionBenefitTypeSellableToken:
+		RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码领取可售令牌 %s，兑换码ID %d，待发放记录 %d", result.ProductName, redemption.Id, result.IssuanceId))
 		return result, nil
 	}
 	RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码充值 %s，兑换码ID %d", logger.LogQuota(redemption.Quota), redemption.Id))
@@ -303,6 +355,7 @@ func (redemption *Redemption) Update() error {
 		"benefit_type",
 		"quota",
 		"plan_id",
+		"sellable_token_product_id",
 		"subscription_purchase_mode",
 		"subscription_purchase_quantity",
 		"redeemed_time",
@@ -359,6 +412,13 @@ func getRedemptionBenefitTypeByKey(key string) (string, error) {
 func fillSingleRedemptionPlanTitle(redemption *Redemption) {
 	// 列表/详情展示时按当前套餐标题回填，不做历史快照。
 	if redemption == nil || redemption.PlanId <= 0 || NormalizeRedemptionBenefitType(redemption.BenefitType) != RedemptionBenefitTypeSubscription {
+		if redemption == nil || redemption.SellableTokenProductId <= 0 || NormalizeRedemptionBenefitType(redemption.BenefitType) != RedemptionBenefitTypeSellableToken {
+			return
+		}
+		product, err := GetSellableTokenProductById(redemption.SellableTokenProductId)
+		if err == nil && product != nil {
+			redemption.ProductName = product.Name
+		}
 		return
 	}
 	plan, err := GetSubscriptionPlanById(redemption.PlanId)
@@ -368,122 +428,108 @@ func fillSingleRedemptionPlanTitle(redemption *Redemption) {
 }
 
 func fillRedemptionPlanTitles(redemptions []*Redemption) {
-	// 批量查询套餐标题，避免列表页出现 N+1 查询。
+	// 批量回填列表展示字段，避免套餐/可售令牌列表页出现 N+1 查询。
 	planIDs := make([]int, 0)
-	seen := make(map[int]struct{})
+	productIDs := make([]int, 0)
+	seenPlanIDs := make(map[int]struct{})
+	seenProductIDs := make(map[int]struct{})
 	for _, redemption := range redemptions {
-		if redemption == nil || redemption.PlanId <= 0 || NormalizeRedemptionBenefitType(redemption.BenefitType) != RedemptionBenefitTypeSubscription {
+		if redemption == nil {
 			continue
 		}
-		if _, ok := seen[redemption.PlanId]; ok {
-			continue
+		switch NormalizeRedemptionBenefitType(redemption.BenefitType) {
+		case RedemptionBenefitTypeSubscription:
+			if redemption.PlanId <= 0 {
+				continue
+			}
+			if _, ok := seenPlanIDs[redemption.PlanId]; ok {
+				continue
+			}
+			seenPlanIDs[redemption.PlanId] = struct{}{}
+			planIDs = append(planIDs, redemption.PlanId)
+		case RedemptionBenefitTypeSellableToken:
+			if redemption.SellableTokenProductId <= 0 {
+				continue
+			}
+			if _, ok := seenProductIDs[redemption.SellableTokenProductId]; ok {
+				continue
+			}
+			seenProductIDs[redemption.SellableTokenProductId] = struct{}{}
+			productIDs = append(productIDs, redemption.SellableTokenProductId)
 		}
-		seen[redemption.PlanId] = struct{}{}
-		planIDs = append(planIDs, redemption.PlanId)
 	}
-	if len(planIDs) == 0 {
-		return
+
+	planTitleByID := make(map[int]string, len(planIDs))
+	if len(planIDs) > 0 {
+		var plans []SubscriptionPlan
+		if err := DB.Select("id", "title").Where("id IN ?", planIDs).Find(&plans).Error; err == nil {
+			for _, plan := range plans {
+				planTitleByID[plan.Id] = plan.Title
+			}
+		}
 	}
-	var plans []SubscriptionPlan
-	if err := DB.Select("id", "title").Where("id IN ?", planIDs).Find(&plans).Error; err != nil {
-		return
+
+	productNameByID := make(map[int]string, len(productIDs))
+	if len(productIDs) > 0 {
+		var products []SellableTokenProduct
+		if err := DB.Select("id", "name").Where("id IN ?", productIDs).Find(&products).Error; err == nil {
+			for _, product := range products {
+				productNameByID[product.Id] = product.Name
+			}
+		}
 	}
-	planTitleByID := make(map[int]string, len(plans))
-	for _, plan := range plans {
-		planTitleByID[plan.Id] = plan.Title
-	}
+
 	for _, redemption := range redemptions {
 		if redemption == nil {
 			continue
 		}
 		redemption.PlanTitle = planTitleByID[redemption.PlanId]
+		redemption.ProductName = productNameByID[redemption.SellableTokenProductId]
 	}
 }
 
-func redeemSubscriptionBenefitTx(tx *gorm.DB, redemption *Redemption, userId int, renewTargetSubscriptionId int, userPurchaseMode string) (string, string, error) {
-	// 套餐码复用现有订阅体系，不单独造一套“发套餐”逻辑，避免后续规则分叉。
+func redeemSubscriptionBenefitTx(tx *gorm.DB, redemption *Redemption, userId int, renewTargetSubscriptionId int, userPurchaseMode string) (string, int, string, error) {
+	// 套餐码先生成待发放记录，再由用户确认叠加/续费，避免兑换时中断导致权益状态不清晰。
 	if tx == nil {
-		return "", "", errors.New("tx is nil")
+		return "", 0, "", errors.New("tx is nil")
 	}
 	if redemption == nil || redemption.PlanId <= 0 {
-		return "", "", errors.New("兑换码未配置有效套餐")
+		return "", 0, "", errors.New("兑换码未配置有效套餐")
 	}
 	plan, err := getSubscriptionPlanByIdTx(tx, redemption.PlanId)
 	if err != nil {
-		return "", "", err
+		return "", 0, "", err
 	}
 	if plan == nil {
-		return "", "", errors.New("套餐不存在")
+		return "", 0, "", errors.New("套餐不存在")
 	}
 	// 套餐码跟随当前套餐状态：套餐被停用后，旧码也不能继续兑换。
 	if !plan.Enabled {
-		return "", "", errors.New("当前套餐不可兑换")
+		return "", 0, "", errors.New("当前套餐不可兑换")
 	}
-	// 优先使用用户传入的 purchaseMode，为空则回退到兑换码记录里的默认值。
-	// 如果用户未指定 mode（空字符串），返回特殊错误让前端弹出选择。
-	mode := NormalizeSubscriptionPurchaseMode(userPurchaseMode)
-	if strings.TrimSpace(userPurchaseMode) == "" {
-		// 用户未选择兑换方式，返回特殊错误让前端弹出选择
-		return "", "", &RedeemNeedSelectPurchaseModeError{
-			PlanId:    plan.Id,
-			PlanTitle: plan.Title,
-		}
+	// 优先使用用户传入的 purchaseMode；为空时兼容沿用兑换码本身的默认兑换方式，
+	// 避免老调用方/测试在未传 mode 时被破坏。
+	modeInput := strings.TrimSpace(userPurchaseMode)
+	if modeInput == "" {
+		modeInput = strings.TrimSpace(redemption.SubscriptionPurchaseMode)
 	}
+	mode := normalizeSubscriptionIssuancePurchaseMode(modeInput)
 	purchaseQuantity := normalizeRedemptionSubscriptionPurchaseQuantity(redemption.SubscriptionPurchaseQuantity)
-	// 先做静态/数量校验，真正写订阅时再通过统一绑定逻辑加锁串行化。
-	if err := validateRedemptionSubscriptionPurchaseQuantityTx(tx, userId, plan, purchaseQuantity); err != nil {
-		return "", "", err
+	issuance := &SubscriptionIssuance{
+		UserId:                    userId,
+		PlanId:                    plan.Id,
+		PlanTitle:                 plan.Title,
+		SourceType:                SubscriptionIssuanceSourceRedeem,
+		SourceRef:                 strconv.Itoa(redemption.Id),
+		PurchaseMode:              mode,
+		PurchaseQuantity:          purchaseQuantity,
+		RenewTargetSubscriptionId: renewTargetSubscriptionId,
 	}
-	if err := validateRedemptionSubscriptionLimitsTx(tx, userId, plan, mode, purchaseQuantity); err != nil {
-		return "", "", err
+	if err := CreateSubscriptionIssuanceTx(tx, issuance); err != nil {
+		return "", 0, "", err
 	}
-	if mode == SubscriptionPurchaseModeRenew {
-		// 兑换码的“续费”语义被简化为：
-		// 1. 没有现有订阅 -> 直接创建；
-		// 2. 只有一条 -> 自动续到该条；
-		// 3. 多条 -> 由用户显式选择目标。
-		activeSubs, err := getActiveUserSubscriptionsByPlanTx(tx, userId, plan.Id, 0)
-		if err != nil {
-			return "", "", err
-		}
-		if len(activeSubs) == 0 {
-			// 没有现有订阅时，新的“续费”语义等价于旧的 renew_extend：
-			// 先创建一条，再把剩余份数顺延到同一条订阅上。
-			createdSummary, createErr := bindSubscriptionWithOptionsTx(tx, userId, plan, SubscriptionPurchaseModeRenewExtend, purchaseQuantity, 0, "redemption")
-			if createErr != nil {
-				return "", "", createErr
-			}
-			return plan.Title, createdSummary, nil
-		}
-		if len(activeSubs) == 1 {
-			renewTargetSubscriptionId = activeSubs[0].Id
-		} else {
-			if renewTargetSubscriptionId <= 0 {
-				return "", "", &RedeemNeedRenewTargetError{
-					PlanId:      plan.Id,
-					PlanTitle:   plan.Title,
-					Options:     buildSubscriptionSummaries(activeSubs),
-					MessageText: "存在多条可续费订阅，请先选择续费目标",
-				}
-			}
-			matched := false
-			for i := range activeSubs {
-				if activeSubs[i].Id == renewTargetSubscriptionId {
-					matched = true
-					break
-				}
-			}
-			if !matched {
-				return "", "", errors.New("续费目标订阅不存在或已失效")
-			}
-		}
-	}
-	// source=redemption 用于后续审计、排障和前端展示来源。
-	actionSummary, err := bindSubscriptionWithOptionsTx(tx, userId, plan, mode, purchaseQuantity, renewTargetSubscriptionId, "redemption")
-	if err != nil {
-		return "", "", err
-	}
-	return plan.Title, actionSummary, nil
+	actionSummary := "已生成套餐待发放记录，请完成叠加或续费设置"
+	return plan.Title, issuance.Id, actionSummary, nil
 }
 
 func validateRedemptionSubscriptionPurchaseQuantityTx(tx *gorm.DB, userId int, plan *SubscriptionPlan, quantity int) error {
@@ -526,6 +572,23 @@ func validateRedemptionSubscriptionPurchaseQuantityTx(tx *gorm.DB, userId int, p
 		return fmt.Errorf("兑换数量超出上限，当前最多可兑换 %d 份", dynamicMaxQuantity)
 	}
 	return nil
+}
+
+func legacyRedeemUnsupportedError(benefitType string) error {
+	switch NormalizeRedemptionBenefitType(benefitType) {
+	case RedemptionBenefitTypeSubscription:
+		return errors.New("该兑换码为套餐兑换码，请使用统一兑换接口")
+	case RedemptionBenefitTypeSellableToken:
+		return errors.New("该兑换码为可售令牌兑换码，请使用统一兑换接口")
+	default:
+		return errors.New("该兑换码为非余额兑换码，请使用统一兑换接口")
+	}
+}
+
+func isRedeemBusinessError(err error) bool {
+	return errors.Is(err, ErrRedemptionAlreadyUsed) ||
+		errors.Is(err, ErrRedemptionDisabled) ||
+		errors.Is(err, ErrRedemptionExpired)
 }
 
 func validateRedemptionSubscriptionLimitsTx(tx *gorm.DB, userId int, plan *SubscriptionPlan, purchaseMode string, purchaseQuantity int) error {
@@ -571,4 +634,12 @@ func validateRedemptionSubscriptionLimitsTx(tx *gorm.DB, userId int, plan *Subsc
 		}
 	}
 	return nil
+}
+
+func resolveRedemptionSubscriptionPurchaseMode(redemption *Redemption, userPurchaseMode string) string {
+	modeInput := strings.TrimSpace(userPurchaseMode)
+	if modeInput == "" && redemption != nil {
+		modeInput = strings.TrimSpace(redemption.SubscriptionPurchaseMode)
+	}
+	return NormalizeSubscriptionPurchaseMode(modeInput)
 }

@@ -84,6 +84,23 @@ func TestToken(c *gin.Context) {
 		return
 	}
 
+	if token.Status != common.TokenStatusEnabled {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "令牌已被禁用或已耗尽，无法测试",
+			"time":    0.0,
+		})
+		return
+	}
+	if token.ExpiredTime != -1 && token.ExpiredTime <= common.GetTimestamp() {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "令牌已过期，无法测试",
+			"time":    0.0,
+		})
+		return
+	}
+
 	req := tokenTestRequest{}
 	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
 		common.ApiError(c, err)
