@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import {
   Notification,
   Button,
@@ -360,6 +360,63 @@ function TokensPage() {
     t,
   } = tokensData;
 
+  // Fetch runtime status for tokens that have runtime limits
+  const [runtimeStatusMap, setRuntimeStatusMap] = useState({});
+
+  const fetchRuntimeStatus = useCallback(async (tokensList) => {
+    const ids = tokensList
+      .filter(
+        (tk) =>
+          (Number(tk.max_concurrency) > 0) ||
+          (Number(tk.window_request_limit) > 0 && Number(tk.window_seconds) > 0),
+      )
+      .map((tk) => tk.id);
+    if (ids.length === 0) {
+      setRuntimeStatusMap({});
+      return;
+    }
+    try {
+      const res = await API.post('/api/token/runtime_status', {
+        token_ids: ids,
+      });
+      if (res.data?.success && res.data?.data) {
+        setRuntimeStatusMap(res.data.data);
+      }
+    } catch {
+      // silently ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!tokensData.tokens || tokensData.tokens.length === 0) return;
+    fetchRuntimeStatus(tokensData.tokens);
+    const interval = setInterval(
+      () => fetchRuntimeStatus(tokensData.tokens),
+      30000,
+    );
+    return () => clearInterval(interval);
+  }, [tokensData.tokens, fetchRuntimeStatus]);
+
+  // Merge runtime status into tokens
+  const tokensWithRuntime = useMemo(() => {
+    if (!tokensData.tokens || Object.keys(runtimeStatusMap).length === 0) {
+      return tokensData.tokens;
+    }
+    return tokensData.tokens.map((tk) => {
+      const rs = runtimeStatusMap[String(tk.id)];
+      if (rs) {
+        return { ...tk, runtime_status: rs };
+      }
+      return tk;
+    });
+  }, [tokensData.tokens, runtimeStatusMap]);
+
+  // Override tokens in tokensData for downstream components
+  const enhancedTokensData = useMemo(
+    () => ({ ...tokensData, tokens: tokensWithRuntime }),
+    [tokensData, tokensWithRuntime],
+  );
+
   return (
     <>
       <EditTokenModal
@@ -376,7 +433,6 @@ function TokensPage() {
           setTestingToken(null);
         }}
       />
-
       <CardPro
         type='type1'
         descriptionArea={
@@ -426,7 +482,7 @@ function TokensPage() {
         t={tokensData.t}
       >
         <TokensTable
-          {...tokensData}
+          {...enhancedTokensData}
           openTestModal={(token) => {
             setTestingToken(token);
             setShowTestModal(true);

@@ -1,4 +1,4 @@
-import React, { useCallback, useContext, useMemo, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Banner,
   Button,
@@ -6,6 +6,7 @@ import {
   Collapsible,
   Empty,
   Input,
+  Progress,
   TabPane,
   Tabs,
   Tag,
@@ -28,6 +29,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { API, renderQuota, showError, showWarning } from '../../helpers';
+import { formatConcurrencyLabel, formatWindowLimitShort } from '../../helpers/render';
 import { StatusContext } from '../../context/Status';
 import { UserContext } from '../../context/User';
 import { useSetTheme, useTheme } from '../../context/Theme';
@@ -117,6 +119,137 @@ function getCacheSummaryText(record, t) {
     return `${t('缓存写')} ${formatExactNumber(cacheWriteTokens)}`;
   }
   return '';
+}
+
+function getRuntimeLimitText(source, t) {
+  const maxConcurrency = Number(source?.max_concurrency || 0);
+  const windowRequestLimit = Number(source?.window_request_limit || 0);
+  const windowSeconds = Number(source?.window_seconds || 0);
+  const parts = [];
+
+  if (maxConcurrency > 0) {
+    parts.push(formatConcurrencyLabel(maxConcurrency, t));
+  }
+  if (windowRequestLimit > 0 && windowSeconds > 0) {
+    parts.push(formatWindowLimitShort(windowSeconds, windowRequestLimit, t));
+  }
+
+  return parts.length ? parts.join(' · ') : t('无限制');
+}
+
+function getRuntimeProgressColor(pct) {
+  if (pct > 90) return 'var(--semi-color-danger)';
+  if (pct >= 70) return 'var(--semi-color-warning)';
+  return 'var(--semi-color-primary)';
+}
+
+function formatCountdown(remainMs) {
+  if (remainMs <= 0) return null;
+  const totalSec = Math.ceil(remainMs / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+}
+
+function RuntimeLimitPanel({ data, t }) {
+  const maxConcurrency = Number(data?.max_concurrency || 0);
+  const windowRequestLimit = Number(data?.window_request_limit || 0);
+  const windowSeconds = Number(data?.window_seconds || 0);
+  const rs = data?.runtime_status || {};
+
+  const currentConcurrency = Number(rs.current_concurrency || 0);
+  const windowUsed = Number(rs.window_used || 0);
+  const windowEndMs = Number(rs.window_end_ms || 0);
+  const serverNowMs = Number(rs.server_now_ms || 0);
+
+  const hasConcurrency = maxConcurrency > 0;
+  const hasWindow = windowRequestLimit > 0 && windowSeconds > 0;
+
+  const [countdown, setCountdown] = useState('');
+  const offsetRef = useRef(0);
+
+  useEffect(() => {
+    if (!hasWindow || !windowEndMs || !serverNowMs) {
+      setCountdown('');
+      return;
+    }
+    offsetRef.current = Date.now() - serverNowMs;
+    const tick = () => {
+      const adjusted = Date.now() - offsetRef.current;
+      const remain = windowEndMs - adjusted;
+      if (remain <= 0) {
+        setCountdown(t('窗口已重置'));
+      } else {
+        setCountdown(formatCountdown(remain) + ' ' + t('后重置'));
+      }
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [hasWindow, windowEndMs, serverNowMs, t]);
+
+  if (!hasConcurrency && !hasWindow) {
+    return (
+      <div className='usage-meta-item' style={{ gridColumn: 'span 1' }}>
+        <span className='usage-meta-item__label'>{t('运行限制')}</span>
+        <span className='usage-meta-item__value'>
+          <Tag color='green'>{t('无限制')}</Tag>
+        </span>
+      </div>
+    );
+  }
+
+  const concurrencyPct = hasConcurrency
+    ? Math.min((currentConcurrency / maxConcurrency) * 100, 100)
+    : 0;
+  const windowPct = hasWindow
+    ? Math.min((windowUsed / windowRequestLimit) * 100, 100)
+    : 0;
+
+  return (
+    <div className='usage-meta-item' style={{ gridColumn: 'span 1' }}>
+      <span className='usage-meta-item__label'>{t('运行限制')}</span>
+      <div className='usage-runtime-panel'>
+        {hasConcurrency && (
+          <div className='usage-runtime-item'>
+            <div className='usage-runtime-item__header'>
+              <span>{t('当前并发')}</span>
+              <span className='usage-runtime-item__value'>
+                {currentConcurrency}/{maxConcurrency}
+              </span>
+            </div>
+            <Progress
+              percent={concurrencyPct}
+              size='small'
+              stroke={getRuntimeProgressColor(concurrencyPct)}
+              showInfo={false}
+              style={{ height: 6 }}
+            />
+          </div>
+        )}
+        {hasWindow && (
+          <div className='usage-runtime-item'>
+            <div className='usage-runtime-item__header'>
+              <span>{t('窗口请求')}</span>
+              <span className='usage-runtime-item__value'>
+                {windowUsed}/{windowRequestLimit}
+              </span>
+            </div>
+            <Progress
+              percent={windowPct}
+              size='small'
+              stroke={getRuntimeProgressColor(windowPct)}
+              showInfo={false}
+              style={{ height: 6 }}
+            />
+            {countdown && (
+              <span className='usage-runtime-countdown'>{countdown}</span>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function normalizeLanguage(i18n) {
@@ -1148,6 +1281,7 @@ export default function Usage() {
                             : renderQuota(usageData.total_granted || 0)
                         }
                       />
+                      <RuntimeLimitPanel data={usageData} t={t} />
                     </div>
                   </div>
                 </div>
@@ -1562,6 +1696,7 @@ export default function Usage() {
                               <span>{`${periodLabel}${t('请求')} ${formatNumber(item.period_request_count)}`}</span>
                               <span>{`${periodLabel}${t('消费')} ${renderQuota(item.period_quota || 0)}`}</span>
                               <span>{`${formatNumber(itemDistribution.total)} Token`}</span>
+                              <span>{getRuntimeLimitText(item, t)}</span>
                             </div>
 
                             {!item.unlimited_quota ? (

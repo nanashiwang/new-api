@@ -1480,3 +1480,38 @@ html.dark .usage-model-board__item {
     text-align: left;
   }
 }
+
+/* Runtime Limit Panel */
+.usage-runtime-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.usage-runtime-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.usage-runtime-item__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.82rem;
+  color: var(--semi-color-text-1);
+}
+
+.usage-runtime-item__value {
+  font-weight: 700;
+  color: var(--semi-color-text-0);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-runtime-countdown {
+  font-size: 0.76rem;
+  color: var(--semi-color-text-2);
+  font-variant-numeric: tabular-nums;
+}

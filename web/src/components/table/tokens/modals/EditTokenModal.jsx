@@ -69,6 +69,7 @@ const EditTokenModal = (props) => {
   const [groups, setGroups] = useState([]);
   const [tokenMode, setTokenMode] = useState('standard');
   const isEdit = props.editingToken.id !== undefined;
+  const isSellableToken = props.editingToken?.source_type === 'sellable_token';
 
   const getInitValues = () => ({
     name: '',
@@ -81,6 +82,9 @@ const EditTokenModal = (props) => {
     allow_ips: '',
     group: '',
     cross_group_retry: false,
+    max_concurrency: 0,
+    window_request_limit: 0,
+    window_seconds: 0,
     tokenCount: 1,
     package_enabled: false,
     package_limit_amount: 0,
@@ -194,10 +198,27 @@ const EditTokenModal = (props) => {
           localGroupOptions.sort((a, b) => (a.value === 'auto' ? -1 : 1));
         }
       }
+      // For sellable tokens, restrict groups to those allowed by the product
+      if (isSellableToken && props.editingToken?.sellable_token_product_id) {
+        try {
+          const productsRes = await API.get('/api/user/sellable-token/products');
+          if (productsRes.data?.success) {
+            const products = productsRes.data.data || [];
+            const matchedProduct = products.find(
+              (item) => Number(item?.product?.id || 0) === Number(props.editingToken.sellable_token_product_id),
+            );
+            if (matchedProduct) {
+              const allowedGroups = matchedProduct.allowed_groups || [];
+              const userGroups = (matchedProduct.user_groups || []).map((g) => g?.value);
+              if (allowedGroups.length > 0 || userGroups.length > 0) {
+                const allowedSet = new Set(userGroups.length > 0 ? userGroups : allowedGroups);
+                localGroupOptions = localGroupOptions.filter((g) => allowedSet.has(g.value));
+              }
+            }
+          }
+        } catch (_) {}
+      }
       setGroups(localGroupOptions);
-      // if (statusState?.status?.default_use_auto_group && formApiRef.current) {
-      //   formApiRef.current.setValue('group', 'auto');
-      // }
     } else {
       showError(t(message));
     }
@@ -302,7 +323,7 @@ const EditTokenModal = (props) => {
     localInputs.package_used_quota = parseInt(localInputs.package_used_quota, 10) || 0;
     localInputs.package_next_reset_time = parseInt(localInputs.package_next_reset_time, 10) || 0;
     const period = (localInputs.package_period || '').trim();
-    if (!['daily', 'weekly', 'monthly', 'custom'].includes(period)) {
+    if (!['hourly', 'daily', 'weekly', 'monthly', 'custom'].includes(period)) {
       return { ok: false, message: t('套餐周期无效') };
     }
     localInputs.package_period = period;
@@ -347,6 +368,36 @@ const EditTokenModal = (props) => {
     return { ok: true };
   };
 
+  const normalizeRuntimeLimitFields = (localInputs) => {
+    localInputs.max_concurrency = parseInt(localInputs.max_concurrency, 10) || 0;
+    localInputs.window_request_limit =
+      parseInt(localInputs.window_request_limit, 10) || 0;
+    localInputs.window_seconds = parseInt(localInputs.window_seconds, 10) || 0;
+
+    if (localInputs.max_concurrency < 0) {
+      return { ok: false, message: t('并发上限不能小于 0') };
+    }
+    if (localInputs.window_request_limit < 0) {
+      return { ok: false, message: t('窗口请求上限不能小于 0') };
+    }
+    if (localInputs.window_seconds < 0) {
+      return { ok: false, message: t('窗口时长不能小于 0') };
+    }
+    if (
+      localInputs.window_request_limit > 0 &&
+      localInputs.window_seconds <= 0
+    ) {
+      return { ok: false, message: t('设置请求窗口限制时，窗口时长必须大于 0') };
+    }
+    if (
+      localInputs.window_seconds > 0 &&
+      localInputs.window_request_limit <= 0
+    ) {
+      return { ok: false, message: t('设置窗口时长时，请同时设置窗口请求上限') };
+    }
+    return { ok: true };
+  };
+
   const generateRandomSuffix = () => {
     const characters =
       'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -368,32 +419,46 @@ const EditTokenModal = (props) => {
     setLoading(true);
     if (isEdit) {
       let { tokenCount: _tc, ...localInputs } = values;
-      const remainResult = normalizeRemainQuotaFields(localInputs);
-      if (!remainResult.ok) {
-        showError(remainResult.message);
-        setLoading(false);
-        return;
-      }
-      const packageResult = normalizePackageFields(localInputs);
-      if (!packageResult.ok) {
-        showError(packageResult.message);
-        setLoading(false);
-        return;
-      }
-      localInputs.model_limits = sanitizeModelLimits(localInputs.model_limits);
-      delete localInputs.remain_amount;
-      delete localInputs.package_limit_amount;
-      if (localInputs.expired_time !== -1) {
-        let time = Date.parse(localInputs.expired_time);
-        if (isNaN(time)) {
-          showError(t('过期时间格式错误！'));
+      if (!isSellableToken) {
+        const remainResult = normalizeRemainQuotaFields(localInputs);
+        if (!remainResult.ok) {
+          showError(remainResult.message);
           setLoading(false);
           return;
         }
-        localInputs.expired_time = Math.ceil(time / 1000);
+        const packageResult = normalizePackageFields(localInputs);
+        if (!packageResult.ok) {
+          showError(packageResult.message);
+          setLoading(false);
+          return;
+        }
+        const runtimeLimitResult = normalizeRuntimeLimitFields(localInputs);
+        if (!runtimeLimitResult.ok) {
+          showError(runtimeLimitResult.message);
+          setLoading(false);
+          return;
+        }
+        localInputs.model_limits = sanitizeModelLimits(localInputs.model_limits);
+        delete localInputs.remain_amount;
+        delete localInputs.package_limit_amount;
+        if (localInputs.expired_time !== -1) {
+          let time = Date.parse(localInputs.expired_time);
+          if (isNaN(time)) {
+            showError(t('过期时间格式错误！'));
+            setLoading(false);
+            return;
+          }
+          localInputs.expired_time = Math.ceil(time / 1000);
+        }
+        localInputs.model_limits = localInputs.model_limits.join(',');
+        localInputs.model_limits_enabled = localInputs.model_limits.length > 0;
+      } else {
+        localInputs = {
+          name: localInputs.name,
+          group: localInputs.group,
+          status: props.editingToken.status,
+        };
       }
-      localInputs.model_limits = localInputs.model_limits.join(',');
-      localInputs.model_limits_enabled = localInputs.model_limits.length > 0;
       let res = await API.put(`/api/token/`, {
         ...localInputs,
         id: parseInt(props.editingToken.id),
@@ -440,6 +505,12 @@ const EditTokenModal = (props) => {
         const packageResult = normalizePackageFields(localInputs);
         if (!packageResult.ok) {
           showError(packageResult.message);
+          setLoading(false);
+          break;
+        }
+        const runtimeLimitResult = normalizeRuntimeLimitFields(localInputs);
+        if (!runtimeLimitResult.ok) {
+          showError(runtimeLimitResult.message);
           setLoading(false);
           break;
         }
@@ -537,6 +608,15 @@ const EditTokenModal = (props) => {
         >
           {({ values }) => (
             <div className='p-2'>
+              {isSellableToken ? (
+                <Card className='!rounded-2xl shadow-sm border-0 mb-4 bg-[var(--semi-color-primary-light-default)]'>
+                  <Text className='text-sm'>
+                    {t('当前为可售令牌，仅会保存名称和分组修改，其余额度与限制配置保持只读。')}
+                  </Text>
+                </Card>
+              ) : null}
+
+              {!isSellableToken && (
               <Card className='!rounded-2xl shadow-sm border-0'>
                 <div className='flex items-center mb-2'>
                   <Avatar size='small' color='orange' className='mr-2 shadow-md'>
@@ -566,6 +646,7 @@ const EditTokenModal = (props) => {
                   </Button>
                 </Space>
               </Card>
+              )}
 
               {/* 基础信息 */}
               <Card className='!rounded-2xl shadow-sm border-0'>
@@ -610,6 +691,8 @@ const EditTokenModal = (props) => {
                       />
                     )}
                   </Col>
+                  {!isSellableToken && (
+                  <>
                   <Col
                     span={24}
                     style={{
@@ -703,9 +786,13 @@ const EditTokenModal = (props) => {
                       />
                     </Col>
                   )}
+                  </>
+                  )}
                 </Row>
               </Card>
 
+              {!isSellableToken && (
+              <>
               {/* 额度设置 */}
               <Card className='!rounded-2xl shadow-sm border-0'>
                 <div className='flex items-center mb-2'>
@@ -770,6 +857,7 @@ const EditTokenModal = (props) => {
                         field='package_period'
                         label={t('套餐周期')}
                         optionList={[
+                          { label: t('每小时'), value: 'hourly' },
                           { label: t('每日'), value: 'daily' },
                           { label: t('每周'), value: 'weekly' },
                           { label: t('每月'), value: 'monthly' },
@@ -878,8 +966,37 @@ const EditTokenModal = (props) => {
                       style={{ width: '100%' }}
                     />
                   </Col>
+                  <Col span={8}>
+                    <Form.InputNumber
+                      field='max_concurrency'
+                      label={t('并发上限')}
+                      min={0}
+                      style={{ width: '100%' }}
+                      extraText={t('0 表示不限制')}
+                    />
+                  </Col>
+                  <Col span={8}>
+                    <Form.InputNumber
+                      field='window_request_limit'
+                      label={t('窗口请求上限')}
+                      min={0}
+                      style={{ width: '100%' }}
+                      extraText={t('0 表示不限制')}
+                    />
+                  </Col>
+                  <Col span={8}>
+                    <Form.InputNumber
+                      field='window_seconds'
+                      label={t('窗口时长（秒）')}
+                      min={0}
+                      style={{ width: '100%' }}
+                      extraText={t('与窗口请求上限配合使用，0 表示不限制')}
+                    />
+                  </Col>
                 </Row>
               </Card>
+              </>
+              )}
             </div>
           )}
         </Form>

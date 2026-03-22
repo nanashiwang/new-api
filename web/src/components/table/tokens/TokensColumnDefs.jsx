@@ -38,6 +38,10 @@ import {
   getModelCategories,
 } from '../../../helpers';
 import {
+  formatConcurrencyLabel,
+  formatWindowLimitShort,
+} from '../../../helpers/render';
+import {
   IconCopy,
   IconEyeOpened,
   IconEyeClosed,
@@ -248,6 +252,99 @@ const renderAllowIps = (text, t) => {
   return <Space wrap>{ipTags}</Space>;
 };
 
+const getRuntimeColor = (pct) => {
+  if (pct > 90) return 'var(--semi-color-danger)';
+  if (pct >= 70) return 'var(--semi-color-warning)';
+  return 'var(--semi-color-primary)';
+};
+
+const renderRuntimeLimits = (record, t) => {
+  const maxConcurrency = Number(record?.max_concurrency || 0);
+  const windowRequestLimit = Number(record?.window_request_limit || 0);
+  const windowSeconds = Number(record?.window_seconds || 0);
+  const hasConcurrency = maxConcurrency > 0;
+  const hasWindow = windowRequestLimit > 0 && windowSeconds > 0;
+
+  if (!hasConcurrency && !hasWindow) {
+    return (
+      <Tag color='white' shape='circle'>
+        {t('无限制')}
+      </Tag>
+    );
+  }
+
+  const rs = record?.runtime_status;
+  const currentConc = Number(rs?.current_concurrency || 0);
+  const windowUsed = Number(rs?.window_used || 0);
+
+  const concPct = hasConcurrency
+    ? Math.min((currentConc / maxConcurrency) * 100, 100)
+    : 0;
+  const winPct = hasWindow
+    ? Math.min((windowUsed / windowRequestLimit) * 100, 100)
+    : 0;
+
+  const popoverContent = (
+    <div style={{ padding: '4px 0', minWidth: 160 }}>
+      {hasConcurrency && (
+        <div style={{ marginBottom: hasWindow ? 10 : 0 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', marginBottom: 4 }}>
+            <span>{t('当前并发')}</span>
+            <strong>{rs ? `${currentConc}/${maxConcurrency}` : formatConcurrencyLabel(maxConcurrency, t)}</strong>
+          </div>
+          {rs && (
+            <Progress
+              percent={concPct}
+              size='small'
+              stroke={getRuntimeColor(concPct)}
+              showInfo={false}
+              style={{ height: 4 }}
+            />
+          )}
+        </div>
+      )}
+      {hasWindow && (
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', marginBottom: 4 }}>
+            <span>{t('窗口请求')}</span>
+            <strong>{rs ? `${windowUsed}/${windowRequestLimit}` : formatWindowLimitShort(windowSeconds, windowRequestLimit, t)}</strong>
+          </div>
+          {rs && (
+            <Progress
+              percent={winPct}
+              size='small'
+              stroke={getRuntimeColor(winPct)}
+              showInfo={false}
+              style={{ height: 4 }}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <Popover content={popoverContent} position='top' showArrow>
+      <Space wrap style={{ cursor: 'pointer' }}>
+        {hasConcurrency && (
+          <Tag color='white' shape='circle'>
+            {rs
+              ? `⇄ ${currentConc}/${maxConcurrency}`
+              : `⇄ ${formatConcurrencyLabel(maxConcurrency, t)}`}
+          </Tag>
+        )}
+        {hasWindow && (
+          <Tag color='white' shape='circle'>
+            {rs
+              ? `↻ ${windowUsed}/${windowRequestLimit}`
+              : `↻ ${formatWindowLimitShort(windowSeconds, windowRequestLimit, t)}`}
+          </Tag>
+        )}
+      </Space>
+    </Popover>
+  );
+};
+
 // 渲染独立额度用量列
 const renderQuotaUsage = (text, record, t) => {
   const { Paragraph } = Typography;
@@ -425,6 +522,8 @@ const renderPackageCycleBalance = (text, record, t) => {
 
 const getPackagePeriodLabel = (record, t) => {
   switch (record?.package_period) {
+    case 'hourly':
+      return t('每小时');
     case 'daily':
       return t('每日');
     case 'weekly':
@@ -439,24 +538,22 @@ const getPackagePeriodLabel = (record, t) => {
 };
 
 const renderTokenName = (text, record, t) => {
-  if (!record?.package_enabled) {
-    return <span>{text}</span>;
-  }
-  const packageLimit = Number(record?.package_limit_quota || 0);
-  const periodLabel = getPackagePeriodLabel(record, t);
-  const budgetLabel =
-    record?.package_period === 'custom'
-      ? `${periodLabel} ${Math.max(0, Number(record?.package_custom_seconds || 0))}${t('秒')}`
-      : `${periodLabel} ${renderQuota(packageLimit)}`;
+  const isSellableToken = record?.source_type === 'sellable_token';
+  const isPackageEnabled = !!record?.package_enabled;
+
   return (
     <div className='flex items-center gap-1 flex-wrap'>
-      <span>{text}</span>
-      <Tag color='blue' shape='circle' size='small'>
-        {t('套餐令牌')}
-      </Tag>
-      <Tag color='white' shape='circle' size='small'>
-        {budgetLabel}
-      </Tag>
+      <span className='font-medium'>{text}</span>
+      {isSellableToken && (
+        <Tag color='cyan' shape='circle' size='small'>
+          {t('可售令牌')}
+        </Tag>
+      )}
+      {!isSellableToken && isPackageEnabled && (
+        <Tag color='blue' shape='circle' size='small'>
+          {t('套餐令牌')}
+        </Tag>
+      )}
     </div>
   );
 };
@@ -520,16 +617,35 @@ const renderOperations = (
         type='danger'
         size='small'
         onClick={() => {
-          Modal.confirm({
-            title: t('确定是否要删除此令牌？'),
-            content: t('此修改将不可逆'),
-            onOk: () => {
-              (async () => {
-                await manageToken(record.id, 'delete', record);
-                await refresh();
-              })();
-            },
-          });
+          if (record?.source_type === 'sellable_token') {
+            Modal.confirm({
+              title: t('确认删除？'),
+              content: t('删除后不可恢复'),
+              onOk: async () => {
+                Modal.confirm({
+                  title: t('二次确认'),
+                  content: t('此操作不可逆，删除后令牌将永久失效且无法恢复。确定要继续吗？'),
+                  okType: 'danger',
+                  okText: t('确认删除'),
+                  onOk: async () => {
+                    await manageToken(record.id, 'delete', record);
+                    await refresh();
+                  },
+                });
+              },
+            });
+          } else {
+            Modal.confirm({
+              title: t('确定是否要删除此令牌？'),
+              content: t('此修改将不可逆'),
+              onOk: () => {
+                (async () => {
+                  await manageToken(record.id, 'delete', record);
+                  await refresh();
+                })();
+              },
+            });
+          }
         }}
       >
         {t('删除')}
@@ -598,6 +714,11 @@ export const getTokensColumns = ({
       title: t('IP限制'),
       dataIndex: 'allow_ips',
       render: (text) => renderAllowIps(text, t),
+    },
+    {
+      title: t('运行限制'),
+      key: 'runtime_limits',
+      render: (text, record) => renderRuntimeLimits(record, t),
     },
     {
       title: t('创建时间'),
