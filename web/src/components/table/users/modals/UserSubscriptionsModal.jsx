@@ -34,7 +34,7 @@ import {
   IllustrationNoResultDark,
 } from '@douyinfe/semi-illustrations';
 import { API, showError, showSuccess } from '../../../../helpers';
-import { convertUSDToCurrency } from '../../../../helpers/render';
+import { formatPaymentAmount } from '../../../../helpers/render';
 import {
   buildPurchaseQuantityOptions,
   getPlanPurchaseQuantityConfig,
@@ -48,6 +48,29 @@ const { Text } = Typography;
 function formatTs(ts) {
   if (!ts) return '-';
   return new Date(ts * 1000).toLocaleString();
+}
+
+function formatSubscriptionSourceLabel(t, source) {
+  switch ((source || '').trim()) {
+    case 'redeem':
+    case 'redemption':
+      return t('兑换码');
+    case 'admin':
+      return t('管理员添加');
+    case 'order':
+      return t('订单购买');
+    case 'subscription_issuance':
+      return t('待发放记录');
+    default:
+      return source || '-';
+  }
+}
+
+function formatSubscriptionPurchaseModeLabel(t, mode) {
+  if (mode === 'renew') return t('续费');
+  if (mode === 'renew_extend') return t('续费式购买');
+  if (mode === 'stack') return t('叠加');
+  return '-';
 }
 
 function getSubscriptionRuntimeState(sub) {
@@ -109,6 +132,7 @@ const UserSubscriptionsModal = ({ visible, onCancel, user, t, onSuccess }) => {
   const [activeQuantityByPlan, setActiveQuantityByPlan] = useState({});
 
   const [subs, setSubs] = useState([]);
+  const [issuances, setIssuances] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 10;
 
@@ -200,7 +224,7 @@ const UserSubscriptionsModal = ({ visible, onCancel, user, t, onSuccess }) => {
 
   const planOptions = useMemo(() => {
     return (plans || []).map((item) => ({
-      label: `${item?.plan?.title || ''} (${convertUSDToCurrency(
+      label: `${item?.plan?.title || ''} (${formatPaymentAmount(
         Number(item?.plan?.price_amount || 0),
         2,
       )})`,
@@ -249,9 +273,11 @@ const UserSubscriptionsModal = ({ visible, onCancel, user, t, onSuccess }) => {
         if (Array.isArray(raw)) {
           // 向后兼容：旧版响应可能直接返回订阅数组。
           setSubs(raw);
+          setIssuances([]);
           setActiveQuantityByPlan({});
         } else {
           setSubs(Array.isArray(raw?.subscriptions) ? raw.subscriptions : []);
+          setIssuances(Array.isArray(raw?.issuances) ? raw.issuances : []);
           setActiveQuantityByPlan(raw?.active_quantity_by_plan || {});
         }
         setCurrentPage(1);
@@ -274,6 +300,7 @@ const UserSubscriptionsModal = ({ visible, onCancel, user, t, onSuccess }) => {
     setCurrentPage(1);
     setSelectedSubscriptionIds([]);
     setActiveQuantityByPlan({});
+    setIssuances([]);
     loadPlans();
     loadUserSubscriptions();
   }, [visible]);
@@ -332,6 +359,10 @@ const UserSubscriptionsModal = ({ visible, onCancel, user, t, onSuccess }) => {
   const handlePageChange = (page) => {
     setCurrentPage(page);
   };
+
+  const pendingIssuanceCount = useMemo(() => {
+    return (issuances || []).filter((item) => item?.status === 'pending').length;
+  }, [issuances]);
 
   const createSubscription = async () => {
     if (!user?.id) {
@@ -536,11 +567,12 @@ const UserSubscriptionsModal = ({ visible, onCancel, user, t, onSuccess }) => {
           const planId = sub?.plan_id;
           const title =
             planTitleMap.get(planId) || (planId ? `#${planId}` : '-');
+          const sourceLabel = formatSubscriptionSourceLabel(t, sub?.source);
           return (
             <div className='min-w-0'>
               <div className='font-medium truncate'>{title}</div>
               <div className='text-xs text-gray-500'>
-                {t('来源')}: {sub?.source || '-'}
+                {t('来源')}：{sourceLabel}
               </div>
             </div>
           );
@@ -736,6 +768,18 @@ const UserSubscriptionsModal = ({ visible, onCancel, user, t, onSuccess }) => {
           </div>
         </div>
 
+        <div className='mb-4 flex flex-wrap gap-2'>
+          <Tag color='green' shape='circle'>
+            {t('生效中')} {subs.filter((item) => getSubscriptionRuntimeState(item?.subscription).isActive).length}
+          </Tag>
+          <Tag color='blue' shape='circle'>
+            {t('待发放')} {pendingIssuanceCount}
+          </Tag>
+          <Tag color='white' shape='circle'>
+            {t('总记录')} {subs.length}
+          </Tag>
+        </div>
+
         {/* 批量操作区：与用户管理保持一致（enable/disable/delete）。 */}
         <div className='flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3'>
           <Text type='tertiary'>
@@ -805,6 +849,102 @@ const UserSubscriptionsModal = ({ visible, onCancel, user, t, onSuccess }) => {
           }
           size='middle'
         />
+
+        <div className='mt-6'>
+          <div className='mb-3 flex flex-col items-start gap-1'>
+            <Typography.Title heading={6} className='!mb-0'>
+              {t('套餐待发放记录')}
+            </Typography.Title>
+            <Text type='tertiary' size='small'>
+              {t('用于查看用户已购买/已兑换但尚未确认叠加或续费的套餐记录')}
+            </Text>
+          </div>
+          <CardTable
+            columns={[
+              {
+                title: 'ID',
+                dataIndex: 'id',
+                width: 70,
+              },
+              {
+                title: t('套餐'),
+                key: 'plan',
+                width: 180,
+                render: (_, record) => {
+                  const title =
+                    record?.plan_title ||
+                    record?.plan?.title ||
+                    `#${record?.plan_id || '-'}`;
+                  const sourceLabel = formatSubscriptionSourceLabel(
+                    t,
+                    record?.source_type,
+                  );
+                  return (
+                    <div className='min-w-0'>
+                      <div className='font-medium truncate'>{title}</div>
+                      <div className='text-xs text-gray-500'>
+                        {t('来源')}：{sourceLabel}
+                      </div>
+                    </div>
+                  );
+                },
+              },
+              {
+                title: t('状态'),
+                dataIndex: 'status',
+                width: 100,
+                render: (text) => (
+                  <Tag
+                    color={text === 'pending' ? 'orange' : 'green'}
+                    shape='circle'
+                    size='small'
+                  >
+                    {text === 'pending' ? t('待发放') : t('已发放')}
+                  </Tag>
+                ),
+              },
+              {
+                title: t('发放方式'),
+                dataIndex: 'purchase_mode',
+                width: 140,
+                render: (text) => formatSubscriptionPurchaseModeLabel(t, text),
+              },
+              {
+                title: t('份数'),
+                dataIndex: 'purchase_quantity',
+                width: 90,
+                render: (text) => Number(text || 1),
+              },
+              {
+                title: t('创建时间'),
+                dataIndex: 'created_time',
+                width: 180,
+                render: (text) => formatTs(text),
+              },
+              {
+                title: t('处理结果'),
+                dataIndex: 'issue_summary',
+                render: (text) => text || '-',
+              },
+            ]}
+            dataSource={issuances}
+            rowKey={(row) => Number(row?.id || 0)}
+            loading={loading}
+            pagination={false}
+            empty={
+              <Empty
+                image={
+                  <IllustrationNoResult style={{ width: 120, height: 120 }} />
+                }
+                darkModeImage={
+                  <IllustrationNoResultDark style={{ width: 120, height: 120 }} />
+                }
+                description={t('暂无待发放记录')}
+                style={{ padding: 24 }}
+              />
+            }
+          />
+        </div>
       </div>
     </SideSheet>
   );

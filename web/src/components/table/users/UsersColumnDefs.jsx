@@ -185,10 +185,12 @@ const renderUsedQuota = (text, record) => {
  */
 const renderSubscriptionStatus = (record, t, showUserSubscriptionsModal) => {
   const activeCount = Number(record?.active_subscription_count || 0);
-  const hasActiveSubscription = record?.has_active_subscription || activeCount > 0;
+  const pendingCount = Number(record?.pending_subscription_issuance_count || 0);
+  const hasActiveSubscription =
+    record?.has_active_subscription || activeCount > 0 || pendingCount > 0;
   const dotColor = hasActiveSubscription ? '#10b981' : '#94a3b8';
   const label = hasActiveSubscription
-    ? `${t('有套餐')} · ${activeCount}`
+    ? `${t('有套餐')} · ${activeCount}${pendingCount > 0 ? ` + ${pendingCount}${t('待发放')}` : ''}`
     : t('无套餐');
   const isDeleted = record?.DeletedAt !== null;
   const content = (
@@ -214,6 +216,41 @@ const renderSubscriptionStatus = (record, t, showUserSubscriptionsModal) => {
       size='small'
       className='!px-0 cursor-pointer'
       onClick={() => showUserSubscriptionsModal?.(record)}
+    >
+      {content}
+    </Button>
+  );
+};
+
+const renderSellableTokenStatus = (record, t, showUserSellableTokensModal) => {
+  const activeCount = Number(record?.active_sellable_token_count || 0);
+  const pendingCount = Number(record?.pending_sellable_issuance_count || 0);
+  const hasTokens = record?.has_sellable_token || activeCount > 0 || pendingCount > 0;
+  const label = hasTokens
+    ? `${t('有令牌')} · ${activeCount}${pendingCount > 0 ? ` + ${pendingCount}${t('待发放')}` : ''}`
+    : t('无令牌');
+  const dotColor = hasTokens ? '#06b6d4' : '#94a3b8';
+  const content = (
+    <Tag color='white' shape='circle'>
+      <div className='flex items-center gap-1'>
+        <div
+          className='w-2 h-2 rounded-full flex-shrink-0'
+          style={{ backgroundColor: dotColor }}
+        />
+        <span className='text-xs'>{label}</span>
+      </div>
+    </Tag>
+  );
+  if (record?.DeletedAt !== null) {
+    return content;
+  }
+  return (
+    <Button
+      type='tertiary'
+      theme='borderless'
+      size='small'
+      className='!px-0 cursor-pointer'
+      onClick={() => showUserSellableTokensModal?.(record)}
     >
       {content}
     </Button>
@@ -296,6 +333,7 @@ const renderOperations = (
     showResetPasskeyModal,
     showResetTwoFAModal,
     showUserSubscriptionsModal,
+    showUserSellableTokensModal,
     t,
   },
 ) => {
@@ -308,6 +346,11 @@ const renderOperations = (
       node: 'item',
       name: t('订阅管理'),
       onClick: () => showUserSubscriptionsModal(record),
+    },
+    {
+      node: 'item',
+      name: t('令牌情况'),
+      onClick: () => showUserSellableTokensModal(record),
     },
     {
       node: 'divider',
@@ -396,6 +439,7 @@ export const getUsersColumns = ({
   showResetPasskeyModal,
   showResetTwoFAModal,
   showUserSubscriptionsModal,
+  showUserSellableTokensModal,
   showInviteRelationsModal,
   openInviteRelationsUser,
 }) => {
@@ -421,6 +465,13 @@ export const getUsersColumns = ({
       key: 'subscription_status',
       render: (text, record) =>
         renderSubscriptionStatus(record, t, showUserSubscriptionsModal),
+    },
+    {
+      title: t('令牌情况'),
+      dataIndex: 'sellable_token_status',
+      key: 'sellable_token_status',
+      render: (text, record) =>
+        renderSellableTokenStatus(record, t, showUserSellableTokensModal),
     },
     {
       title: t('剩余额度/总额度'),
@@ -475,6 +526,7 @@ export const getUsersColumns = ({
           showResetPasskeyModal,
           showResetTwoFAModal,
           showUserSubscriptionsModal,
+          showUserSellableTokensModal,
           t,
         }),
     },

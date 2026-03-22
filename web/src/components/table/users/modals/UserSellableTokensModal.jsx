@@ -99,8 +99,23 @@ const UserSellableTokensModal = ({
   const [tokenName, setTokenName] = useState('');
   const [tokenGroup, setTokenGroup] = useState('');
   const [selectedTokenIds, setSelectedTokenIds] = useState([]);
+  const [selectedIssuanceIds, setSelectedIssuanceIds] = useState([]);
+  const [batchIssuanceCancelLoading, setBatchIssuanceCancelLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 10;
+
+  const [issuanceActionLoading, setIssuanceActionLoading] = useState({ id: 0, action: '' });
+
+  // Admin confirm issuance modal state
+  const [confirmIssuanceModalVisible, setConfirmIssuanceModalVisible] = useState(false);
+  const [confirmIssuanceTarget, setConfirmIssuanceTarget] = useState(null);
+  const [confirmIssuanceContextLoading, setConfirmIssuanceContextLoading] = useState(false);
+  const [confirmIssuanceContext, setConfirmIssuanceContext] = useState(null);
+  const [confirmIssueMode, setConfirmIssueMode] = useState('stack');
+  const [confirmRenewTargetTokenId, setConfirmRenewTargetTokenId] = useState(0);
+  const [confirmTokenName, setConfirmTokenName] = useState('');
+  const [confirmTokenGroup, setConfirmTokenGroup] = useState('');
+  const [confirmSubmitting, setConfirmSubmitting] = useState(false);
 
   const pendingCount = useMemo(() => {
     return issuances.filter((item) => item?.status === 'pending').length;
@@ -112,7 +127,7 @@ const UserSellableTokensModal = ({
 
   const productOptions = useMemo(() => {
     return enabledProducts.map((item) => ({
-      label: `${item?.name || ''} · ${renderQuota(item?.total_quota || 0)}`,
+      label: `${item?.name || ''} · ${Number(item?.total_quota || 0) === 0 ? t('不限') : renderQuota(item.total_quota)}`,
       value: Number(item?.id || 0),
     }));
   }, [enabledProducts]);
@@ -311,8 +326,8 @@ const UserSellableTokensModal = ({
         dataIndex: 'status',
         width: 100,
         render: (text) => (
-          <Tag color={text === 'pending' ? 'orange' : 'green'} shape='circle'>
-            {text === 'pending' ? t('待发放') : t('已发放')}
+          <Tag color={text === 'pending' ? 'orange' : text === 'cancelled' ? 'red' : 'green'} shape='circle'>
+            {text === 'pending' ? t('待发放') : text === 'cancelled' ? t('已取消') : t('已发放')}
           </Tag>
         ),
       },
@@ -328,8 +343,43 @@ const UserSellableTokensModal = ({
         width: 180,
         render: (text) => (Number(text || 0) > 0 ? timestamp2string(text) : '-'),
       },
+      {
+        title: '',
+        key: 'operate',
+        width: 200,
+        fixed: 'right',
+        render: (_, record) => {
+          if (record?.status !== 'pending') return null;
+          const recordId = Number(record?.id || 0);
+          const busy = loading || submitting || issuanceActionLoading.id > 0;
+          return (
+            <Space>
+              <Button
+                size='small'
+                theme='solid'
+                type='primary'
+                disabled={busy}
+                loading={issuanceActionLoading.id === recordId && issuanceActionLoading.action === 'confirm'}
+                onClick={() => openConfirmIssuanceModal(record)}
+              >
+                {t('发放')}
+              </Button>
+              <Button
+                size='small'
+                theme='light'
+                type='danger'
+                disabled={busy}
+                loading={issuanceActionLoading.id === recordId && issuanceActionLoading.action === 'cancel'}
+                onClick={() => confirmCancelIssuance(recordId)}
+              >
+                {t('取消')}
+              </Button>
+            </Space>
+          );
+        },
+      },
     ];
-  }, [t]);
+  }, [t, loading, submitting, issuanceActionLoading]);
 
   const rowSelection = useMemo(() => {
     return {
@@ -417,6 +467,7 @@ const UserSellableTokensModal = ({
       setTokenName('');
       setTokenGroup('');
       setSelectedTokenIds([]);
+      setSelectedIssuanceIds([]);
       setCurrentPage(1);
       return;
     }
@@ -471,6 +522,16 @@ const UserSellableTokensModal = ({
     );
     setSelectedTokenIds((prev) => prev.filter((id) => exists.has(id)));
   }, [tokens]);
+
+  useEffect(() => {
+    const pendingIds = new Set(
+      (issuances || [])
+        .filter((item) => item?.status === 'pending')
+        .map((item) => Number(item?.id || 0))
+        .filter((id) => id > 0),
+    );
+    setSelectedIssuanceIds((prev) => prev.filter((id) => pendingIds.has(id)));
+  }, [issuances]);
 
   const submitIssue = async () => {
     if (!user?.id) {
@@ -651,6 +712,163 @@ const UserSellableTokensModal = ({
     });
   };
 
+  const batchCancelIssuances = async () => {
+    if (!user?.id || selectedIssuanceIds.length === 0) return;
+    setBatchIssuanceCancelLoading(true);
+    try {
+      const res = await API.post(
+        `/api/user/${user.id}/sellable-token/issuances/cancel/batch`,
+        { ids: selectedIssuanceIds },
+      );
+      if (res.data?.success) {
+        const result = res.data?.data || {};
+        const successCount = Number(result?.success_count || 0);
+        const failedCount = Number(result?.failed_count || 0);
+        if (failedCount > 0) {
+          const firstFailedMessage = result?.failed?.[0]?.message;
+          showError(
+            t('批量取消完成：成功 {{success}} 条，失败 {{failed}} 条', {
+              success: successCount,
+              failed: failedCount,
+            }) + (firstFailedMessage ? `；${firstFailedMessage}` : ''),
+          );
+        } else {
+          showSuccess(
+            t('批量取消成功：{{count}} 条', { count: successCount }),
+          );
+        }
+        setSelectedIssuanceIds([]);
+        await loadSummary();
+        onSuccess?.();
+      } else {
+        showError(res.data?.message || t('批量取消失败'));
+      }
+    } catch (error) {
+      showError(error.message || t('请求失败'));
+    } finally {
+      setBatchIssuanceCancelLoading(false);
+    }
+  };
+
+  const confirmBatchCancelIssuances = () => {
+    if (selectedIssuanceIds.length === 0) return;
+    Modal.confirm({
+      title: t('确认批量取消'),
+      content: t('确定要取消所选的 {{count}} 条待发放记录吗？钱包购买的将退还额度。', {
+        count: selectedIssuanceIds.length,
+      }),
+      centered: true,
+      okType: 'danger',
+      okText: t('确认取消'),
+      onOk: async () => {
+        await batchCancelIssuances();
+      },
+    });
+  };
+
+  const confirmCancelIssuance = (issuanceId) => {
+    Modal.confirm({
+      title: t('确认取消'),
+      content: t('取消后不可恢复，钱包购买的将退还额度。是否继续？'),
+      centered: true,
+      okType: 'danger',
+      okText: t('确认取消'),
+      onOk: async () => {
+        setIssuanceActionLoading({ id: issuanceId, action: 'cancel' });
+        try {
+          const res = await API.post(
+            `/api/user/${user.id}/sellable-token/issuances/${issuanceId}/cancel`,
+          );
+          if (res.data?.success) {
+            showSuccess(t('已取消'));
+            await loadSummary();
+            onSuccess?.();
+          } else {
+            showError(res.data?.message || t('取消失败'));
+          }
+        } catch (error) {
+          showError(error.message || t('请求失败'));
+        } finally {
+          setIssuanceActionLoading({ id: 0, action: '' });
+        }
+      },
+    });
+  };
+
+  const openConfirmIssuanceModal = async (record) => {
+    const productId = Number(record?.product?.id || 0);
+    setConfirmIssuanceTarget(record);
+    setConfirmIssuanceModalVisible(true);
+    setConfirmIssueMode('stack');
+    setConfirmRenewTargetTokenId(0);
+    setConfirmTokenName(record?.product?.name || '');
+    setConfirmTokenGroup('');
+    if (productId > 0) {
+      setConfirmIssuanceContextLoading(true);
+      try {
+        const res = await API.get(
+          `/api/user/${user.id}/sellable-token/products/${productId}/context`,
+        );
+        if (res.data?.success) {
+          const ctx = res.data.data || null;
+          setConfirmIssuanceContext(ctx);
+          setConfirmTokenGroup(ctx?.group_options?.[0]?.value || '');
+        } else {
+          setConfirmIssuanceContext(null);
+          showError(res.data?.message || t('加载上下文失败'));
+        }
+      } catch (e) {
+        setConfirmIssuanceContext(null);
+      } finally {
+        setConfirmIssuanceContextLoading(false);
+      }
+    }
+  };
+
+  const submitConfirmIssuance = async () => {
+    if (!confirmIssuanceTarget || !user?.id) return;
+    const issuanceId = Number(confirmIssuanceTarget?.id || 0);
+    if (issuanceId <= 0) return;
+    if (!confirmTokenGroup) {
+      showError(t('请选择分组'));
+      return;
+    }
+    setConfirmSubmitting(true);
+    try {
+      const res = await API.post(
+        `/api/user/${user.id}/sellable-token/issuances/${issuanceId}/confirm`,
+        {
+          mode: confirmIssueMode,
+          target_token_id: confirmIssueMode === 'renew' ? Number(confirmRenewTargetTokenId || 0) : 0,
+          name: confirmTokenName || '',
+          group: confirmTokenGroup || '',
+        },
+      );
+      if (res.data?.success) {
+        showSuccess(t('可售令牌发放成功'));
+        setConfirmIssuanceModalVisible(false);
+        setConfirmIssuanceTarget(null);
+        setConfirmIssuanceContext(null);
+        await loadSummary();
+        onSuccess?.();
+      } else {
+        showError(res.data?.message || t('发放失败'));
+      }
+    } catch (error) {
+      showError(error.message || t('请求失败'));
+    } finally {
+      setConfirmSubmitting(false);
+    }
+  };
+
+  const confirmIssuanceGroupOptions = confirmIssuanceContext?.group_options || [];
+  const confirmIssuanceRenewableTargets = confirmIssuanceContext?.renewable_targets || [];
+  const confirmIssuanceCanRenew = confirmIssuanceRenewableTargets.length > 0;
+  const confirmIssuanceRenewOptions = confirmIssuanceRenewableTargets.map((token) => ({
+    value: Number(token?.id || 0),
+    label: `${token?.name || '-'} (#${token?.id || '-'}) · ${t('到期')} ${formatExpiryText(t, token?.expired_time)}`,
+  }));
+
   return (
     <SideSheet
       visible={visible}
@@ -753,7 +971,7 @@ const UserSellableTokensModal = ({
 
                   <Space wrap spacing={8}>
                     <Tag color='white' shape='circle'>
-                      {t('总额度')} {renderQuota(selectedProduct?.total_quota || 0)}
+                      {t('总额度')} {Number(selectedProduct?.total_quota || 0) === 0 ? t('不限') : renderQuota(selectedProduct.total_quota)}
                     </Tag>
                     <Tag color='white' shape='circle'>
                       {t('有效期')}{' '}
@@ -870,16 +1088,124 @@ const UserSellableTokensModal = ({
                 {t('用于查看用户已购买、已兑换或管理员手动发放的可售令牌记录')}
               </Text>
             </div>
+            <div className='flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3'>
+              <Text type='tertiary'>
+                {t('已选择 {{count}} 条待发放', { count: selectedIssuanceIds.length })}
+              </Text>
+              <Button
+                size='small'
+                type='danger'
+                disabled={selectedIssuanceIds.length === 0 || batchIssuanceCancelLoading}
+                loading={batchIssuanceCancelLoading}
+                onClick={confirmBatchCancelIssuances}
+              >
+                {t('批量取消')}
+              </Button>
+            </div>
             <CardTable
               columns={issuanceColumns}
               dataSource={issuances}
+              rowKey={(row) => Number(row?.id || 0)}
+              rowSelection={!isMobile ? {
+                selectedRowKeys: selectedIssuanceIds,
+                onChange: (selectedRowKeys) => {
+                  setSelectedIssuanceIds(
+                    (selectedRowKeys || [])
+                      .map((key) => Number(key || 0))
+                      .filter((id) => id > 0),
+                  );
+                },
+                getCheckboxProps: (record) => ({
+                  disabled: record?.status !== 'pending',
+                }),
+              } : undefined}
               pagination={false}
-              scroll={{ x: 760 }}
+              scroll={{ x: 960 }}
               empty={<Empty description={t('暂无待发放记录')} />}
             />
           </div>
         </div>
       </Spin>
+
+      <Modal
+        visible={confirmIssuanceModalVisible}
+        title={t('代用户发放可售令牌')}
+        centered
+        maskClosable={false}
+        onCancel={() => {
+          setConfirmIssuanceModalVisible(false);
+          setConfirmIssuanceTarget(null);
+          setConfirmIssuanceContext(null);
+        }}
+        onOk={submitConfirmIssuance}
+        confirmLoading={confirmSubmitting}
+        okText={t('确认发放')}
+        width={520}
+      >
+        <Spin spinning={confirmIssuanceContextLoading}>
+          <div className='space-y-3'>
+            {confirmIssuanceTarget?.product?.name && (
+              <div>
+                <Text type='tertiary' size='small'>{t('商品')}</Text>
+                <div className='font-medium'>{confirmIssuanceTarget.product.name}</div>
+              </div>
+            )}
+            <div>
+              <Text type='tertiary' size='small'>{t('发放方式')}</Text>
+              <Select
+                optionList={[
+                  { value: 'stack', label: t('叠加新令牌') },
+                  confirmIssuanceCanRenew
+                    ? { value: 'renew', label: t('续费已有令牌') }
+                    : { value: 'renew', label: `${t('续费已有令牌')} (${t('暂无可续费目标')})`, disabled: true },
+                ]}
+                value={confirmIssueMode}
+                onChange={(v) => setConfirmIssueMode(v || 'stack')}
+                style={{ width: '100%' }}
+              />
+            </div>
+            <div>
+              <Text type='tertiary' size='small'>{t('令牌名称')}</Text>
+              <Input
+                value={confirmTokenName}
+                onChange={setConfirmTokenName}
+                placeholder={t('请输入令牌名称')}
+                maxLength={50}
+              />
+            </div>
+            <div>
+              <Text type='tertiary' size='small'>{t('分组')}</Text>
+              <Select
+                optionList={confirmIssuanceGroupOptions.map((item) => ({
+                  label: item?.label || item?.value,
+                  value: item?.value,
+                }))}
+                value={confirmTokenGroup || undefined}
+                onChange={(v) => setConfirmTokenGroup(v || '')}
+                placeholder={t('选择分组')}
+                style={{ width: '100%' }}
+              />
+            </div>
+            {confirmIssueMode === 'renew' && confirmIssuanceRenewOptions.length > 1 && (
+              <div>
+                <Text type='tertiary' size='small'>{t('续费目标')}</Text>
+                <Select
+                  optionList={confirmIssuanceRenewOptions}
+                  value={confirmRenewTargetTokenId || undefined}
+                  onChange={(v) => setConfirmRenewTargetTokenId(Number(v || 0))}
+                  placeholder={t('选择续费目标')}
+                  style={{ width: '100%' }}
+                />
+              </div>
+            )}
+            {confirmIssueMode === 'renew' && confirmIssuanceRenewOptions.length === 1 && (
+              <Text type='tertiary'>
+                {t('续费目标')}: {confirmIssuanceRenewOptions[0].label}
+              </Text>
+            )}
+          </div>
+        </Spin>
+      </Modal>
     </SideSheet>
   );
 };
