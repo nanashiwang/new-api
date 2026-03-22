@@ -124,7 +124,7 @@ const SubscriptionIssuanceModal = ({
                     {issuance?.plan_title || plan?.title || '-'}
                   </div>
                   <div className='mt-2 text-sm text-[var(--semi-color-text-2)]'>
-                    {t('来源')}: {issuance?.source_type || '-'} · {t('创建时间')}:{' '}
+                    {t('来源')}: {issuance?.source_type === 'wallet' ? t('钱包购买') : issuance?.source_type === 'redeem' ? t('兑换码') : issuance?.source_type === 'admin' ? t('管理员添加') : issuance?.source_type || '-'} · {t('创建时间')}:{' '}
                     {timestamp2string(issuance?.created_time || 0)}
                   </div>
                 </div>

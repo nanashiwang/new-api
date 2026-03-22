@@ -18,12 +18,21 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
+import { TabPane, Tabs } from '@douyinfe/semi-ui';
 import SubscriptionsPage from '../../components/table/subscriptions';
+import SellableTokenProductsPanel from '../../components/table/redemptions/SellableTokenProductsPanel';
 
 const Subscription = () => {
   return (
     <div className='mt-[60px] px-2'>
-      <SubscriptionsPage />
+      <Tabs type='line'>
+        <TabPane tab='订阅套餐' itemKey='subscription_plans'>
+          <SubscriptionsPage />
+        </TabPane>
+        <TabPane tab='可售令牌商品' itemKey='sellable_tokens'>
+          <SellableTokenProductsPanel />
+        </TabPane>
+      </Tabs>
     </div>
   );
 };

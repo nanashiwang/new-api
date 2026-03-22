@@ -44,7 +44,7 @@ import {
   Receipt,
   Sparkles,
 } from 'lucide-react';
-import { IconGift } from '@douyinfe/semi-icons';
+
 import { getCurrencyConfig } from '../../helpers/render';
 import SubscriptionPlansCard from './SubscriptionPlansCard';
 
@@ -74,12 +74,6 @@ const RechargeCard = ({
   preTopUp,
   paymentLoading,
   payWay,
-  redemptionCode,
-  setRedemptionCode,
-  topUp,
-  isSubmitting,
-  topUpLink,
-  openTopUpLink,
   userState,
   renderQuota,
   statusLoading,
@@ -93,26 +87,40 @@ const RechargeCard = ({
   activeQuantityByPlan = {},
   allSubscriptions = [],
   reloadSubscriptionSelf,
+  sellableTokenContent = null,
+  showSellableTokenTab = false,
 }) => {
   const onlineFormApiRef = useRef(null);
-  const redeemFormApiRef = useRef(null);
   const initialTabSetRef = useRef(false);
   const [activeTab, setActiveTab] = useState('topup');
   const shouldShowSubscription =
     !subscriptionLoading && subscriptionPlans.length > 0;
+  const shouldShowTabs = shouldShowSubscription || showSellableTokenTab;
 
   useEffect(() => {
     if (initialTabSetRef.current) return;
     if (subscriptionLoading) return;
-    setActiveTab(shouldShowSubscription ? 'subscription' : 'topup');
-    initialTabSetRef.current = true;
-  }, [shouldShowSubscription, subscriptionLoading]);
-
-  useEffect(() => {
-    if (!shouldShowSubscription && activeTab !== 'topup') {
+    if (shouldShowSubscription) {
+      setActiveTab('subscription');
+    } else if (showSellableTokenTab) {
+      setActiveTab('sellable-token');
+    } else {
       setActiveTab('topup');
     }
-  }, [shouldShowSubscription, activeTab]);
+    initialTabSetRef.current = true;
+  }, [shouldShowSubscription, showSellableTokenTab, subscriptionLoading]);
+
+  useEffect(() => {
+    if (!shouldShowTabs && activeTab !== 'topup') {
+      setActiveTab('topup');
+    }
+    if (!shouldShowSubscription && activeTab === 'subscription') {
+      setActiveTab(showSellableTokenTab ? 'sellable-token' : 'topup');
+    }
+    if (!showSellableTokenTab && activeTab === 'sellable-token') {
+      setActiveTab(shouldShowSubscription ? 'subscription' : 'topup');
+    }
+  }, [shouldShowSubscription, shouldShowTabs, showSellableTokenTab, activeTab]);
   const topupContent = (
     <Space vertical style={{ width: '100%' }}>
       {/* 统计信息 */}
@@ -525,59 +533,6 @@ const RechargeCard = ({
           />
         )}
       </Card>
-
-      {/* 兑换码充值 */}
-      <Card
-        className='!rounded-xl w-full'
-        title={
-          <Text type='tertiary' strong>
-            {t('兑换码充值')}
-          </Text>
-        }
-      >
-        <Form
-          getFormApi={(api) => (redeemFormApiRef.current = api)}
-          initValues={{ redemptionCode: redemptionCode }}
-        >
-          <Form.Input
-            field='redemptionCode'
-            noLabel={true}
-            placeholder={t('请输入兑换码')}
-            value={redemptionCode}
-            onChange={(value) => setRedemptionCode(value)}
-            prefix={<IconGift />}
-            suffix={
-              <div className='flex items-center gap-2'>
-                <Button
-                  type='primary'
-                  theme='solid'
-                  onClick={() => topUp()}
-                  loading={isSubmitting}
-                >
-                  {t('立即兑换')}
-                </Button>
-              </div>
-            }
-            showClear
-            style={{ width: '100%' }}
-            extraText={
-              topUpLink && (
-                <Text type='tertiary'>
-                  {t('在找兑换码？')}
-                  <Text
-                    type='secondary'
-                    underline
-                    className='cursor-pointer'
-                    onClick={openTopUpLink}
-                  >
-                    {t('购买兑换码')}
-                  </Text>
-                </Text>
-              )
-            }
-          />
-        </Form>
-      </Card>
     </Space>
   );
 
@@ -605,36 +560,51 @@ const RechargeCard = ({
         </Button>
       </div>
 
-      {shouldShowSubscription ? (
+      {shouldShowTabs ? (
         <Tabs type='card' activeKey={activeTab} onChange={setActiveTab}>
-          <TabPane
-            tab={
-              <div className='flex items-center gap-2'>
-                <Sparkles size={16} />
-                {t('订阅套餐')}
+          {shouldShowSubscription ? (
+            <TabPane
+              tab={
+                <div className='flex items-center gap-2'>
+                  <Sparkles size={16} />
+                  {t('订阅套餐')}
+                </div>
+              }
+              itemKey='subscription'
+            >
+              <div className='py-2'>
+                <SubscriptionPlansCard
+                  t={t}
+                  loading={subscriptionLoading}
+                  plans={subscriptionPlans}
+                  payMethods={payMethods}
+                  enableOnlineTopUp={enableOnlineTopUp}
+                  enableStripeTopUp={enableStripeTopUp}
+                  enableCreemTopUp={enableCreemTopUp}
+                  billingPreference={billingPreference}
+                  onChangeBillingPreference={onChangeBillingPreference}
+                  activeSubscriptions={activeSubscriptions}
+                  activeQuantityByPlan={activeQuantityByPlan}
+                  allSubscriptions={allSubscriptions}
+                  reloadSubscriptionSelf={reloadSubscriptionSelf}
+                  withCard={false}
+                />
               </div>
-            }
-            itemKey='subscription'
-          >
-            <div className='py-2'>
-              <SubscriptionPlansCard
-                t={t}
-                loading={subscriptionLoading}
-                plans={subscriptionPlans}
-                payMethods={payMethods}
-                enableOnlineTopUp={enableOnlineTopUp}
-                enableStripeTopUp={enableStripeTopUp}
-                enableCreemTopUp={enableCreemTopUp}
-                billingPreference={billingPreference}
-                onChangeBillingPreference={onChangeBillingPreference}
-                activeSubscriptions={activeSubscriptions}
-                activeQuantityByPlan={activeQuantityByPlan}
-                allSubscriptions={allSubscriptions}
-                reloadSubscriptionSelf={reloadSubscriptionSelf}
-                withCard={false}
-              />
-            </div>
-          </TabPane>
+            </TabPane>
+          ) : null}
+          {showSellableTokenTab ? (
+            <TabPane
+              tab={
+                <div className='flex items-center gap-2'>
+                  <Coins size={16} />
+                  {t('可售令牌')}
+                </div>
+              }
+              itemKey='sellable-token'
+            >
+              <div className='py-2'>{sellableTokenContent}</div>
+            </TabPane>
+          ) : null}
           <TabPane
             tab={
               <div className='flex items-center gap-2'>

@@ -137,7 +137,7 @@ const SellableTokenIssuanceModal = ({
                       {product?.name || t('可售令牌')}
                     </Tag>
                     <Tag color='white' shape='circle'>
-                      {t('总额度')} {renderQuota(product?.total_quota || 0)}
+                      {t('总额度')} {Number(product?.total_quota || 0) === 0 ? t('不限') : renderQuota(product.total_quota)}
                     </Tag>
                     {product?.validity_seconds > 0 ? (
                       <Tag color='white' shape='circle'>
@@ -148,7 +148,7 @@ const SellableTokenIssuanceModal = ({
                     )}
                   </Space>
                   <div className='mt-3 text-sm text-gray-600'>
-                    <div>{t('来源')}: {issuance?.source_type || '-'}</div>
+                    <div>{t('来源')}: {issuance?.source_type === 'wallet' ? t('钱包购买') : issuance?.source_type === 'redeem' ? t('兑换码') : issuance?.source_type === 'admin' ? t('管理员添加') : issuance?.source_type || '-'}</div>
                     <div>{t('创建时间')}: {timestamp2string(issuance?.created_time || 0)}</div>
                     {product?.package_enabled ? (
                       <div>

@@ -110,8 +110,21 @@ export const getRedemptionsColumns = ({
       render: (text) => {
         const benefitType = text || 'quota';
         return (
-          <Tag color={benefitType === 'subscription' ? 'blue' : 'grey'} shape='circle'>
-            {benefitType === 'subscription' ? t('套餐') : t('额度')}
+          <Tag
+            color={
+              benefitType === 'subscription'
+                ? 'blue'
+                : benefitType === 'sellable_token'
+                  ? 'cyan'
+                  : 'grey'
+            }
+            shape='circle'
+          >
+            {benefitType === 'subscription'
+              ? t('套餐')
+              : benefitType === 'sellable_token'
+                ? t('可售令牌')
+                : t('额度')}
           </Tag>
         );
       },
@@ -122,6 +135,14 @@ export const getRedemptionsColumns = ({
       render: (text, record) => {
         if ((record?.benefit_type || 'quota') === 'subscription') {
           return <div>{record?.plan_title || `#${record?.plan_id || '-'}`}</div>;
+        }
+        if ((record?.benefit_type || 'quota') === 'sellable_token') {
+          return (
+            <div>
+              {record?.product_name ||
+                `#${record?.sellable_token_product_id || '-'}`}
+            </div>
+          );
         }
         return (
           <div>

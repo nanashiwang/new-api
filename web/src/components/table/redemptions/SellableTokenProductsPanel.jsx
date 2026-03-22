@@ -103,7 +103,7 @@ const buildEditFormValues = (record) => {
     ...record,
     subtitle: record.subtitle || '',
     sort_order: Number(record.sort_order || 0),
-    price_amount: Number(record.price_amount || 0),
+    price_amount: quotaToDisplayAmount(record.price_quota || 0),
     total_amount: record.unlimited_quota
       ? 0
       : quotaToDisplayAmount(record.total_quota || 0),
@@ -462,9 +462,6 @@ const SellableTokenProductsPanel = () => {
   const openEditModal = (record) => {
     setEditingProduct(record);
     setEditVisible(true);
-    setTimeout(() => {
-      editFormApiRef.current?.setValues(buildEditFormValues(record));
-    }, 0);
   };
 
   const columns = useMemo(
@@ -532,8 +529,8 @@ const SellableTokenProductsPanel = () => {
       },
       {
         title: t('售价'),
-        dataIndex: 'price_amount',
-        render: (text) => formatPaymentAmount(text || 0),
+        dataIndex: 'price_quota',
+        render: (text) => renderQuota(text || 0),
       },
       {
         title: t('总额度'),
@@ -703,8 +700,10 @@ const SellableTokenProductsPanel = () => {
         }}
         width={760}
       >
+        {editingProduct && (
         <Form
-          initValues={defaultValues}
+          key={editingProduct.id}
+          initValues={buildEditFormValues(editingProduct)}
           getFormApi={(api) => {
             editFormApiRef.current = api;
           }}
@@ -738,6 +737,7 @@ const SellableTokenProductsPanel = () => {
             </>
           )}
         </Form>
+        )}
       </Modal>
 
       <CardPro

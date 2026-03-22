@@ -56,6 +56,7 @@ const EditRedemptionModal = (props) => {
   const isEdit = props.editingRedemption.id !== undefined;
   const [loading, setLoading] = useState(isEdit);
   const [subscriptionPlans, setSubscriptionPlans] = useState([]);
+  const [sellableTokenProducts, setSellableTokenProducts] = useState([]);
   const isMobile = useIsMobile();
   const formApiRef = useRef(null);
 
@@ -64,6 +65,7 @@ const EditRedemptionModal = (props) => {
     benefit_type: 'quota',
     quota: 100000,
     plan_id: 0,
+    sellable_token_product_id: 0,
     subscription_purchase_mode: 'stack',
     subscription_purchase_quantity: 1,
     count: 1,
@@ -109,8 +111,19 @@ const EditRedemptionModal = (props) => {
     }
   };
 
+  const loadSellableTokenProducts = async () => {
+    const res = await API.get('/api/redemption/sellable-token-products');
+    const { success, data } = res.data || {};
+    if (success) {
+      setSellableTokenProducts(data || []);
+    }
+  };
+
   useEffect(() => {
-    loadSubscriptionPlans().catch(() => {});
+    Promise.all([
+      loadSubscriptionPlans().catch(() => {}),
+      loadSellableTokenProducts().catch(() => {}),
+    ]);
   }, []);
 
   useEffect(() => {
@@ -133,6 +146,8 @@ const EditRedemptionModal = (props) => {
     localInputs.count = parseInt(localInputs.count) || 0;
     localInputs.quota = parseInt(localInputs.quota) || 0;
     localInputs.plan_id = parseInt(localInputs.plan_id) || 0;
+    localInputs.sellable_token_product_id =
+      parseInt(localInputs.sellable_token_product_id) || 0;
     localInputs.subscription_purchase_quantity =
       parseInt(localInputs.subscription_purchase_quantity) || 1;
     localInputs.name = name;
@@ -140,9 +155,16 @@ const EditRedemptionModal = (props) => {
     if (localInputs.benefit_type === 'subscription') {
       // 套餐码不允许再携带余额，避免一个码同时发两类权益。
       localInputs.quota = 0;
+      localInputs.sellable_token_product_id = 0;
+    } else if (localInputs.benefit_type === 'sellable_token') {
+      localInputs.quota = 0;
+      localInputs.plan_id = 0;
+      localInputs.subscription_purchase_mode = 'stack';
+      localInputs.subscription_purchase_quantity = 1;
     } else {
       // 余额码统一清空套餐字段，避免编辑历史数据时残留脏值。
       localInputs.plan_id = 0;
+      localInputs.sellable_token_product_id = 0;
       localInputs.subscription_purchase_mode = 'stack';
       localInputs.subscription_purchase_quantity = 1;
     }
@@ -299,6 +321,7 @@ const EditRedemptionModal = (props) => {
                         optionList={[
                           { label: t('额度'), value: 'quota' },
                           { label: t('套餐'), value: 'subscription' },
+                          { label: t('可售令牌'), value: 'sellable_token' },
                         ]}
                       />
                     </Col>
@@ -363,6 +386,25 @@ const EditRedemptionModal = (props) => {
                           />
                         </Col>
                       </>
+                    ) : values.benefit_type === 'sellable_token' ? (
+                      <Col span={24}>
+                        <Form.Select
+                          field='sellable_token_product_id'
+                          label={t('可售令牌商品')}
+                          placeholder={t('请选择可售令牌商品')}
+                          style={{ width: '100%' }}
+                          optionList={sellableTokenProducts.map((product) => ({
+                            label: `${product.name} (#${product.id})`,
+                            value: product.id,
+                          }))}
+                          rules={[
+                            {
+                              required: true,
+                              message: t('请选择可售令牌商品'),
+                            },
+                          ]}
+                        />
+                      </Col>
                     ) : (
                       <Col span={12}>
                         <Form.AutoComplete
