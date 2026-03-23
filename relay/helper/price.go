@@ -2,8 +2,10 @@ package helper
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -11,7 +13,21 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 )
+
+const defaultConservativeCompletionTokens = 4096
+
+func shouldApplyDefaultCompletionReserve(info *relaycommon.RelayInfo, priceData types.PriceData) bool {
+	if priceData.UsePrice || priceData.ImageRatio > 1 {
+		return false
+	}
+	if info == nil {
+		return true
+	}
+	_, isImageRequest := info.Request.(*dto.ImageRequest)
+	return !isImageRequest
+}
 
 // https://docs.claude.com/en/docs/build-with-claude/prompt-caching#1-hour-cache-duration
 const claudeCacheCreation1hMultiplier = 6 / 3.75
@@ -45,7 +61,116 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.
 	return groupRatioInfo
 }
 
+func estimateConservativeBuiltInToolQuota(info *relaycommon.RelayInfo, priceData types.PriceData) decimal.Decimal {
+	if info == nil {
+		return decimal.Zero
+	}
+
+	groupRatio := decimal.NewFromFloat(priceData.GroupRatioInfo.GroupRatio)
+	quotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
+	toolQuota := decimal.Zero
+
+	if info.ResponsesUsageInfo != nil {
+		if webSearchTool, exists := info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearchPreview]; exists && webSearchTool != nil {
+			searchContextSize := webSearchTool.SearchContextSize
+			if searchContextSize == "" {
+				searchContextSize = "medium"
+			}
+			toolQuota = toolQuota.Add(
+				decimal.NewFromFloat(operation_setting.GetWebSearchPricePerThousand(info.OriginModelName, searchContextSize)).
+					Div(decimal.NewFromInt(1000)).
+					Mul(groupRatio).
+					Mul(quotaPerUnit),
+			)
+		}
+		if fileSearchTool, exists := info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolFileSearch]; exists && fileSearchTool != nil {
+			toolQuota = toolQuota.Add(
+				decimal.NewFromFloat(operation_setting.GetFileSearchPricePerThousand()).
+					Div(decimal.NewFromInt(1000)).
+					Mul(groupRatio).
+					Mul(quotaPerUnit),
+			)
+		}
+	}
+
+	if strings.HasSuffix(info.OriginModelName, "search-preview") {
+		searchContextSize := "medium"
+		if request, ok := info.Request.(*dto.GeneralOpenAIRequest); ok && request.WebSearchOptions != nil && request.WebSearchOptions.SearchContextSize != "" {
+			searchContextSize = request.WebSearchOptions.SearchContextSize
+		}
+		toolQuota = toolQuota.Add(
+			decimal.NewFromFloat(operation_setting.GetWebSearchPricePerThousand(info.OriginModelName, searchContextSize)).
+				Div(decimal.NewFromInt(1000)).
+				Mul(groupRatio).
+				Mul(quotaPerUnit),
+		)
+	}
+
+	if request, ok := info.Request.(*dto.GeneralOpenAIRequest); ok && request.WebSearchOptions != nil && info.RelayFormat == types.RelayFormatClaude {
+		toolQuota = toolQuota.Add(
+			decimal.NewFromFloat(operation_setting.GetClaudeWebSearchPricePerThousand()).
+				Div(decimal.NewFromInt(1000)).
+				Mul(groupRatio).
+				Mul(quotaPerUnit),
+		)
+	}
+
+	return toolQuota
+}
+
+func EstimateConservativePreConsumeQuota(info *relaycommon.RelayInfo, promptTokens int, meta *types.TokenCountMeta, priceData types.PriceData) int {
+	if meta == nil {
+		meta = &types.TokenCountMeta{}
+	}
+
+	conservativePromptTokens := common.Max(promptTokens, common.PreConsumedQuota)
+	conservativeCompletionTokens := common.Max(meta.MaxTokens, 0)
+	if conservativeCompletionTokens == 0 && shouldApplyDefaultCompletionReserve(info, priceData) {
+		conservativeCompletionTokens = defaultConservativeCompletionTokens
+	}
+	groupRatio := decimal.NewFromFloat(priceData.GroupRatioInfo.GroupRatio)
+	quotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
+
+	quota := decimal.Zero
+	if priceData.UsePrice {
+		quota = decimal.NewFromFloat(priceData.ModelPrice).Mul(quotaPerUnit).Mul(groupRatio)
+	} else {
+		promptQuota := decimal.NewFromInt(int64(conservativePromptTokens))
+		if priceData.ImageRatio > 1 {
+			promptQuota = promptQuota.Mul(decimal.NewFromFloat(priceData.ImageRatio))
+		}
+		completionRatio := priceData.CompletionRatio
+		if completionRatio < 1 {
+			completionRatio = 1
+		}
+		completionQuota := decimal.NewFromInt(int64(conservativeCompletionTokens)).Mul(decimal.NewFromFloat(completionRatio))
+		quota = promptQuota.
+			Add(completionQuota).
+			Mul(decimal.NewFromFloat(priceData.ModelRatio)).
+			Mul(groupRatio)
+	}
+
+	quota = quota.Add(estimateConservativeBuiltInToolQuota(info, priceData))
+
+	for _, otherRatio := range priceData.OtherRatios {
+		if otherRatio > 0 {
+			quota = quota.Mul(decimal.NewFromFloat(otherRatio))
+		}
+	}
+
+	if !priceData.UsePrice && priceData.ModelRatio != 0 && quota.LessThanOrEqual(decimal.Zero) {
+		quota = decimal.NewFromInt(1)
+	}
+	if quota.LessThan(decimal.Zero) {
+		return 0
+	}
+	return int(quota.Round(0).IntPart())
+}
+
 func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens int, meta *types.TokenCountMeta) (types.PriceData, error) {
+	if meta == nil {
+		meta = &types.TokenCountMeta{}
+	}
 	modelPrice, usePrice := ratio_setting.GetModelPrice(info.OriginModelName, false)
 
 	groupRatioInfo := HandleGroupRatio(c, info)
@@ -130,6 +255,10 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		CacheCreation5mRatio: cacheCreationRatio5m,
 		CacheCreation1hRatio: cacheCreationRatio1h,
 		QuotaToPreConsume:    preConsumedQuota,
+	}
+	priceData.ConservativeQuotaToPreConsume = EstimateConservativePreConsumeQuota(info, promptTokens, meta, priceData)
+	if priceData.ConservativeQuotaToPreConsume < priceData.QuotaToPreConsume {
+		priceData.ConservativeQuotaToPreConsume = priceData.QuotaToPreConsume
 	}
 
 	if common.DebugEnabled {

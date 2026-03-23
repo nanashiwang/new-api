@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -322,5 +323,74 @@ func TestDecreaseTokenQuotaWithPackage_UpdatesCycleUsage(t *testing.T) {
 	}
 	if updated.PackageNextResetTime <= common.GetTimestamp() {
 		t.Fatalf("expected package_next_reset_time initialized, got=%d", updated.PackageNextResetTime)
+	}
+}
+
+func TestValidateUserToken_RejectsExhaustedPackageQuota(t *testing.T) {
+	cleanupTokenPackageIntegrationData(t)
+	token := &Token{
+		UserId:               1,
+		Key:                  "token_package_block_test_key_00000000000000000001",
+		Status:               common.TokenStatusEnabled,
+		Name:                 "package-block-test",
+		CreatedTime:          common.GetTimestamp(),
+		AccessedTime:         common.GetTimestamp(),
+		ExpiredTime:          -1,
+		RemainQuota:          100000,
+		PackageEnabled:       true,
+		PackageLimitQuota:    20000,
+		PackageUsedQuota:     20000,
+		PackagePeriod:        TokenPackagePeriodDaily,
+		PackagePeriodMode:    TokenPackagePeriodModeRelative,
+		PackageNextResetTime: common.GetTimestamp() + 3600,
+	}
+	if err := token.Insert(); err != nil {
+		t.Fatalf("insert token failed: %v", err)
+	}
+
+	validated, err := ValidateUserToken(token.Key)
+	if err == nil {
+		t.Fatal("expected package quota error")
+	}
+	if validated == nil {
+		t.Fatal("expected validated token returned")
+	}
+	if !strings.Contains(err.Error(), "套餐周期额度已用尽") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateUserToken_AllowsAfterPackageReset(t *testing.T) {
+	cleanupTokenPackageIntegrationData(t)
+	now := common.GetTimestamp()
+	token := &Token{
+		UserId:               1,
+		Key:                  "token_package_reset_test_key_00000000000000000001",
+		Status:               common.TokenStatusEnabled,
+		Name:                 "package-reset-test",
+		CreatedTime:          now,
+		AccessedTime:         now,
+		ExpiredTime:          -1,
+		RemainQuota:          100000,
+		PackageEnabled:       true,
+		PackageLimitQuota:    20000,
+		PackageUsedQuota:     20000,
+		PackagePeriod:        TokenPackagePeriodDaily,
+		PackagePeriodMode:    TokenPackagePeriodModeRelative,
+		PackageNextResetTime: now - 60,
+	}
+	if err := token.Insert(); err != nil {
+		t.Fatalf("insert token failed: %v", err)
+	}
+
+	validated, err := ValidateUserToken(token.Key)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if validated.PackageUsedQuota != 0 {
+		t.Fatalf("expected reset package usage, got=%d", validated.PackageUsedQuota)
+	}
+	if validated.PackageNextResetTime <= now {
+		t.Fatalf("expected next reset in future, got=%d", validated.PackageNextResetTime)
 	}
 }

@@ -138,6 +138,25 @@ func (s *BillingSession) GetPreConsumedQuota() int {
 	return s.preConsumedQuota
 }
 
+func (s *BillingSession) resolvePreConsumeQuota(c *gin.Context, quota int) int {
+	effectiveQuota := quota
+	if s == nil || s.relayInfo == nil || c == nil {
+		return effectiveQuota
+	}
+	if !common.GetContextKeyBool(c, constant.ContextKeyTokenPackageEnabled) {
+		return effectiveQuota
+	}
+	if common.GetContextKeyString(c, constant.ContextKeyTokenBillingMode) != model.TokenBillingModeTokenOnly {
+		return effectiveQuota
+	}
+
+	conservativeQuota := s.relayInfo.PriceData.ConservativeQuotaToPreConsume
+	if conservativeQuota > effectiveQuota {
+		return conservativeQuota
+	}
+	return effectiveQuota
+}
+
 // ---------------------------------------------------------------------------
 // PreConsume — 统一预扣费入口（含信任额度旁路）
 // ---------------------------------------------------------------------------
@@ -145,7 +164,7 @@ func (s *BillingSession) GetPreConsumedQuota() int {
 // preConsume 执行预扣费：信任检查 -> 令牌预扣 -> 资金来源预扣。
 // 任一步骤失败时原子回滚已完成的步骤。
 func (s *BillingSession) preConsume(c *gin.Context, quota int) *types.NewAPIError {
-	effectiveQuota := quota
+	effectiveQuota := s.resolvePreConsumeQuota(c, quota)
 
 	// ---- 信任额度旁路 ----
 	if s.shouldTrust(c) {

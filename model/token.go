@@ -260,6 +260,10 @@ func ValidateUserToken(key string) (token *Token, err error) {
 			}
 			return token, errors.New("该令牌已过期")
 		}
+		token, err = validateTokenPackageAccess(token)
+		if err != nil {
+			return token, err
+		}
 		if !token.UnlimitedQuota && token.RemainQuota <= 0 {
 			if !common.RedisEnabled {
 				// in this case, we can make sure the token is exhausted
@@ -281,6 +285,55 @@ func ValidateUserToken(key string) (token *Token, err error) {
 	} else {
 		return nil, errors.New("无效的令牌，数据库查询出错，请联系管理员")
 	}
+}
+
+func validateTokenPackageAccess(token *Token) (*Token, error) {
+	if token == nil || !token.PackageEnabled || token.PackageLimitQuota <= 0 {
+		return token, nil
+	}
+
+	updated := *token
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		query := tx.Where("id = ?", token.Id)
+		if !common.UsingSQLite {
+			query = query.Set("gorm:query_option", "FOR UPDATE")
+		}
+		if err := query.First(&updated).Error; err != nil {
+			return err
+		}
+
+		changed, err := MaybeResetTokenPackageState(&updated, GetDBTimestampTx(tx))
+		if err != nil {
+			return err
+		}
+		if changed {
+			updates := map[string]interface{}{
+				"package_period":          updated.PackagePeriod,
+				"package_custom_seconds":  updated.PackageCustomSeconds,
+				"package_used_quota":      updated.PackageUsedQuota,
+				"package_next_reset_time": updated.PackageNextResetTime,
+				"package_period_mode":     updated.PackagePeriodMode,
+			}
+			if err := tx.Model(&Token{}).Where("id = ?", updated.Id).Updates(updates).Error; err != nil {
+				return err
+			}
+		}
+		if updated.PackageUsedQuota >= updated.PackageLimitQuota {
+			return errors.New("该令牌套餐周期额度已用尽，请等待下个周期重置后再试")
+		}
+		return nil
+	})
+	if err != nil {
+		return &updated, err
+	}
+	if common.RedisEnabled {
+		gopool.Go(func() {
+			if err := cacheSetToken(updated); err != nil {
+				common.SysLog("failed to update token cache: " + err.Error())
+			}
+		})
+	}
+	return &updated, nil
 }
 
 func GetTokenByIds(id int, userId int) (*Token, error) {

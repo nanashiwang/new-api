@@ -36,9 +36,9 @@ import {
   IllustrationNoResult,
   IllustrationNoResultDark,
 } from '@douyinfe/semi-illustrations';
-import { IconSearch, IconFilter, IconClose } from '@douyinfe/semi-icons';
+import { IconSearch, IconFilter } from '@douyinfe/semi-icons';
 import { Coins } from 'lucide-react';
-import { API, stringToColor, timestamp2string } from '../../../helpers';
+import { API, renderQuota, stringToColor, timestamp2string } from '../../../helpers';
 import { isAdmin } from '../../../helpers/utils';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 
@@ -48,6 +48,7 @@ const STATUS_CONFIG = {
   success: { type: 'success', key: '\u6210\u529f' },
   pending: { type: 'warning', key: '\u5f85\u652f\u4ed8' },
   expired: { type: 'danger', key: '\u5df2\u8fc7\u671f' },
+  cancelled: { type: 'tertiary', key: '\u5df2\u53d6\u6d88' },
 };
 
 const PAYMENT_METHOD_MAP = {
@@ -55,6 +56,7 @@ const PAYMENT_METHOD_MAP = {
   creem: 'Creem',
   alipay: '\u652f\u4ed8\u5b9d',
   wxpay: '\u5fae\u4fe1',
+  wallet: '\u94b1\u5305',
 };
 
 const EMPTY_FILTERS = {
@@ -69,10 +71,12 @@ const STATUS_OPTIONS = [
   { label: '\u5f85\u652f\u4ed8', value: 'pending' },
   { label: '\u6210\u529f', value: 'success' },
   { label: '\u5df2\u8fc7\u671f', value: 'expired' },
+  { label: '\u5df2\u53d6\u6d88', value: 'cancelled' },
 ];
 
 const PAYMENT_OPTIONS = [
   { label: '\u5168\u90e8\u652f\u4ed8\u65b9\u5f0f', value: '' },
+  { label: '\u94b1\u5305', value: 'wallet' },
   { label: '\u5fae\u4fe1', value: 'wxpay' },
   { label: '\u652f\u4ed8\u5b9d', value: 'alipay' },
   { label: 'Stripe', value: 'stripe' },
@@ -101,7 +105,7 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
   const loadTopups = async (currentPage, currentPageSize, currentFilters) => {
     setLoading(true);
     try {
-      const base = userIsAdmin ? '/api/user/topup' : '/api/user/topup/self';
+      const base = userIsAdmin ? '/api/user/payment-records' : '/api/user/payment-records/self';
       const searchParams = new URLSearchParams({
         p: String(currentPage),
         page_size: String(currentPageSize),
@@ -131,7 +135,7 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
       Toast.error({ content: message || translate('\u64cd\u4f5c\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5') });
     } catch (error) {
       console.error('Load topups error:', error);
-      Toast.error({ content: translate('\u52a0\u8f7d\u5145\u503c\u8bb0\u5f55\u5931\u8d25') });
+      Toast.error({ content: translate('\u52a0\u8f7d\u652f\u4ed8\u8bb0\u5f55\u5931\u8d25') });
     } finally {
       setLoading(false);
     }
@@ -248,16 +252,66 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
 
   const renderPaymentMethod = (paymentMethod) => {
     const displayName = PAYMENT_METHOD_MAP[paymentMethod];
+    const isWallet = paymentMethod === 'wallet';
     return (
-      <Tag shape='circle' color='grey'>
+      <Tag shape='circle' color={isWallet ? 'blue' : 'grey'}>
         {displayName ? translate(displayName) : paymentMethod || '-'}
       </Tag>
     );
   };
 
+  const isSellableTokenPurchase = (record) => record?.record_type === 'sellable_token_purchase';
+
   const isSubscriptionTopup = (record) => {
+    if (isSellableTokenPurchase(record)) {
+      return false;
+    }
     const tradeNo = (record?.trade_no || '').toLowerCase();
     return Number(record?.amount || 0) === 0 && tradeNo.startsWith('sub');
+  };
+
+  const renderRecordType = (record) => {
+    if (isSellableTokenPurchase(record)) {
+      return (
+        <div className='min-w-0'>
+          <Tag color='blue' shape='circle' size='small'>
+            {translate('\u94b1\u5305\u8d2d\u4e70')}
+          </Tag>
+          <div className='mt-1'>
+            <Text ellipsis={{ showTooltip: true }} style={{ maxWidth: 180, display: 'inline-block' }}>
+              {record?.product_name || translate('\u53ef\u552e\u4ee4\u724c')}
+            </Text>
+          </div>
+        </div>
+      );
+    }
+
+    if (isSubscriptionTopup(record)) {
+      return (
+        <Tag color='purple' shape='circle' size='small'>
+          {translate('\u8ba2\u9605\u5957\u9910')}
+        </Tag>
+      );
+    }
+
+    return (
+      <Tag color='green' shape='circle' size='small'>
+        {translate('\u5728\u7ebf\u5145\u503c')}
+      </Tag>
+    );
+  };
+
+  const renderRecordNo = (record) => {
+    const text = isSellableTokenPurchase(record) ? `STO-${record?.id || '-'}` : record?.trade_no || '-';
+    return (
+      <Text
+        copyable={text !== '-'}
+        ellipsis={{ showTooltip: { opts: { style: { wordBreak: 'break-all' } } } }}
+        style={{ width: 170, display: 'inline-block' }}
+      >
+        {text}
+      </Text>
+    );
   };
 
   const columns = useMemo(() => {
@@ -267,15 +321,13 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
         dataIndex: 'trade_no',
         key: 'trade_no',
         width: 200,
-        render: (text) => (
-          <Text
-            copyable
-            ellipsis={{ showTooltip: { opts: { style: { wordBreak: 'break-all' } } } }}
-            style={{ width: 170, display: 'inline-block' }}
-          >
-            {text || '-'}
-          </Text>
-        ),
+        render: (_, record) => renderRecordNo(record),
+      },
+      {
+        title: translate('\u7c7b\u578b / \u5546\u54c1'),
+        key: 'record_type',
+        width: 200,
+        render: (_, record) => renderRecordType(record),
       },
     ];
 
@@ -339,7 +391,7 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
           return (
             <span className='flex items-center gap-1'>
               <Coins size={16} />
-              <Text>{amount ?? 0}</Text>
+              <Text>{renderQuota(amount ?? 0)}</Text>
             </span>
           );
         },
@@ -348,12 +400,18 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
         title: translate('\u652f\u4ed8\u91d1\u989d'),
         dataIndex: 'money',
         key: 'money',
-        render: (money) => (
-          <Text type='danger'>
-            {String.fromCharCode(0x00A5)}
-            {Number(money || 0).toFixed(2)}
-          </Text>
-        ),
+        render: (money, record) => {
+          if (isSellableTokenPurchase(record)) {
+            return <Text type='tertiary'>-</Text>;
+          }
+
+          return (
+            <Text type='danger'>
+              {String.fromCharCode(0x00A5)}
+              {Number(money || 0).toFixed(2)}
+            </Text>
+          );
+        },
       },
       {
         title: translate('\u72b6\u6001'),
@@ -374,7 +432,7 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
         title: translate('\u64cd\u4f5c'),
         key: 'action',
         render: (_, record) => {
-          if (record.status !== 'pending') {
+          if (record?.record_type !== 'topup' || record.status !== 'pending') {
             return null;
           }
 
@@ -409,7 +467,7 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
         <div className='flex items-center gap-2'>
           <Input
             prefix={<IconSearch />}
-            placeholder={translate('\u8ba2\u5355\u53f7')}
+            placeholder={translate('\u8ba2\u5355\u53f7 / \u5546\u54c1\u540d')}
             value={filters.keyword}
             onChange={(value) => handleFilterChange('keyword', value)}
             onEnterPress={() => applyFilters()}
@@ -514,7 +572,7 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
         columns={columns}
         dataSource={topups}
         loading={loading}
-        rowKey='id'
+        rowKey={(record) => `${record?.record_type || 'topup'}-${record?.id || '0'}`}
         size='small'
         pagination={{
           currentPage: page,
@@ -530,7 +588,7 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
           <Empty
             image={<IllustrationNoResult style={{ width: 150, height: 150 }} />}
             darkModeImage={<IllustrationNoResultDark style={{ width: 150, height: 150 }} />}
-            description={translate('\u6682\u65e0\u5145\u503c\u8bb0\u5f55')}
+            description={translate('\u6682\u65e0\u652f\u4ed8\u8bb0\u5f55')}
             style={{ padding: 30 }}
           />
         }
