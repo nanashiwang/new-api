@@ -302,7 +302,7 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
   };
 
   const renderRecordNo = (record) => {
-    const text = isSellableTokenPurchase(record) ? `STO-${record?.id || '-'}` : record?.trade_no || '-';
+    const text = record?.trade_no || '-';
     return (
       <Text
         copyable={text !== '-'}

@@ -200,3 +200,61 @@ func TestPreConsumeBilling_PackageTokenWithoutMaxTokensUsesDefaultCompletionRese
 	require.Equal(t, 20000, token.RemainQuota)
 	require.Equal(t, 0, token.PackageUsedQuota)
 }
+
+func TestPreConsumeBilling_UnlimitedPackageTokenTracksCycleUsage(t *testing.T) {
+	truncate(t)
+
+	const userID = 3005
+	const tokenID = 4005
+	const tokenKey = "package_unlimited_preconsume_key"
+
+	seedUser(t, userID, 0)
+	require.NoError(t, model.DB.Create(&model.Token{
+		Id:                tokenID,
+		UserId:            userID,
+		Key:               tokenKey,
+		Name:              "package_unlimited_token",
+		Status:            common.TokenStatusEnabled,
+		RemainQuota:       0,
+		UnlimitedQuota:    true,
+		PackageEnabled:    true,
+		PackageLimitQuota: 100,
+		PackagePeriod:     model.TokenPackagePeriodHourly,
+		PackagePeriodMode: model.TokenPackagePeriodModeRelative,
+	}).Error)
+
+	ctx := newPackageBillingContext(true)
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:          userID,
+		TokenId:         tokenID,
+		TokenKey:        tokenKey,
+		OriginModelName: "test-unlimited-package-model",
+		PriceData: types.PriceData{
+			ConservativeQuotaToPreConsume: 60,
+		},
+	}
+
+	apiErr := PreConsumeBilling(ctx, 60, relayInfo)
+	require.Nil(t, apiErr)
+	require.NotNil(t, relayInfo.Billing)
+	require.Equal(t, 60, relayInfo.FinalPreConsumedQuota)
+
+	token, err := model.GetTokenById(tokenID)
+	require.NoError(t, err)
+	require.Equal(t, 0, token.RemainQuota)
+	require.Equal(t, 60, token.UsedQuota)
+	require.Equal(t, 60, token.PackageUsedQuota)
+	require.Greater(t, token.PackageNextResetTime, common.GetTimestamp())
+
+	apiErr = PreConsumeBilling(ctx, 50, &relaycommon.RelayInfo{
+		UserId:          userID,
+		TokenId:         tokenID,
+		TokenKey:        tokenKey,
+		OriginModelName: "test-unlimited-package-model",
+		PriceData: types.PriceData{
+			ConservativeQuotaToPreConsume: 50,
+		},
+	})
+	require.Error(t, apiErr)
+	require.Contains(t, apiErr.Error(), "令牌套餐周期额度不足")
+}

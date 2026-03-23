@@ -250,6 +250,7 @@ func listSellableTokenPaymentRecords(userId *int, params PaymentRecordSearchPara
 			UserId:        row.UserId,
 			Username:      row.Username,
 			DisplayName:   row.DisplayName,
+			TradeNo:       formatSellableTokenPaymentTradeNo(row.UserId, row.Id),
 			PaymentMethod: PaymentMethodWallet,
 			Amount:        int64(row.PriceQuota),
 			Money:         0,
@@ -350,6 +351,13 @@ func applySellableTokenPaymentSearch(query *gorm.DB, params PaymentRecordSearchP
 func parseSellableTokenOrderKeyword(keyword string) (int, bool) {
 	normalized := strings.TrimSpace(keyword)
 	upper := strings.ToUpper(normalized)
+	if strings.HasPrefix(upper, "USR") {
+		marker := strings.LastIndex(upper, "STO")
+		if marker >= 0 && marker+3 < len(normalized) {
+			normalized = strings.TrimSpace(normalized[marker+3:])
+			upper = strings.ToUpper(normalized)
+		}
+	}
 	if strings.HasPrefix(upper, "STO-") && len(normalized) > 4 {
 		normalized = strings.TrimSpace(normalized[4:])
 	}
@@ -369,4 +377,14 @@ func toSellableTokenPaymentStatus(issuanceStatus string) string {
 	default:
 		return common.TopUpStatusSuccess
 	}
+}
+
+func formatSellableTokenPaymentTradeNo(userId int, orderId int) string {
+	if orderId <= 0 {
+		return ""
+	}
+	if userId > 0 {
+		return "USR" + strconv.Itoa(userId) + "STO" + strconv.Itoa(orderId)
+	}
+	return "STO-" + strconv.Itoa(orderId)
 }

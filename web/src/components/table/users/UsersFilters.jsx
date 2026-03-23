@@ -312,36 +312,32 @@ const UsersFilters = ({
                 placeholder={t('是否有被邀请人')}
                 showClear
               />
-              <div className='sm:col-span-2'>
-                <Select
-                  value={draftAdvancedFilters.searchHasActiveSubscription}
-                  onChange={(value) =>
-                    setDraftAdvancedFilters((prev) => ({
-                      ...prev,
-                      searchHasActiveSubscription:
-                        value === null || value === undefined ? '' : value,
-                    }))
-                  }
-                  optionList={hasActiveSubscriptionOptions}
-                  placeholder={t('套餐筛选')}
-                  showClear
-                />
-              </div>
-              <div className='sm:col-span-2'>
-                <Select
-                  value={draftAdvancedFilters.searchHasSellableToken}
-                  onChange={(value) =>
-                    setDraftAdvancedFilters((prev) => ({
-                      ...prev,
-                      searchHasSellableToken:
-                        value === null || value === undefined ? '' : value,
-                    }))
-                  }
-                  optionList={hasSellableTokenOptions}
-                  placeholder={t('令牌情况筛选')}
-                  showClear
-                />
-              </div>
+              <Select
+                value={draftAdvancedFilters.searchHasActiveSubscription}
+                onChange={(value) =>
+                  setDraftAdvancedFilters((prev) => ({
+                    ...prev,
+                    searchHasActiveSubscription:
+                      value === null || value === undefined ? '' : value,
+                  }))
+                }
+                optionList={hasActiveSubscriptionOptions}
+                placeholder={t('套餐筛选')}
+                showClear
+              />
+              <Select
+                value={draftAdvancedFilters.searchHasSellableToken}
+                onChange={(value) =>
+                  setDraftAdvancedFilters((prev) => ({
+                    ...prev,
+                    searchHasSellableToken:
+                      value === null || value === undefined ? '' : value,
+                  }))
+                }
+                optionList={hasSellableTokenOptions}
+                placeholder={t('令牌情况筛选')}
+                showClear
+              />
               <InputNumber
                 value={
                   draftAdvancedFilters.searchInviterId === ''

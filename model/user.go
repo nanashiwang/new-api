@@ -1598,6 +1598,16 @@ func updateUserUsedQuota(id int, quota int) {
 	}
 }
 
+// UpdateUserRequestCount 仅更新用户请求计数，不更新已使用额度。
+// 用于可售令牌等仅令牌计费模式，避免令牌消费被计入用户钱包已使用额度。
+func UpdateUserRequestCount(id int) {
+	if common.BatchUpdateEnabled {
+		addNewRecord(BatchUpdateTypeRequestCount, id, 1)
+		return
+	}
+	updateUserRequestCount(id, 1)
+}
+
 func updateUserRequestCount(id int, count int) {
 	err := DB.Model(&User{}).Where("id = ?", id).Update("request_count", gorm.Expr("request_count + ?", count)).Error
 	if err != nil {

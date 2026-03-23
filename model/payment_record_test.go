@@ -104,8 +104,10 @@ func TestGetUserPaymentRecordsByParams_MergesAndSortsSources(t *testing.T) {
 	require.Equal(t, PaymentRecordTypeTopUp, records[0].RecordType)
 	require.Equal(t, "T-002", records[0].TradeNo)
 	require.Equal(t, PaymentRecordTypeSellableTokenPurchase, records[1].RecordType)
+	require.Equal(t, "USR1STO1", records[1].TradeNo)
 	require.Equal(t, "Alpha", records[1].ProductName)
 	require.Equal(t, common.TopUpStatusPending, records[2].Status)
+	require.Equal(t, "USR1STO2", records[2].TradeNo)
 	require.Equal(t, "Beta", records[2].ProductName)
 	require.Equal(t, "T-001", records[3].TradeNo)
 }
@@ -141,5 +143,33 @@ func TestGetAllPaymentRecordsByParams_FiltersWalletPurchaseStatusAndUser(t *test
 	require.Equal(t, int64(1), cancelledTotal)
 	require.Len(t, cancelledRecords, 1)
 	require.Equal(t, "Cancelled Product", cancelledRecords[0].ProductName)
+	require.Equal(t, "USR1STO2", cancelledRecords[0].TradeNo)
 	require.Equal(t, PaymentRecordStatusCancelled, cancelledRecords[0].Status)
+}
+
+func TestGetAllPaymentRecordsByParams_FiltersWalletPurchaseByUnifiedTradeNo(t *testing.T) {
+	setupPaymentRecordTestDB(t)
+
+	alice := createPaymentRecordTestUser(t, "alice")
+	createPaymentRecordSellablePurchase(t, alice.Id, "Gamma", 220, SellableTokenIssuanceStatusPending)
+	createPaymentRecordSellablePurchase(t, alice.Id, "Delta", 180, SellableTokenIssuanceStatusIssued)
+
+	records, total, err := GetAllPaymentRecordsByParams(PaymentRecordSearchParams{
+		Keyword:       "USR1STO2",
+		PaymentMethod: PaymentMethodWallet,
+	}, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, records, 1)
+	require.Equal(t, "Delta", records[0].ProductName)
+	require.Equal(t, "USR1STO2", records[0].TradeNo)
+
+	legacyRecords, legacyTotal, err := GetAllPaymentRecordsByParams(PaymentRecordSearchParams{
+		Keyword:       "STO-1",
+		PaymentMethod: PaymentMethodWallet,
+	}, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), legacyTotal)
+	require.Len(t, legacyRecords, 1)
+	require.Equal(t, "Gamma", legacyRecords[0].ProductName)
 }

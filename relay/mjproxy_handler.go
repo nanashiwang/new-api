@@ -229,7 +229,11 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 				Group:     info.UsingGroup,
 				Other:     other,
 			})
-			model.UpdateUserUsedQuotaAndRequestCount(info.UserId, priceData.Quota)
+			if info.BillingSource == service.BillingSourceToken {
+				model.UpdateUserRequestCount(info.UserId)
+			} else {
+				model.UpdateUserUsedQuotaAndRequestCount(info.UserId, priceData.Quota)
+			}
 			model.UpdateChannelUsedQuota(info.ChannelId, priceData.Quota)
 		}
 	}()
@@ -529,7 +533,11 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 				Group:     relayInfo.UsingGroup,
 				Other:     other,
 			})
-			model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, priceData.Quota)
+			if relayInfo.BillingSource == service.BillingSourceToken {
+				model.UpdateUserRequestCount(relayInfo.UserId)
+			} else {
+				model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, priceData.Quota)
+			}
 			model.UpdateChannelUsedQuota(relayInfo.ChannelId, priceData.Quota)
 		}
 	}()

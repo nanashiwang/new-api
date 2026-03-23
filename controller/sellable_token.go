@@ -46,11 +46,13 @@ type sellableTokenSummaryItem struct {
 	ProductId          int    `json:"product_id"`
 	RemainQuota        int    `json:"remain_quota"`
 	UsedQuota          int    `json:"used_quota"`
+	UnlimitedQuota     bool   `json:"unlimited_quota"`
 	MaxConcurrency     int    `json:"max_concurrency"`
 	WindowRequestLimit int    `json:"window_request_limit"`
 	WindowSeconds      int64  `json:"window_seconds"`
 	PackageEnabled     bool   `json:"package_enabled"`
 	PackageLimitQuota  int    `json:"package_limit_quota"`
+	PackageUsedQuota   int    `json:"package_used_quota"`
 	PackagePeriod      string `json:"package_period"`
 	ExpiredTime        int64  `json:"expired_time"`
 	CreatedTime        int64  `json:"created_time"`
@@ -1043,11 +1045,13 @@ func sanitizeSellableTokenSummaryItems(tokens []*model.Token) []sellableTokenSum
 			ProductId:          token.SellableTokenProductId,
 			RemainQuota:        token.RemainQuota,
 			UsedQuota:          token.UsedQuota,
+			UnlimitedQuota:     token.UnlimitedQuota,
 			MaxConcurrency:     token.MaxConcurrency,
 			WindowRequestLimit: token.WindowRequestLimit,
 			WindowSeconds:      token.WindowSeconds,
 			PackageEnabled:     token.PackageEnabled,
 			PackageLimitQuota:  token.PackageLimitQuota,
+			PackageUsedQuota:   token.PackageUsedQuota,
 			PackagePeriod:      token.PackagePeriod,
 			ExpiredTime:        token.ExpiredTime,
 			CreatedTime:        token.CreatedTime,

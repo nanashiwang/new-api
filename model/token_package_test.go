@@ -326,6 +326,50 @@ func TestDecreaseTokenQuotaWithPackage_UpdatesCycleUsage(t *testing.T) {
 	}
 }
 
+func TestDecreaseTokenQuotaWithPackageUnlimited_UpdatesCycleUsageWithoutChangingRemainQuota(t *testing.T) {
+	cleanupTokenPackageIntegrationData(t)
+	token := &Token{
+		UserId:            1,
+		Key:               "token_package_unlimited_usage_test_key_0000000000001",
+		Status:            common.TokenStatusEnabled,
+		Name:              "package-unlimited-test",
+		CreatedTime:       common.GetTimestamp(),
+		AccessedTime:      common.GetTimestamp(),
+		ExpiredTime:       -1,
+		RemainQuota:       0,
+		UsedQuota:         0,
+		UnlimitedQuota:    true,
+		PackageEnabled:    true,
+		PackageLimitQuota: 20000,
+		PackagePeriod:     TokenPackagePeriodDaily,
+	}
+	if err := token.Insert(); err != nil {
+		t.Fatalf("insert token failed: %v", err)
+	}
+
+	const consumeQuota = 1200
+	if err := DecreaseTokenQuota(token.Id, token.Key, consumeQuota); err != nil {
+		t.Fatalf("decrease token quota failed: %v", err)
+	}
+
+	updated, err := GetTokenById(token.Id)
+	if err != nil {
+		t.Fatalf("reload token failed: %v", err)
+	}
+	if updated.PackageUsedQuota != consumeQuota {
+		t.Fatalf("expected package_used_quota=%d, got=%d", consumeQuota, updated.PackageUsedQuota)
+	}
+	if updated.UsedQuota != consumeQuota {
+		t.Fatalf("expected used_quota=%d, got=%d", consumeQuota, updated.UsedQuota)
+	}
+	if updated.RemainQuota != 0 {
+		t.Fatalf("expected remain_quota unchanged for unlimited token, got=%d", updated.RemainQuota)
+	}
+	if updated.PackageNextResetTime <= common.GetTimestamp() {
+		t.Fatalf("expected package_next_reset_time initialized, got=%d", updated.PackageNextResetTime)
+	}
+}
+
 func TestValidateUserToken_RejectsExhaustedPackageQuota(t *testing.T) {
 	cleanupTokenPackageIntegrationData(t)
 	token := &Token{

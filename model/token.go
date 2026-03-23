@@ -532,11 +532,11 @@ func DecreaseTokenQuota(id int, key string, quota int) (err error) {
 	if err != nil {
 		return err
 	}
-	if token.UnlimitedQuota {
-		return updateTokenUsageOnly(id, quota)
-	}
 	if token.PackageEnabled {
 		return decreaseTokenQuotaWithPackage(token, quota)
+	}
+	if token.UnlimitedQuota {
+		return updateTokenUsageOnly(id, quota)
 	}
 	if common.RedisEnabled {
 		gopool.Go(func() {
@@ -616,9 +616,11 @@ func increaseTokenQuotaWithPackage(token *Token, quota int) error {
 		}
 
 		updates := map[string]interface{}{
-			"remain_quota":  gorm.Expr("remain_quota + ?", quota),
 			"used_quota":    gorm.Expr("used_quota - ?", quota),
 			"accessed_time": now,
+		}
+		if !updated.UnlimitedQuota {
+			updates["remain_quota"] = gorm.Expr("remain_quota + ?", quota)
 		}
 		if changed {
 			updates["package_next_reset_time"] = updated.PackageNextResetTime
@@ -634,7 +636,9 @@ func increaseTokenQuotaWithPackage(token *Token, quota int) error {
 		if err := tx.Model(&Token{}).Where("id = ?", token.Id).Updates(updates).Error; err != nil {
 			return err
 		}
-		updated.RemainQuota += quota
+		if !updated.UnlimitedQuota {
+			updated.RemainQuota += quota
+		}
 		updated.UsedQuota -= quota
 		updated.AccessedTime = now
 		return nil
@@ -682,9 +686,11 @@ func decreaseTokenQuotaWithPackage(token *Token, quota int) error {
 		}
 
 		updates := map[string]interface{}{
-			"remain_quota":  gorm.Expr("remain_quota - ?", quota),
 			"used_quota":    gorm.Expr("used_quota + ?", quota),
 			"accessed_time": now,
+		}
+		if !updated.UnlimitedQuota {
+			updates["remain_quota"] = gorm.Expr("remain_quota - ?", quota)
 		}
 		if changed {
 			updates["package_next_reset_time"] = updated.PackageNextResetTime
@@ -696,7 +702,9 @@ func decreaseTokenQuotaWithPackage(token *Token, quota int) error {
 		if err := tx.Model(&Token{}).Where("id = ?", token.Id).Updates(updates).Error; err != nil {
 			return err
 		}
-		updated.RemainQuota -= quota
+		if !updated.UnlimitedQuota {
+			updated.RemainQuota -= quota
+		}
 		updated.UsedQuota += quota
 		updated.AccessedTime = now
 		return nil

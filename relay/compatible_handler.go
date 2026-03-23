@@ -421,7 +421,11 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 		if !ratio.IsZero() && quota == 0 {
 			quota = 1
 		}
-		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, quota)
+		if relayInfo.BillingSource == service.BillingSourceToken {
+			model.UpdateUserRequestCount(relayInfo.UserId)
+		} else {
+			model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, quota)
+		}
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
 	}
 
