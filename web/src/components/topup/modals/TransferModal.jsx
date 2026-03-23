@@ -25,12 +25,12 @@ import { quotaToDisplayAmount } from '../../../helpers/quota';
 
 const roundCurrencyAmountUp = (amount) => {
   const numericAmount = Number(amount || 0);
-  return Math.ceil((numericAmount + Number.EPSILON) * 100) / 100;
+  return Math.ceil(numericAmount * 100 - 1e-8) / 100;
 };
 
 const roundCurrencyAmountDown = (amount) => {
   const numericAmount = Number(amount || 0);
-  return Math.floor((numericAmount + Number.EPSILON) * 100) / 100;
+  return Math.floor(numericAmount * 100 + 1e-8) / 100;
 };
 
 const TransferModal = ({

@@ -286,6 +286,11 @@ func SearchUsers(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	hasSellableToken, err := parseOptionalBoolQuery(c.Query("has_sellable_token"), "has_sellable_token")
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	balanceMin, err := parseOptionalIntQuery(c.Query("balance_min"), "balance_min")
 	if err != nil {
 		common.ApiError(c, err)
@@ -349,6 +354,7 @@ func SearchUsers(c *gin.Context) {
 		HasInviter:            hasInviter,
 		HasInvitees:           hasInvitees,
 		HasActiveSubscription: hasActiveSubscription,
+		HasSellableToken:      hasSellableToken,
 		BalanceMin:            balanceMin,
 		BalanceMax:            balanceMax,
 		UsedBalanceMin:        usedBalanceMin,
@@ -1286,13 +1292,13 @@ func ManageUserBatch(c *gin.Context) {
 	updated := make([]gin.H, 0, len(updatedUsers))
 	for _, u := range updatedUsers {
 		updated = append(updated, gin.H{
-			"id":                               u.Id,
-			"role":                             u.Role,
-			"status":                           u.Status,
-			"has_active_subscription":            u.HasActiveSubscription,
-			"active_subscription_count":          u.ActiveSubscriptionCount,
+			"id":                                  u.Id,
+			"role":                                u.Role,
+			"status":                              u.Status,
+			"has_active_subscription":             u.HasActiveSubscription,
+			"active_subscription_count":           u.ActiveSubscriptionCount,
 			"pending_subscription_issuance_count": u.PendingSubscriptionIssuanceCount,
-			"has_sellable_token":                 u.HasSellableToken,
+			"has_sellable_token":                  u.HasSellableToken,
 			"active_sellable_token_count":         u.ActiveSellableTokenCount,
 			"pending_sellable_issuance_count":     u.PendingSellableIssuanceCount,
 		})

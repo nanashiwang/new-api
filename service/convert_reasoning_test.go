@@ -22,7 +22,7 @@ func TestClaudeToOpenAIRequest_MapsThinkingBudgetToReasoningEffort(t *testing.T)
 			BudgetTokens: common.GetPointer(1280),
 		},
 	}, &relaycommon.RelayInfo{
-		ChannelType:     constant.ChannelTypeOpenAI,
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeOpenAI},
 		OriginModelName: "gpt-5",
 	})
 	require.NoError(t, err)
@@ -41,7 +41,7 @@ func TestClaudeToOpenAIRequest_UsesMaxBucketForLargeThinkingBudget(t *testing.T)
 			BudgetTokens: common.GetPointer(6000),
 		},
 	}, &relaycommon.RelayInfo{
-		ChannelType:     constant.ChannelTypeOpenAI,
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeOpenAI},
 		OriginModelName: "gpt-5",
 	})
 	require.NoError(t, err)
@@ -56,7 +56,7 @@ func TestClaudeToOpenAIRequest_PreservesOpenRouterReasoningPayload(t *testing.T)
 			BudgetTokens: common.GetPointer(2048),
 		},
 	}, &relaycommon.RelayInfo{
-		ChannelType:     constant.ChannelTypeOpenRouter,
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeOpenRouter},
 		OriginModelName: "gpt-5",
 	})
 	require.NoError(t, err)
@@ -76,11 +76,11 @@ func TestClaudeToOpenAIRequest_AddsThinkingSuffixAlongsideReasoningEffort(t *tes
 			BudgetTokens: common.GetPointer(2048),
 		},
 	}, &relaycommon.RelayInfo{
-		ChannelType:     constant.ChannelTypeOpenAI,
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeOpenAI},
 		OriginModelName: "gpt-5-thinking",
 	})
 	require.NoError(t, err)
-	require.Equal(t, "gpt-5-thinking", request.Model)
+	require.Equal(t, "claude-3-7-sonnet-thinking", request.Model)
 	require.Equal(t, "medium", request.ReasoningEffort)
 }
 

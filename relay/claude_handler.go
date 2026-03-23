@@ -47,8 +47,8 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	}
 	adaptor.Init(info)
 
-	if request.MaxTokens == nil || *request.MaxTokens == 0 {
-		request.MaxTokens = common.GetPointer(uint(model_setting.GetClaudeSettings().GetDefaultMaxTokens(request.Model)))
+	if request.MaxTokens == 0 {
+		request.MaxTokens = uint(model_setting.GetClaudeSettings().GetDefaultMaxTokens(request.Model))
 	}
 
 	if baseModel, effortLevel, ok := reasoning.TrimEffortSuffix(request.Model); ok && effortLevel != "" &&
@@ -58,8 +58,8 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			Type: "adaptive",
 		}
 		request.OutputConfig = json.RawMessage(fmt.Sprintf(`{"effort":"%s"}`, effortLevel))
-		if request.TopP == nil {
-			request.TopP = common.GetPointer[float64](1)
+		if request.TopP == 0 {
+			request.TopP = 1
 		}
 		request.Temperature = common.GetPointer[float64](1.0)
 		info.UpstreamModelName = request.Model
@@ -67,14 +67,14 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		strings.HasSuffix(request.Model, "-thinking") {
 		if request.Thinking == nil {
 			// 因为BudgetTokens 必须大于1024
-			if request.MaxTokens == nil || *request.MaxTokens < 1280 {
-				request.MaxTokens = common.GetPointer(uint(1280))
+			if request.MaxTokens < 1280 {
+				request.MaxTokens = 1280
 			}
 
 			// BudgetTokens 为 max_tokens 的 80%
 			request.Thinking = &dto.Thinking{
 				Type: "enabled",
-				BudgetTokens: common.GetPointer[int](int(float64(*request.MaxTokens) *
+				BudgetTokens: common.GetPointer[int](int(float64(request.MaxTokens) *
 					model_setting.GetClaudeSettings().ThinkingAdapterBudgetTokensPercentage)),
 			}
 			// TODO: 临时处理

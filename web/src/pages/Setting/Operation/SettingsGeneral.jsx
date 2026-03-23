@@ -49,6 +49,7 @@ export default function GeneralSettings(props) {
     'general_setting.quota_display_type': 'USD',
     'general_setting.custom_currency_symbol': '¤',
     'general_setting.custom_currency_exchange_rate': '',
+    'general_setting.payment_currency_symbol': '¥',
     QuotaPerUnit: '',
     RetryTimes: '',
     USDExchangeRate: '',
@@ -155,6 +156,10 @@ export default function GeneralSettings(props) {
       currentInputs['general_setting.custom_currency_exchange_rate'] =
         props.options['general_setting.custom_currency_exchange_rate'];
     }
+    if (props.options['general_setting.payment_currency_symbol'] !== undefined) {
+      currentInputs['general_setting.payment_currency_symbol'] =
+        props.options['general_setting.payment_currency_symbol'];
+    }
     setInputs(currentInputs);
     setInputsRow(structuredClone(currentInputs));
     refForm.current.setValues(currentInputs);
@@ -242,6 +247,17 @@ export default function GeneralSettings(props) {
                   disabled={
                     inputs['general_setting.quota_display_type'] !== 'CUSTOM'
                   }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Input
+                  field={'general_setting.payment_currency_symbol'}
+                  label={t('支付货币符号')}
+                  placeholder={t('如 ¥、$、€')}
+                  onChange={handleFieldChange(
+                    'general_setting.payment_currency_symbol',
+                  )}
+                  showClear
                 />
               </Col>
             </Row>

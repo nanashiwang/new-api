@@ -768,7 +768,7 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 			return &dto.ImageRequest{
 				Model:  model,
 				Prompt: "a cute cat",
-				N:      common.GetPointer[uint](1),
+				N:      1,
 				Size:   "1024x1024",
 			}
 		case constant.EndpointTypeJinaRerank:
@@ -784,7 +784,7 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 			return &dto.OpenAIResponsesRequest{
 				Model:  model,
 				Input:  json.RawMessage(`[{"role":"user","content":"hi"}]`),
-				Stream: common.GetPointer(isStream),
+				Stream: isStream,
 			}
 		case constant.EndpointTypeOpenAIResponseCompact:
 			// 返回 OpenAIResponsesCompactionRequest
@@ -800,14 +800,14 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 			}
 			req := &dto.GeneralOpenAIRequest{
 				Model:  model,
-				Stream: common.GetPointer(isStream),
+				Stream: isStream,
 				Messages: []dto.Message{
 					{
 						Role:    "user",
 						Content: "hi",
 					},
 				},
-				MaxTokens: common.GetPointer(maxTokens),
+				MaxTokens: maxTokens,
 			}
 			if isStream {
 				req.StreamOptions = &dto.StreamOptions{IncludeUsage: true}
@@ -850,14 +850,14 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 		return &dto.OpenAIResponsesRequest{
 			Model:  model,
 			Input:  json.RawMessage(`[{"role":"user","content":"hi"}]`),
-			Stream: common.GetPointer(isStream),
+			Stream: isStream,
 		}
 	}
 
 	// Chat/Completion 请求 - 返回 GeneralOpenAIRequest
 	testRequest := &dto.GeneralOpenAIRequest{
 		Model:  model,
-		Stream: common.GetPointer(isStream),
+		Stream: isStream,
 		Messages: []dto.Message{
 			{
 				Role:    "user",
@@ -870,15 +870,15 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 	}
 
 	if strings.HasPrefix(model, "o") {
-		testRequest.MaxCompletionTokens = common.GetPointer[uint](16)
+		testRequest.MaxCompletionTokens = 16
 	} else if strings.Contains(model, "thinking") {
 		if !strings.Contains(model, "claude") {
-			testRequest.MaxTokens = common.GetPointer[uint](50)
+			testRequest.MaxTokens = 50
 		}
 	} else if strings.Contains(model, "gemini") {
-		testRequest.MaxTokens = common.GetPointer[uint](3000)
+		testRequest.MaxTokens = 3000
 	} else {
-		testRequest.MaxTokens = common.GetPointer[uint](16)
+		testRequest.MaxTokens = 16
 	}
 
 	return testRequest

@@ -82,6 +82,7 @@ type UserSearchParams struct {
 	HasInviter            *bool
 	HasInvitees           *bool
 	HasActiveSubscription *bool
+	HasSellableToken      *bool
 	BalanceMin            *int
 	BalanceMax            *int
 	UsedBalanceMin        *int
@@ -404,13 +405,21 @@ func SearchUsersWithParams(params UserSearchParams) ([]*User, int64, error) {
 	}
 	if params.HasActiveSubscription != nil {
 		now := common.GetTimestamp()
-		// 套餐筛选统一按“生效套餐”口径：status=active 且 end_time > now。
+		// 套餐筛选统一按”生效套餐”口径：status=active 且 end_time > now。
 		// 使用 EXISTS/NOT EXISTS 让三种数据库都能稳定执行，且不影响主表分页结构。
-		activeSubExistsSQL := "SELECT 1 FROM user_subscriptions us WHERE us.user_id = users.id AND us.status = ? AND us.end_time > ?"
+		activeSubExistsSQL := “SELECT 1 FROM user_subscriptions us WHERE us.user_id = users.id AND us.status = ? AND us.end_time > ?”
 		if *params.HasActiveSubscription {
-			query = query.Where("EXISTS ("+activeSubExistsSQL+")", "active", now)
+			query = query.Where(“EXISTS (“+activeSubExistsSQL+”)”, “active”, now)
 		} else {
-			query = query.Where("NOT EXISTS ("+activeSubExistsSQL+")", "active", now)
+			query = query.Where(“NOT EXISTS (“+activeSubExistsSQL+”)”, “active”, now)
+		}
+	}
+	if params.HasSellableToken != nil {
+		sellableExistsSQL := “SELECT 1 FROM tokens t WHERE t.user_id = users.id AND t.source_type = 'sellable_token' AND t.status = 1 AND t.deleted_at IS NULL”
+		if *params.HasSellableToken {
+			query = query.Where(“EXISTS (“ + sellableExistsSQL + “)”)
+		} else {
+			query = query.Where(“NOT EXISTS (“ + sellableExistsSQL + “)”)
 		}
 	}
 	// 额度筛选基于“总额度 = quota + used_quota”。

@@ -284,13 +284,9 @@ func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
 	case *dto.GeneralOpenAIRequest:
 		meta.MaxTokens = int(r.GetMaxTokens())
 	case *dto.OpenAIResponsesRequest:
-		if r.MaxOutputTokens != nil {
-			meta.MaxTokens = int(*r.MaxOutputTokens)
-		}
+		meta.MaxTokens = int(r.MaxOutputTokens)
 	case *dto.ClaudeRequest:
-		if r.MaxTokens != nil {
-			meta.MaxTokens = int(*r.MaxTokens)
-		}
+		meta.MaxTokens = int(r.MaxTokens)
 	case *dto.ImageRequest:
 		// Pricing for image requests depends on ImagePriceRatio; safe to compute even when CountToken is disabled.
 		return r.GetTokenCountMeta()
@@ -357,9 +353,6 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	}
 	if code < 100 || code > 599 {
 		return true
-	}
-	if operation_setting.IsAlwaysSkipRetryCode(openaiErr.GetErrorCode()) {
-		return false
 	}
 	return operation_setting.ShouldRetryByStatusCode(code)
 }

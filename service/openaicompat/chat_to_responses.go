@@ -79,7 +79,7 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 	if req.Model == "" {
 		return nil, errors.New("model is required")
 	}
-	if req.N != nil && *req.N > 1 {
+	if req.N > 1 {
 		return nil, fmt.Errorf("n>1 is not supported in responses compatibility mode")
 	}
 
@@ -290,12 +290,16 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 		for _, tool := range req.Tools {
 			switch tool.Type {
 			case "function":
-				tools = append(tools, map[string]any{
+				entry := map[string]any{
 					"type":        "function",
 					"name":        tool.Function.Name,
 					"description": tool.Function.Description,
 					"parameters":  tool.Function.Parameters,
-				})
+				}
+				if len(tool.Function.Strict) > 0 {
+					entry["strict"] = tool.Function.Strict
+				}
+				tools = append(tools, entry)
 			default:
 				// Best-effort: keep original tool shape for unknown types.
 				var m map[string]any
@@ -362,7 +366,7 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 	textRaw := convertChatResponseFormatToResponsesText(req.ResponseFormat)
 
 	maxOutputTokens := req.MaxTokens
-	if req.MaxCompletionTokens != nil && (maxOutputTokens == nil || *req.MaxCompletionTokens > *maxOutputTokens) {
+	if req.MaxCompletionTokens > maxOutputTokens {
 		maxOutputTokens = req.MaxCompletionTokens
 	}
 	// OpenAI Responses API rejects max_output_tokens < 16 when explicitly provided.
@@ -370,8 +374,15 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 	//	maxOutputTokens = 16
 	//}
 
-	topP := req.TopP
-	topLogProbs := req.TopLogProbs
+	var topP *float64
+	if req.TopP != 0 {
+		topP = common.GetPointer(req.TopP)
+	}
+
+	var topLogProbs *int
+	if req.TopLogProbs != 0 {
+		topLogProbs = common.GetPointer(req.TopLogProbs)
+	}
 
 	out := &dto.OpenAIResponsesRequest{
 		Model:                req.Model,

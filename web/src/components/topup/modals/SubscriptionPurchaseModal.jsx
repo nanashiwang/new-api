@@ -32,7 +32,7 @@ import { Crown, CalendarClock, Package } from 'lucide-react';
 import { SiStripe } from 'react-icons/si';
 import { IconCreditCard, IconInfoCircle } from '@douyinfe/semi-icons';
 import { renderQuota } from '../../../helpers';
-import { getCurrencyConfig } from '../../../helpers/render';
+import { getPaymentCurrencySymbol } from '../../../helpers/render';
 import {
   formatSubscriptionDuration,
   formatSubscriptionResetPeriod,
@@ -68,7 +68,7 @@ const SubscriptionPurchaseModal = ({
 }) => {
   const plan = selectedPlan?.plan;
   const totalAmount = Number(plan?.total_amount || 0);
-  const { symbol, rate } = getCurrencyConfig();
+  const symbol = getPaymentCurrencySymbol();
   const minPurchaseQuantity = Math.max(
     1,
     Number(purchaseQuantityRange?.min || 1),
@@ -85,7 +85,7 @@ const SubscriptionPurchaseModal = ({
       )
     : 0;
   const price = plan ? Number(plan.price_amount || 0) : 0;
-  const convertedPrice = price * normalizedPurchaseQuantity * rate;
+  const convertedPrice = price * normalizedPurchaseQuantity;
   const displayPrice = convertedPrice.toFixed(
     Number.isInteger(convertedPrice) ? 0 : 2,
   );

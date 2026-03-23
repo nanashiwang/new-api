@@ -12,7 +12,7 @@ import (
 var ModelRequestRateLimitEnabled = false
 var ModelRequestRateLimitDurationMinutes = 1
 var ModelRequestRateLimitCount = 0
-var ModelRequestRateLimitSuccessCount = 1000
+var ModelRequestRateLimitSuccessCount = 0
 var ModelRequestRateLimitGroup = map[string][2]int{}
 var ModelRequestRateLimitMutex sync.RWMutex
 
@@ -57,7 +57,7 @@ func CheckModelRequestRateLimitGroup(jsonStr string) error {
 		return err
 	}
 	for group, limits := range checkModelRequestRateLimitGroup {
-		if limits[0] < 0 || limits[1] < 1 {
+		if limits[0] < 0 || limits[1] < 0 {
 			return fmt.Errorf("group %s has negative rate limit values: [%d, %d]", group, limits[0], limits[1])
 		}
 		if limits[0] > math.MaxInt32 || limits[1] > math.MaxInt32 {

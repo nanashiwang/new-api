@@ -221,10 +221,26 @@ const UserSellableTokensModal = ({
       {
         title: t('额度'),
         width: 180,
-        render: (_, record) =>
-          `${renderQuota(record?.remain_quota || 0)} / ${renderQuota(
+        render: (_, record) => {
+          if (record?.unlimited_quota) {
+            return t('无限');
+          }
+          return `${renderQuota(record?.remain_quota || 0)} / ${renderQuota(
             Number(record?.remain_quota || 0) + Number(record?.used_quota || 0),
-          )}`,
+          )}`;
+        },
+      },
+      {
+        title: t('周期限额'),
+        width: 180,
+        render: (_, record) => {
+          if (!record?.package_enabled) {
+            return '-';
+          }
+          const used = Number(record?.package_used_quota || 0);
+          const limit = Number(record?.package_limit_quota || 0);
+          return `${renderQuota(used)} / ${renderQuota(limit)}`;
+        },
       },
       {
         title: t('状态'),

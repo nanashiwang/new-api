@@ -31,7 +31,7 @@ import {
   Typography,
 } from '@douyinfe/semi-ui';
 import { API, showError, showSuccess, renderQuota } from '../../helpers';
-import { getCurrencyConfig } from '../../helpers/render';
+import { getPaymentCurrencySymbol } from '../../helpers/render';
 import { ChevronDown, ChevronUp, RefreshCw, Sparkles } from 'lucide-react';
 import SubscriptionPurchaseModal from './modals/SubscriptionPurchaseModal';
 import {
@@ -62,10 +62,12 @@ function submitEpayForm({ url, params }) {
     navigator.userAgent.indexOf('Chrome') < 1;
   if (!isSafari) form.target = '_blank';
   Object.keys(params || {}).forEach((key) => {
+    // Sanitize key and value to prevent parameter injection
+    if (typeof key !== 'string' || typeof params[key] === 'undefined') return;
     const input = document.createElement('input');
     input.type = 'hidden';
     input.name = key;
-    input.value = params[key];
+    input.value = String(params[key]);
     form.appendChild(input);
   });
   document.body.appendChild(form);
@@ -642,9 +644,9 @@ const SubscriptionPlansCard = ({
               {plans.map((p, index) => {
                 const plan = p?.plan;
                 const totalAmount = Number(plan?.total_amount || 0);
-                const { symbol, rate } = getCurrencyConfig();
+                const symbol = getPaymentCurrencySymbol();
                 const price = Number(plan?.price_amount || 0);
-                const convertedPrice = price * rate;
+                const convertedPrice = price;
                 const displayPrice = convertedPrice.toFixed(
                   Number.isInteger(convertedPrice) ? 0 : 2,
                 );

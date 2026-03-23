@@ -144,20 +144,21 @@ func memoryRateLimitHandler(duration int64, totalMaxCount, successMaxCount int) 
 			return
 		}
 
-		// 2. 检查成功请求数限制
-		// 使用一个临时key来检查限制，这样可以避免实际记录
-		checkKey := successKey + "_check"
-		if !inMemoryRateLimiter.Request(checkKey, successMaxCount, duration) {
-			c.Status(http.StatusTooManyRequests)
-			c.Abort()
-			return
+		// 2. Check success request limit. Zero means unlimited.
+		if successMaxCount > 0 {
+			checkKey := successKey + "_check"
+			if !inMemoryRateLimiter.Request(checkKey, successMaxCount, duration) {
+				c.Status(http.StatusTooManyRequests)
+				c.Abort()
+				return
+			}
 		}
 
 		// 3. 处理请求
 		c.Next()
 
 		// 4. 如果请求成功，记录到实际的成功请求计数中
-		if c.Writer.Status() < 400 {
+		if successMaxCount > 0 && c.Writer.Status() < 400 {
 			inMemoryRateLimiter.Request(successKey, successMaxCount, duration)
 		}
 	}

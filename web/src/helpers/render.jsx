@@ -1115,6 +1115,26 @@ export function getCurrencyConfig() {
 }
 
 /**
+ * 获取支付货币符号（用于实付金额/套餐标价，与额度展示解耦）
+ * @returns {string}
+ */
+export function getPaymentCurrencySymbol() {
+  try {
+    const statusStr = localStorage.getItem('status');
+    if (statusStr) {
+      const s = JSON.parse(statusStr);
+      if (s?.payment_currency_symbol) return s.payment_currency_symbol;
+    }
+  } catch (e) {}
+  return '¥';
+}
+
+export function formatPaymentAmount(amount, digits = 2) {
+  const symbol = getPaymentCurrencySymbol();
+  return symbol + Number(amount || 0).toFixed(digits);
+}
+
+/**
  * 将美元金额转换为当前选择的货币
  * @param {number} usdAmount - 美元金额
  * @param {number} digits - 小数位数
@@ -2303,4 +2323,30 @@ export function rehypeSplitWordsIntoSpans(options = {}) {
       }
     });
   };
+}
+
+// ── 运行时限制格式化工具函数 ──
+
+export function formatDurationUnit(seconds, t) {
+  const s = Number(seconds);
+  if (s >= 86400 && s % 86400 === 0) return `${s / 86400}${t('天')}`;
+  if (s >= 3600 && s % 3600 === 0) return `${s / 3600}${t('小时')}`;
+  if (s >= 60 && s % 60 === 0) return `${s / 60}${t('分钟')}`;
+  return `${s}${t('秒')}`;
+}
+
+export function formatWindowLimitShort(seconds, limit, t) {
+  return `${t('每')}${formatDurationUnit(seconds, t)} ${limit} ${t('次')}`;
+}
+
+export function formatWindowLimitLong(seconds, limit, t) {
+  return `${t('每')}${formatDurationUnit(seconds, t)}${t('最多')} ${limit} ${t('次请求')}`;
+}
+
+export function formatConcurrencyLabel(n, t) {
+  return `${t('并发')} ${n}`;
+}
+
+export function formatConcurrencyLong(n, t) {
+  return `${t('最多同时进行')} ${n} ${t('个请求')}`;
 }

@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -49,7 +48,7 @@ type OptionUpdateRequest struct {
 
 func UpdateOption(c *gin.Context) {
 	var option OptionUpdateRequest
-	err := json.NewDecoder(c.Request.Body).Decode(&option)
+	err := common.DecodeJson(c.Request.Body, &option)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
@@ -241,6 +240,15 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "ClaudeToOpenAIReasoningMap":
+		err = validateClaudeToOpenAIReasoningMap(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
 	}
 	err = model.UpdateOption(option.Key, option.Value.(string))
 	if err != nil {
@@ -252,4 +260,30 @@ func UpdateOption(c *gin.Context) {
 		"message": "",
 	})
 	return
+}
+
+func validateClaudeToOpenAIReasoningMap(raw string) error {
+	parsed := make(map[string]string)
+	if err := common.UnmarshalJsonStr(raw, &parsed); err != nil {
+		return fmt.Errorf("推理映射必须是 JSON 对象: %w", err)
+	}
+
+	requiredLevels := []string{"low", "medium", "high", "max"}
+	allowedEfforts := map[string]struct{}{
+		"minimal": {},
+		"low":     {},
+		"medium":  {},
+		"high":    {},
+		"xhigh":   {},
+	}
+	for _, level := range requiredLevels {
+		value := strings.TrimSpace(parsed[level])
+		if value == "" {
+			return fmt.Errorf("缺少 %s 档位", level)
+		}
+		if _, ok := allowedEfforts[value]; !ok {
+			return fmt.Errorf("%s 档位仅支持 minimal、low、medium、high、xhigh", level)
+		}
+	}
+	return nil
 }

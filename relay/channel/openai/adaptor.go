@@ -314,9 +314,9 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 
 	}
 	if strings.HasPrefix(info.UpstreamModelName, "o") || strings.HasPrefix(info.UpstreamModelName, "gpt-5") {
-		if request.MaxCompletionTokens == nil && request.MaxTokens != nil {
+		if request.MaxCompletionTokens == 0 && request.MaxTokens != 0 {
 			request.MaxCompletionTokens = request.MaxTokens
-			request.MaxTokens = nil
+			request.MaxTokens = 0
 		}
 
 		if strings.HasPrefix(info.UpstreamModelName, "o") {
@@ -326,8 +326,9 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 		// gpt-5系列模型适配 归零不再支持的参数
 		if strings.HasPrefix(info.UpstreamModelName, "gpt-5") {
 			request.Temperature = nil
-			request.TopP = nil
-			request.LogProbs = nil
+			request.TopP = 0
+			request.LogProbs = false
+			request.TopLogProbs = 0
 		}
 
 		// 转换模型推理力度后缀
