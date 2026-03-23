@@ -309,7 +309,7 @@ func GetAllUsers(pageInfo *common.PageInfo, sortBy string, sortOrder string, idS
 		tx.Rollback()
 		return nil, 0, err
 	}
-	// 当前页批量补充“生效套餐”统计，避免前端逐行请求造成 N+1。
+	// 当前页批量补充"生效套餐"统计，避免前端逐行请求造成 N+1。
 	if err = AttachUserSubscriptionMetadata(tx, users); err != nil {
 		tx.Rollback()
 		return nil, 0, err
@@ -405,24 +405,24 @@ func SearchUsersWithParams(params UserSearchParams) ([]*User, int64, error) {
 	}
 	if params.HasActiveSubscription != nil {
 		now := common.GetTimestamp()
-		// 套餐筛选统一按”生效套餐”口径：status=active 且 end_time > now。
+		// 套餐筛选统一按"生效套餐"口径：status=active 且 end_time > now。
 		// 使用 EXISTS/NOT EXISTS 让三种数据库都能稳定执行，且不影响主表分页结构。
-		activeSubExistsSQL := “SELECT 1 FROM user_subscriptions us WHERE us.user_id = users.id AND us.status = ? AND us.end_time > ?”
+		activeSubExistsSQL := "SELECT 1 FROM user_subscriptions us WHERE us.user_id = users.id AND us.status = ? AND us.end_time > ?"
 		if *params.HasActiveSubscription {
-			query = query.Where(“EXISTS (“+activeSubExistsSQL+”)”, “active”, now)
+			query = query.Where("EXISTS ("+activeSubExistsSQL+")", "active", now)
 		} else {
-			query = query.Where(“NOT EXISTS (“+activeSubExistsSQL+”)”, “active”, now)
+			query = query.Where("NOT EXISTS ("+activeSubExistsSQL+")", "active", now)
 		}
 	}
 	if params.HasSellableToken != nil {
-		sellableExistsSQL := “SELECT 1 FROM tokens t WHERE t.user_id = users.id AND t.source_type = 'sellable_token' AND t.status = 1 AND t.deleted_at IS NULL”
+		sellableExistsSQL := "SELECT 1 FROM tokens t WHERE t.user_id = users.id AND t.source_type = 'sellable_token' AND t.status = 1 AND t.deleted_at IS NULL"
 		if *params.HasSellableToken {
-			query = query.Where(“EXISTS (“ + sellableExistsSQL + “)”)
+			query = query.Where("EXISTS (" + sellableExistsSQL + ")")
 		} else {
-			query = query.Where(“NOT EXISTS (“ + sellableExistsSQL + “)”)
+			query = query.Where("NOT EXISTS (" + sellableExistsSQL + ")")
 		}
 	}
-	// 额度筛选基于“总额度 = quota + used_quota”。
+	// 额度筛选基于"总额度 = quota + used_quota"。
 	// 使用参数绑定占位符传值，避免把数值拼接到 SQL 字符串中。
 	if params.BalanceMin != nil {
 		query = query.Where("(quota + used_quota) >= ?", *params.BalanceMin)
@@ -437,7 +437,7 @@ func SearchUsersWithParams(params UserSearchParams) ([]*User, int64, error) {
 		query = query.Where("used_quota <= ?", *params.UsedBalanceMax)
 	}
 	if params.InviteeUserID != nil {
-		// 通过子查询拿到“被邀请人 -> 邀请人ID”，然后反查邀请人用户。
+		// 通过子查询拿到"被邀请人 -> 邀请人ID"，然后反查邀请人用户。
 		// 子查询同样走参数绑定，避免原始 SQL 拼接带来的注入风险。
 		subQuery := tx.Unscoped().
 			Model(&User{}).
@@ -551,7 +551,7 @@ func AttachUserSubscriptionMetadata(tx *gorm.DB, users []*User) error {
 			continue
 		}
 		userIDs = append(userIDs, user.Id)
-		// 先写入默认值，确保“无套餐”用户也有明确响应字段。
+		// 先写入默认值，确保"无套餐"用户也有明确响应字段。
 		user.ActiveSubscriptionCount = 0
 		user.HasActiveSubscription = false
 		user.PendingSubscriptionIssuanceCount = 0
@@ -706,7 +706,7 @@ func GetUserInviteRelations(userID int, startIdx int, pageSize int) (*User, *Use
 		return nil, nil, nil, 0, nil, err
 	}
 
-	// 直接收益采用“当前配置口径”：
+	// 直接收益采用"当前配置口径"：
 	// - 每个被邀请用户按 QuotaForInviter 计一次；
 	// - 该口径实现简单、开销稳定，但不追溯历史配置变更。
 	if common.QuotaForInviter > 0 {
@@ -714,7 +714,7 @@ func GetUserInviteRelations(userID int, startIdx int, pageSize int) (*User, *Use
 	}
 	// 充值返佣按台账汇总（仅统计 settled）：
 	// - pending/skipped 不计入已到账收益；
-	// - 这里按 inviter_user_id 聚合，得到“该用户作为邀请人”的总返佣。
+	// - 这里按 inviter_user_id 聚合，得到"该用户作为邀请人"的总返佣。
 	if err := DB.Model(&InviteCommissionLedger{}).
 		Select("COALESCE(SUM(settled_quota), 0)").
 		Where("inviter_user_id = ? AND status = ?", userID, InviteCommissionStatusSettled).
@@ -747,7 +747,7 @@ func GetUserInviteRelations(userID int, startIdx int, pageSize int) (*User, *Use
 			RechargeTotalQuota int `gorm:"column:recharge_total_quota"`
 		}
 		var rows []inviteeRechargeRow
-		// 为“当前页被邀请人”批量聚合返佣，避免前端逐行请求导致 N+1。
+		// 为"当前页被邀请人"批量聚合返佣，避免前端逐行请求导致 N+1。
 		if err := DB.Model(&InviteCommissionLedger{}).
 			Select("invitee_user_id, COALESCE(SUM(settled_quota), 0) AS recharge_total_quota").
 			Where("inviter_user_id = ? AND status = ? AND invitee_user_id IN ?", userID, InviteCommissionStatusSettled, inviteeIDs).
@@ -762,7 +762,7 @@ func GetUserInviteRelations(userID int, startIdx int, pageSize int) (*User, *Use
 	for _, invitee := range invitees {
 		if invitee != nil {
 			invitee.InviteeCount = invitee.AffCount
-			// 每个被邀请人对应一份“直接收益”（当前配置口径）。
+			// 每个被邀请人对应一份"直接收益"（当前配置口径）。
 			directIncome := 0
 			if common.QuotaForInviter > 0 {
 				directIncome = common.QuotaForInviter
@@ -923,9 +923,9 @@ func inviteUser(inviterId int) (err error) {
 	if inviterId <= 0 {
 		return errors.New("inviterId 为空！")
 	}
-	// 这里必须使用数据库原子自增而不是“先查后改再保存”：
+	// 这里必须使用数据库原子自增而不是"先查后改再保存"：
 	// 在高并发注册场景下，后者会出现并发覆盖（lost update），导致 aff_count 实际被少加。
-	// 这正是“邀请关系查到 2 人，但直接邀请人数只有 1”这类数据漂移的常见根因。
+	// 这正是"邀请关系查到 2 人，但直接邀请人数只有 1"这类数据漂移的常见根因。
 	result := DB.Model(&User{}).
 		Where("id = ?", inviterId).
 		Updates(map[string]interface{}{
@@ -1033,7 +1033,7 @@ func (user *User) Insert(inviterId int) error {
 		}
 		// 邀请人数统计必须独立于邀请奖励额度开关：
 		// 即使 QuotaForInviter=0（不发固定邀请奖励），也要累计 aff_count，
-		// 否则会出现“邀请关系已建立但邀请人数始终为 0”的错误展示。
+		// 否则会出现"邀请关系已建立但邀请人数始终为 0"的错误展示。
 		if err := inviteUser(inviterId); err != nil {
 			// 邀请关系统计属于关键业务指标，这里显式记录错误便于排查数据不一致问题。
 			common.SysError(fmt.Sprintf("更新邀请统计失败(inviter_id=%d,user_id=%d): %s", inviterId, user.Id, err.Error()))
@@ -1099,7 +1099,7 @@ func (user *User) FinalizeOAuthUserCreation(inviterId int) {
 			RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
 		}
 		// 与普通注册保持一致：邀请人数统计不依赖 QuotaForInviter。
-		// 这样 OAuth 注册链路也能在“奖励为 0”时正确累计邀请人数。
+		// 这样 OAuth 注册链路也能在"奖励为 0"时正确累计邀请人数。
 		if err := inviteUser(inviterId); err != nil {
 			common.SysError(fmt.Sprintf("更新邀请统计失败(inviter_id=%d,user_id=%d): %s", inviterId, user.Id, err.Error()))
 		}
