@@ -27,7 +27,10 @@ import {
   verifyJSON,
 } from '../../../../helpers';
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
-import { CHANNEL_OPTIONS } from '../../../../constants';
+import {
+  CHANNEL_OPTIONS,
+  MODEL_FETCHABLE_CHANNEL_TYPES,
+} from '../../../../constants';
 import {
   SideSheet,
   Space,
@@ -98,11 +101,6 @@ const REGION_EXAMPLE = {
   'gemini-1.5-flash-002': 'europe-west2',
   'claude-3-5-sonnet-20240620': 'europe-west1',
 };
-
-// 支持并且已适配通过接口获取模型列表的渠道类型
-const MODEL_FETCHABLE_TYPES = new Set([
-  1, 4, 14, 34, 17, 26, 27, 24, 47, 25, 20, 23, 31, 40, 42, 48, 43,
-]);
 
 function type2secretPrompt(type) {
   // inputs.type === 15 ? '按照如下格式输入：APIKey|SecretKey' : (inputs.type === 18 ? '按照如下格式输入：APPID|APISecret|APIKey' : '请输入渠道对应的鉴权密钥')
@@ -178,6 +176,11 @@ const EditChannelModal = (props) => {
     allow_include_obfuscation: false,
     allow_inference_geo: false,
     claude_beta_query: false,
+    upstream_model_update_check_enabled: false,
+    upstream_model_update_auto_sync_enabled: false,
+    upstream_model_update_last_check_time: 0,
+    upstream_model_update_last_detected_models: [],
+    upstream_model_update_ignored_models: '',
   };
   const [batch, setBatch] = useState(false);
   const [multiToSingle, setMultiToSingle] = useState(false);
@@ -470,6 +473,14 @@ const EditChannelModal = (props) => {
 
   const isIonetLocked = isIonetChannel && isEdit;
 
+  const formatUnixTime = (timestamp) => {
+    const value = Number(timestamp || 0);
+    if (!value) {
+      return t('暂无');
+    }
+    return new Date(value * 1000).toLocaleString();
+  };
+
   const handleInputChange = (name, value) => {
     if (
       isIonetChannel &&
@@ -673,6 +684,22 @@ const EditChannelModal = (props) => {
           data.allow_inference_geo =
             parsedSettings.allow_inference_geo || false;
           data.claude_beta_query = parsedSettings.claude_beta_query || false;
+          data.upstream_model_update_check_enabled =
+            parsedSettings.upstream_model_update_check_enabled === true;
+          data.upstream_model_update_auto_sync_enabled =
+            parsedSettings.upstream_model_update_auto_sync_enabled === true;
+          data.upstream_model_update_last_check_time =
+            Number(parsedSettings.upstream_model_update_last_check_time) || 0;
+          data.upstream_model_update_last_detected_models = Array.isArray(
+            parsedSettings.upstream_model_update_last_detected_models,
+          )
+            ? parsedSettings.upstream_model_update_last_detected_models
+            : [];
+          data.upstream_model_update_ignored_models = Array.isArray(
+            parsedSettings.upstream_model_update_ignored_models,
+          )
+            ? parsedSettings.upstream_model_update_ignored_models.join(',')
+            : '';
         } catch (error) {
           console.error('解析其他设置失败:', error);
           data.azure_responses_version = '';
@@ -686,6 +713,11 @@ const EditChannelModal = (props) => {
           data.allow_include_obfuscation = false;
           data.allow_inference_geo = false;
           data.claude_beta_query = false;
+          data.upstream_model_update_check_enabled = false;
+          data.upstream_model_update_auto_sync_enabled = false;
+          data.upstream_model_update_last_check_time = 0;
+          data.upstream_model_update_last_detected_models = [];
+          data.upstream_model_update_ignored_models = '';
         }
       } else {
         // 兼容历史数据：老渠道没有 settings 时，默认按 json 展示
@@ -698,6 +730,11 @@ const EditChannelModal = (props) => {
         data.allow_include_obfuscation = false;
         data.allow_inference_geo = false;
         data.claude_beta_query = false;
+        data.upstream_model_update_check_enabled = false;
+        data.upstream_model_update_auto_sync_enabled = false;
+        data.upstream_model_update_last_check_time = 0;
+        data.upstream_model_update_last_detected_models = [];
+        data.upstream_model_update_ignored_models = '';
       }
 
       if (
@@ -828,7 +865,7 @@ const EditChannelModal = (props) => {
     const mappingKey = String(pairKey ?? '').trim();
     if (!mappingKey) return;
 
-    if (!MODEL_FETCHABLE_TYPES.has(inputs.type)) {
+    if (!MODEL_FETCHABLE_CHANNEL_TYPES.has(inputs.type)) {
       return;
     }
 
@@ -1499,6 +1536,35 @@ const EditChannelModal = (props) => {
       }
     }
 
+    settings.upstream_model_update_check_enabled =
+      localInputs.upstream_model_update_check_enabled === true;
+    settings.upstream_model_update_auto_sync_enabled =
+      settings.upstream_model_update_check_enabled &&
+      localInputs.upstream_model_update_auto_sync_enabled === true;
+    settings.upstream_model_update_ignored_models = Array.from(
+      new Set(
+        String(localInputs.upstream_model_update_ignored_models || '')
+          .split(',')
+          .map((model) => model.trim())
+          .filter(Boolean),
+      ),
+    );
+    if (
+      !Array.isArray(settings.upstream_model_update_last_detected_models) ||
+      !settings.upstream_model_update_check_enabled
+    ) {
+      settings.upstream_model_update_last_detected_models = [];
+    }
+    if (
+      !Array.isArray(settings.upstream_model_update_last_removed_models) ||
+      !settings.upstream_model_update_check_enabled
+    ) {
+      settings.upstream_model_update_last_removed_models = [];
+    }
+    if (typeof settings.upstream_model_update_last_check_time !== 'number') {
+      settings.upstream_model_update_last_check_time = 0;
+    }
+
     localInputs.settings = JSON.stringify(settings);
 
     // 清理不需要发送到后端的字段
@@ -1520,6 +1586,11 @@ const EditChannelModal = (props) => {
     delete localInputs.allow_include_obfuscation;
     delete localInputs.allow_inference_geo;
     delete localInputs.claude_beta_query;
+    delete localInputs.upstream_model_update_check_enabled;
+    delete localInputs.upstream_model_update_auto_sync_enabled;
+    delete localInputs.upstream_model_update_last_check_time;
+    delete localInputs.upstream_model_update_last_detected_models;
+    delete localInputs.upstream_model_update_ignored_models;
 
     let res;
     localInputs.auto_ban = localInputs.auto_ban ? 1 : 0;
@@ -2898,7 +2969,7 @@ const EditChannelModal = (props) => {
                           >
                             {t('填入所有模型')}
                           </Button>
-                          {MODEL_FETCHABLE_TYPES.has(inputs.type) && (
+                          {MODEL_FETCHABLE_CHANNEL_TYPES.has(inputs.type) && (
                             <Button
                               size='small'
                               type='tertiary'
@@ -3030,7 +3101,7 @@ const EditChannelModal = (props) => {
                       editorType='keyValue'
                       formApi={formApiRef.current}
                       renderStringValueSuffix={({ pairKey, value }) => {
-                        if (!MODEL_FETCHABLE_TYPES.has(inputs.type)) {
+                        if (!MODEL_FETCHABLE_CHANNEL_TYPES.has(inputs.type)) {
                           return null;
                         }
                         const disabled = !String(pairKey ?? '').trim();
@@ -3149,6 +3220,82 @@ const EditChannelModal = (props) => {
                       )}
                       initValue={autoBan}
                     />
+
+                    {MODEL_FETCHABLE_CHANNEL_TYPES.has(inputs.type) && (
+                      <>
+                        <Form.Switch
+                          field='upstream_model_update_check_enabled'
+                          label={t('是否检测上游模型更新')}
+                          checkedText={t('开')}
+                          uncheckedText={t('关')}
+                          onChange={(value) =>
+                            handleChannelOtherSettingsChange(
+                              'upstream_model_update_check_enabled',
+                              value,
+                            )
+                          }
+                          extraText={t(
+                            '开启后由后端定时任务检测该渠道上游模型变化',
+                          )}
+                        />
+
+                        <Form.Switch
+                          field='upstream_model_update_auto_sync_enabled'
+                          label={t('是否自动同步上游模型更新')}
+                          checkedText={t('开')}
+                          uncheckedText={t('关')}
+                          disabled={!inputs.upstream_model_update_check_enabled}
+                          onChange={(value) =>
+                            handleChannelOtherSettingsChange(
+                              'upstream_model_update_auto_sync_enabled',
+                              value,
+                            )
+                          }
+                          extraText={t(
+                            '开启后检测到新增模型会自动加入当前渠道模型列表',
+                          )}
+                        />
+
+                        <div className='text-xs text-gray-500 mb-2'>
+                          {t('上次检测时间')}:{' '}
+                          {formatUnixTime(
+                            inputs.upstream_model_update_last_check_time,
+                          )}
+                        </div>
+
+                        <Form.Input
+                          field='upstream_model_update_ignored_models'
+                          label={t('已忽略模型')}
+                          placeholder={t(
+                            '例如：gpt-4.1-nano,gpt-4o-mini',
+                          )}
+                          onChange={(value) =>
+                            handleInputChange(
+                              'upstream_model_update_ignored_models',
+                              value,
+                            )
+                          }
+                          extraText={t(
+                            '逗号分隔，检测到这些模型时不会再出现在待处理列表',
+                          )}
+                          showClear
+                        />
+
+                        <div className='text-xs text-gray-500 mb-3 break-all'>
+                          {t('待加入模型')}:{' '}
+                          {Array.isArray(
+                            inputs.upstream_model_update_last_detected_models,
+                          ) &&
+                          inputs.upstream_model_update_last_detected_models
+                            .length > 0
+                            ? inputs.upstream_model_update_last_detected_models
+                                .map((model) => String(model || '').trim())
+                                .filter(Boolean)
+                                .join(', ')
+                            : t('暂无')}
+                        </div>
+                      </>
+                    )}
 
                     <Form.TextArea
                       field='param_override'
