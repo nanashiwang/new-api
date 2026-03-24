@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNormalizeTokenPackagePeriod(t *testing.T) {
@@ -279,6 +280,65 @@ func TestValidateTokenQuotaPackageRelation_AllowWhenTotalQuotaMeetsPackageLimit(
 	if err := ValidateTokenQuotaPackageRelation(token); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+}
+
+func TestNormalizeTokenPackageStateForRead_PersistsExpiredCycleReset(t *testing.T) {
+	cleanupTokenPackageIntegrationData(t)
+	now := common.GetTimestamp()
+	token := &Token{
+		UserId:               1,
+		Key:                  "token_package_read_reset_key_00000000000000000001",
+		Status:               common.TokenStatusEnabled,
+		Name:                 "package-read-reset-test",
+		CreatedTime:          now,
+		AccessedTime:         now,
+		ExpiredTime:          -1,
+		RemainQuota:          50000,
+		PackageEnabled:       true,
+		PackageLimitQuota:    20000,
+		PackageUsedQuota:     18000,
+		PackagePeriod:        TokenPackagePeriodDaily,
+		PackagePeriodMode:    TokenPackagePeriodModeNatural,
+		PackageNextResetTime: now - 60,
+	}
+	require.NoError(t, token.Insert())
+
+	stored, err := GetTokenById(token.Id)
+	require.NoError(t, err)
+	require.Equal(t, 0, stored.PackageUsedQuota)
+	require.Greater(t, stored.PackageNextResetTime, now)
+
+	var persisted Token
+	require.NoError(t, DB.First(&persisted, "id = ?", token.Id).Error)
+	require.Equal(t, 0, persisted.PackageUsedQuota)
+	require.Greater(t, persisted.PackageNextResetTime, now)
+}
+
+func TestValidateTokenCanEnable_RejectsPackageExhaustedToken(t *testing.T) {
+	cleanupTokenPackageIntegrationData(t)
+	now := common.GetTimestamp()
+	token := &Token{
+		UserId:               1,
+		Key:                  "token_package_enable_block_key_0000000000000000001",
+		Status:               common.TokenStatusDisabled,
+		Name:                 "package-enable-block-test",
+		CreatedTime:          now,
+		AccessedTime:         now,
+		ExpiredTime:          -1,
+		RemainQuota:          50000,
+		PackageEnabled:       true,
+		PackageLimitQuota:    20000,
+		PackageUsedQuota:     20000,
+		PackagePeriod:        TokenPackagePeriodDaily,
+		PackagePeriodMode:    TokenPackagePeriodModeRelative,
+		PackageNextResetTime: now + 3600,
+	}
+	require.NoError(t, token.Insert())
+
+	normalized, err := ValidateTokenCanEnable(token)
+	require.ErrorIs(t, err, ErrTokenCannotEnablePackageExhausted)
+	require.NotNil(t, normalized)
+	require.Equal(t, 20000, normalized.PackageUsedQuota)
 }
 
 func cleanupTokenPackageIntegrationData(t *testing.T) {

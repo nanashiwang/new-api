@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -347,6 +348,11 @@ func GetTokenUsage(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgTokenGetInfoFailed)
 		return
 	}
+	token, err = model.NormalizeTokenPackageStateForRead(token)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	expiredAt := token.ExpiredTime
 	if expiredAt == -1 {
 		expiredAt = 0
@@ -455,7 +461,11 @@ func resolvePublicSingleToken(rawKey string) (*model.Token, error) {
 	if key == "" {
 		return nil, fmt.Errorf("empty key")
 	}
-	return model.GetTokenByKey(key, false)
+	token, err := model.GetTokenByKey(key, false)
+	if err != nil {
+		return nil, err
+	}
+	return model.NormalizeTokenPackageStateForRead(token)
 }
 
 func buildPublicTokenUsagePayload(token *model.Token) gin.H {
@@ -812,12 +822,16 @@ func UpdateToken(c *gin.Context) {
 		return
 	}
 	if token.Status == common.TokenStatusEnabled {
-		if cleanToken.Status == common.TokenStatusExpired && cleanToken.ExpiredTime <= common.GetTimestamp() && cleanToken.ExpiredTime != -1 {
-			common.ApiErrorI18n(c, i18n.MsgTokenExpiredCannotEnable)
-			return
-		}
-		if cleanToken.Status == common.TokenStatusExhausted && cleanToken.RemainQuota <= 0 && !cleanToken.UnlimitedQuota {
-			common.ApiErrorI18n(c, i18n.MsgTokenExhaustedCannotEable)
+		cleanToken, err = model.ValidateTokenCanEnable(cleanToken)
+		if err != nil {
+			switch {
+			case errors.Is(err, model.ErrTokenCannotEnableExpired):
+				common.ApiErrorI18n(c, i18n.MsgTokenExpiredCannotEnable)
+			case errors.Is(err, model.ErrTokenCannotEnableExhausted):
+				common.ApiErrorI18n(c, i18n.MsgTokenExhaustedCannotEable)
+			default:
+				common.ApiErrorMsg(c, err.Error())
+			}
 			return
 		}
 	}
@@ -947,19 +961,11 @@ func ManageTokenBatch(c *gin.Context) {
 
 		switch action {
 		case "enable":
-			// 规则与单条编辑保持一致：已过期令牌不允许重新启用。
-			if token.Status == common.TokenStatusExpired && token.ExpiredTime <= common.GetTimestamp() && token.ExpiredTime != -1 {
+			token, err = model.ValidateTokenCanEnable(token)
+			if err != nil {
 				failed = append(failed, gin.H{
 					"id":      id,
-					"message": "已过期令牌不可启用",
-				})
-				continue
-			}
-			// 规则与单条编辑保持一致：已耗尽且非无限额令牌不可启用。
-			if token.Status == common.TokenStatusExhausted && token.RemainQuota <= 0 && !token.UnlimitedQuota {
-				failed = append(failed, gin.H{
-					"id":      id,
-					"message": "已耗尽令牌不可启用",
+					"message": err.Error(),
 				})
 				continue
 			}

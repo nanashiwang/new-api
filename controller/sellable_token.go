@@ -483,6 +483,10 @@ func AdminGetUserSellableTokenSummary(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	if err := model.NormalizeTokenPackageStatesForRead(tokens); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	issuances, err := model.ListSellableTokenIssuancesByUser(userId, "")
 	if err != nil {
 		common.ApiError(c, err)
@@ -605,11 +609,9 @@ func manageUserSellableToken(userId int, tokenId int, action string) (string, er
 
 	switch action {
 	case "enable":
-		if token.Status == common.TokenStatusExpired && token.ExpiredTime <= common.GetTimestamp() && token.ExpiredTime != -1 {
-			return "", errors.New("已过期令牌不可启用")
-		}
-		if token.Status == common.TokenStatusExhausted && token.RemainQuota <= 0 && !token.UnlimitedQuota {
-			return "", errors.New("已耗尽令牌不可启用")
+		token, err = model.ValidateTokenCanEnable(token)
+		if err != nil {
+			return "", err
 		}
 		token.Status = common.TokenStatusEnabled
 		if err := token.Update(); err != nil {

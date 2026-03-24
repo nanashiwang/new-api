@@ -231,6 +231,9 @@ func SearchUserTokens(userId int, keyword string, token string, offset int, limi
 		common.SysError("failed to search tokens: " + err.Error())
 		return nil, 0, errors.New("搜索令牌失败")
 	}
+	if err = NormalizeTokenPackageStatesForRead(tokens); err != nil {
+		return nil, 0, err
+	}
 	return tokens, total, nil
 }
 
@@ -307,14 +310,7 @@ func validateTokenPackageAccess(token *Token) (*Token, error) {
 			return err
 		}
 		if changed {
-			updates := map[string]interface{}{
-				"package_period":          updated.PackagePeriod,
-				"package_custom_seconds":  updated.PackageCustomSeconds,
-				"package_used_quota":      updated.PackageUsedQuota,
-				"package_next_reset_time": updated.PackageNextResetTime,
-				"package_period_mode":     updated.PackagePeriodMode,
-			}
-			if err := tx.Model(&Token{}).Where("id = ?", updated.Id).Updates(updates).Error; err != nil {
+			if err := applyTokenPackageStateUpdates(tx, &updated); err != nil {
 				return err
 			}
 		}
@@ -343,7 +339,10 @@ func GetTokenByIds(id int, userId int) (*Token, error) {
 	token := Token{Id: id, UserId: userId}
 	var err error = nil
 	err = DB.First(&token, "id = ? and user_id = ?", id, userId).Error
-	return &token, err
+	if err != nil {
+		return &token, err
+	}
+	return NormalizeTokenPackageStateForRead(&token)
 }
 
 func GetTokenById(id int) (*Token, error) {
@@ -353,14 +352,21 @@ func GetTokenById(id int) (*Token, error) {
 	token := Token{Id: id}
 	var err error = nil
 	err = DB.First(&token, "id = ?", id).Error
+	if err != nil {
+		return &token, err
+	}
+	normalized, err := NormalizeTokenPackageStateForRead(&token)
+	if err != nil {
+		return nil, err
+	}
 	if shouldUpdateRedis(true, err) {
 		gopool.Go(func() {
-			if err := cacheSetToken(token); err != nil {
+			if err := cacheSetToken(*normalized); err != nil {
 				common.SysLog("failed to update user status cache: " + err.Error())
 			}
 		})
 	}
-	return &token, err
+	return normalized, nil
 }
 
 func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {

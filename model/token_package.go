@@ -5,6 +5,16 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/bytedance/gopkg/util/gopool"
+	"gorm.io/gorm"
+)
+
+var (
+	ErrTokenCannotEnableExpired          = errors.New("已过期令牌不可启用")
+	ErrTokenCannotEnableExhausted        = errors.New("已耗尽令牌不可启用")
+	ErrTokenCannotEnablePackageExhausted = errors.New("套餐周期额度已用尽的令牌不可启用")
 )
 
 const (
@@ -243,4 +253,98 @@ func MaybeResetTokenPackageState(token *Token, nowUnix int64) (bool, error) {
 		token.PackageUsedQuota = 0
 	}
 	return true, nil
+}
+
+func applyTokenPackageStateUpdates(tx *gorm.DB, token *Token) error {
+	if token == nil {
+		return errors.New("token is nil")
+	}
+	updates := map[string]interface{}{
+		"package_period":          token.PackagePeriod,
+		"package_custom_seconds":  token.PackageCustomSeconds,
+		"package_used_quota":      token.PackageUsedQuota,
+		"package_next_reset_time": token.PackageNextResetTime,
+		"package_period_mode":     token.PackagePeriodMode,
+	}
+	return tx.Model(&Token{}).Where("id = ?", token.Id).Updates(updates).Error
+}
+
+func NormalizeTokenPackageStateForRead(token *Token) (*Token, error) {
+	if token == nil {
+		return nil, errors.New("token is nil")
+	}
+
+	normalized := *token
+	changed, err := MaybeResetTokenPackageState(&normalized, common.GetTimestamp())
+	if err != nil {
+		return nil, err
+	}
+	if !changed || token.Id <= 0 {
+		return &normalized, nil
+	}
+
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		query := tx.Where("id = ?", token.Id)
+		if !common.UsingSQLite {
+			query = query.Set("gorm:query_option", "FOR UPDATE")
+		}
+		if err := query.First(&normalized).Error; err != nil {
+			return err
+		}
+		changed, err := MaybeResetTokenPackageState(&normalized, GetDBTimestampTx(tx))
+		if err != nil {
+			return err
+		}
+		if !changed {
+			return nil
+		}
+		return applyTokenPackageStateUpdates(tx, &normalized)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if common.RedisEnabled {
+		gopool.Go(func() {
+			if err := cacheSetToken(normalized); err != nil {
+				common.SysLog("failed to update token cache: " + err.Error())
+			}
+		})
+	}
+	return &normalized, nil
+}
+
+func NormalizeTokenPackageStatesForRead(tokens []*Token) error {
+	for i, token := range tokens {
+		if token == nil {
+			continue
+		}
+		normalized, err := NormalizeTokenPackageStateForRead(token)
+		if err != nil {
+			return err
+		}
+		tokens[i] = normalized
+	}
+	return nil
+}
+
+func ValidateTokenCanEnable(token *Token) (*Token, error) {
+	if token == nil {
+		return nil, errors.New("token is nil")
+	}
+
+	normalized, err := NormalizeTokenPackageStateForRead(token)
+	if err != nil {
+		return nil, err
+	}
+	now := common.GetTimestamp()
+	if normalized.ExpiredTime > 0 && normalized.ExpiredTime != -1 && normalized.ExpiredTime <= now {
+		return normalized, ErrTokenCannotEnableExpired
+	}
+	if !normalized.UnlimitedQuota && normalized.RemainQuota <= 0 {
+		return normalized, ErrTokenCannotEnableExhausted
+	}
+	if normalized.PackageEnabled && normalized.PackageLimitQuota > 0 && normalized.PackageUsedQuota >= normalized.PackageLimitQuota {
+		return normalized, ErrTokenCannotEnablePackageExhausted
+	}
+	return normalized, nil
 }

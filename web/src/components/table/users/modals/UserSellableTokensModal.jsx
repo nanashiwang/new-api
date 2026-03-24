@@ -60,9 +60,18 @@ const getTokenRuntimeState = (token) => {
   const endTime = Number(token?.expired_time || 0);
   const status = Number(token?.status || 0);
   const remainQuota = Number(token?.remain_quota || 0);
+  const packageLimitQuota = Number(token?.package_limit_quota || 0);
+  const packageUsedQuota = Number(token?.package_used_quota || 0);
   const isExpiredByTime = endTime > 0 && endTime !== -1 && endTime <= nowUnix;
   const isEnabled = status === 1;
-  const isExhausted = status === 4 || (!isEnabled && remainQuota <= 0);
+  const isPackageExhausted =
+    Boolean(token?.package_enabled) &&
+    packageLimitQuota > 0 &&
+    packageUsedQuota >= packageLimitQuota;
+  const isExhausted =
+    status === 4 ||
+    (!token?.unlimited_quota && remainQuota <= 0) ||
+    isPackageExhausted;
   return {
     isEnabled,
     canEnable: !isEnabled && !isExpiredByTime && !isExhausted,
