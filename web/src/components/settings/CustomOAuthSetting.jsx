@@ -45,7 +45,7 @@ import { useTranslation } from 'react-i18next';
 
 const { Text } = Typography;
 
-// Preset templates for common OAuth providers
+// 常见 OAuth 提供商的预设模板
 const OAUTH_PRESETS = {
   'github-enterprise': {
     name: 'GitHub Enterprise',
@@ -306,7 +306,7 @@ const CustomOAuthSetting = ({ serverAddress }) => {
   const handleSubmit = async () => {
     const currentValues = getLatestFormValues();
 
-    // Validate required fields
+    // 校验必填字段
     const requiredFields = [
       'name',
       'slug',
@@ -327,12 +327,12 @@ const CustomOAuthSetting = ({ serverAddress }) => {
       }
     }
 
-    // Validate endpoint URLs must be full URLs
+    // 校验端点 URL 必须是完整地址
     const endpointFields = ['authorization_endpoint', 'token_endpoint', 'user_info_endpoint'];
     for (const field of endpointFields) {
       const value = currentValues[field];
       if (value && !value.startsWith('http://') && !value.startsWith('https://')) {
-        // Check if user selected a preset but forgot to fill issuer URL
+        // 检查是否选择了预设但忘记填写发行方 URL
         if (selectedPreset && !baseUrl) {
           showError(t('请先填写 Issuer URL，以自动生成完整的端点 URL'));
         } else {

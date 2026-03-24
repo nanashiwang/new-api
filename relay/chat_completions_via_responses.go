@@ -127,6 +127,7 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 	if err != nil {
 		return nil, types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
+	relaycommon.NormalizeResponsesStreamOptions(responsesReq)
 	if sessionMatch != nil {
 		responsesReq.PreviousResponseID = sessionMatch.ResponseID
 	}
@@ -158,6 +159,10 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 		if err != nil {
 			return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 		}
+	}
+	jsonData, err = relaycommon.NormalizeJSONStreamOptions(jsonData)
+	if err != nil {
+		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 	}
 
 	var httpResp *http.Response
