@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -55,6 +56,10 @@ func createPaymentRecordTopUp(t *testing.T, userID int, tradeNo string, createTi
 }
 
 func createPaymentRecordSellablePurchase(t *testing.T, userID int, productName string, createTime int64, issuanceStatus string) *SellableTokenOrder {
+	return createPaymentRecordSellablePurchaseWithTradeNo(t, userID, productName, createTime, issuanceStatus, "")
+}
+
+func createPaymentRecordSellablePurchaseWithTradeNo(t *testing.T, userID int, productName string, createTime int64, issuanceStatus string, tradeNo string) *SellableTokenOrder {
 	t.Helper()
 	product := &SellableTokenProduct{
 		Name:       productName,
@@ -67,13 +72,19 @@ func createPaymentRecordSellablePurchase(t *testing.T, userID int, productName s
 	order := &SellableTokenOrder{
 		UserId:     userID,
 		ProductId:  product.Id,
+		TradeNo:    tradeNo,
 		PriceQuota: 200,
 	}
 	require.NoError(t, DB.Create(order).Error)
-	require.NoError(t, DB.Model(&SellableTokenOrder{}).Where("id = ?", order.Id).Updates(map[string]any{
+	updates := map[string]any{
 		"create_time":   createTime,
 		"complete_time": createTime,
-	}).Error)
+	}
+	if tradeNo == "" {
+		updates["trade_no"] = ""
+		order.TradeNo = ""
+	}
+	require.NoError(t, DB.Model(&SellableTokenOrder{}).Where("id = ?", order.Id).Updates(updates).Error)
 
 	issuance := &SellableTokenIssuance{
 		UserId:     userID,
@@ -110,6 +121,46 @@ func TestGetUserPaymentRecordsByParams_MergesAndSortsSources(t *testing.T) {
 	require.Equal(t, "USR1STO2", records[2].TradeNo)
 	require.Equal(t, "Beta", records[2].ProductName)
 	require.Equal(t, "T-001", records[3].TradeNo)
+}
+
+func TestGetUserPaymentRecordsByParams_UsesPersistedSellableTokenTradeNoForNewOrders(t *testing.T) {
+	setupPaymentRecordTestDB(t)
+
+	user := createPaymentRecordTestUser(t, "alice")
+	product := &SellableTokenProduct{
+		Name:       "Alpha",
+		Status:     SellableTokenProductStatusEnabled,
+		PriceQuota: 200,
+		TotalQuota: 1000,
+	}
+	require.NoError(t, CreateSellableTokenProduct(product))
+	order := &SellableTokenOrder{
+		UserId:     user.Id,
+		ProductId:  product.Id,
+		PriceQuota: 200,
+	}
+	require.NoError(t, DB.Create(order).Error)
+	require.NoError(t, DB.Model(&SellableTokenOrder{}).Where("id = ?", order.Id).Updates(map[string]any{
+		"create_time":   250,
+		"complete_time": 250,
+	}).Error)
+	issuance := &SellableTokenIssuance{
+		UserId:     user.Id,
+		ProductId:  product.Id,
+		SourceType: SellableTokenSourceTypeWallet,
+		SourceId:   order.Id,
+	}
+	require.NoError(t, CreateSellableTokenIssuanceTx(DB, issuance))
+	require.NoError(t, DB.Model(&SellableTokenIssuance{}).Where("id = ?", issuance.Id).Update("status", SellableTokenIssuanceStatusIssued).Error)
+	require.NotEmpty(t, order.TradeNo)
+	require.True(t, strings.HasPrefix(order.TradeNo, "USR1NO"))
+
+	records, total, err := GetUserPaymentRecordsByParams(user.Id, PaymentRecordSearchParams{}, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, records, 1)
+	require.Equal(t, order.TradeNo, records[0].TradeNo)
+	require.Equal(t, PaymentRecordTypeSellableTokenPurchase, records[0].RecordType)
 }
 
 func TestGetAllPaymentRecordsByParams_FiltersWalletPurchaseStatusAndUser(t *testing.T) {
@@ -152,17 +203,17 @@ func TestGetAllPaymentRecordsByParams_FiltersWalletPurchaseByUnifiedTradeNo(t *t
 
 	alice := createPaymentRecordTestUser(t, "alice")
 	createPaymentRecordSellablePurchase(t, alice.Id, "Gamma", 220, SellableTokenIssuanceStatusPending)
-	createPaymentRecordSellablePurchase(t, alice.Id, "Delta", 180, SellableTokenIssuanceStatusIssued)
+	order := createPaymentRecordSellablePurchaseWithTradeNo(t, alice.Id, "Delta", 180, SellableTokenIssuanceStatusIssued, "USR1NOABC123456789")
 
 	records, total, err := GetAllPaymentRecordsByParams(PaymentRecordSearchParams{
-		Keyword:       "USR1STO2",
+		Keyword:       "USR1NOABC123456789",
 		PaymentMethod: PaymentMethodWallet,
 	}, &common.PageInfo{Page: 1, PageSize: 10})
 	require.NoError(t, err)
 	require.Equal(t, int64(1), total)
 	require.Len(t, records, 1)
 	require.Equal(t, "Delta", records[0].ProductName)
-	require.Equal(t, "USR1STO2", records[0].TradeNo)
+	require.Equal(t, order.TradeNo, records[0].TradeNo)
 
 	legacyRecords, legacyTotal, err := GetAllPaymentRecordsByParams(PaymentRecordSearchParams{
 		Keyword:       "STO-1",

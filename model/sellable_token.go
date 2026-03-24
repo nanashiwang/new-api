@@ -256,6 +256,7 @@ type SellableTokenOrder struct {
 	Id           int            `json:"id"`
 	UserId       int            `json:"user_id" gorm:"index"`
 	ProductId    int            `json:"product_id" gorm:"index"`
+	TradeNo      string         `json:"trade_no" gorm:"type:varchar(255)"`
 	PriceQuota   int            `json:"price_quota" gorm:"type:int;default:0"`
 	Status       int            `json:"status" gorm:"type:int;default:1"`
 	CreateTime   int64          `json:"create_time" gorm:"bigint"`
@@ -271,6 +272,9 @@ func (o *SellableTokenOrder) BeforeCreate(tx *gorm.DB) error {
 	}
 	if o.Status == 0 {
 		o.Status = SellableTokenOrderStatusCompleted
+	}
+	if o.TradeNo == "" && o.UserId > 0 {
+		o.TradeNo = fmt.Sprintf("USR%dNO%s%d", o.UserId, common.GetRandomString(6), now)
 	}
 	return nil
 }

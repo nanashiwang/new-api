@@ -45,6 +45,7 @@ type sellableTokenPaymentRecordRow struct {
 	UserId         int    `gorm:"column:user_id"`
 	ProductId      int    `gorm:"column:product_id"`
 	ProductName    string `gorm:"column:product_name"`
+	TradeNo        string `gorm:"column:trade_no"`
 	PriceQuota     int    `gorm:"column:price_quota"`
 	CreateTime     int64  `gorm:"column:create_time"`
 	CompleteTime   int64  `gorm:"column:complete_time"`
@@ -250,7 +251,7 @@ func listSellableTokenPaymentRecords(userId *int, params PaymentRecordSearchPara
 			UserId:        row.UserId,
 			Username:      row.Username,
 			DisplayName:   row.DisplayName,
-			TradeNo:       formatSellableTokenPaymentTradeNo(row.UserId, row.Id),
+			TradeNo:       formatSellableTokenPaymentTradeNo(row.TradeNo, row.UserId, row.Id),
 			PaymentMethod: PaymentMethodWallet,
 			Amount:        int64(row.PriceQuota),
 			Money:         0,
@@ -289,6 +290,7 @@ func sellableTokenPaymentSelectQuery(includeUser bool) *gorm.DB {
 		"sellable_token_orders.user_id AS user_id",
 		"sellable_token_orders.product_id AS product_id",
 		"sellable_token_products.name AS product_name",
+		"sellable_token_orders.trade_no AS trade_no",
 		"sellable_token_orders.price_quota AS price_quota",
 		"sellable_token_orders.create_time AS create_time",
 		"sellable_token_orders.complete_time AS complete_time",
@@ -307,7 +309,7 @@ func applySellableTokenPaymentSearch(query *gorm.DB, params PaymentRecordSearchP
 	keyword := strings.TrimSpace(params.Keyword)
 	if keyword != "" {
 		like := "%" + keyword + "%"
-		keywordQuery := DB.Where("sellable_token_products.name LIKE ?", like)
+		keywordQuery := DB.Where("sellable_token_products.name LIKE ? OR sellable_token_orders.trade_no LIKE ?", like, like)
 		if orderID, ok := parseSellableTokenOrderKeyword(keyword); ok {
 			keywordQuery = keywordQuery.Or("sellable_token_orders.id = ?", orderID)
 		}
@@ -379,7 +381,11 @@ func toSellableTokenPaymentStatus(issuanceStatus string) string {
 	}
 }
 
-func formatSellableTokenPaymentTradeNo(userId int, orderId int) string {
+func formatSellableTokenPaymentTradeNo(tradeNo string, userId int, orderId int) string {
+	tradeNo = strings.TrimSpace(tradeNo)
+	if tradeNo != "" {
+		return tradeNo
+	}
 	if orderId <= 0 {
 		return ""
 	}

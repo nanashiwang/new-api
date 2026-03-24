@@ -380,6 +380,10 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
         dataIndex: 'amount',
         key: 'amount',
         render: (amount, record) => {
+          if (isSellableTokenPurchase(record)) {
+            return <Text type='tertiary'>-</Text>;
+          }
+
           if (isSubscriptionTopup(record)) {
             return (
               <Tag color='purple' shape='circle' size='small'>
@@ -402,7 +406,7 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
         key: 'money',
         render: (money, record) => {
           if (isSellableTokenPurchase(record)) {
-            return <Text type='tertiary'>-</Text>;
+            return <Text type='danger'>{renderQuota(record?.amount ?? 0)}</Text>;
           }
 
           return (

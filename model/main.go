@@ -303,6 +303,9 @@ func migrateDB() error {
 		if err := ensureSubscriptionOrderColumnsSQLite(); err != nil {
 			return err
 		}
+		if err := ensureSellableTokenOrderColumnsSQLite(); err != nil {
+			return err
+		}
 	} else {
 		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
 			return err
@@ -384,6 +387,9 @@ func migrateDBFast() error {
 			return err
 		}
 		if err := ensureSubscriptionOrderColumnsSQLite(); err != nil {
+			return err
+		}
+		if err := ensureSellableTokenOrderColumnsSQLite(); err != nil {
 			return err
 		}
 	} else {
@@ -508,6 +514,39 @@ func ensureSubscriptionOrderColumnsSQLite() error {
 		{Name: "purchase_mode", DDL: "`purchase_mode` varchar(16) NOT NULL DEFAULT 'stack'"},
 		{Name: "renew_target_subscription_id", DDL: "`renew_target_subscription_id` integer DEFAULT 0"},
 		{Name: "purchase_quantity", DDL: "`purchase_quantity` integer NOT NULL DEFAULT 1"},
+	}
+	for _, col := range required {
+		if _, ok := existing[col.Name]; ok {
+			continue
+		}
+		if err := DB.Exec("ALTER TABLE `" + tableName + "` ADD COLUMN " + col.DDL).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ensureSellableTokenOrderColumnsSQLite 为 SQLite 旧库补齐可售令牌订单字段。
+func ensureSellableTokenOrderColumnsSQLite() error {
+	if !common.UsingSQLite {
+		return nil
+	}
+	tableName := "sellable_token_orders"
+	if !DB.Migrator().HasTable(tableName) {
+		return nil
+	}
+	var cols []struct {
+		Name string `gorm:"column:name"`
+	}
+	if err := DB.Raw("PRAGMA table_info(`" + tableName + "`)").Scan(&cols).Error; err != nil {
+		return err
+	}
+	existing := make(map[string]struct{}, len(cols))
+	for _, c := range cols {
+		existing[c.Name] = struct{}{}
+	}
+	required := []sqliteColumnDef{
+		{Name: "trade_no", DDL: "`trade_no` varchar(255) DEFAULT ''"},
 	}
 	for _, col := range required {
 		if _, ok := existing[col.Name]; ok {
