@@ -38,7 +38,7 @@ import {
 } from '@douyinfe/semi-illustrations';
 import { IconSearch, IconFilter } from '@douyinfe/semi-icons';
 import { Coins } from 'lucide-react';
-import { API, renderQuota, stringToColor, timestamp2string } from '../../../helpers';
+import {API, renderQuota, renderQuotaWithAmount, stringToColor, timestamp2string,} from '../../../helpers';
 import { isAdmin } from '../../../helpers/utils';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 
@@ -395,7 +395,7 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
           return (
             <span className='flex items-center gap-1'>
               <Coins size={16} />
-              <Text>{renderQuota(amount ?? 0)}</Text>
+              <Text>{renderQuotaWithAmount(amount ?? 0)}</Text>
             </span>
           );
         },
