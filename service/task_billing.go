@@ -68,17 +68,6 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 // 异步任务计费辅助函数
 // ---------------------------------------------------------------------------
 
-// resolveTokenKey 通过 TokenId 运行时获取令牌 Key（用于 Redis 缓存操作）。
-// 如果令牌已被删除或查询失败，返回空字符串。
-func resolveTokenKey(ctx context.Context, tokenId int, taskID string) string {
-	token, err := model.GetTokenById(tokenId)
-	if err != nil {
-		logger.LogWarn(ctx, fmt.Sprintf("获取令牌 key 失败 (tokenId=%d, task=%s): %s", tokenId, taskID, err.Error()))
-		return ""
-	}
-	return token.Key
-}
-
 // taskIsSubscription 判断任务是否通过订阅计费。
 func taskIsSubscription(task *model.Task) bool {
 	return task.PrivateData.BillingSource == BillingSourceSubscription && task.PrivateData.SubscriptionId > 0
@@ -96,24 +85,25 @@ func taskAdjustFunding(task *model.Task, delta int) error {
 }
 
 // taskAdjustTokenQuota 调整任务的令牌额度，delta > 0 表示扣费，delta < 0 表示退还。
-// 需要通过 resolveTokenKey 运行时获取 key（不从 PrivateData 中读取）。
-func taskAdjustTokenQuota(ctx context.Context, task *model.Task, delta int) {
+// 异步任务结算只依赖持久化的 TokenId，避免历史任务因 key 规范差异导致对账失败。
+func taskAdjustTokenQuota(task *model.Task, delta int) error {
 	if task.PrivateData.TokenId <= 0 || delta == 0 {
-		return
+		return nil
 	}
-	tokenKey := resolveTokenKey(ctx, task.PrivateData.TokenId, task.TaskID)
-	if tokenKey == "" {
-		return
-	}
-	var err error
 	if delta > 0 {
-		err = model.DecreaseTokenQuota(task.PrivateData.TokenId, tokenKey, delta)
-	} else {
-		err = model.IncreaseTokenQuota(task.PrivateData.TokenId, tokenKey, -delta)
+		return model.DecreaseTokenQuotaByID(task.PrivateData.TokenId, delta)
 	}
-	if err != nil {
-		logger.LogWarn(ctx, fmt.Sprintf("调整令牌额度失败 (delta=%d, task=%s): %s", delta, task.TaskID, err.Error()))
+	return model.IncreaseTokenQuotaByID(task.PrivateData.TokenId, -delta)
+}
+
+func logTaskBillingReconciliationError(ctx context.Context, task *model.Task, delta int, err error) {
+	if err == nil {
+		return
 	}
+	logger.LogError(ctx, fmt.Sprintf("异步任务结算与令牌额度调整不一致 (task=%s, userId=%d, tokenId=%d, delta=%d): %s",
+		task.TaskID, task.UserId, task.PrivateData.TokenId, delta, err.Error()))
+	common.SysError(fmt.Sprintf("CRITICAL: async task billing token quota adjustment failed after funding settled (task=%s, userId=%d, tokenId=%d, delta=%d): %s — manual reconciliation required",
+		task.TaskID, task.UserId, task.PrivateData.TokenId, delta, err.Error()))
 }
 
 // taskBillingOther 从 task 的 BillingContext 构建日志 Other 字段。
@@ -159,7 +149,10 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
 	}
 
 	// 2. 退还令牌额度
-	taskAdjustTokenQuota(ctx, task, -quota)
+	if err := taskAdjustTokenQuota(task, -quota); err != nil {
+		logTaskBillingReconciliationError(ctx, task, -quota, err)
+		return
+	}
 
 	// 3. 记录日志
 	other := taskBillingOther(task)
@@ -209,7 +202,10 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	}
 
 	// 调整令牌额度
-	taskAdjustTokenQuota(ctx, task, quotaDelta)
+	if err := taskAdjustTokenQuota(task, quotaDelta); err != nil {
+		logTaskBillingReconciliationError(ctx, task, quotaDelta, err)
+		return
+	}
 
 	task.Quota = actualQuota
 

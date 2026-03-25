@@ -501,6 +501,21 @@ func IncreaseTokenQuota(tokenId int, key string, quota int) (err error) {
 	if err != nil {
 		return err
 	}
+	return increaseTokenQuotaWithResolvedToken(token, quota)
+}
+
+func IncreaseTokenQuotaByID(tokenId int, quota int) (err error) {
+	if quota < 0 {
+		return errors.New("quota 不能为负数！")
+	}
+	token, err := getTokenForQuotaAdjustByID(tokenId)
+	if err != nil {
+		return err
+	}
+	return increaseTokenQuotaWithResolvedToken(token, quota)
+}
+
+func increaseTokenQuotaWithResolvedToken(token *Token, quota int) error {
 	if token.PackageEnabled {
 		return increaseTokenQuotaWithPackage(token, quota)
 	}
@@ -513,10 +528,10 @@ func IncreaseTokenQuota(tokenId int, key string, quota int) (err error) {
 		})
 	}
 	if common.BatchUpdateEnabled {
-		addNewRecord(BatchUpdateTypeTokenQuota, tokenId, quota)
+		addNewRecord(BatchUpdateTypeTokenQuota, token.Id, quota)
 		return nil
 	}
-	return increaseTokenQuota(tokenId, quota)
+	return increaseTokenQuota(token.Id, quota)
 }
 
 func increaseTokenQuota(id int, quota int) (err error) {
@@ -538,11 +553,26 @@ func DecreaseTokenQuota(id int, key string, quota int) (err error) {
 	if err != nil {
 		return err
 	}
+	return decreaseTokenQuotaWithResolvedToken(token, quota)
+}
+
+func DecreaseTokenQuotaByID(tokenId int, quota int) (err error) {
+	if quota < 0 {
+		return errors.New("quota 不能为负数！")
+	}
+	token, err := getTokenForQuotaAdjustByID(tokenId)
+	if err != nil {
+		return err
+	}
+	return decreaseTokenQuotaWithResolvedToken(token, quota)
+}
+
+func decreaseTokenQuotaWithResolvedToken(token *Token, quota int) error {
 	if token.PackageEnabled {
 		return decreaseTokenQuotaWithPackage(token, quota)
 	}
 	if token.UnlimitedQuota {
-		return updateTokenUsageOnly(id, quota)
+		return updateTokenUsageOnly(token.Id, quota)
 	}
 	if common.RedisEnabled {
 		gopool.Go(func() {
@@ -553,10 +583,10 @@ func DecreaseTokenQuota(id int, key string, quota int) (err error) {
 		})
 	}
 	if common.BatchUpdateEnabled {
-		addNewRecord(BatchUpdateTypeTokenQuota, id, -quota)
+		addNewRecord(BatchUpdateTypeTokenQuota, token.Id, -quota)
 		return nil
 	}
-	return decreaseTokenQuota(id, quota)
+	return decreaseTokenQuota(token.Id, quota)
 }
 
 func updateTokenUsageOnly(id int, quota int) error {
@@ -587,14 +617,25 @@ func getTokenForQuotaAdjust(tokenId int, key string) (*Token, error) {
 	if tokenId <= 0 {
 		return nil, errors.New("tokenId 不能小于等于 0")
 	}
-	// 扣费路径必须以数据库真实状态为准，避免缓存延迟导致套餐令牌误走普通扣费分支。
-	token, err := GetTokenById(tokenId)
+	token, err := getTokenForQuotaAdjustByID(tokenId)
 	if err != nil {
 		return nil, err
 	}
 	cleanKey := strings.TrimSpace(strings.TrimPrefix(key, "sk-"))
 	if cleanKey != "" && token.Key != cleanKey {
 		return nil, errors.New("token key 与 tokenId 不匹配")
+	}
+	return token, nil
+}
+
+func getTokenForQuotaAdjustByID(tokenId int) (*Token, error) {
+	if tokenId <= 0 {
+		return nil, errors.New("tokenId 不能小于等于 0")
+	}
+	// 扣费路径必须以数据库真实状态为准，避免缓存延迟导致套餐令牌误走普通扣费分支。
+	token, err := GetTokenById(tokenId)
+	if err != nil {
+		return nil, err
 	}
 	return token, nil
 }

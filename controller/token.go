@@ -15,7 +15,9 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/cachex"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
 	"github.com/samber/hot"
@@ -279,6 +281,25 @@ func parseTokenListQuery(c *gin.Context) (*int, *int, *int, *int, string, string
 	}
 
 	return balanceMin, balanceMax, usedBalanceMin, usedBalanceMax, packageMode, sortBy, sortOrder, nil
+}
+
+func validateTokenGroupSelection(userID int, group string) error {
+	group = strings.TrimSpace(group)
+	if group == "" {
+		return fmt.Errorf("令牌分组不能为空")
+	}
+
+	userGroup, err := model.GetUserGroup(userID, false)
+	if err != nil {
+		return err
+	}
+	if !service.GroupInUserUsableGroups(userGroup, group) && group != userGroup {
+		return fmt.Errorf("无权访问 %s 分组", group)
+	}
+	if group != "auto" && !ratio_setting.ContainsGroupRatio(group) && group != userGroup {
+		return fmt.Errorf("分组 %s 已被弃用", group)
+	}
+	return nil
 }
 
 func GetToken(c *gin.Context) {
@@ -688,6 +709,10 @@ func AddToken(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgTokenNameTooLong)
 		return
 	}
+	if err := validateTokenGroupSelection(c.GetInt("id"), token.Group); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	if err := model.ValidateTokenPackageConfig(&token); err != nil {
 		common.ApiError(c, err)
 		return
@@ -796,6 +821,12 @@ func UpdateToken(c *gin.Context) {
 	if len(token.Name) > 50 {
 		common.ApiErrorI18n(c, i18n.MsgTokenNameTooLong)
 		return
+	}
+	if statusOnly == "" {
+		if err := validateTokenGroupSelection(userId, token.Group); err != nil {
+			common.ApiError(c, err)
+			return
+		}
 	}
 	if err := model.ValidateTokenPackageConfig(&token); err != nil {
 		common.ApiError(c, err)
