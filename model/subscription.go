@@ -803,9 +803,11 @@ func renewUserSubscriptionByPlanTx(tx *gorm.DB, userId int, plan *SubscriptionPl
 	return &sub, true, nil
 }
 
-// CompleteSubscriptionOrder 完成订阅订单（幂等）：
+// CompleteSubscriptionOrder 完成在线支付订阅订单（幂等）：
+// - 正常情况下创建 issuance 后立即自动发放
+// - 若自动发放遇到可人工修复的续费冲突，则保留 pending issuance 供用户继续处理
 // - stack: 新建订阅
-// - renew: 仅续费同 plan 生效订阅；无可续费目标时直接失败，不回退到叠加
+// - renew: 仅续费同 plan 生效订阅；无可续费目标时不回退到叠加
 // - renew_extend: 续费式购买；无生效订阅时先创建 1 条，再按同条顺延
 func CompleteSubscriptionOrder(tradeNo string, providerPayload string) error {
 	if tradeNo == "" {
@@ -821,6 +823,9 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string) error {
 	var logPaymentMethod string
 	var logPurchaseQuantity int
 	var logIssuanceId int
+	var logIssueSummary string
+	var logAutoIssued bool
+	var logPendingManualIssue bool
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var order SubscriptionOrder
 		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", tradeNo).First(&order).Error; err != nil {
@@ -866,12 +871,19 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string) error {
 		if err := EnqueueInviteCommissionFromSubscriptionOrderTx(tx, &order); err != nil {
 			return err
 		}
+		autoIssued, issueSummary, err := autoIssuePaidSubscriptionOrderTx(tx, issuance)
+		if err != nil {
+			return err
+		}
 		logUserId = order.UserId
 		logPlanTitle = plan.Title
 		logMoney = order.Money
 		logPaymentMethod = order.PaymentMethod
 		logPurchaseQuantity = order.PurchaseQuantity
 		logIssuanceId = issuance.Id
+		logIssueSummary = issueSummary
+		logAutoIssued = autoIssued
+		logPendingManualIssue = !autoIssued
 		return nil
 	})
 	if err != nil {
@@ -881,10 +893,49 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string) error {
 		if logPurchaseQuantity <= 0 {
 			logPurchaseQuantity = 1
 		}
-		msg := fmt.Sprintf("订阅支付成功，套餐: %s，份数: %d，支付金额: %.2f，支付方式: %s，待发放记录: %d", logPlanTitle, logPurchaseQuantity, logMoney, logPaymentMethod, logIssuanceId)
+		msg := fmt.Sprintf("订阅支付成功，套餐: %s，份数: %d，支付金额: %.2f，支付方式: %s，发放记录: %d", logPlanTitle, logPurchaseQuantity, logMoney, logPaymentMethod, logIssuanceId)
+		if logAutoIssued {
+			if logIssueSummary != "" {
+				msg = fmt.Sprintf("%s，已自动发放：%s", msg, logIssueSummary)
+			} else {
+				msg = fmt.Sprintf("%s，已自动发放", msg)
+			}
+		} else if logPendingManualIssue {
+			if logIssueSummary != "" {
+				msg = fmt.Sprintf("%s，待用户确认发放：%s", msg, logIssueSummary)
+			} else {
+				msg = fmt.Sprintf("%s，待用户确认发放", msg)
+			}
+		}
 		RecordLog(logUserId, LogTypeTopup, msg)
 	}
 	return nil
+}
+
+func autoIssuePaidSubscriptionOrderTx(tx *gorm.DB, issuance *SubscriptionIssuance) (bool, string, error) {
+	if tx == nil {
+		return false, "", errors.New("tx is nil")
+	}
+	if issuance == nil {
+		return false, "", errors.New("issuance is nil")
+	}
+	confirmedIssuance, summary, err := ConfirmSubscriptionIssuanceTx(
+		tx,
+		issuance.Id,
+		issuance.UserId,
+		issuance.PurchaseMode,
+		issuance.RenewTargetSubscriptionId,
+	)
+	if err != nil {
+		if IsRecoverableSubscriptionIssuanceError(err) {
+			return false, err.Error(), nil
+		}
+		return false, "", err
+	}
+	if confirmedIssuance != nil {
+		*issuance = *confirmedIssuance
+	}
+	return true, summary, nil
 }
 
 func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {

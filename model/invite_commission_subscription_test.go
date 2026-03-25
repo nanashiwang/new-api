@@ -116,6 +116,14 @@ func requirePendingSubscriptionIssuanceBySourceRef(t *testing.T, sourceType stri
 	return &issuance
 }
 
+func requireIssuedSubscriptionIssuanceBySourceRef(t *testing.T, sourceType string, sourceRef string) *SubscriptionIssuance {
+	t.Helper()
+	var issuance SubscriptionIssuance
+	require.NoError(t, DB.Where("source_type = ? AND source_ref = ?", sourceType, sourceRef).First(&issuance).Error)
+	require.Equal(t, SubscriptionIssuanceStatusIssued, issuance.Status)
+	return &issuance
+}
+
 func TestCompleteSubscriptionOrder_EnqueueInviteCommissionByPaidAmount_StackAndIdempotent(t *testing.T) {
 	setupInviteCommissionSubscriptionTest(t)
 
@@ -157,6 +165,14 @@ func TestCompleteSubscriptionOrder_EnqueueInviteCommissionByPaidAmount_StackAndI
 	var count int64
 	require.NoError(t, DB.Model(&InviteCommissionLedger{}).Where("topup_trade_no = ? AND inviter_user_id = ?", tradeNo, inviter.Id).Count(&count).Error)
 	assert.EqualValues(t, 1, count)
+
+	issuance := requireIssuedSubscriptionIssuanceBySourceRef(t, SubscriptionIssuanceSourceOrder, tradeNo)
+	assert.Equal(t, SubscriptionPurchaseModeStack, issuance.PurchaseMode)
+	assert.Equal(t, 1, issuance.PurchaseQuantity)
+
+	var subCount int64
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("user_id = ? AND plan_id = ?", invitee.Id, plan.Id).Count(&subCount).Error)
+	assert.EqualValues(t, 1, subCount)
 }
 
 func TestCompleteSubscriptionOrder_EnqueueInviteCommission_Renew(t *testing.T) {
@@ -203,6 +219,14 @@ func TestCompleteSubscriptionOrder_EnqueueInviteCommission_Renew(t *testing.T) {
 	assert.Equal(t, 11000, ledger.BaseQuota)
 	assert.Equal(t, 1100, ledger.CommissionQuota)
 	assert.Equal(t, InviteCommissionStatusPending, ledger.Status)
+
+	issuance := requireIssuedSubscriptionIssuanceBySourceRef(t, SubscriptionIssuanceSourceOrder, tradeNo)
+	assert.Equal(t, SubscriptionPurchaseModeRenew, issuance.PurchaseMode)
+	assert.Equal(t, existingSub.Id, issuance.RenewTargetSubscriptionId)
+
+	var refreshedSub UserSubscription
+	require.NoError(t, DB.First(&refreshedSub, "id = ?", existingSub.Id).Error)
+	assert.Greater(t, refreshedSub.EndTime, existingSub.EndTime)
 }
 
 func TestCompleteSubscriptionOrder_InvalidPrice_RollbackWithoutLedger(t *testing.T) {
@@ -300,7 +324,7 @@ func TestCompleteSubscriptionOrder_RenewQuantityUseSameTargetSubscription(t *tes
 	require.NoError(t, DB.Create(order).Error)
 	require.NoError(t, CompleteSubscriptionOrder(tradeNo, `{"status":"success"}`))
 
-	issuance := requirePendingSubscriptionIssuanceBySourceRef(t, SubscriptionIssuanceSourceOrder, tradeNo)
+	issuance := requireIssuedSubscriptionIssuanceBySourceRef(t, SubscriptionIssuanceSourceOrder, tradeNo)
 	assert.Equal(t, user.Id, issuance.UserId)
 	assert.Equal(t, plan.Id, issuance.PlanId)
 	assert.Equal(t, plan.Title, issuance.PlanTitle)
@@ -308,14 +332,13 @@ func TestCompleteSubscriptionOrder_RenewQuantityUseSameTargetSubscription(t *tes
 	assert.Equal(t, 2, issuance.PurchaseQuantity)
 	assert.Equal(t, targetSub.Id, issuance.RenewTargetSubscriptionId)
 
-	// 订单完成阶段只生成待发放记录，不应直接改动已有订阅。
 	require.NoError(t, DB.First(targetSub, "id = ?", targetSub.Id).Error)
 	require.NoError(t, DB.First(earliestSub, "id = ?", earliestSub.Id).Error)
-	assert.Equal(t, targetOldEndTime, targetSub.EndTime)
+	assert.Greater(t, targetSub.EndTime, targetOldEndTime)
 	assert.Equal(t, earliestOldEndTime, earliestSub.EndTime)
 }
 
-func TestCompleteSubscriptionOrder_RenewWithoutTargetFallbackToEarliest(t *testing.T) {
+func TestCompleteSubscriptionOrder_RenewWithoutTargetWithMultipleActiveFallbackToPendingIssuance(t *testing.T) {
 	setupInviteCommissionSubscriptionTest(t)
 
 	user := createInviteCommissionTestUser(t, "invitee_sub_renew_fallback_earliest", 0)
@@ -371,11 +394,15 @@ func TestCompleteSubscriptionOrder_RenewWithoutTargetFallbackToEarliest(t *testi
 	assert.Equal(t, 1, issuance.PurchaseQuantity)
 	assert.Equal(t, 0, issuance.RenewTargetSubscriptionId)
 
-	// 订单完成阶段不再自动兜底到“最早到期”，由用户确认待发放记录时再决定目标。
+	// 多个候选但下单时未锁定目标，自动发放应回退为待用户确认。
 	require.NoError(t, DB.First(earliestSub, "id = ?", earliestSub.Id).Error)
 	require.NoError(t, DB.First(laterSub, "id = ?", laterSub.Id).Error)
 	assert.Equal(t, earliestOldEndTime, earliestSub.EndTime)
 	assert.Equal(t, laterOldEndTime, laterSub.EndTime)
+
+	orderByTradeNo := GetSubscriptionOrderByTradeNo(tradeNo)
+	require.NotNil(t, orderByTradeNo)
+	assert.Equal(t, common.TopUpStatusSuccess, orderByTradeNo.Status)
 }
 
 func TestCompleteSubscriptionOrder_StackQuantityWithoutActive_CreateMultipleSubscriptions(t *testing.T) {
@@ -400,7 +427,7 @@ func TestCompleteSubscriptionOrder_StackQuantityWithoutActive_CreateMultipleSubs
 	require.NoError(t, DB.Create(order).Error)
 	require.NoError(t, CompleteSubscriptionOrder(tradeNo, `{"status":"success"}`))
 
-	issuance := requirePendingSubscriptionIssuanceBySourceRef(t, SubscriptionIssuanceSourceOrder, tradeNo)
+	issuance := requireIssuedSubscriptionIssuanceBySourceRef(t, SubscriptionIssuanceSourceOrder, tradeNo)
 	assert.Equal(t, user.Id, issuance.UserId)
 	assert.Equal(t, plan.Id, issuance.PlanId)
 	assert.Equal(t, SubscriptionPurchaseModeStack, issuance.PurchaseMode)
@@ -409,7 +436,7 @@ func TestCompleteSubscriptionOrder_StackQuantityWithoutActive_CreateMultipleSubs
 
 	var subCount int64
 	require.NoError(t, DB.Model(&UserSubscription{}).Where("user_id = ? AND plan_id = ?", user.Id, plan.Id).Count(&subCount).Error)
-	assert.EqualValues(t, 0, subCount)
+	assert.EqualValues(t, 2, subCount)
 }
 
 func TestCompleteSubscriptionOrder_RenewExtendWithoutActive_ExtendSingleSubscription(t *testing.T) {
@@ -434,7 +461,7 @@ func TestCompleteSubscriptionOrder_RenewExtendWithoutActive_ExtendSingleSubscrip
 	require.NoError(t, DB.Create(order).Error)
 	require.NoError(t, CompleteSubscriptionOrder(tradeNo, `{"status":"success"}`))
 
-	issuance := requirePendingSubscriptionIssuanceBySourceRef(t, SubscriptionIssuanceSourceOrder, tradeNo)
+	issuance := requireIssuedSubscriptionIssuanceBySourceRef(t, SubscriptionIssuanceSourceOrder, tradeNo)
 	assert.Equal(t, user.Id, issuance.UserId)
 	assert.Equal(t, plan.Id, issuance.PlanId)
 	assert.Equal(t, SubscriptionPurchaseModeRenewExtend, issuance.PurchaseMode)
@@ -443,5 +470,89 @@ func TestCompleteSubscriptionOrder_RenewExtendWithoutActive_ExtendSingleSubscrip
 
 	var subCount int64
 	require.NoError(t, DB.Model(&UserSubscription{}).Where("user_id = ? AND plan_id = ?", user.Id, plan.Id).Count(&subCount).Error)
+	assert.EqualValues(t, 1, subCount)
+}
+
+func TestCompleteSubscriptionOrder_RenewInvalidTargetFallbackToPendingIssuance(t *testing.T) {
+	setupInviteCommissionSubscriptionTest(t)
+
+	user := createInviteCommissionTestUser(t, "invitee_sub_renew_invalid_target", 0)
+	plan := createSubscriptionPlanForInviteCommissionTest(t, "续费失效目标月卡", 88, 1000)
+
+	now := time.Now().Unix()
+	activeSub := &UserSubscription{
+		UserId:      user.Id,
+		PlanId:      plan.Id,
+		AmountTotal: 1000,
+		AmountUsed:  0,
+		StartTime:   now - 3600,
+		EndTime:     now + 24*3600,
+		Status:      "active",
+		Source:      "order",
+	}
+	require.NoError(t, DB.Create(activeSub).Error)
+
+	tradeNo := "sub_renew_invalid_target_001"
+	order := &SubscriptionOrder{
+		UserId:                    user.Id,
+		PlanId:                    plan.Id,
+		Money:                     88,
+		PurchaseQuantity:          1,
+		TradeNo:                   tradeNo,
+		PaymentMethod:             "epay",
+		PurchaseMode:              SubscriptionPurchaseModeRenew,
+		RenewTargetSubscriptionId: activeSub.Id + 9999,
+		CreateTime:                common.GetTimestamp(),
+		Status:                    common.TopUpStatusPending,
+	}
+	require.NoError(t, DB.Create(order).Error)
+
+	originalEndTime := activeSub.EndTime
+	require.NoError(t, CompleteSubscriptionOrder(tradeNo, `{"status":"success"}`))
+
+	issuance := requirePendingSubscriptionIssuanceBySourceRef(t, SubscriptionIssuanceSourceOrder, tradeNo)
+	assert.Equal(t, SubscriptionPurchaseModeRenew, issuance.PurchaseMode)
+	assert.Equal(t, activeSub.Id+9999, issuance.RenewTargetSubscriptionId)
+
+	var refreshedSub UserSubscription
+	require.NoError(t, DB.First(&refreshedSub, "id = ?", activeSub.Id).Error)
+	assert.Equal(t, originalEndTime, refreshedSub.EndTime)
+
+	orderByTradeNo := GetSubscriptionOrderByTradeNo(tradeNo)
+	require.NotNil(t, orderByTradeNo)
+	assert.Equal(t, common.TopUpStatusSuccess, orderByTradeNo.Status)
+}
+
+func TestCompleteSubscriptionOrder_RenewWithoutActiveFallbackToPendingIssuance(t *testing.T) {
+	setupInviteCommissionSubscriptionTest(t)
+
+	user := createInviteCommissionTestUser(t, "invitee_sub_renew_no_active", 0)
+	plan := createSubscriptionPlanForInviteCommissionTest(t, "续费无生效月卡", 88, 1000)
+
+	tradeNo := "sub_renew_no_active_001"
+	order := &SubscriptionOrder{
+		UserId:                    user.Id,
+		PlanId:                    plan.Id,
+		Money:                     88,
+		PurchaseQuantity:          1,
+		TradeNo:                   tradeNo,
+		PaymentMethod:             "epay",
+		PurchaseMode:              SubscriptionPurchaseModeRenew,
+		RenewTargetSubscriptionId: 0,
+		CreateTime:                common.GetTimestamp(),
+		Status:                    common.TopUpStatusPending,
+	}
+	require.NoError(t, DB.Create(order).Error)
+	require.NoError(t, CompleteSubscriptionOrder(tradeNo, `{"status":"success"}`))
+
+	issuance := requirePendingSubscriptionIssuanceBySourceRef(t, SubscriptionIssuanceSourceOrder, tradeNo)
+	assert.Equal(t, SubscriptionPurchaseModeRenew, issuance.PurchaseMode)
+
+	var subCount int64
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("user_id = ? AND plan_id = ?", user.Id, plan.Id).Count(&subCount).Error)
 	assert.EqualValues(t, 0, subCount)
+
+	orderByTradeNo := GetSubscriptionOrderByTradeNo(tradeNo)
+	require.NotNil(t, orderByTradeNo)
+	assert.Equal(t, common.TopUpStatusSuccess, orderByTradeNo.Status)
 }

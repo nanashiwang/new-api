@@ -16,6 +16,15 @@ const (
 	SubscriptionIssuanceSourceOrder  = "order"
 )
 
+var (
+	ErrSubscriptionIssuanceInvalid          = errors.New("无效的待发放记录")
+	ErrSubscriptionIssuanceProcessed        = errors.New("该待发放记录已处理")
+	ErrSubscriptionIssuanceModeRequired     = errors.New("请选择发放方式")
+	ErrSubscriptionRenewUnavailable         = errors.New("当前无可续费的同规格订阅")
+	ErrSubscriptionRenewTargetInvalid       = errors.New("续费目标订阅不存在或已失效")
+	ErrSubscriptionRenewTargetSelectionNeed = errors.New("请选择续费目标订阅")
+)
+
 type SubscriptionIssuance struct {
 	Id                        int                   `json:"id"`
 	UserId                    int                   `json:"user_id" gorm:"index"`
@@ -133,7 +142,7 @@ func ConfirmSubscriptionIssuanceTx(tx *gorm.DB, issuanceId int, userId int, purc
 		tx = DB
 	}
 	if issuanceId <= 0 || userId <= 0 {
-		return nil, "", errors.New("无效的待发放记录")
+		return nil, "", ErrSubscriptionIssuanceInvalid
 	}
 	query := tx.Preload("Plan").Where("id = ? AND user_id = ?", issuanceId, userId)
 	if !common.UsingSQLite {
@@ -144,7 +153,7 @@ func ConfirmSubscriptionIssuanceTx(tx *gorm.DB, issuanceId int, userId int, purc
 		return nil, "", err
 	}
 	if issuance.Status != SubscriptionIssuanceStatusPending {
-		return nil, "", errors.New("该待发放记录已处理")
+		return nil, "", ErrSubscriptionIssuanceProcessed
 	}
 	plan := issuance.Plan
 	if plan == nil {
@@ -159,7 +168,7 @@ func ConfirmSubscriptionIssuanceTx(tx *gorm.DB, issuanceId int, userId int, purc
 		mode = normalizeSubscriptionIssuancePurchaseMode(issuance.PurchaseMode)
 	}
 	if mode == "" {
-		return nil, "", errors.New("请选择发放方式")
+		return nil, "", ErrSubscriptionIssuanceModeRequired
 	}
 	targetId := renewTargetSubscriptionId
 	if targetId <= 0 {
@@ -171,7 +180,7 @@ func ConfirmSubscriptionIssuanceTx(tx *gorm.DB, issuanceId int, userId int, purc
 			return nil, "", err
 		}
 		if len(activeSubs) == 0 {
-			return nil, "", errors.New("当前无可续费的同规格订阅")
+			return nil, "", ErrSubscriptionRenewUnavailable
 		}
 		if targetId > 0 {
 			matched := false
@@ -182,12 +191,12 @@ func ConfirmSubscriptionIssuanceTx(tx *gorm.DB, issuanceId int, userId int, purc
 				}
 			}
 			if !matched {
-				return nil, "", errors.New("续费目标订阅不存在或已失效")
+				return nil, "", ErrSubscriptionRenewTargetInvalid
 			}
 		} else if len(activeSubs) == 1 {
 			targetId = activeSubs[0].Id
 		} else {
-			return nil, "", errors.New("请选择续费目标订阅")
+			return nil, "", ErrSubscriptionRenewTargetSelectionNeed
 		}
 	}
 
@@ -212,4 +221,10 @@ func ConfirmSubscriptionIssuanceTx(tx *gorm.DB, issuanceId int, userId int, purc
 		return nil, "", err
 	}
 	return &issuance, summary, nil
+}
+
+func IsRecoverableSubscriptionIssuanceError(err error) bool {
+	return errors.Is(err, ErrSubscriptionRenewUnavailable) ||
+		errors.Is(err, ErrSubscriptionRenewTargetInvalid) ||
+		errors.Is(err, ErrSubscriptionRenewTargetSelectionNeed)
 }
