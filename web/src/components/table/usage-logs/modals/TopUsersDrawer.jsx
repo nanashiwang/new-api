@@ -127,9 +127,6 @@ const TopUsersDrawer = ({
             onClick={() => selectTopUser(record.username)}
           >
             <span className='top-users-drawer__user-name'>{text}</span>
-            <span className='top-users-drawer__user-action'>
-              {t('点击筛选日志')}
-            </span>
           </Button>
         ),
       },
@@ -228,7 +225,6 @@ const TopUsersDrawer = ({
     emptyDescription,
     order,
     leader,
-    helper,
   }) => (
     <section className={`top-users-drawer__board top-users-drawer__board--${tone}`}>
       <div className='top-users-drawer__board-head'>
@@ -241,7 +237,6 @@ const TopUsersDrawer = ({
               {order === 'desc' ? t('降序') : t('升序')}
             </Tag>
           </div>
-          <Text className='top-users-drawer__board-description'>{helper}</Text>
         </div>
         <div className='top-users-drawer__board-highlight'>
           <span className='top-users-drawer__board-highlight-label'>
@@ -334,14 +329,7 @@ const TopUsersDrawer = ({
 
         <section className='top-users-drawer__controls'>
           <div className='top-users-drawer__control-block'>
-            <div className='top-users-drawer__control-head'>
-              <Text className='top-users-drawer__control-label'>
-                {t('查看方式')}
-              </Text>
-              <Text className='top-users-drawer__control-help'>
-                {t('双榜对比更适合快速找出“高消耗”和“高频请求”不是同一批人的情况。')}
-              </Text>
-            </div>
+            <Text className='top-users-drawer__control-label'>{t('查看方式')}</Text>
             <RadioGroup
               type='button'
               value={topUsersViewMode}
@@ -407,25 +395,23 @@ const TopUsersDrawer = ({
         <div className='top-users-drawer__boards'>
           {showQuotaTable
             ? renderTable({
-                title: t('按消耗额度排序'),
+                title: t('额度榜'),
                 tone: 'blue',
                 dataSource: topUsersData?.by_quota || [],
                 emptyDescription: t('暂无额度榜数据'),
                 order: topUsersQuotaOrder,
                 leader: boardSummary.quotaLeader,
-                helper: t('优先看谁消耗最多，适合排查异常大户和费用集中来源。'),
               })
             : null}
 
           {showRequestTable
             ? renderTable({
-                title: t('按请求数排序'),
+                title: t('请求榜'),
                 tone: 'teal',
                 dataSource: topUsersData?.by_requests || [],
                 emptyDescription: t('暂无请求数榜数据'),
                 order: topUsersRequestOrder,
                 leader: boardSummary.requestLeader,
-                helper: t('优先看谁请求最密集，适合排查高频调用、刷量和重试放大。'),
               })
             : null}
         </div>

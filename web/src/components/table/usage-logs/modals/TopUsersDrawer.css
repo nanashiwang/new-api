@@ -192,13 +192,6 @@ html.dark .top-users-drawer__overview-icon {
   gap: 10px;
 }
 
-.top-users-drawer__control-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-
 .top-users-drawer__control-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -334,12 +327,6 @@ html.dark .top-users-drawer__table .semi-table-tbody > tr:hover > td {
   font-weight: 600;
 }
 
-.top-users-drawer__user-action {
-  color: var(--semi-color-text-2);
-  font-size: 0.76rem;
-  line-height: 1.45;
-}
-
 .top-users-drawer__empty {
   padding: 28px 0 32px;
 }
@@ -366,7 +353,6 @@ html.dark .top-users-drawer__table .semi-table-tbody > tr:hover > td {
     grid-template-columns: 1fr;
   }
 
-  .top-users-drawer__control-head,
   .top-users-drawer__board-head,
   .top-users-drawer__board-title-row {
     flex-direction: column;
