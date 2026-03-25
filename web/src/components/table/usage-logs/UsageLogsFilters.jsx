@@ -30,6 +30,7 @@ const LogsFilters = ({
   setShowColumnSelector,
   formApi,
   setLogType,
+  groupOptions,
   loading,
   isAdminUser,
   t,
@@ -84,10 +85,10 @@ const LogsFilters = ({
             size='small'
           />
 
-          <Form.Input
+          <Form.Select
             field='group'
-            prefix={<IconSearch />}
-            placeholder={t('分组')}
+            placeholder={t('选择分组')}
+            optionList={groupOptions}
             showClear
             pure
             size='small'

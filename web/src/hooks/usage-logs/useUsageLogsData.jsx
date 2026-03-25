@@ -27,8 +27,6 @@ import {
   showError,
   showSuccess,
   timestamp2string,
-  renderQuota,
-  renderNumber,
   getLogOther,
   copy,
   renderClaudeLogContent,
@@ -39,6 +37,7 @@ import {
 } from '../../helpers';
 import { ITEMS_PER_PAGE } from '../../constants';
 import { useTableCompactMode } from '../common/useTableCompactMode';
+import { renderRouteDecisionContent } from '../../components/table/usage-logs/routeDecision';
 
 export const useLogsData = () => {
   const { t } = useTranslation();
@@ -72,6 +71,7 @@ export const useLogsData = () => {
   const [pageSize, setPageSize] = useState(ITEMS_PER_PAGE);
   const [logType, setLogType] = useState(0);
   const requestCounter = useRef(0);
+  const topUsersRequestCounter = useRef(0);
 
   // User and admin
   const isAdminUser = isAdmin();
@@ -85,6 +85,7 @@ export const useLogsData = () => {
     quota: 0,
     token: 0,
   });
+  const [groupOptions, setGroupOptions] = useState([]);
 
   // 表单状态
   const [formApi, setFormApi] = useState(null);
@@ -121,6 +122,16 @@ export const useLogsData = () => {
   ] = useState(false);
   const [channelAffinityUsageCacheTarget, setChannelAffinityUsageCacheTarget] =
     useState(null);
+  const [showTopUsersDrawer, setShowTopUsersDrawer] = useState(false);
+  const [topUsersLoading, setTopUsersLoading] = useState(false);
+  const [topUsersData, setTopUsersData] = useState({
+    by_quota: [],
+    by_requests: [],
+  });
+  const [topUsersViewMode, setTopUsersViewMode] = useState('both');
+  const [topUsersQuotaOrder, setTopUsersQuotaOrder] = useState('desc');
+  const [topUsersRequestOrder, setTopUsersRequestOrder] = useState('desc');
+  const [topUsersLimit, setTopUsersLimit] = useState(10);
 
   // Load saved column preferences from localStorage
   useEffect(() => {
@@ -235,6 +246,94 @@ export const useLogsData = () => {
       request_id: formValues.request_id || '',
       logType: formValues.logType ? parseInt(formValues.logType) : 0,
     };
+  };
+
+  const fetchGroupOptions = async () => {
+    try {
+      const endpoint = isAdminUser ? '/api/group/' : '/api/user/self/groups';
+      const res = await API.get(endpoint);
+      const source = res?.data?.data;
+      if (!source) {
+        setGroupOptions([]);
+        return;
+      }
+      if (Array.isArray(source)) {
+        setGroupOptions(
+          source.map((group) => ({
+            label: group,
+            value: group,
+          })),
+        );
+        return;
+      }
+      setGroupOptions(
+        Object.entries(source).map(([group, meta]) => ({
+          label: meta?.desc ? `${group} (${meta.desc})` : group,
+          value: group,
+        })),
+      );
+    } catch (error) {
+      showError(error?.message || t('获取组列表失败'));
+    }
+  };
+
+  const loadTopUsers = async () => {
+    if (!isAdminUser) {
+      return;
+    }
+    const reqId = ++topUsersRequestCounter.current;
+    const {
+      username,
+      token_name,
+      model_name,
+      start_timestamp,
+      end_timestamp,
+      channel,
+      group,
+      request_id,
+    } = getFormValues();
+
+    setTopUsersLoading(true);
+    try {
+      const localStartTimestamp = Date.parse(start_timestamp) / 1000;
+      const localEndTimestamp = Date.parse(end_timestamp) / 1000;
+      const url = `/api/log/top-users?username=${username}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&channel=${channel}&group=${group}&request_id=${request_id}&view_mode=${topUsersViewMode}&quota_order=${topUsersQuotaOrder}&request_order=${topUsersRequestOrder}&limit=${topUsersLimit}`;
+      const res = await API.get(encodeURI(url));
+      if (reqId !== topUsersRequestCounter.current) {
+        return;
+      }
+      const { success, message, data } = res.data || {};
+      if (success) {
+        setTopUsersData({
+          by_quota: data?.by_quota || [],
+          by_requests: data?.by_requests || [],
+        });
+      } else {
+        showError(message || t('获取大用户榜单失败'));
+      }
+    } catch (error) {
+      if (reqId !== topUsersRequestCounter.current) {
+        return;
+      }
+      showError(error?.message || t('获取大用户榜单失败'));
+    } finally {
+      if (reqId === topUsersRequestCounter.current) {
+        setTopUsersLoading(false);
+      }
+    }
+  };
+
+  const openTopUsersDrawer = () => {
+    setShowTopUsersDrawer(true);
+  };
+
+  const selectTopUser = async (username) => {
+    if (!formApi || !username) {
+      return;
+    }
+    formApi.setValue('username', username);
+    setShowTopUsersDrawer(false);
+    await refresh();
   };
 
   // Statistics functions
@@ -560,6 +659,15 @@ export const useLogsData = () => {
           value: other.request_path,
         });
       }
+      if (isAdminUser && (logs[i].type === 2 || logs[i].type === 5)) {
+        const routeDecisionContent = renderRouteDecisionContent(logs[i], other, t);
+        if (routeDecisionContent) {
+          expandDataLocal.push({
+            key: t('路由决策说明'),
+            value: routeDecisionContent,
+          });
+        }
+      }
       if (other?.billing_source === 'subscription') {
         const planId = other?.subscription_plan_id;
         const planTitle = other?.subscription_plan_title || '';
@@ -707,8 +815,11 @@ export const useLogsData = () => {
   // 刷新函数
   const refresh = async () => {
     setActivePage(1);
-    handleEyeClick();
+    await handleEyeClick();
     await loadLogs(1, pageSize);
+    if (showTopUsersDrawer) {
+      await loadTopUsers();
+    }
   };
 
   // 复制文本函数
@@ -726,12 +837,29 @@ export const useLogsData = () => {
     const localPageSize =
       parseInt(localStorage.getItem('page-size')) || ITEMS_PER_PAGE;
     setPageSize(localPageSize);
+    fetchGroupOptions().catch((reason) => {
+      showError(reason?.message || reason || t('获取组列表失败'));
+    });
     loadLogs(activePage, localPageSize)
       .then()
       .catch((reason) => {
         showError(reason);
       });
   }, []);
+
+  useEffect(() => {
+    if (showTopUsersDrawer) {
+      loadTopUsers().catch((reason) => {
+        showError(reason?.message || reason || t('获取大用户榜单失败'));
+      });
+    }
+  }, [
+    showTopUsersDrawer,
+    topUsersViewMode,
+    topUsersQuotaOrder,
+    topUsersRequestOrder,
+    topUsersLimit,
+  ]);
 
   // Initialize statistics when formApi is available
   useEffect(() => {
@@ -760,6 +888,7 @@ export const useLogsData = () => {
     logType,
     stat,
     isAdminUser,
+    groupOptions,
 
     // 表单状态
     formApi,
@@ -791,6 +920,22 @@ export const useLogsData = () => {
     setShowChannelAffinityUsageCacheModal,
     channelAffinityUsageCacheTarget,
     openChannelAffinityUsageCacheModal,
+    showTopUsersDrawer,
+    setShowTopUsersDrawer,
+    topUsersLoading,
+    topUsersData,
+    topUsersViewMode,
+    setTopUsersViewMode,
+    topUsersQuotaOrder,
+    setTopUsersQuotaOrder,
+    topUsersRequestOrder,
+    setTopUsersRequestOrder,
+    topUsersLimit,
+    setTopUsersLimit,
+    openTopUsersDrawer,
+    selectTopUser,
+    refreshTopUsers: loadTopUsers,
+    currentTopUsersLogType: getFormValues().logType,
 
     // 函数集合
     loadLogs,
