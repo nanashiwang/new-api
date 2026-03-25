@@ -827,6 +827,14 @@ func getChannelAffinityUsageCacheStatsCache() *cachex.HybridCache[ChannelAffinit
 	return channelAffinityUsageCacheStatsCache
 }
 
+func resetChannelAffinityUsageCacheStatsForTest() {
+	if channelAffinityUsageCacheStatsCache != nil {
+		_ = channelAffinityUsageCacheStatsCache.Purge()
+	}
+	channelAffinityUsageCacheStatsCache = nil
+	channelAffinityUsageCacheStatsOnce = sync.Once{}
+}
+
 func channelAffinityUsageCacheStatsLock(key string) *sync.Mutex {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(key))
