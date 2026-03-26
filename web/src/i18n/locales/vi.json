@@ -2303,6 +2303,8 @@
     "授权范围 (Scopes)": "授权范围 (Scopes)",
     "授权失败": "Ủy quyền thất bại",
     "输出": "Đầu ra",
+    "缓存读取": "Đọc bộ nhớ đệm",
+    "缓存创建": "Tạo bộ nhớ đệm",
     "输出 {{completion}} tokens / 1M tokens * {{symbol}}{{compPrice}}) * {{ratioType}} {{ratio}}": "Đầu ra {{completion}} tokens / 1M tokens * {{symbol}}{{compPrice}}) * {{ratioType}} {{ratio}}",
     "输出倍率 {{completionRatio}}": "Output ratio {{completionRatio}}",
     "输出价格": "Giá đầu ra",

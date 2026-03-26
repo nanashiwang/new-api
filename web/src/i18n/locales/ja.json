@@ -1969,6 +1969,8 @@
     "授权范围 (Scopes)": "授权范围 (Scopes)",
     "授权失败": "認可に失敗しました",
     "输出": "出力",
+    "缓存读取": "キャッシュ読み取り",
+    "缓存创建": "キャッシュ作成",
     "输出 {{completion}} tokens / 1M tokens * {{symbol}}{{compPrice}}) * {{ratioType}} {{ratio}}": "補完 {{completion}} tokens / 1M tokens * {{symbol}}{{compPrice}}) * {{ratioType}} {{ratio}}",
     "输出倍率 {{completionRatio}}": "Output ratio {{completionRatio}}",
     "输出价格": "補完料金",

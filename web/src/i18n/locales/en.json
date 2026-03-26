@@ -2017,6 +2017,8 @@
     "授权范围 (Scopes)": "Scopes",
     "授权失败": "Authorization failed",
     "输出": "Output",
+    "缓存读取": "Cache Read",
+    "缓存创建": "Cache Creation",
     "输出Token": "Output Tokens",
     "输出 {{completion}} tokens / 1M tokens * {{symbol}}{{compPrice}}) * {{ratioType}} {{ratio}}": "Output {{completion}} tokens / 1M tokens * {{symbol}}{{compPrice}} * {{ratioType}} {{ratio}}",
     "输出倍率 {{completionRatio}}": "Output ratio {{completionRatio}}",

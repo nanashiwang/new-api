@@ -264,7 +264,7 @@ const PricingCardView = ({
                       <h3 className='text-lg font-bold text-gray-900 truncate'>
                         {model.model_name}
                       </h3>
-                      <div className='flex items-center gap-3 text-xs mt-1'>
+                      <div className='flex flex-wrap gap-2 text-xs mt-2'>
                         {formatPriceInfo(priceData, t)}
                       </div>
                     </div>

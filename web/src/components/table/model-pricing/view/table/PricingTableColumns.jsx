@@ -21,10 +21,11 @@ import React from 'react';
 import { Tag, Space, Tooltip } from '@douyinfe/semi-ui';
 import { IconHelpCircle } from '@douyinfe/semi-icons';
 import {
+  calculateModelPrice,
+  formatPriceInfo,
+  getLobeHubIcon,
   renderModelTag,
   stringToColor,
-  calculateModelPrice,
-  getLobeHubIcon,
 } from '../../../../../helpers';
 import {
   renderLimitedItems,
@@ -231,26 +232,11 @@ export const getPricingTableColumns = ({
     ...(isMobile ? {} : { fixed: 'right' }),
     render: (text, record, index) => {
       const priceData = getPriceData(record);
-
-      if (priceData.isPerToken) {
-        return (
-          <div className='space-y-1'>
-            <div className='text-gray-700'>
-              {t('输入')} {priceData.inputPrice} / 1{priceData.unitLabel} tokens
-            </div>
-            <div className='text-gray-700'>
-              {t('输出')} {priceData.completionPrice} / 1{priceData.unitLabel}{' '}
-              tokens
-            </div>
-          </div>
-        );
-      } else {
-        return (
-          <div className='text-gray-700'>
-            {t('模型价格')}：{priceData.price}
-          </div>
-        );
-      }
+      return (
+        <div className='flex flex-wrap gap-2 py-1'>
+          {formatPriceInfo(priceData, t)}
+        </div>
+      );
     },
   };
 

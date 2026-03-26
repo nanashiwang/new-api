@@ -1926,6 +1926,8 @@
     "授权范围 (Scopes)": "授权范围 (Scopes)",
     "授权失败": "授权失败",
     "输出": "输出",
+    "缓存读取": "缓存读取",
+    "缓存创建": "缓存创建",
     "输出 {{completion}} tokens / 1M tokens * {{symbol}}{{compPrice}}) * {{ratioType}} {{ratio}}": "输出 {{completion}} tokens / 1M tokens * {{symbol}}{{compPrice}}) * {{ratioType}} {{ratio}}",
     "输出倍率 {{completionRatio}}": "输出倍率 {{completionRatio}}",
     "输出价格": "输出价格",

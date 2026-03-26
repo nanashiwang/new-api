@@ -606,6 +606,78 @@ export const selectFilter = (input, option) => {
   return valueText.includes(keyword) || labelText.includes(keyword);
 };
 
+const priceItemStyle = {
+  color: 'var(--semi-color-text-1)',
+  background: 'var(--semi-color-fill-0)',
+  border: '1px solid var(--semi-color-border)',
+  borderRadius: 999,
+  padding: '2px 8px',
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 4,
+  fontSize: 12,
+  fontWeight: 500,
+  lineHeight: '18px',
+};
+
+const getDisplayCurrencySymbol = (currency) => {
+  if (currency === 'CNY') {
+    return '¥';
+  }
+  if (currency === 'CUSTOM') {
+    try {
+      const statusStr = localStorage.getItem('status');
+      if (statusStr) {
+        const status = JSON.parse(statusStr);
+        return status?.custom_currency_symbol || '¤';
+      }
+    } catch (e) {
+      return '¤';
+    }
+    return '¤';
+  }
+  return '$';
+};
+
+const formatTokenUnitPrice = ({
+  priceUSD,
+  tokenUnit,
+  displayPrice,
+  currency,
+  precision,
+}) => {
+  const unitDivisor = tokenUnit === 'K' ? 1000 : 1;
+  const rawDisplay = displayPrice(priceUSD);
+  const numericValue =
+    parseFloat(rawDisplay.replace(/[^0-9.]/g, '')) / unitDivisor;
+  const symbol = getDisplayCurrencySymbol(currency);
+
+  return `${symbol}${numericValue.toFixed(precision)}`;
+};
+
+export const getModelPricingItems = (priceData) => {
+  if (!priceData) {
+    return [];
+  }
+
+  if (priceData.isPerToken) {
+    return priceData.pricingItems || [];
+  }
+
+  if (!priceData.price || priceData.price === '-') {
+    return [];
+  }
+
+  return [
+    {
+      key: 'fixed',
+      label: '模型价格',
+      value: priceData.price,
+      unitLabel: '',
+    },
+  ];
+};
+
 // -------------------------------
 // 模型定价计算工具函数
 export const calculateModelPrice = ({
@@ -650,37 +722,81 @@ export const calculateModelPrice = ({
     const inputRatioPriceUSD = record.model_ratio * 2 * usedGroupRatio;
     const completionRatioPriceUSD =
       record.model_ratio * record.completion_ratio * 2 * usedGroupRatio;
-
-    const unitDivisor = tokenUnit === 'K' ? 1000 : 1;
     const unitLabel = tokenUnit === 'K' ? 'K' : 'M';
+    const inputPrice = formatTokenUnitPrice({
+      priceUSD: inputRatioPriceUSD,
+      tokenUnit,
+      displayPrice,
+      currency,
+      precision,
+    });
+    const completionPrice = formatTokenUnitPrice({
+      priceUSD: completionRatioPriceUSD,
+      tokenUnit,
+      displayPrice,
+      currency,
+      precision,
+    });
 
-    const rawDisplayInput = displayPrice(inputRatioPriceUSD);
-    const rawDisplayCompletion = displayPrice(completionRatioPriceUSD);
+    const pricingItems = [
+      {
+        key: 'input',
+        label: '输入',
+        value: inputPrice,
+        unitLabel,
+      },
+      {
+        key: 'output',
+        label: '输出',
+        value: completionPrice,
+        unitLabel,
+      },
+    ];
 
-    const numInput =
-      parseFloat(rawDisplayInput.replace(/[^0-9.]/g, '')) / unitDivisor;
-    const numCompletion =
-      parseFloat(rawDisplayCompletion.replace(/[^0-9.]/g, '')) / unitDivisor;
-
-    let symbol = '$';
-    if (currency === 'CNY') {
-      symbol = '¥';
-    } else if (currency === 'CUSTOM') {
-      try {
-        const statusStr = localStorage.getItem('status');
-        if (statusStr) {
-          const s = JSON.parse(statusStr);
-          symbol = s?.custom_currency_symbol || '¤';
-        } else {
-          symbol = '¤';
-        }
-      } catch (e) {
-        symbol = '¤';
-      }
+    if (record.supports_cache_read) {
+      pricingItems.push({
+        key: 'cacheRead',
+        label: '缓存读取',
+        value: formatTokenUnitPrice({
+          priceUSD:
+            record.model_ratio * record.cache_ratio * 2 * usedGroupRatio,
+          tokenUnit,
+          displayPrice,
+          currency,
+          precision,
+        }),
+        unitLabel,
+      });
     }
+
+    if (record.supports_cache_creation) {
+      pricingItems.push({
+        key: 'cacheCreation',
+        label: '缓存创建',
+        value: formatTokenUnitPrice({
+          priceUSD:
+            record.model_ratio *
+            record.cache_creation_ratio *
+            2 *
+            usedGroupRatio,
+          tokenUnit,
+          displayPrice,
+          currency,
+          precision,
+        }),
+        unitLabel,
+      });
+    }
+
     return {
-      inputPrice: `${symbol}${numInput.toFixed(precision)}`,
-      completionPrice: `${symbol}${numCompletion.toFixed(precision)}`,
+      inputPrice,
+      completionPrice,
+      cacheReadPrice:
+        pricingItems.find((item) => item.key === 'cacheRead')?.value || null,
+      cacheCreationPrice:
+        pricingItems.find((item) => item.key === 'cacheCreation')?.value ||
+        null,
+      pricingItems,
       unitLabel,
       isPerToken: true,
       usedGroup,
@@ -695,6 +811,14 @@ export const calculateModelPrice = ({
 
     return {
       price: displayVal,
+      pricingItems: [
+        {
+          key: 'fixed',
+          label: '模型价格',
+          value: displayVal,
+          unitLabel: '',
+        },
+      ],
       isPerToken: false,
       usedGroup,
       usedGroupRatio,
@@ -712,26 +836,12 @@ export const calculateModelPrice = ({
 
 // 格式化价格信息（用于卡片视图）
 export const formatPriceInfo = (priceData, t) => {
-  if (priceData.isPerToken) {
-    return (
-      <>
-        <span style={{ color: 'var(--semi-color-text-1)' }}>
-          {t('输入')} {priceData.inputPrice}/{priceData.unitLabel}
-        </span>
-        <span style={{ color: 'var(--semi-color-text-1)' }}>
-          {t('输出')} {priceData.completionPrice}/{priceData.unitLabel}
-        </span>
-      </>
-    );
-  }
-
-  return (
-    <>
-      <span style={{ color: 'var(--semi-color-text-1)' }}>
-        {t('模型价格')} {priceData.price}
-      </span>
-    </>
-  );
+  return getModelPricingItems(priceData).map((item) => (
+    <span key={item.key} style={priceItemStyle}>
+      {t(item.label)} {item.value}
+      {item.unitLabel ? `/${item.unitLabel}` : ''}
+    </span>
+  ));
 };
 
 // -------------------------------

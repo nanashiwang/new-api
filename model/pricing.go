@@ -24,6 +24,10 @@ type Pricing struct {
 	ModelPrice             float64                 `json:"model_price"`
 	OwnerBy                string                  `json:"owner_by"`
 	CompletionRatio        float64                 `json:"completion_ratio"`
+	SupportsCacheRead      bool                    `json:"supports_cache_read"`
+	CacheRatio             float64                 `json:"cache_ratio"`
+	SupportsCacheCreation  bool                    `json:"supports_cache_creation"`
+	CacheCreationRatio     float64                 `json:"cache_creation_ratio"`
 	EnableGroup            []string                `json:"enable_groups"`
 	SupportedEndpointTypes []constant.EndpointType `json:"supported_endpoint_types"`
 	PricingVersion         string                  `json:"pricing_version,omitempty"`
@@ -87,6 +91,22 @@ func GetModelSupportEndpointTypes(model string) []constant.EndpointType {
 		return endpoints
 	}
 	return make([]constant.EndpointType, 0)
+}
+
+func applyPricingCacheSupport(pricing *Pricing, modelName string) {
+	if pricing == nil || pricing.QuotaType != 0 {
+		return
+	}
+
+	if cacheRatio, ok := ratio_setting.GetCacheRatio(modelName); ok {
+		pricing.SupportsCacheRead = true
+		pricing.CacheRatio = cacheRatio
+	}
+
+	if cacheCreationRatio, ok := ratio_setting.GetCreateCacheRatio(modelName); ok {
+		pricing.SupportsCacheCreation = true
+		pricing.CacheCreationRatio = cacheCreationRatio
+	}
 }
 
 func updatePricing() {
@@ -295,13 +315,14 @@ func updatePricing() {
 			pricing.ModelRatio = modelRatio
 			pricing.CompletionRatio = ratio_setting.GetCompletionRatio(model)
 			pricing.QuotaType = 0
+			applyPricingCacheSupport(&pricing, model)
 		}
 		pricingMap = append(pricingMap, pricing)
 	}
 
 	// 防止大更新后数据不通用
 	if len(pricingMap) > 0 {
-		pricingMap[0].PricingVersion = "82c4a357505fff6fee8462c3f7ec8a645bb95532669cb73b2cabee6a416ec24f"
+		pricingMap[0].PricingVersion = "4bb6660445d238d6528f8f0257307c1de706fe7ad132ee3faafef6c223607a80"
 	}
 
 	// 刷新缓存映射，供高并发快速查询

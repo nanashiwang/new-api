@@ -2080,6 +2080,8 @@
     "授权范围 (Scopes)": "授权范围 (Scopes)",
     "授权失败": "Авторизация не удалась",
     "输出": "Вывод",
+    "缓存读取": "Чтение кэша",
+    "缓存创建": "Создание кэша",
     "输出 {{completion}} tokens / 1M tokens * {{symbol}}{{compPrice}}) * {{ratioType}} {{ratio}}": "Вывод {{completion}} tokens / 1M tokens * {{symbol}}{{compPrice}}) * {{ratioType}} {{ratio}}",
     "输出倍率 {{completionRatio}}": "Коэффициент вывода {{completionRatio}}",
     "输出价格": "Цена вывода",

@@ -2045,6 +2045,8 @@
     "授权范围 (Scopes)": "授权范围 (Scopes)",
     "授权失败": "Échec de l'autorisation",
     "输出": "Sortie",
+    "缓存读取": "Lecture du cache",
+    "缓存创建": "Création du cache",
     "输出Token": "Tokens de sortie",
     "输出 {{completion}} tokens / 1M tokens * {{symbol}}{{compPrice}}) * {{ratioType}} {{ratio}}": "Sortie {{completion}} tokens / 1M tokens * {{symbol}}{{compPrice}} * {{ratioType}} {{ratio}}",
     "输出倍率 {{completionRatio}}": "Ratio de sortie {{completionRatio}}",

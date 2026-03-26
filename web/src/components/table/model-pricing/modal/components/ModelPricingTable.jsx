@@ -20,7 +20,10 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import { Card, Avatar, Typography, Table, Tag } from '@douyinfe/semi-ui';
 import { IconCoinMoneyStroked } from '@douyinfe/semi-icons';
-import { calculateModelPrice } from '../../../../../helpers';
+import {
+  calculateModelPrice,
+  getModelPricingItems,
+} from '../../../../../helpers';
 
 const { Text } = Typography;
 
@@ -46,6 +49,20 @@ const ModelPricingTable = ({
       .filter((g) => g !== '')
       .filter((g) => g !== 'auto')
       .filter((g) => modelEnableGroups.includes(g));
+    const priceItemTemplate =
+      modelData?.quota_type === 0
+        ? getModelPricingItems(
+            calculateModelPrice({
+              record: modelData,
+              selectedGroup:
+                availableGroups[0] || modelEnableGroups[0] || 'all',
+              groupRatio,
+              tokenUnit,
+              displayPrice,
+              currency,
+            }),
+          )
+        : [];
 
     // 准备表格数据
     const tableData = availableGroups.map((group) => {
@@ -74,13 +91,16 @@ const ModelPricingTable = ({
             : modelData?.quota_type === 1
               ? t('按次计费')
               : '-',
-        inputPrice: modelData?.quota_type === 0 ? priceData.inputPrice : '-',
-        outputPrice:
-          modelData?.quota_type === 0
-            ? priceData.completionPrice || priceData.outputPrice
-            : '-',
         fixedPrice: modelData?.quota_type === 1 ? priceData.price : '-',
       };
+
+      if (modelData?.quota_type === 0) {
+        getModelPricingItems(priceData).forEach((item) => {
+          row[item.key] = item.value;
+        });
+      }
+
+      return row;
     });
 
     // 定义表格列
@@ -130,9 +150,9 @@ const ModelPricingTable = ({
     if (modelData?.quota_type === 0) {
       // 按量计费
       columns.push(
-        {
-          title: t('提示'),
-          dataIndex: 'inputPrice',
+        ...priceItemTemplate.map((item) => ({
+          title: t(item.label),
+          dataIndex: item.key,
           render: (text) => (
             <>
               <div className='font-semibold text-orange-600'>{text}</div>
@@ -141,19 +161,7 @@ const ModelPricingTable = ({
               </div>
             </>
           ),
-        },
-        {
-          title: t('补全'),
-          dataIndex: 'outputPrice',
-          render: (text) => (
-            <>
-              <div className='font-semibold text-orange-600'>{text}</div>
-              <div className='text-xs text-gray-500'>
-                / {tokenUnit === 'K' ? '1K' : '1M'} tokens
-              </div>
-            </>
-          ),
-        },
+        })),
       );
     } else {
       // 按次计费

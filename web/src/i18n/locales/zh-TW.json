@@ -1944,6 +1944,8 @@
     "授权范围 (Scopes)": "授權範圍 (Scopes)",
     "授权失败": "授權失敗",
     "输出": "輸出",
+    "缓存读取": "快取讀取",
+    "缓存创建": "快取建立",
     "输出 {{completion}} tokens / 1M tokens * {{symbol}}{{compPrice}}) * {{ratioType}} {{ratio}}": "輸出 {{completion}} tokens / 1M tokens * {{symbol}}{{compPrice}}) * {{ratioType}} {{ratio}}",
     "输出倍率 {{completionRatio}}": "輸出倍率 {{completionRatio}}",
     "输出价格": "輸出價格",
