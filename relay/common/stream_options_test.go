@@ -63,7 +63,7 @@ func TestNormalizeResponsesStreamOptionsRemovesForNonStream(t *testing.T) {
 	}
 }
 
-func TestNormalizeResponsesStreamOptionsDropsIncludeUsage(t *testing.T) {
+func TestNormalizeResponsesStreamOptionsPreservesIncludeUsage(t *testing.T) {
 	req := &dto.OpenAIResponsesRequest{
 		Stream:        true,
 		StreamOptions: &dto.StreamOptions{IncludeUsage: true},
@@ -71,12 +71,15 @@ func TestNormalizeResponsesStreamOptionsDropsIncludeUsage(t *testing.T) {
 
 	NormalizeResponsesStreamOptions(req, true)
 
-	if req.StreamOptions != nil {
-		t.Fatalf("expected responses stream_options to be removed when only include_usage was provided")
+	if req.StreamOptions == nil {
+		t.Fatalf("expected responses stream_options to remain present")
+	}
+	if !req.StreamOptions.IncludeUsage {
+		t.Fatalf("expected include_usage=true to be preserved")
 	}
 }
 
-func TestNormalizeResponsesStreamOptionsKeepsIncludeObfuscationOnly(t *testing.T) {
+func TestNormalizeResponsesStreamOptionsPreservesWhenCapabilityDisabled(t *testing.T) {
 	req := &dto.OpenAIResponsesRequest{
 		Stream: true,
 		StreamOptions: &dto.StreamOptions{
@@ -85,29 +88,13 @@ func TestNormalizeResponsesStreamOptionsKeepsIncludeObfuscationOnly(t *testing.T
 		},
 	}
 
-	NormalizeResponsesStreamOptions(req, true)
-
-	if req.StreamOptions == nil {
-		t.Fatalf("expected responses stream_options to remain present")
-	}
-	if req.StreamOptions.IncludeUsage {
-		t.Fatalf("expected include_usage to be stripped for responses stream_options")
-	}
-	if !req.StreamOptions.IncludeObfuscation {
-		t.Fatalf("expected include_obfuscation to be preserved")
-	}
-}
-
-func TestNormalizeResponsesStreamOptionsRemovesWhenUnsupported(t *testing.T) {
-	req := &dto.OpenAIResponsesRequest{
-		Stream:        true,
-		StreamOptions: &dto.StreamOptions{IncludeUsage: true},
-	}
-
 	NormalizeResponsesStreamOptions(req, false)
 
-	if req.StreamOptions != nil {
-		t.Fatalf("expected stream_options to be removed when responses stream options unsupported")
+	if req.StreamOptions == nil {
+		t.Fatalf("expected stream_options to remain present under restored legacy behavior")
+	}
+	if !req.StreamOptions.IncludeUsage || !req.StreamOptions.IncludeObfuscation {
+		t.Fatalf("expected responses stream_options fields to be preserved, got %+v", req.StreamOptions)
 	}
 }
 

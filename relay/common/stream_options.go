@@ -24,22 +24,12 @@ func NormalizeGeneralOpenAIStreamOptions(request *dto.GeneralOpenAIRequest, supp
 	}
 }
 
-// NormalizeResponsesStreamOptions 仅在流式 Responses 请求且 endpoint 声明支持时保留
-// stream_options。
-func NormalizeResponsesStreamOptions(request *dto.OpenAIResponsesRequest, supportsEndpointStreamOptions bool) {
+// NormalizeResponsesStreamOptions 仅在非流式 Responses 请求中移除 stream_options，其余情况保留原始值。
+func NormalizeResponsesStreamOptions(request *dto.OpenAIResponsesRequest, _ bool) {
 	if request == nil {
 		return
 	}
-	if !supportsEndpointStreamOptions || !request.Stream {
-		request.StreamOptions = nil
-		return
-	}
-	if request.StreamOptions == nil {
-		return
-	}
-	// OpenAI Responses API 当前仅支持 include_obfuscation，不支持 include_usage。
-	request.StreamOptions.IncludeUsage = false
-	if !request.StreamOptions.IncludeObfuscation {
+	if !request.Stream {
 		request.StreamOptions = nil
 	}
 }
