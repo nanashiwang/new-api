@@ -263,16 +263,6 @@ export default function SettingClaudeModel(props) {
                 />
               </Col>
             </Row>
-            <Row>
-              <Col span={16}>
-                {/*//展示MaxTokens和BudgetTokens的计算公式, 并展示实际数字*/}
-                <Text>
-                  {t(
-                    'Claude思考适配 BudgetTokens = MaxTokens * BudgetTokens 百分比',
-                  )}
-                </Text>
-              </Col>
-            </Row>
             <Form.Section
               text={
                 <span style={{ fontSize: 14, fontWeight: 600 }}>
@@ -329,12 +319,17 @@ export default function SettingClaudeModel(props) {
               </Row>
             </Form.Section>
             <Row>
+              <Col span={16}>
+                <Text>{t('计算公式：BudgetTokens = MaxTokens × 百分比')}</Text>
+              </Col>
+            </Row>
+            <Row>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.InputNumber
                   label={t('思考适配 BudgetTokens 百分比')}
                   field={'claude.thinking_adapter_budget_tokens_percentage'}
                   initValue={''}
-                  extraText={t('0.1以上的小数')}
+                  extraText={t('填写 0.1 以上的小数')}
                   min={0.1}
                   onChange={(value) =>
                     setInputs({
