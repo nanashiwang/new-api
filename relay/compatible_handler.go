@@ -14,7 +14,6 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
@@ -26,19 +25,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
-
-func shouldUseResponsesBridge(info *relaycommon.RelayInfo) bool {
-	if info == nil || info.RelayMode != relayconstant.RelayModeChatCompletions {
-		return false
-	}
-	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
-		return false
-	}
-	if !service.ShouldChatCompletionsUseResponsesWithChannelSetting(info.ChannelSetting, info.ChannelId, info.ChannelType, info.OriginModelName) {
-		return false
-	}
-	return info.SupportsResponsesAPI
-}
 
 func buildPassthroughOpenAIRequestBytes(c *gin.Context, stripStreamOptions bool) ([]byte, *types.NewAPIError) {
 	storage, err := common.GetBodyStorage(c)
