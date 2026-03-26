@@ -57,6 +57,40 @@ func TestChatCompletionsRequestToResponsesRequest_MapsAssistantContentAndFields(
 	require.Equal(t, "done", assistantPart["text"])
 }
 
+func TestChatCompletionsRequestToResponsesRequest_OmitsEmptyInstructionsWithoutSystemMessages(t *testing.T) {
+	t.Parallel()
+
+	req := &dto.GeneralOpenAIRequest{
+		Model:    "gpt-5",
+		Messages: []dto.Message{{Role: "user", Content: "hello"}},
+	}
+
+	out, err := ChatCompletionsRequestToResponsesRequest(req)
+	require.NoError(t, err)
+	require.Len(t, out.Instructions, 0)
+}
+
+func TestChatCompletionsRequestToResponsesRequest_MapsSystemMessagesToInstructions(t *testing.T) {
+	t.Parallel()
+
+	req := &dto.GeneralOpenAIRequest{
+		Model: "gpt-5",
+		Messages: []dto.Message{
+			{Role: "system", Content: "be helpful"},
+			{Role: "developer", Content: "format as json"},
+			{Role: "user", Content: "hello"},
+		},
+	}
+
+	out, err := ChatCompletionsRequestToResponsesRequest(req)
+	require.NoError(t, err)
+
+	var instructions string
+	err = common.Unmarshal(out.Instructions, &instructions)
+	require.NoError(t, err)
+	require.Equal(t, "be helpful\n\nformat as json", instructions)
+}
+
 func TestChatToResponses_ToolStrictFieldPreserved(t *testing.T) {
 	t.Parallel()
 
