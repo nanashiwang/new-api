@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useEffect, useState, useRef } from 'react';
-import { Button, Col, Form, Row, Spin } from '@douyinfe/semi-ui';
+import { Button, Col, Form, Row, Select, Spin } from '@douyinfe/semi-ui';
 import {
   compareObjects,
   API,
@@ -281,40 +281,44 @@ export default function SettingClaudeModel(props) {
               </Row>
               <Row>
                 <Col xs={24} sm={12} md={6} lg={6} xl={6}>
-                  <Form.Select
-                    field='claude_to_openai_reasoning_map_low'
-                    label='low'
-                    value={reasoningMap.low}
-                    optionList={OPENAI_REASONING_EFFORT_OPTIONS}
-                    onChange={(value) => updateReasoningMap('low', value)}
-                  />
+                  <Form.Slot label='low'>
+                    <Select
+                      style={{ width: '100%' }}
+                      value={reasoningMap.low}
+                      optionList={OPENAI_REASONING_EFFORT_OPTIONS}
+                      onChange={(value) => updateReasoningMap('low', value)}
+                    />
+                  </Form.Slot>
                 </Col>
                 <Col xs={24} sm={12} md={6} lg={6} xl={6}>
-                  <Form.Select
-                    field='claude_to_openai_reasoning_map_medium'
-                    label='medium'
-                    value={reasoningMap.medium}
-                    optionList={OPENAI_REASONING_EFFORT_OPTIONS}
-                    onChange={(value) => updateReasoningMap('medium', value)}
-                  />
+                  <Form.Slot label='medium'>
+                    <Select
+                      style={{ width: '100%' }}
+                      value={reasoningMap.medium}
+                      optionList={OPENAI_REASONING_EFFORT_OPTIONS}
+                      onChange={(value) => updateReasoningMap('medium', value)}
+                    />
+                  </Form.Slot>
                 </Col>
                 <Col xs={24} sm={12} md={6} lg={6} xl={6}>
-                  <Form.Select
-                    field='claude_to_openai_reasoning_map_high'
-                    label='high'
-                    value={reasoningMap.high}
-                    optionList={OPENAI_REASONING_EFFORT_OPTIONS}
-                    onChange={(value) => updateReasoningMap('high', value)}
-                  />
+                  <Form.Slot label='high'>
+                    <Select
+                      style={{ width: '100%' }}
+                      value={reasoningMap.high}
+                      optionList={OPENAI_REASONING_EFFORT_OPTIONS}
+                      onChange={(value) => updateReasoningMap('high', value)}
+                    />
+                  </Form.Slot>
                 </Col>
                 <Col xs={24} sm={12} md={6} lg={6} xl={6}>
-                  <Form.Select
-                    field='claude_to_openai_reasoning_map_max'
-                    label='max'
-                    value={reasoningMap.max}
-                    optionList={OPENAI_REASONING_EFFORT_OPTIONS}
-                    onChange={(value) => updateReasoningMap('max', value)}
-                  />
+                  <Form.Slot label='max'>
+                    <Select
+                      style={{ width: '100%' }}
+                      value={reasoningMap.max}
+                      optionList={OPENAI_REASONING_EFFORT_OPTIONS}
+                      onChange={(value) => updateReasoningMap('max', value)}
+                    />
+                  </Form.Slot>
                 </Col>
               </Row>
             </Form.Section>
