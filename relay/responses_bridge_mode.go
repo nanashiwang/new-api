@@ -34,9 +34,6 @@ func resolveResponsesBridgeMode(info *relaycommon.RelayInfo) responsesBridgeMode
 	if !service.ShouldChatCompletionsUseResponsesWithChannelSetting(info.ChannelSetting, info.ChannelId, info.ChannelType, info.OriginModelName) {
 		return responsesBridgeModeDisabled
 	}
-	if !info.SupportsResponsesAPI {
-		return responsesBridgeModeDisabled
-	}
 
 	return responsesBridgeModeAuto
 }

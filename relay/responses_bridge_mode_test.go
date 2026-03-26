@@ -38,7 +38,7 @@ func TestResolveResponsesBridgeModeForcedOverrideIgnoresCapabilityDefault(t *tes
 	}
 }
 
-func TestResolveResponsesBridgeModeInheritRequiresCapability(t *testing.T) {
+func TestResolveResponsesBridgeModeInheritFollowsPolicyEvenWithoutCapability(t *testing.T) {
 	original := *model_setting.GetGlobalSettings()
 	model_setting.GetGlobalSettings().PassThroughRequestEnabled = false
 	model_setting.GetGlobalSettings().ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
@@ -61,11 +61,11 @@ func TestResolveResponsesBridgeModeInheritRequiresCapability(t *testing.T) {
 		},
 	}
 
-	if got := resolveResponsesBridgeMode(info); got != responsesBridgeModeDisabled {
-		t.Fatalf("expected disabled bridge mode for inherit without capability, got %q", got)
+	if got := resolveResponsesBridgeMode(info); got != responsesBridgeModeAuto {
+		t.Fatalf("expected auto bridge mode for inherit policy hit, got %q", got)
 	}
-	if shouldUseResponsesBridge(info) {
-		t.Fatal("expected chat/completions bridge to stay disabled in inherit mode")
+	if !shouldUseResponsesBridge(info) {
+		t.Fatal("expected chat/completions bridge to stay enabled in inherit mode")
 	}
 }
 
