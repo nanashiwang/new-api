@@ -614,10 +614,13 @@ const priceItemStyle = {
   padding: '2px 8px',
   display: 'inline-flex',
   alignItems: 'center',
+  justifyContent: 'center',
   gap: 4,
   fontSize: 12,
   fontWeight: 500,
   lineHeight: '18px',
+  minWidth: 156,
+  whiteSpace: 'nowrap',
 };
 
 const getDisplayCurrencySymbol = (currency) => {

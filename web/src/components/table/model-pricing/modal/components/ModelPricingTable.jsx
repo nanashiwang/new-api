@@ -81,7 +81,7 @@ const ModelPricingTable = ({
       const groupRatioValue =
         groupRatio && groupRatio[group] ? groupRatio[group] : 1;
 
-      return {
+      const row = {
         key: group,
         group: group,
         ratio: groupRatioValue,
