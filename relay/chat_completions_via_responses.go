@@ -81,6 +81,21 @@ func shouldRemoveDisabledFieldsInResponsesBridge(info *relaycommon.RelayInfo) bo
 	return !settings.AllowServiceTier || !settings.AllowInferenceGeo || settings.DisableStore || !settings.AllowSafetyIdentifier || !settings.AllowIncludeObfuscation
 }
 
+func restoreResponsesInstructionsFromOriginalChat(responsesReq *dto.OpenAIResponsesRequest, originalChatReq *dto.GeneralOpenAIRequest) error {
+	if responsesReq == nil || originalChatReq == nil || len(responsesReq.Instructions) > 0 {
+		return nil
+	}
+
+	originalResponsesReq, err := service.ChatCompletionsRequestToResponsesRequest(originalChatReq)
+	if err != nil {
+		return err
+	}
+	if len(originalResponsesReq.Instructions) > 0 {
+		responsesReq.Instructions = originalResponsesReq.Instructions
+	}
+	return nil
+}
+
 func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, adaptor channel.Adaptor, request *dto.GeneralOpenAIRequest) (*dto.Usage, *types.NewAPIError) {
 	overrideCtx := relaycommon.BuildParamOverrideContext(info)
 	shouldRemoveDisabledFields := shouldRemoveDisabledFieldsInResponsesBridge(info)
@@ -126,6 +141,11 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 	responsesReq, err := service.ChatCompletionsRequestToResponsesRequest(requestForResponses)
 	if err != nil {
 		return nil, types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	}
+	if sessionMatch != nil {
+		if err := restoreResponsesInstructionsFromOriginalChat(responsesReq, overriddenChatReq); err != nil {
+			return nil, types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+		}
 	}
 	relaycommon.NormalizeResponsesStreamOptions(responsesReq, info.SupportsResponsesStreamOptions)
 	if sessionMatch != nil {
