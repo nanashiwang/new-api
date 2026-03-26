@@ -275,6 +275,15 @@ func SetApiRouter(router *gin.Engine) {
 			channelRoute.POST("/copy/:id", controller.CopyChannel)
 			channelRoute.POST("/multi_key/manage", controller.ManageMultiKeys)
 		}
+		profitBoardRoute := apiRouter.Group("/profit_board")
+		profitBoardRoute.Use(middleware.AdminAuth())
+		{
+			profitBoardRoute.GET("/options", controller.GetProfitBoardOptions)
+			profitBoardRoute.GET("/config", controller.GetProfitBoardConfig)
+			profitBoardRoute.PUT("/config", controller.SaveProfitBoardConfig)
+			profitBoardRoute.POST("/query", controller.QueryProfitBoard)
+			profitBoardRoute.POST("/export/csv", controller.ExportProfitBoardCSV)
+		}
 		tokenRoute := apiRouter.Group("/token")
 		tokenRoute.Use(middleware.UserAuth())
 		{

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -75,6 +76,54 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	appendRequestConversionChain(relayInfo, other)
 	appendBillingInfo(relayInfo, other)
 	return other
+}
+
+func normalizeUsageCostUSD(cost any) (float64, bool) {
+	switch value := cost.(type) {
+	case nil:
+		return 0, false
+	case float64:
+		return value, value > 0
+	case float32:
+		return float64(value), value > 0
+	case int:
+		return float64(value), value > 0
+	case int64:
+		return float64(value), value > 0
+	case int32:
+		return float64(value), value > 0
+	case uint:
+		return float64(value), value > 0
+	case uint64:
+		return float64(value), value > 0
+	case uint32:
+		return float64(value), value > 0
+	case string:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+		if err != nil || parsed <= 0 {
+			return 0, false
+		}
+		return parsed, true
+	default:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(common.Interface2String(value)), 64)
+		if err != nil || parsed <= 0 {
+			return 0, false
+		}
+		return parsed, true
+	}
+}
+
+func AppendUsageCost(other map[string]interface{}, cost any) {
+	if other == nil {
+		return
+	}
+	costUSD, ok := normalizeUsageCostUSD(cost)
+	if !ok {
+		return
+	}
+	other["upstream_cost"] = costUSD
+	other["upstream_cost_currency"] = "USD"
+	other["upstream_cost_source"] = "provider"
 }
 
 func appendBillingInfo(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {

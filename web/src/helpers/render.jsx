@@ -67,6 +67,7 @@ import {
   Image as ImageIcon,
   CheckSquare,
   CreditCard,
+  BadgeDollarSign,
   Layers,
   Gift,
   User,
@@ -134,6 +135,8 @@ export function getLucideIcon(key, selected = false) {
       return <CreditCard {...commonProps} color={iconColor} />;
     case 'channel':
       return <Layers {...commonProps} color={iconColor} />;
+    case 'profitBoard':
+      return <BadgeDollarSign {...commonProps} color={iconColor} />;
     case 'redemption':
       return <Gift {...commonProps} color={iconColor} />;
     case 'user':
@@ -594,7 +597,9 @@ export function getOAuthProviderIcon(iconName, size = 20) {
     return <IconComp size={iconSize} />;
   }
 
-  return <Avatar size='extra-extra-small'>{raw.charAt(0).toUpperCase()}</Avatar>;
+  return (
+    <Avatar size='extra-extra-small'>{raw.charAt(0).toUpperCase()}</Avatar>
+  );
 }
 
 // 颜色列表

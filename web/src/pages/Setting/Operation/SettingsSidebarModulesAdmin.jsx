@@ -60,6 +60,7 @@ export default function SettingsSidebarModulesAdmin(props) {
     },
     admin: {
       enabled: true,
+      profitBoard: true,
       channel: true,
       models: true,
       deployment: true,
@@ -121,6 +122,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       },
       admin: {
         enabled: true,
+        profitBoard: true,
         channel: true,
         models: true,
         deployment: true,
@@ -190,6 +192,7 @@ export default function SettingsSidebarModulesAdmin(props) {
           personal: { enabled: true, topup: true, personal: true },
           admin: {
             enabled: true,
+            profitBoard: true,
             channel: true,
             models: true,
             deployment: true,
@@ -253,6 +256,11 @@ export default function SettingsSidebarModulesAdmin(props) {
       title: t('管理员区域'),
       description: t('系统管理功能'),
       modules: [
+        {
+          key: 'profitBoard',
+          title: t('收益看板'),
+          description: t('收益分析与对账'),
+        },
         { key: 'channel', title: t('渠道管理'), description: t('API渠道配置') },
         { key: 'models', title: t('模型管理'), description: t('AI模型配置') },
         {

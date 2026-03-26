@@ -38,6 +38,7 @@ const About = lazy(() => import('./pages/About'));
 const User = lazy(() => import('./pages/User'));
 const Setting = lazy(() => import('./pages/Setting'));
 const Channel = lazy(() => import('./pages/Channel'));
+const ProfitBoard = lazy(() => import('./pages/ProfitBoard'));
 const Token = lazy(() => import('./pages/Token'));
 const Redemption = lazy(() => import('./pages/Redemption'));
 const TopUp = lazy(() => import('./pages/TopUp'));
@@ -136,6 +137,16 @@ function App() {
             <AdminRoute>
               <Suspense fallback={<Loading></Loading>} key={location.pathname}>
                 <Subscription />
+              </Suspense>
+            </AdminRoute>
+          }
+        />
+        <Route
+          path='/console/profit-board'
+          element={
+            <AdminRoute>
+              <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+                <ProfitBoard />
               </Suspense>
             </AdminRoute>
           }
