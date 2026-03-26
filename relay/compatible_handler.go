@@ -3,7 +3,6 @@ package relay
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -26,6 +26,172 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+func shouldUseResponsesBridge(info *relaycommon.RelayInfo) bool {
+	if info == nil || info.RelayMode != relayconstant.RelayModeChatCompletions {
+		return false
+	}
+	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
+		return false
+	}
+	if !service.ShouldChatCompletionsUseResponsesWithChannelSetting(info.ChannelSetting, info.ChannelId, info.ChannelType, info.OriginModelName) {
+		return false
+	}
+	return info.SupportsResponsesAPI
+}
+
+func buildPassthroughOpenAIRequestBytes(c *gin.Context, stripStreamOptions bool) ([]byte, *types.NewAPIError) {
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return nil, types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	}
+	requestBytes, err := storage.Bytes()
+	if err != nil {
+		return nil, types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	}
+	requestBytes, err = relaycommon.NormalizeJSONStreamOptions(requestBytes)
+	if err != nil {
+		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+	}
+	if stripStreamOptions {
+		requestBytes, err = relaycommon.RemoveJSONStreamOptions(requestBytes)
+		if err != nil {
+			return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+	}
+	if common.DebugEnabled {
+		println("requestBody: ", string(requestBytes))
+	}
+	return requestBytes, nil
+}
+
+func buildOpenAIRequestBytes(c *gin.Context, info *relaycommon.RelayInfo, adaptor channel.Adaptor, request *dto.GeneralOpenAIRequest, stripStreamOptions bool) ([]byte, *types.NewAPIError) {
+	requestForUpstream, err := common.DeepCopy(request)
+	if err != nil {
+		return nil, types.NewError(fmt.Errorf("failed to copy request to GeneralOpenAIRequest: %w", err), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
+	}
+	if stripStreamOptions {
+		requestForUpstream.StreamOptions = nil
+	}
+
+	convertedRequest, err := adaptor.ConvertOpenAIRequest(c, info, requestForUpstream)
+	if err != nil {
+		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+	}
+	relaycommon.AppendRequestConversionFromRequest(info, convertedRequest)
+
+	if info.ChannelSetting.SystemPrompt != "" {
+		if request, ok := convertedRequest.(*dto.GeneralOpenAIRequest); ok {
+			containSystemPrompt := false
+			for _, message := range request.Messages {
+				if message.Role == request.GetSystemRoleName() {
+					containSystemPrompt = true
+					break
+				}
+			}
+			if !containSystemPrompt {
+				systemMessage := dto.Message{
+					Role:    request.GetSystemRoleName(),
+					Content: info.ChannelSetting.SystemPrompt,
+				}
+				request.Messages = append([]dto.Message{systemMessage}, request.Messages...)
+			} else if info.ChannelSetting.SystemPromptOverride {
+				common.SetContextKey(c, constant.ContextKeySystemPromptOverride, true)
+				for i, message := range request.Messages {
+					if message.Role == request.GetSystemRoleName() {
+						if message.IsStringContent() {
+							request.Messages[i].SetStringContent(info.ChannelSetting.SystemPrompt + "\n" + message.StringContent())
+						} else {
+							contents := message.ParseContent()
+							contents = append([]dto.MediaContent{
+								{
+									Type: dto.ContentTypeText,
+									Text: info.ChannelSetting.SystemPrompt,
+								},
+							}, contents...)
+							request.Messages[i].Content = contents
+						}
+						break
+					}
+				}
+			}
+		}
+	}
+
+	jsonData, err := common.Marshal(convertedRequest)
+	if err != nil {
+		return nil, types.NewError(err, types.ErrorCodeJsonMarshalFailed, types.ErrOptionWithSkipRetry())
+	}
+
+	jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings, info.ChannelSetting.PassThroughBodyEnabled)
+	if err != nil {
+		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+	}
+
+	if len(info.ParamOverride) > 0 {
+		jsonData, err = relaycommon.ApplyParamOverride(jsonData, info.ParamOverride, relaycommon.BuildParamOverrideContext(info))
+		if err != nil {
+			return nil, types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid, types.ErrOptionWithSkipRetry())
+		}
+	}
+	jsonData, err = relaycommon.NormalizeJSONStreamOptions(jsonData)
+	if err != nil {
+		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+	}
+	if stripStreamOptions {
+		jsonData, err = relaycommon.RemoveJSONStreamOptions(jsonData)
+		if err != nil {
+			return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+	}
+
+	logger.LogDebug(c, fmt.Sprintf("text request body: %s", string(jsonData)))
+	return jsonData, nil
+}
+
+func doOpenAIRequestWithCompatRetry(c *gin.Context, info *relaycommon.RelayInfo, adaptor channel.Adaptor, request *dto.GeneralOpenAIRequest, passThrough bool) (*http.Response, *types.NewAPIError) {
+	statusCodeMappingStr := c.GetString("status_code_mapping")
+	strippedStreamOptions := false
+
+	for {
+		var requestBytes []byte
+		var newApiErr *types.NewAPIError
+		if passThrough {
+			requestBytes, newApiErr = buildPassthroughOpenAIRequestBytes(c, strippedStreamOptions)
+		} else {
+			requestBytes, newApiErr = buildOpenAIRequestBytes(c, info, adaptor, request, strippedStreamOptions)
+		}
+		if newApiErr != nil {
+			return nil, newApiErr
+		}
+
+		resp, err := adaptor.DoRequest(c, info, bytes.NewBuffer(requestBytes))
+		if err != nil {
+			return nil, types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
+		}
+		if resp == nil {
+			return nil, nil
+		}
+
+		httpResp := resp.(*http.Response)
+		info.IsStream = info.IsStream || strings.HasPrefix(httpResp.Header.Get("Content-Type"), "text/event-stream")
+		if httpResp.StatusCode == http.StatusOK {
+			return httpResp, nil
+		}
+
+		issue := classifyUpstreamCompatibilityIssue(httpResp, info.RelayMode)
+		if issue == upstreamCompatIssueStreamOptions && !strippedStreamOptions {
+			strippedStreamOptions = true
+			logCompatFallback(c, info, string(issue))
+			_ = httpResp.Body.Close()
+			continue
+		}
+
+		newApiErr = service.RelayErrorHandler(c.Request.Context(), httpResp, false)
+		service.ResetStatusCode(newApiErr, statusCodeMappingStr)
+		return nil, newApiErr
+	}
+}
 
 func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
@@ -55,7 +221,7 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		includeUsage = request.StreamOptions.IncludeUsage
 	}
 
-	relaycommon.NormalizeGeneralOpenAIStreamOptions(request, info.SupportStreamOptions, constant.ForceStreamOption)
+	relaycommon.NormalizeGeneralOpenAIStreamOptions(request, info.SupportsChatStreamOptions, constant.ForceStreamOption)
 	if request.StreamOptions != nil {
 		includeUsage = request.StreamOptions.IncludeUsage
 	}
@@ -69,142 +235,37 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 	adaptor.Init(info)
 
 	passThroughGlobal := model_setting.GetGlobalSettings().PassThroughRequestEnabled
-	if info.RelayMode == relayconstant.RelayModeChatCompletions &&
-		!passThroughGlobal &&
-		!info.ChannelSetting.PassThroughBodyEnabled &&
-		service.ShouldChatCompletionsUseResponsesWithChannelSetting(info.ChannelSetting, info.ChannelId, info.ChannelType, info.OriginModelName) {
-		applySystemPromptIfNeeded(c, info, request)
-		usage, newApiErr := chatCompletionsViaResponses(c, info, adaptor, request)
+	if shouldUseResponsesBridge(info) {
+		bridgeRequest, err := common.DeepCopy(request)
+		if err != nil {
+			return types.NewError(fmt.Errorf("failed to copy request for responses bridge: %w", err), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
+		}
+		applySystemPromptIfNeeded(c, info, bridgeRequest)
+		usage, newApiErr := chatCompletionsViaResponses(c, info, adaptor, bridgeRequest)
 		if newApiErr != nil {
-			return newApiErr
-		}
-
-		var containAudioTokens = usage.CompletionTokenDetails.AudioTokens > 0 || usage.PromptTokensDetails.AudioTokens > 0
-		var containsAudioRatios = ratio_setting.ContainsAudioRatio(info.OriginModelName) || ratio_setting.ContainsAudioCompletionRatio(info.OriginModelName)
-
-		if containAudioTokens && containsAudioRatios {
-			service.PostAudioConsumeQuota(c, info, usage, "")
-		} else {
-			postConsumeQuota(c, info, usage)
-		}
-		return nil
-	}
-
-	var requestBody io.Reader
-
-	if passThroughGlobal || info.ChannelSetting.PassThroughBodyEnabled {
-		storage, err := common.GetBodyStorage(c)
-		if err != nil {
-			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
-		}
-		requestBytes, err := storage.Bytes()
-		if err != nil {
-			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
-		}
-		requestBytes, err = relaycommon.NormalizeJSONStreamOptions(requestBytes)
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-		}
-		if common.DebugEnabled {
-			println("requestBody: ", string(requestBytes))
-		}
-		requestBody = bytes.NewBuffer(requestBytes)
-	} else {
-		convertedRequest, err := adaptor.ConvertOpenAIRequest(c, info, request)
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-		}
-		relaycommon.AppendRequestConversionFromRequest(info, convertedRequest)
-
-		if info.ChannelSetting.SystemPrompt != "" {
-			// 如果有系统提示，则将其添加到请求中
-			request, ok := convertedRequest.(*dto.GeneralOpenAIRequest)
-			if ok {
-				containSystemPrompt := false
-				for _, message := range request.Messages {
-					if message.Role == request.GetSystemRoleName() {
-						containSystemPrompt = true
-						break
-					}
-				}
-				if !containSystemPrompt {
-					// 如果没有系统提示，则添加系统提示
-					systemMessage := dto.Message{
-						Role:    request.GetSystemRoleName(),
-						Content: info.ChannelSetting.SystemPrompt,
-					}
-					request.Messages = append([]dto.Message{systemMessage}, request.Messages...)
-				} else if info.ChannelSetting.SystemPromptOverride {
-					common.SetContextKey(c, constant.ContextKeySystemPromptOverride, true)
-					// 如果有系统提示，且允许覆盖，则拼接到前面
-					for i, message := range request.Messages {
-						if message.Role == request.GetSystemRoleName() {
-							if message.IsStringContent() {
-								request.Messages[i].SetStringContent(info.ChannelSetting.SystemPrompt + "\n" + message.StringContent())
-							} else {
-								contents := message.ParseContent()
-								contents = append([]dto.MediaContent{
-									{
-										Type: dto.ContentTypeText,
-										Text: info.ChannelSetting.SystemPrompt,
-									},
-								}, contents...)
-								request.Messages[i].Content = contents
-							}
-							break
-						}
-					}
-				}
+			if !shouldFallbackToNativeChat(c) {
+				return newApiErr
 			}
 		}
+		if newApiErr == nil {
+			var containAudioTokens = usage.CompletionTokenDetails.AudioTokens > 0 || usage.PromptTokensDetails.AudioTokens > 0
+			var containsAudioRatios = ratio_setting.ContainsAudioRatio(info.OriginModelName) || ratio_setting.ContainsAudioCompletionRatio(info.OriginModelName)
 
-		jsonData, err := common.Marshal(convertedRequest)
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeJsonMarshalFailed, types.ErrOptionWithSkipRetry())
-		}
-
-		// remove disabled fields for OpenAI API
-		jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings, info.ChannelSetting.PassThroughBodyEnabled)
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-		}
-
-		// apply param override
-		if len(info.ParamOverride) > 0 {
-			jsonData, err = relaycommon.ApplyParamOverride(jsonData, info.ParamOverride, relaycommon.BuildParamOverrideContext(info))
-			if err != nil {
-				return types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid, types.ErrOptionWithSkipRetry())
+			if containAudioTokens && containsAudioRatios {
+				service.PostAudioConsumeQuota(c, info, usage, "")
+			} else {
+				postConsumeQuota(c, info, usage)
 			}
+			return nil
 		}
-		jsonData, err = relaycommon.NormalizeJSONStreamOptions(jsonData)
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-		}
-
-		logger.LogDebug(c, fmt.Sprintf("text request body: %s", string(jsonData)))
-
-		requestBody = bytes.NewBuffer(jsonData)
 	}
 
-	var httpResp *http.Response
-	resp, err := adaptor.DoRequest(c, info, requestBody)
-	if err != nil {
-		return types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
+	httpResp, newApiErr := doOpenAIRequestWithCompatRetry(c, info, adaptor, request, passThroughGlobal || info.ChannelSetting.PassThroughBodyEnabled)
+	if newApiErr != nil {
+		return newApiErr
 	}
 
 	statusCodeMappingStr := c.GetString("status_code_mapping")
-
-	if resp != nil {
-		httpResp = resp.(*http.Response)
-		info.IsStream = info.IsStream || strings.HasPrefix(httpResp.Header.Get("Content-Type"), "text/event-stream")
-		if httpResp.StatusCode != http.StatusOK {
-			newApiErr := service.RelayErrorHandler(c.Request.Context(), httpResp, false)
-			// reset status code 重置状态码
-			service.ResetStatusCode(newApiErr, statusCodeMappingStr)
-			return newApiErr
-		}
-	}
-
 	usage, newApiErr := adaptor.DoResponse(c, httpResp, info)
 	if newApiErr != nil {
 		// reset status code 重置状态码

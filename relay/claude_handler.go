@@ -114,7 +114,8 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 
 	if !model_setting.GetGlobalSettings().PassThroughRequestEnabled &&
 		!info.ChannelSetting.PassThroughBodyEnabled &&
-		service.ShouldChatCompletionsUseResponsesWithChannelSetting(info.ChannelSetting, info.ChannelId, info.ChannelType, info.OriginModelName) {
+		service.ShouldChatCompletionsUseResponsesWithChannelSetting(info.ChannelSetting, info.ChannelId, info.ChannelType, info.OriginModelName) &&
+		info.SupportsResponsesAPI {
 		openAIRequest, convErr := service.ClaudeToOpenAIRequest(c, *request, info)
 		if convErr != nil {
 			return types.NewError(convErr, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
@@ -122,11 +123,13 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 
 		usage, newApiErr := chatCompletionsViaResponses(c, info, adaptor, openAIRequest)
 		if newApiErr != nil {
-			return newApiErr
+			if !shouldFallbackToNativeChat(c) {
+				return newApiErr
+			}
+		} else {
+			service.PostClaudeConsumeQuota(c, info, usage)
+			return nil
 		}
-
-		service.PostClaudeConsumeQuota(c, info, usage)
-		return nil
 	}
 
 	var requestBody io.Reader

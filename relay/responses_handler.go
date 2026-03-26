@@ -59,7 +59,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	if err != nil {
 		return types.NewError(fmt.Errorf("failed to copy request to GeneralOpenAIRequest: %w", err), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 	}
-	relaycommon.NormalizeResponsesStreamOptions(request)
+	relaycommon.NormalizeResponsesStreamOptions(request, info.SupportsResponsesStreamOptions)
 
 	err = helper.ModelMappedHelper(c, info, request)
 	if err != nil {
@@ -71,73 +71,102 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		return types.NewError(fmt.Errorf("invalid api type: %d", info.ApiType), types.ErrorCodeInvalidApiType, types.ErrOptionWithSkipRetry())
 	}
 	adaptor.Init(info)
-	var requestBody io.Reader
-	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
-		storage, err := common.GetBodyStorage(c)
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
-		}
-		requestBytes, err := storage.Bytes()
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
-		}
-		requestBytes, err = relaycommon.NormalizeJSONStreamOptions(requestBytes)
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-		}
-		requestBody = bytes.NewBuffer(requestBytes)
-	} else {
-		convertedRequest, err := adaptor.ConvertOpenAIResponsesRequest(c, info, *request)
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-		}
-		relaycommon.AppendRequestConversionFromRequest(info, convertedRequest)
-		jsonData, err := common.Marshal(convertedRequest)
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-		}
-
-		// remove disabled fields for OpenAI Responses API
-		jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings, info.ChannelSetting.PassThroughBodyEnabled)
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-		}
-
-		// apply param override
-		if len(info.ParamOverride) > 0 {
-			jsonData, err = relaycommon.ApplyParamOverride(jsonData, info.ParamOverride, relaycommon.BuildParamOverrideContext(info))
-			if err != nil {
-				return types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid, types.ErrOptionWithSkipRetry())
-			}
-		}
-		jsonData, err = relaycommon.NormalizeJSONStreamOptions(jsonData)
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-		}
-
-		if common.DebugEnabled {
-			println("requestBody: ", string(jsonData))
-		}
-		requestBody = bytes.NewBuffer(jsonData)
-	}
-
-	var httpResp *http.Response
-	resp, err := adaptor.DoRequest(c, info, requestBody)
-	if err != nil {
-		return types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
-	}
-
 	statusCodeMappingStr := c.GetString("status_code_mapping")
+	passThrough := model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled
+	strippedStreamOptions := false
+	var httpResp *http.Response
+	for {
+		var requestBody io.Reader
+		if passThrough {
+			storage, err := common.GetBodyStorage(c)
+			if err != nil {
+				return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+			}
+			requestBytes, err := storage.Bytes()
+			if err != nil {
+				return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+			}
+			requestBytes, err = relaycommon.NormalizeJSONStreamOptions(requestBytes)
+			if err != nil {
+				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			}
+			if strippedStreamOptions {
+				requestBytes, err = relaycommon.RemoveJSONStreamOptions(requestBytes)
+				if err != nil {
+					return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+				}
+			}
+			requestBody = bytes.NewBuffer(requestBytes)
+		} else {
+			requestForUpstream, err := common.DeepCopy(request)
+			if err != nil {
+				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			}
+			if strippedStreamOptions {
+				requestForUpstream.StreamOptions = nil
+			}
 
-	if resp != nil {
-		httpResp = resp.(*http.Response)
+			convertedRequest, err := adaptor.ConvertOpenAIResponsesRequest(c, info, *requestForUpstream)
+			if err != nil {
+				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			}
+			relaycommon.AppendRequestConversionFromRequest(info, convertedRequest)
+			jsonData, err := common.Marshal(convertedRequest)
+			if err != nil {
+				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			}
 
-		if httpResp.StatusCode != http.StatusOK {
-			newAPIError = service.RelayErrorHandler(c.Request.Context(), httpResp, false)
-			// reset status code 重置状态码
-			service.ResetStatusCode(newAPIError, statusCodeMappingStr)
-			return newAPIError
+			jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings, info.ChannelSetting.PassThroughBodyEnabled)
+			if err != nil {
+				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			}
+
+			if len(info.ParamOverride) > 0 {
+				jsonData, err = relaycommon.ApplyParamOverride(jsonData, info.ParamOverride, relaycommon.BuildParamOverrideContext(info))
+				if err != nil {
+					return types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid, types.ErrOptionWithSkipRetry())
+				}
+			}
+			jsonData, err = relaycommon.NormalizeJSONStreamOptions(jsonData)
+			if err != nil {
+				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			}
+			if strippedStreamOptions {
+				jsonData, err = relaycommon.RemoveJSONStreamOptions(jsonData)
+				if err != nil {
+					return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+				}
+			}
+
+			if common.DebugEnabled {
+				println("requestBody: ", string(jsonData))
+			}
+			requestBody = bytes.NewBuffer(jsonData)
 		}
+
+		resp, err := adaptor.DoRequest(c, info, requestBody)
+		if err != nil {
+			return types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
+		}
+		if resp == nil {
+			break
+		}
+		httpResp = resp.(*http.Response)
+		if httpResp.StatusCode == http.StatusOK {
+			break
+		}
+
+		issue := classifyUpstreamCompatibilityIssue(httpResp, info.RelayMode)
+		if issue == upstreamCompatIssueStreamOptions && !strippedStreamOptions {
+			strippedStreamOptions = true
+			logCompatFallback(c, info, string(issue))
+			_ = httpResp.Body.Close()
+			continue
+		}
+
+		newAPIError = service.RelayErrorHandler(c.Request.Context(), httpResp, false)
+		service.ResetStatusCode(newAPIError, statusCodeMappingStr)
+		return newAPIError
 	}
 
 	usage, newAPIError := adaptor.DoResponse(c, httpResp, info)

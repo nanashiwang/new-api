@@ -102,6 +102,12 @@ const REGION_EXAMPLE = {
   'claude-3-5-sonnet-20240620': 'europe-west1',
 };
 
+const CAPABILITY_MODE_OPTIONS = [
+  { label: '继承默认', value: 'inherit' },
+  { label: '强制开启', value: 'enabled' },
+  { label: '强制关闭', value: 'disabled' },
+];
+
 function type2secretPrompt(type) {
   // inputs.type === 15 ? '按照如下格式输入：APIKey|SecretKey' : (inputs.type === 18 ? '按照如下格式输入：APPID|APISecret|APIKey' : '请输入渠道对应的鉴权密钥')
   switch (type) {
@@ -175,6 +181,9 @@ const EditChannelModal = (props) => {
     allow_safety_identifier: false,
     allow_include_obfuscation: false,
     allow_inference_geo: false,
+    chat_stream_options_mode: 'inherit',
+    responses_api_mode: 'inherit',
+    responses_stream_options_mode: 'inherit',
     claude_beta_query: false,
     upstream_model_update_check_enabled: false,
     upstream_model_update_auto_sync_enabled: false,
@@ -683,6 +692,12 @@ const EditChannelModal = (props) => {
             parsedSettings.allow_include_obfuscation || false;
           data.allow_inference_geo =
             parsedSettings.allow_inference_geo || false;
+          data.chat_stream_options_mode =
+            parsedSettings.chat_stream_options_mode || 'inherit';
+          data.responses_api_mode =
+            parsedSettings.responses_api_mode || 'inherit';
+          data.responses_stream_options_mode =
+            parsedSettings.responses_stream_options_mode || 'inherit';
           data.claude_beta_query = parsedSettings.claude_beta_query || false;
           data.upstream_model_update_check_enabled =
             parsedSettings.upstream_model_update_check_enabled === true;
@@ -712,6 +727,9 @@ const EditChannelModal = (props) => {
           data.allow_safety_identifier = false;
           data.allow_include_obfuscation = false;
           data.allow_inference_geo = false;
+          data.chat_stream_options_mode = 'inherit';
+          data.responses_api_mode = 'inherit';
+          data.responses_stream_options_mode = 'inherit';
           data.claude_beta_query = false;
           data.upstream_model_update_check_enabled = false;
           data.upstream_model_update_auto_sync_enabled = false;
@@ -729,6 +747,9 @@ const EditChannelModal = (props) => {
         data.allow_safety_identifier = false;
         data.allow_include_obfuscation = false;
         data.allow_inference_geo = false;
+        data.chat_stream_options_mode = 'inherit';
+        data.responses_api_mode = 'inherit';
+        data.responses_stream_options_mode = 'inherit';
         data.claude_beta_query = false;
         data.upstream_model_update_check_enabled = false;
         data.upstream_model_update_auto_sync_enabled = false;
@@ -1519,6 +1540,20 @@ const EditChannelModal = (props) => {
       delete settings.vertex_key_type;
     }
 
+    const capabilityModes = [
+      'chat_stream_options_mode',
+      'responses_api_mode',
+      'responses_stream_options_mode',
+    ];
+    capabilityModes.forEach((key) => {
+      const value = localInputs[key] || 'inherit';
+      if (value === 'inherit') {
+        delete settings[key];
+      } else {
+        settings[key] = value;
+      }
+    });
+
     // type === 1 (OpenAI) 或 type === 14 (Claude): 设置字段透传控制（显式保存布尔值）
     if (localInputs.type === 1 || localInputs.type === 14) {
       settings.allow_service_tier = localInputs.allow_service_tier === true;
@@ -1585,6 +1620,9 @@ const EditChannelModal = (props) => {
     delete localInputs.allow_safety_identifier;
     delete localInputs.allow_include_obfuscation;
     delete localInputs.allow_inference_geo;
+    delete localInputs.chat_stream_options_mode;
+    delete localInputs.responses_api_mode;
+    delete localInputs.responses_stream_options_mode;
     delete localInputs.claude_beta_query;
     delete localInputs.upstream_model_update_check_enabled;
     delete localInputs.upstream_model_update_auto_sync_enabled;
@@ -3478,6 +3516,56 @@ const EditChannelModal = (props) => {
                           {t('字段透传控制')}
                         </div>
 
+                        <Form.Select
+                          field='chat_stream_options_mode'
+                          label={t('Chat stream_options 支持')}
+                          optionList={CAPABILITY_MODE_OPTIONS}
+                          value={inputs.chat_stream_options_mode || 'inherit'}
+                          onChange={(value) =>
+                            handleChannelOtherSettingsChange(
+                              'chat_stream_options_mode',
+                              value,
+                            )
+                          }
+                          extraText={t(
+                            '控制 chat/completions 请求是否允许保留或自动补全 stream_options。第三方 OpenAI 兼容上游不完整时，建议保持继承或强制关闭。',
+                          )}
+                        />
+
+                        <Form.Select
+                          field='responses_api_mode'
+                          label={t('Responses API 支持')}
+                          optionList={CAPABILITY_MODE_OPTIONS}
+                          value={inputs.responses_api_mode || 'inherit'}
+                          onChange={(value) =>
+                            handleChannelOtherSettingsChange(
+                              'responses_api_mode',
+                              value,
+                            )
+                          }
+                          extraText={t(
+                            '控制该渠道是否允许 chat -> responses 桥接以及直接走 /v1/responses。未知兼容站建议保持继承或强制关闭。',
+                          )}
+                        />
+
+                        <Form.Select
+                          field='responses_stream_options_mode'
+                          label={t('Responses stream_options 支持')}
+                          optionList={CAPABILITY_MODE_OPTIONS}
+                          value={
+                            inputs.responses_stream_options_mode || 'inherit'
+                          }
+                          onChange={(value) =>
+                            handleChannelOtherSettingsChange(
+                              'responses_stream_options_mode',
+                              value,
+                            )
+                          }
+                          extraText={t(
+                            '控制 /v1/responses 的 stream_options 是否允许保留。若上游会报 Unsupported parameter: stream_options，可强制关闭。',
+                          )}
+                        />
+
                         <Form.Switch
                           field='allow_service_tier'
                           label={t('允许 service_tier 透传')}
@@ -3552,6 +3640,56 @@ const EditChannelModal = (props) => {
                         <div className='mt-4 mb-2 text-sm font-medium text-gray-700'>
                           {t('字段透传控制')}
                         </div>
+
+                        <Form.Select
+                          field='chat_stream_options_mode'
+                          label={t('Chat stream_options 支持')}
+                          optionList={CAPABILITY_MODE_OPTIONS}
+                          value={inputs.chat_stream_options_mode || 'inherit'}
+                          onChange={(value) =>
+                            handleChannelOtherSettingsChange(
+                              'chat_stream_options_mode',
+                              value,
+                            )
+                          }
+                          extraText={t(
+                            '控制桥接到 OpenAI chat 兼容格式时是否允许保留或自动补全 stream_options。',
+                          )}
+                        />
+
+                        <Form.Select
+                          field='responses_api_mode'
+                          label={t('Responses API 支持')}
+                          optionList={CAPABILITY_MODE_OPTIONS}
+                          value={inputs.responses_api_mode || 'inherit'}
+                          onChange={(value) =>
+                            handleChannelOtherSettingsChange(
+                              'responses_api_mode',
+                              value,
+                            )
+                          }
+                          extraText={t(
+                            '控制 chat -> responses 桥接是否启用。若上游不支持 /v1/responses，可强制关闭。',
+                          )}
+                        />
+
+                        <Form.Select
+                          field='responses_stream_options_mode'
+                          label={t('Responses stream_options 支持')}
+                          optionList={CAPABILITY_MODE_OPTIONS}
+                          value={
+                            inputs.responses_stream_options_mode || 'inherit'
+                          }
+                          onChange={(value) =>
+                            handleChannelOtherSettingsChange(
+                              'responses_stream_options_mode',
+                              value,
+                            )
+                          }
+                          extraText={t(
+                            '控制桥接到 /v1/responses 时是否允许保留 stream_options。',
+                          )}
+                        />
 
                         <Form.Switch
                           field='allow_service_tier'

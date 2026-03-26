@@ -58,23 +58,25 @@ type ResponsesUsageInfo struct {
 }
 
 type ChannelMeta struct {
-	ChannelType          int
-	ChannelId            int
-	ChannelIsMultiKey    bool
-	ChannelMultiKeyIndex int
-	ChannelBaseUrl       string
-	ApiType              int
-	ApiVersion           string
-	ApiKey               string
-	Organization         string
-	ChannelCreateTime    int64
-	ParamOverride        map[string]interface{}
-	HeadersOverride      map[string]interface{}
-	ChannelSetting       dto.ChannelSettings
-	ChannelOtherSettings dto.ChannelOtherSettings
-	UpstreamModelName    string
-	IsModelMapped        bool
-	SupportStreamOptions bool // 是否支持流式选项
+	ChannelType                    int
+	ChannelId                      int
+	ChannelIsMultiKey              bool
+	ChannelMultiKeyIndex           int
+	ChannelBaseUrl                 string
+	ApiType                        int
+	ApiVersion                     string
+	ApiKey                         string
+	Organization                   string
+	ChannelCreateTime              int64
+	ParamOverride                  map[string]interface{}
+	HeadersOverride                map[string]interface{}
+	ChannelSetting                 dto.ChannelSettings
+	ChannelOtherSettings           dto.ChannelOtherSettings
+	UpstreamModelName              string
+	IsModelMapped                  bool
+	SupportsChatStreamOptions      bool // 是否支持 chat/completions 的 stream_options
+	SupportsResponsesAPI           bool // 是否支持 /v1/responses
+	SupportsResponsesStreamOptions bool // 是否支持 responses 的 stream_options
 }
 
 type TokenCountMeta struct {
@@ -185,7 +187,6 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 		HeadersOverride:      headerOverride,
 		UpstreamModelName:    common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
 		IsModelMapped:        false,
-		SupportStreamOptions: false,
 	}
 
 	if channelType == constant.ChannelTypeAzure {
@@ -205,9 +206,10 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 		channelMeta.ChannelOtherSettings = channelOtherSettings
 	}
 
-	if streamSupportedChannels[channelMeta.ChannelType] {
-		channelMeta.SupportStreamOptions = true
-	}
+	caps := ResolveChannelCapabilities(channelMeta.ChannelType, channelMeta.ChannelBaseUrl, channelMeta.ChannelOtherSettings)
+	channelMeta.SupportsChatStreamOptions = caps.SupportsChatStreamOptions
+	channelMeta.SupportsResponsesAPI = caps.SupportsResponsesAPI
+	channelMeta.SupportsResponsesStreamOptions = caps.SupportsResponsesStreamOptions
 
 	info.ChannelMeta = channelMeta
 
@@ -267,8 +269,8 @@ func (info *RelayInfo) ToString() string {
 	// Channel metadata (mask ApiKey)
 	if info.ChannelMeta != nil {
 		cm := info.ChannelMeta
-		fmt.Fprintf(b, "ChannelMeta{ Type: %d, Id: %d, IsMultiKey: %t, MultiKeyIndex: %d, BaseURL: %q, ApiType: %d, ApiVersion: %q, Organization: %q, CreateTime: %d, UpstreamModelName: %q, IsModelMapped: %t, SupportStreamOptions: %t, ApiKey: ***masked*** }, ",
-			cm.ChannelType, cm.ChannelId, cm.ChannelIsMultiKey, cm.ChannelMultiKeyIndex, cm.ChannelBaseUrl, cm.ApiType, cm.ApiVersion, cm.Organization, cm.ChannelCreateTime, cm.UpstreamModelName, cm.IsModelMapped, cm.SupportStreamOptions)
+		fmt.Fprintf(b, "ChannelMeta{ Type: %d, Id: %d, IsMultiKey: %t, MultiKeyIndex: %d, BaseURL: %q, ApiType: %d, ApiVersion: %q, Organization: %q, CreateTime: %d, UpstreamModelName: %q, IsModelMapped: %t, SupportsChatStreamOptions: %t, SupportsResponsesAPI: %t, SupportsResponsesStreamOptions: %t, ApiKey: ***masked*** }, ",
+			cm.ChannelType, cm.ChannelId, cm.ChannelIsMultiKey, cm.ChannelMultiKeyIndex, cm.ChannelBaseUrl, cm.ApiType, cm.ApiVersion, cm.Organization, cm.ChannelCreateTime, cm.UpstreamModelName, cm.IsModelMapped, cm.SupportsChatStreamOptions, cm.SupportsResponsesAPI, cm.SupportsResponsesStreamOptions)
 	}
 
 	// Responses usage info (non-sensitive)
@@ -291,28 +293,6 @@ func (info *RelayInfo) ToString() string {
 
 	fmt.Fprintf(b, "}")
 	return b.String()
-}
-
-// 定义支持流式选项的通道类型
-var streamSupportedChannels = map[int]bool{
-	constant.ChannelTypeOpenAI:      true,
-	constant.ChannelTypeAnthropic:   true,
-	constant.ChannelTypeAws:         true,
-	constant.ChannelTypeGemini:      true,
-	constant.ChannelCloudflare:      true,
-	constant.ChannelTypeAzure:       true,
-	constant.ChannelTypeVolcEngine:  true,
-	constant.ChannelTypeOllama:      true,
-	constant.ChannelTypeXai:         true,
-	constant.ChannelTypeDeepSeek:    true,
-	constant.ChannelTypeBaiduV2:     true,
-	constant.ChannelTypeZhipu_v4:    true,
-	constant.ChannelTypeAli:         true,
-	constant.ChannelTypeSubmodel:    true,
-	constant.ChannelTypeCodex:       true,
-	constant.ChannelTypeMoonshot:    true,
-	constant.ChannelTypeMiniMax:     true,
-	constant.ChannelTypeSiliconFlow: true,
 }
 
 func GenRelayInfoWs(c *gin.Context, ws *websocket.Conn) *RelayInfo {

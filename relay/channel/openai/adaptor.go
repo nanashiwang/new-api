@@ -86,7 +86,7 @@ func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayIn
 	//		println(fmt.Sprintf("failed to save request body to file: %v", err))
 	//	}
 	//}
-	if info.SupportStreamOptions && info.IsStream {
+	if info.SupportsChatStreamOptions && info.IsStream {
 		aiRequest.StreamOptions = &dto.StreamOptions{
 			IncludeUsage: true,
 		}

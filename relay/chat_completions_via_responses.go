@@ -127,7 +127,7 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 	if err != nil {
 		return nil, types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
-	relaycommon.NormalizeResponsesStreamOptions(responsesReq)
+	relaycommon.NormalizeResponsesStreamOptions(responsesReq, info.SupportsResponsesStreamOptions)
 	if sessionMatch != nil {
 		responsesReq.PreviousResponseID = sessionMatch.ResponseID
 	}
@@ -143,42 +143,72 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 	info.RelayMode = relayconstant.RelayModeResponses
 	info.RequestURLPath = "/v1/responses"
 
-	convertedRequest, err := adaptor.ConvertOpenAIResponsesRequest(c, info, *responsesReq)
-	if err != nil {
-		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-	}
-	relaycommon.AppendRequestConversionFromRequest(info, convertedRequest)
-
-	jsonData, err := common.Marshal(convertedRequest)
-	if err != nil {
-		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-	}
-
-	if shouldRemoveDisabledFields {
-		jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings, info.ChannelSetting.PassThroughBodyEnabled)
+	statusCodeMappingStr := c.GetString("status_code_mapping")
+	strippedStreamOptions := false
+	var httpResp *http.Response
+	for {
+		responsesReqForUpstream, err := common.DeepCopy(responsesReq)
 		if err != nil {
 			return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 		}
-	}
-	jsonData, err = relaycommon.NormalizeJSONStreamOptions(jsonData)
-	if err != nil {
-		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-	}
+		if strippedStreamOptions {
+			responsesReqForUpstream.StreamOptions = nil
+		}
 
-	var httpResp *http.Response
-	resp, err := adaptor.DoRequest(c, info, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return nil, types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
-	}
-	if resp == nil {
-		return nil, types.NewOpenAIError(nil, types.ErrorCodeBadResponse, http.StatusInternalServerError)
-	}
+		convertedRequest, err := adaptor.ConvertOpenAIResponsesRequest(c, info, *responsesReqForUpstream)
+		if err != nil {
+			return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+		relaycommon.AppendRequestConversionFromRequest(info, convertedRequest)
 
-	statusCodeMappingStr := c.GetString("status_code_mapping")
+		jsonData, err := common.Marshal(convertedRequest)
+		if err != nil {
+			return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
 
-	httpResp = resp.(*http.Response)
-	info.IsStream = info.IsStream || strings.HasPrefix(httpResp.Header.Get("Content-Type"), "text/event-stream")
-	if httpResp.StatusCode != http.StatusOK {
+		if shouldRemoveDisabledFields {
+			jsonData, err = relaycommon.RemoveDisabledFields(jsonData, info.ChannelOtherSettings, info.ChannelSetting.PassThroughBodyEnabled)
+			if err != nil {
+				return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			}
+		}
+		jsonData, err = relaycommon.NormalizeJSONStreamOptions(jsonData)
+		if err != nil {
+			return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+		if strippedStreamOptions {
+			jsonData, err = relaycommon.RemoveJSONStreamOptions(jsonData)
+			if err != nil {
+				return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			}
+		}
+
+		resp, err := adaptor.DoRequest(c, info, bytes.NewBuffer(jsonData))
+		if err != nil {
+			return nil, types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
+		}
+		if resp == nil {
+			return nil, types.NewOpenAIError(nil, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+		}
+
+		httpResp = resp.(*http.Response)
+		info.IsStream = info.IsStream || strings.HasPrefix(httpResp.Header.Get("Content-Type"), "text/event-stream")
+		if httpResp.StatusCode == http.StatusOK {
+			break
+		}
+
+		issue := classifyUpstreamCompatibilityIssue(httpResp, info.RelayMode)
+		switch {
+		case issue == upstreamCompatIssueStreamOptions && !strippedStreamOptions:
+			strippedStreamOptions = true
+			logCompatFallback(c, info, string(issue))
+			_ = httpResp.Body.Close()
+			continue
+		case issue == upstreamCompatIssueResponsesAPI:
+			logCompatFallback(c, info, string(issue))
+			markFallbackToNativeChat(c)
+		}
+
 		newApiErr := service.RelayErrorHandler(c.Request.Context(), httpResp, false)
 		service.ResetStatusCode(newApiErr, statusCodeMappingStr)
 		return nil, newApiErr
