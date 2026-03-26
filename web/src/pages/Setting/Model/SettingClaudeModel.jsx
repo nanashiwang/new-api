@@ -46,18 +46,88 @@ const CLAUDE_DEFAULT_MAX_TOKENS = {
   'claude-3-7-sonnet-20250219-thinking': 8192,
 };
 
+const DEFAULT_CLAUDE_TO_OPENAI_REASONING_MAP = {
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  max: 'xhigh',
+};
+
+const OPENAI_REASONING_EFFORT_OPTIONS = [
+  { label: 'minimal', value: 'minimal' },
+  { label: 'low', value: 'low' },
+  { label: 'medium', value: 'medium' },
+  { label: 'high', value: 'high' },
+  { label: 'xhigh', value: 'xhigh' },
+];
+
+const ALLOWED_OPENAI_REASONING_EFFORTS = new Set(
+  OPENAI_REASONING_EFFORT_OPTIONS.map((option) => option.value),
+);
+
+const defaultClaudeSettingInputs = {
+  'claude.model_headers_settings': '',
+  'claude.thinking_adapter_enabled': true,
+  'claude.default_max_tokens': '',
+  'claude.thinking_adapter_budget_tokens_percentage': 0.8,
+  ClaudeToOpenAIReasoningMap: JSON.stringify(
+    DEFAULT_CLAUDE_TO_OPENAI_REASONING_MAP,
+  ),
+};
+
+const normalizeClaudeToOpenAIReasoningMap = (raw) => {
+  const normalized = { ...DEFAULT_CLAUDE_TO_OPENAI_REASONING_MAP };
+  if (!raw || String(raw).trim() === '') {
+    return normalized;
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    for (const key of Object.keys(normalized)) {
+      const value = parsed?.[key];
+      if (ALLOWED_OPENAI_REASONING_EFFORTS.has(value)) {
+        normalized[key] = value;
+      }
+    }
+  } catch (error) {
+    console.error('Invalid ClaudeToOpenAIReasoningMap:', error);
+  }
+
+  return normalized;
+};
+
+const stringifyClaudeToOpenAIReasoningMap = (mapping) =>
+  JSON.stringify({
+    low: mapping.low,
+    medium: mapping.medium,
+    high: mapping.high,
+    max: mapping.max,
+  });
+
 export default function SettingClaudeModel(props) {
   const { t } = useTranslation();
 
   const [loading, setLoading] = useState(false);
-  const [inputs, setInputs] = useState({
-    'claude.model_headers_settings': '',
-    'claude.thinking_adapter_enabled': true,
-    'claude.default_max_tokens': '',
-    'claude.thinking_adapter_budget_tokens_percentage': 0.8,
-  });
+  const [inputs, setInputs] = useState(defaultClaudeSettingInputs);
   const refForm = useRef();
-  const [inputsRow, setInputsRow] = useState(inputs);
+  const [inputsRow, setInputsRow] = useState(defaultClaudeSettingInputs);
+  const [reasoningMap, setReasoningMap] = useState(
+    DEFAULT_CLAUDE_TO_OPENAI_REASONING_MAP,
+  );
+
+  const updateReasoningMap = (level, value) => {
+    setReasoningMap((prev) => {
+      const next = {
+        ...prev,
+        [level]: value,
+      };
+      setInputs((current) => ({
+        ...current,
+        ClaudeToOpenAIReasoningMap: stringifyClaudeToOpenAIReasoningMap(next),
+      }));
+      return next;
+    });
+  };
 
   function onSubmit() {
     const updateArray = compareObjects(inputs, inputsRow);
@@ -91,15 +161,22 @@ export default function SettingClaudeModel(props) {
   }
 
   useEffect(() => {
-    const currentInputs = {};
-    for (let key in props.options) {
-      if (Object.keys(inputs).includes(key)) {
+    const currentInputs = { ...defaultClaudeSettingInputs };
+    for (const key of Object.keys(defaultClaudeSettingInputs)) {
+      if (props.options[key] !== undefined) {
         currentInputs[key] = props.options[key];
       }
     }
     setInputs(currentInputs);
     setInputsRow(structuredClone(currentInputs));
-    refForm.current.setValues(currentInputs);
+    setReasoningMap(
+      normalizeClaudeToOpenAIReasoningMap(
+        currentInputs.ClaudeToOpenAIReasoningMap,
+      ),
+    );
+    if (refForm.current) {
+      refForm.current.setValues(currentInputs);
+    }
   }, [props.options]);
 
   return (
@@ -196,6 +273,61 @@ export default function SettingClaudeModel(props) {
                 </Text>
               </Col>
             </Row>
+            <Form.Section
+              text={
+                <span style={{ fontSize: 14, fontWeight: 600 }}>
+                  {t('Claude -> OpenAI 思考模式映射')}
+                </span>
+              }
+            >
+              <Row>
+                <Col span={24}>
+                  <Text>
+                    {t(
+                      '将 Claude 的思考档位映射为 OpenAI 的 reasoning_effort，用于 Claude 请求转换为 OpenAI 请求时。',
+                    )}
+                  </Text>
+                </Col>
+              </Row>
+              <Row>
+                <Col xs={24} sm={12} md={6} lg={6} xl={6}>
+                  <Form.Select
+                    field='claude_to_openai_reasoning_map_low'
+                    label='low'
+                    value={reasoningMap.low}
+                    optionList={OPENAI_REASONING_EFFORT_OPTIONS}
+                    onChange={(value) => updateReasoningMap('low', value)}
+                  />
+                </Col>
+                <Col xs={24} sm={12} md={6} lg={6} xl={6}>
+                  <Form.Select
+                    field='claude_to_openai_reasoning_map_medium'
+                    label='medium'
+                    value={reasoningMap.medium}
+                    optionList={OPENAI_REASONING_EFFORT_OPTIONS}
+                    onChange={(value) => updateReasoningMap('medium', value)}
+                  />
+                </Col>
+                <Col xs={24} sm={12} md={6} lg={6} xl={6}>
+                  <Form.Select
+                    field='claude_to_openai_reasoning_map_high'
+                    label='high'
+                    value={reasoningMap.high}
+                    optionList={OPENAI_REASONING_EFFORT_OPTIONS}
+                    onChange={(value) => updateReasoningMap('high', value)}
+                  />
+                </Col>
+                <Col xs={24} sm={12} md={6} lg={6} xl={6}>
+                  <Form.Select
+                    field='claude_to_openai_reasoning_map_max'
+                    label='max'
+                    value={reasoningMap.max}
+                    optionList={OPENAI_REASONING_EFFORT_OPTIONS}
+                    onChange={(value) => updateReasoningMap('max', value)}
+                  />
+                </Col>
+              </Row>
+            </Form.Section>
             <Row>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.InputNumber

@@ -28,27 +28,30 @@ import SettingGlobalModel from '../../pages/Setting/Model/SettingGlobalModel';
 import SettingGrokModel from '../../pages/Setting/Model/SettingGrokModel';
 import SettingsChannelAffinity from '../../pages/Setting/Operation/SettingsChannelAffinity';
 
+const defaultModelSettingInputs = {
+  'gemini.safety_settings': '',
+  'gemini.version_settings': '',
+  'gemini.supported_imagine_models': '',
+  'gemini.remove_function_response_id_enabled': true,
+  'claude.model_headers_settings': '',
+  'claude.thinking_adapter_enabled': true,
+  'claude.default_max_tokens': '',
+  'claude.thinking_adapter_budget_tokens_percentage': 0.8,
+  ClaudeToOpenAIReasoningMap: '',
+  'global.pass_through_request_enabled': false,
+  'global.thinking_model_blacklist': '[]',
+  'global.chat_completions_to_responses_policy': '{}',
+  'general_setting.ping_interval_enabled': false,
+  'general_setting.ping_interval_seconds': 60,
+  'gemini.thinking_adapter_enabled': false,
+  'gemini.thinking_adapter_budget_tokens_percentage': 0.6,
+  'grok.violation_deduction_enabled': true,
+  'grok.violation_deduction_amount': 0.05,
+};
+
 const ModelSetting = () => {
   const { t } = useTranslation();
-  let [inputs, setInputs] = useState({
-    'gemini.safety_settings': '',
-    'gemini.version_settings': '',
-    'gemini.supported_imagine_models': '',
-    'gemini.remove_function_response_id_enabled': true,
-    'claude.model_headers_settings': '',
-    'claude.thinking_adapter_enabled': true,
-    'claude.default_max_tokens': '',
-    'claude.thinking_adapter_budget_tokens_percentage': 0.8,
-    'global.pass_through_request_enabled': false,
-    'global.thinking_model_blacklist': '[]',
-    'global.chat_completions_to_responses_policy': '{}',
-    'general_setting.ping_interval_enabled': false,
-    'general_setting.ping_interval_seconds': 60,
-    'gemini.thinking_adapter_enabled': false,
-    'gemini.thinking_adapter_budget_tokens_percentage': 0.6,
-    'grok.violation_deduction_enabled': true,
-    'grok.violation_deduction_amount': 0.05,
-  });
+  let [inputs, setInputs] = useState(defaultModelSettingInputs);
 
   let [loading, setLoading] = useState(false);
 
@@ -56,7 +59,7 @@ const ModelSetting = () => {
     const res = await API.get('/api/option/');
     const { success, message, data } = res.data;
     if (success) {
-      let newInputs = {};
+      let newInputs = { ...defaultModelSettingInputs };
       data.forEach((item) => {
         if (
           item.key === 'gemini.safety_settings' ||
@@ -64,6 +67,7 @@ const ModelSetting = () => {
           item.key === 'claude.model_headers_settings' ||
           item.key === 'claude.default_max_tokens' ||
           item.key === 'gemini.supported_imagine_models' ||
+          item.key === 'ClaudeToOpenAIReasoningMap' ||
           item.key === 'global.thinking_model_blacklist' ||
           item.key === 'global.chat_completions_to_responses_policy'
         ) {
