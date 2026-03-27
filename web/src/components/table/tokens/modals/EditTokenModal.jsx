@@ -417,11 +417,13 @@ const EditTokenModal = (props) => {
         formApiRef.current.setValues(getInitValues());
       }
     }
-    loadModels(props.editingToken.group || '');
-    loadChannels(
-      props.editingToken.group || '',
-      props.editingToken.channel_limits || [],
-    );
+    if (!isEdit) {
+      loadModels(props.editingToken.group || '');
+      loadChannels(
+        props.editingToken.group || '',
+        props.editingToken.model_limits || [],
+      );
+    }
     loadGroups();
   }, [props.editingToken.id]);
 

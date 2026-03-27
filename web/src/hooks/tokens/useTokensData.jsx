@@ -158,6 +158,14 @@ export const useTokensData = (openFluentNotification) => {
     }, 500);
   };
 
+  useEffect(() => {
+    if (!showEdit || !clearEditingTokenTimerRef.current) {
+      return;
+    }
+    clearTimeout(clearEditingTokenTimerRef.current);
+    clearEditingTokenTimerRef.current = null;
+  }, [showEdit]);
+
   // 从 API 响应同步分页数据
   const syncPageData = (payload) => {
     setTokens(payload.items || []);
