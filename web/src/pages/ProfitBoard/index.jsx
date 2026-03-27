@@ -22,6 +22,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import dayjs from 'dayjs';
@@ -41,6 +42,7 @@ import {
   Table,
   Tabs,
   Tag,
+  Tooltip,
   Typography,
 } from '@douyinfe/semi-ui';
 import { VChart } from '@visactor/react-vchart';
@@ -136,7 +138,11 @@ const createDefaultState = () => {
     editingBatchId: '',
     dateRange: [start, end],
     granularity: 'day',
+    customIntervalMinutes: 15,
     chartTab: 'trend',
+    compareMode: 'none',
+    comparePeriod: 'previous',
+    compareDateRange: [],
     metricKey: 'configured_profit_usd',
     viewBatchId: 'all',
     detailFilter: null,
@@ -201,8 +207,19 @@ const normalizeRestoredState = (state) => {
     start ? new Date(start) : defaults.dateRange[0],
     end ? new Date(end) : defaults.dateRange[1],
   ];
+  const [compareStart, compareEnd] = next.compareDateRange || [];
+  next.compareDateRange = [
+    compareStart ? new Date(compareStart) : null,
+    compareEnd ? new Date(compareEnd) : null,
+  ].filter(Boolean);
   next.draft = normalizeBatchForState(next.draft || {}, 0);
   next.editingBatchId = next.editingBatchId || '';
+  next.customIntervalMinutes = Math.max(
+    Number(next.customIntervalMinutes || defaults.customIntervalMinutes),
+    1,
+  );
+  next.compareMode = next.compareMode || 'none';
+  next.comparePeriod = next.comparePeriod || 'previous';
   next.upstreamConfig = {
     ...createDefaultUpstreamConfig(),
     ...(next.upstreamConfig || {}),
@@ -246,7 +263,53 @@ const downloadBlob = (blob, filename) => {
 };
 const buildQueryKey = (payload) => JSON.stringify(payload);
 
+const normalizeCachedReportBundle = (raw) => {
+  if (!raw) return null;
+  if (raw.report) {
+    return {
+      report: raw.report,
+      queryKey: raw.queryKey || '',
+      activityWatermark:
+        raw.activityWatermark || raw.report?.meta?.activity_watermark || '',
+      generatedAt: raw.generatedAt || raw.report?.meta?.generated_at || 0,
+    };
+  }
+  return {
+    report: raw,
+    queryKey: '',
+    activityWatermark: raw?.meta?.activity_watermark || '',
+    generatedAt: raw?.meta?.generated_at || 0,
+  };
+};
+
 const formatRatio = (value) => `${(Number(value || 0) * 100).toFixed(1)}%`;
+
+const formatBucketLabel = (timestamp, granularity, customIntervalMinutes) => {
+  const current = dayjs.unix(timestamp);
+  if (granularity === 'hour') return current.format('YYYY-MM-DD HH:00');
+  if (granularity === 'week') return current.startOf('week').add(1, 'day').format('GGGG-[W]WW');
+  if (granularity === 'month') return current.startOf('month').format('YYYY-MM');
+  if (granularity === 'custom') {
+    const interval = Math.max(Number(customIntervalMinutes || 1), 1);
+    const totalMinutes = current.hour() * 60 + current.minute();
+    const alignedMinutes = Math.floor(totalMinutes / interval) * interval;
+    return current
+      .startOf('day')
+      .add(alignedMinutes, 'minute')
+      .format('YYYY-MM-DD HH:mm');
+  }
+  return current.format('YYYY-MM-DD');
+};
+
+const buildPreviousPeriodRange = (range) => {
+  if (!Array.isArray(range) || !range[0] || !range[1]) return [];
+  const start = dayjs(range[0]);
+  const end = dayjs(range[1]);
+  const duration = Math.max(end.diff(start, 'second'), 0);
+  const previousEnd = start.subtract(1, 'second');
+  const previousStart = previousEnd.subtract(duration, 'second');
+  return [previousStart.toDate(), previousEnd.toDate()];
+};
 
 const aggregateBreakdownRows = (rows, viewBatchId, metricKey) => {
   const filtered =
@@ -306,6 +369,8 @@ const createBarSpec = (title, rows, metricLabel, status, t) => ({
   data: [{ id: 'bar', values: rows }],
   xField: 'label',
   yField: 'value',
+  seriesField: rows.some((item) => item.series) ? 'series' : undefined,
+  legends: { visible: rows.some((item) => item.series) },
   axes: [
     {
       orient: 'bottom',
@@ -319,6 +384,9 @@ const createBarSpec = (title, rows, metricLabel, status, t) => ({
     mark: {
       content: [
         { key: t('名称'), value: (datum) => datum.label },
+        ...(rows.some((item) => item.series)
+          ? [{ key: t('对比项'), value: (datum) => datum.series }]
+          : []),
         {
           key: metricLabel,
           value: (datum) => formatMoney(datum.value, status),
@@ -333,8 +401,11 @@ const ProfitBoardPage = () => {
   const [statusState] = useContext(StatusContext);
   const actualTheme = useActualTheme();
   const isMobile = useIsMobile();
-  const cachedReport = useMemo(
-    () => safeParse(localStorage.getItem(REPORT_CACHE_KEY), null),
+  const cachedReportBundle = useMemo(
+    () =>
+      normalizeCachedReportBundle(
+        safeParse(localStorage.getItem(REPORT_CACHE_KEY), null),
+      ),
     [],
   );
   const restoredState = useMemo(
@@ -364,7 +435,19 @@ const ProfitBoardPage = () => {
   const [granularity, setGranularity] = useState(
     restoredState.granularity || 'day',
   );
+  const [customIntervalMinutes, setCustomIntervalMinutes] = useState(
+    restoredState.customIntervalMinutes || 15,
+  );
   const [chartTab, setChartTab] = useState(restoredState.chartTab || 'trend');
+  const [compareMode, setCompareMode] = useState(
+    restoredState.compareMode || 'none',
+  );
+  const [comparePeriod, setComparePeriod] = useState(
+    restoredState.comparePeriod || 'previous',
+  );
+  const [compareDateRange, setCompareDateRange] = useState(
+    restoredState.compareDateRange || [],
+  );
   const [metricKey, setMetricKey] = useState(
     restoredState.metricKey || 'configured_profit_usd',
   );
@@ -380,12 +463,18 @@ const ProfitBoardPage = () => {
   const [siteConfig, setSiteConfig] = useState(
     restoredState.siteConfig || createDefaultSiteConfig(),
   );
-  const [report, setReport] = useState(cachedReport);
+  const [report, setReport] = useState(cachedReportBundle?.report || null);
+  const [compareReport, setCompareReport] = useState(null);
   const [lastQueryKey, setLastQueryKey] = useState(
-    restoredState.lastQueryKey || '',
+    restoredState.lastQueryKey || cachedReportBundle?.queryKey || '',
   );
   const [reportLoadedFromCache, setReportLoadedFromCache] = useState(
-    !!cachedReport,
+    !!cachedReportBundle?.report,
+  );
+  const [activityChecking, setActivityChecking] = useState(false);
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  const lastActivityWatermarkRef = useRef(
+    cachedReportBundle?.activityWatermark || '',
   );
 
   useEffect(() => {
@@ -489,14 +578,37 @@ const ProfitBoardPage = () => {
     if ((batches || []).length === 0) errors.push(t('请至少添加一个批次'));
     if (!Array.isArray(dateRange) || !dateRange[0] || !dateRange[1])
       errors.push(t('请选择完整的时间范围'));
+    if (granularity === 'custom' && Number(customIntervalMinutes || 0) <= 0) {
+      errors.push(t('自定义时间粒度必须大于 0 分钟'));
+    }
     if (
       siteConfig.pricing_mode === 'site_model' &&
       (siteConfig.model_names || []).length === 0
     )
       errors.push(t('读取本站模型价格时，至少选择一个模型'));
+    if (
+      compareMode === 'time' &&
+      comparePeriod === 'custom' &&
+      (!Array.isArray(compareDateRange) ||
+        !compareDateRange[0] ||
+        !compareDateRange[1])
+    ) {
+      errors.push(t('请选择完整的对比时间范围'));
+    }
     if (duplicateBatchError) errors.push(duplicateBatchError);
     return errors;
-  }, [batches, dateRange, duplicateBatchError, siteConfig, t]);
+  }, [
+    batches,
+    compareDateRange,
+    compareMode,
+    comparePeriod,
+    customIntervalMinutes,
+    dateRange,
+    duplicateBatchError,
+    granularity,
+    siteConfig,
+    t,
+  ]);
 
   const persistState = useCallback(
     (next = {}) => {
@@ -508,7 +620,11 @@ const ProfitBoardPage = () => {
           editingBatchId,
           dateRange,
           granularity,
+          customIntervalMinutes,
           chartTab,
+          compareMode,
+          comparePeriod,
+          compareDateRange,
           metricKey,
           viewBatchId,
           detailFilter,
@@ -522,6 +638,10 @@ const ProfitBoardPage = () => {
     [
       batches,
       chartTab,
+      compareDateRange,
+      compareMode,
+      comparePeriod,
+      customIntervalMinutes,
       dateRange,
       detailFilter,
       draft,
@@ -562,21 +682,70 @@ const ProfitBoardPage = () => {
       start_timestamp: dayjs(dateRange?.[0]).unix(),
       end_timestamp: dayjs(dateRange?.[1]).unix(),
       granularity,
+      custom_interval_minutes:
+        granularity === 'custom' ? Number(customIntervalMinutes || 0) : 0,
       detail_limit: DETAIL_LIMIT,
     }),
-    [batchPayload, dateRange, granularity, siteConfig, upstreamConfig],
+    [
+      batchPayload,
+      customIntervalMinutes,
+      dateRange,
+      granularity,
+      siteConfig,
+      upstreamConfig,
+    ],
   );
+  const buildActivityPayload = useCallback(() => {
+    const payload = buildQueryPayload();
+    return {
+      batches: payload.batches,
+      upstream: payload.upstream,
+      site: payload.site,
+      start_timestamp: payload.start_timestamp,
+      end_timestamp: payload.end_timestamp,
+      granularity: payload.granularity,
+      custom_interval_minutes: payload.custom_interval_minutes,
+    };
+  }, [buildQueryPayload]);
+  const resolvedCompareDateRange = useMemo(() => {
+    if (compareMode !== 'time') return [];
+    if (comparePeriod === 'custom') return compareDateRange || [];
+    return buildPreviousPeriodRange(dateRange);
+  }, [compareDateRange, compareMode, comparePeriod, dateRange]);
+  const compareQueryPayload = useMemo(() => {
+    if (
+      compareMode !== 'time' ||
+      !resolvedCompareDateRange?.[0] ||
+      !resolvedCompareDateRange?.[1]
+    ) {
+      return null;
+    }
+    const payload = buildQueryPayload();
+    return {
+      ...payload,
+      start_timestamp: dayjs(resolvedCompareDateRange[0]).unix(),
+      end_timestamp: dayjs(resolvedCompareDateRange[1]).unix(),
+    };
+  }, [buildQueryPayload, compareMode, resolvedCompareDateRange]);
   const currentQueryKey = useMemo(
     () => buildQueryKey(buildQueryPayload()),
     [buildQueryPayload],
   );
-  const reportIsFresh =
-    !!report &&
-    !reportLoadedFromCache &&
-    currentQueryKey === lastQueryKey;
-  const hasCachedReport = !!report && reportLoadedFromCache;
-  const reportIsStale =
+  const compareQueryKey = useMemo(
+    () => (compareQueryPayload ? buildQueryKey(compareQueryPayload) : ''),
+    [compareQueryPayload],
+  );
+  const reportMatchesCurrentFilters =
+    !!report && !!lastQueryKey && currentQueryKey === lastQueryKey;
+  const reportHasPendingChanges =
     !!report && !!lastQueryKey && currentQueryKey !== lastQueryKey;
+  const reportIsFresh =
+    !!report && reportMatchesCurrentFilters && !reportLoadedFromCache;
+  const autoRefreshEligible = useMemo(() => {
+    const end = dateRange?.[1];
+    if (!end) return false;
+    return dayjs(end).isAfter(dayjs().subtract(15, 'minute'));
+  }, [dateRange]);
 
   const loadOptions = useCallback(async () => {
     const res = await API.get('/api/profit_board/options');
@@ -658,22 +827,18 @@ const ProfitBoardPage = () => {
         if (prev.type === 'model') return row.model_name === prev.value;
         if (prev.type === 'trend') {
           return (
-            dayjs
-              .unix(row.created_at)
-              .format(
-                granularity === 'hour'
-                  ? 'YYYY-MM-DD HH:00'
-                  : granularity === 'week'
-                    ? 'GGGG-[W]WW'
-                    : 'YYYY-MM-DD',
-              ) === prev.value
+            formatBucketLabel(
+              row.created_at,
+              granularity,
+              customIntervalMinutes,
+            ) === prev.value
           );
         }
         return false;
       });
       return matched ? prev : null;
     });
-  }, [granularity, report, viewBatchId]);
+  }, [customIntervalMinutes, granularity, report, viewBatchId]);
 
   const batchSummaryOptions = useMemo(
     () => [
@@ -738,6 +903,26 @@ const ProfitBoardPage = () => {
     [editingBatchId, resetDraft],
   );
 
+  const fetchCompareReport = useCallback(
+    async (payload, silent = true) => {
+      if (!payload) {
+        setCompareReport(null);
+        return null;
+      }
+      try {
+        const res = await API.post('/api/profit_board/query', payload);
+        if (!res.data.success) throw new Error(res.data.message);
+        setCompareReport(res.data.data);
+        return res.data.data;
+      } catch (error) {
+        setCompareReport(null);
+        if (!silent) showError(error);
+        return null;
+      }
+    },
+    [],
+  );
+
   const runQuery = useCallback(
     async (silent = false) => {
       if (validationErrors.length > 0) return showError(validationErrors[0]);
@@ -750,23 +935,122 @@ const ProfitBoardPage = () => {
         setReport(res.data.data);
         setLastQueryKey(queryKey);
         setReportLoadedFromCache(false);
-        localStorage.setItem(REPORT_CACHE_KEY, JSON.stringify(res.data.data));
+        lastActivityWatermarkRef.current =
+          res.data.data?.meta?.activity_watermark || '';
+        localStorage.setItem(
+          REPORT_CACHE_KEY,
+          JSON.stringify({
+            report: res.data.data,
+            queryKey,
+            activityWatermark: res.data.data?.meta?.activity_watermark || '',
+            generatedAt: res.data.data?.meta?.generated_at || 0,
+          }),
+        );
+        if (compareMode === 'time' && compareQueryPayload) {
+          await fetchCompareReport(compareQueryPayload);
+        } else {
+          setCompareReport(null);
+        }
         if (!silent) {
           showSuccess(t('收益看板已更新'));
         }
+        return res.data.data;
       } catch (error) {
         showError(error);
+        return null;
       } finally {
         setQuerying(false);
       }
     },
-    [buildQueryPayload, t, validationErrors],
+    [buildQueryPayload, compareMode, compareQueryPayload, fetchCompareReport, t, validationErrors],
   );
 
   useEffect(() => {
     if (!report || validationErrors.length > 0) return;
     runQuery(true);
-  }, [granularity]);
+  }, [customIntervalMinutes, granularity]);
+
+  useEffect(() => {
+    if (compareMode !== 'time') {
+      setCompareReport(null);
+      return;
+    }
+    if (!reportMatchesCurrentFilters || !compareQueryPayload) return;
+    fetchCompareReport(compareQueryPayload);
+  }, [
+    compareMode,
+    comparePeriod,
+    compareQueryKey,
+    compareQueryPayload,
+    fetchCompareReport,
+    reportMatchesCurrentFilters,
+  ]);
+
+  useEffect(() => {
+    if (reportHasPendingChanges) {
+      setCompareReport(null);
+    }
+  }, [reportHasPendingChanges]);
+
+  const checkActivity = useCallback(async (notifyOnError = false) => {
+    if (!reportMatchesCurrentFilters) return null;
+    setActivityChecking(true);
+    try {
+      const res = await API.post('/api/profit_board/activity', buildActivityPayload());
+      if (!res.data.success) throw new Error(res.data.message);
+      const activity = res.data.data;
+      if (
+        activity?.activity_watermark &&
+        activity.activity_watermark !== lastActivityWatermarkRef.current
+      ) {
+        await runQuery(true);
+      } else if (activity?.activity_watermark) {
+        lastActivityWatermarkRef.current = activity.activity_watermark;
+      }
+      return activity;
+    } catch (error) {
+      if (notifyOnError) showError(error);
+      return null;
+    } finally {
+      setActivityChecking(false);
+    }
+  }, [buildActivityPayload, reportMatchesCurrentFilters, runQuery]);
+
+  useEffect(() => {
+    if (!report || !reportMatchesCurrentFilters) return;
+    if (!reportLoadedFromCache) return;
+    checkActivity();
+  }, [checkActivity, report, reportLoadedFromCache, reportMatchesCurrentFilters]);
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      setAutoRefreshEnabled(document.visibilityState === 'visible');
+    };
+    handleVisibility();
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, []);
+
+  useEffect(() => {
+    if (
+      !report ||
+      !reportMatchesCurrentFilters ||
+      !autoRefreshEligible ||
+      !autoRefreshEnabled
+    ) {
+      return undefined;
+    }
+    const timer = window.setInterval(() => {
+      checkActivity();
+    }, 25000);
+    return () => window.clearInterval(timer);
+  }, [
+    autoRefreshEligible,
+    autoRefreshEnabled,
+    checkActivity,
+    report,
+    reportMatchesCurrentFilters,
+  ]);
 
   const saveConfig = useCallback(async () => {
     if (validationErrors.length > 0) return showError(validationErrors[0]);
@@ -787,10 +1071,19 @@ const ProfitBoardPage = () => {
     }
   }, [batchPayload, buildQueryPayload, t, validationErrors]);
 
+  const ensureFreshReport = useCallback(async () => {
+    if (!report || !reportMatchesCurrentFilters || reportLoadedFromCache) {
+      return !!(await runQuery(true));
+    }
+    await checkActivity(true);
+    return true;
+  }, [checkActivity, report, reportLoadedFromCache, reportMatchesCurrentFilters, runQuery]);
+
   const exportCSV = useCallback(async () => {
-    if (!reportIsFresh) return showError(t('当前结果已过期，请重新刷新数据'));
     setExporting(true);
     try {
+      const ready = await ensureFreshReport();
+      if (!ready) return;
       const res = await API.post(
         '/api/profit_board/export/csv',
         buildQueryPayload(),
@@ -807,12 +1100,13 @@ const ProfitBoardPage = () => {
     } finally {
       setExporting(false);
     }
-  }, [buildQueryPayload, reportIsFresh, t]);
+  }, [buildQueryPayload, ensureFreshReport]);
 
   const exportExcel = useCallback(async () => {
-    if (!reportIsFresh) return showError(t('当前结果已过期，请重新刷新数据'));
     setExporting(true);
     try {
+      const ready = await ensureFreshReport();
+      if (!ready) return;
       const res = await API.post(
         '/api/profit_board/export/excel',
         buildQueryPayload(),
@@ -831,7 +1125,7 @@ const ProfitBoardPage = () => {
     } finally {
       setExporting(false);
     }
-  }, [buildQueryPayload, reportIsFresh, t]);
+  }, [buildQueryPayload, ensureFreshReport]);
 
   const trendRows = useMemo(
     () =>
@@ -847,6 +1141,35 @@ const ProfitBoardPage = () => {
         })),
     [metricKey, report?.timeseries, viewBatchId],
   );
+  const compareTrendRows = useMemo(
+    () =>
+      (compareReport?.timeseries || [])
+        .filter(
+          (item) => viewBatchId === 'all' || item.batch_id === viewBatchId,
+        )
+        .map((item) => ({
+          bucket: item.bucket,
+          value: item[metricKey] || 0,
+          series: item.batch_name,
+          batch_id: item.batch_id,
+        })),
+    [compareReport?.timeseries, metricKey, viewBatchId],
+  );
+  const batchChannelChartRows = useMemo(() => {
+    if (compareMode !== 'batch') return [];
+    const filtered = (report?.channel_breakdown || []).filter(
+      (item) => viewBatchId === 'all' || item.batch_id === viewBatchId,
+    );
+    return filtered
+      .map((item) => ({
+        label: item.label || item.key,
+        value: Number(item[metricKey] || 0),
+        series: item.batch_name,
+        batch_id: item.batch_id,
+      }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 24);
+  }, [compareMode, metricKey, report?.channel_breakdown, viewBatchId]);
   const channelChartRows = useMemo(
     () =>
       aggregateBreakdownRows(
@@ -856,6 +1179,21 @@ const ProfitBoardPage = () => {
       ),
     [metricKey, report?.channel_breakdown, viewBatchId],
   );
+  const batchModelChartRows = useMemo(() => {
+    if (compareMode !== 'batch') return [];
+    const filtered = (report?.model_breakdown || []).filter(
+      (item) => viewBatchId === 'all' || item.batch_id === viewBatchId,
+    );
+    return filtered
+      .map((item) => ({
+        label: item.label || item.key,
+        value: Number(item[metricKey] || 0),
+        series: item.batch_name,
+        batch_id: item.batch_id,
+      }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 24);
+  }, [compareMode, metricKey, report?.model_breakdown, viewBatchId]);
   const modelChartRows = useMemo(
     () =>
       aggregateBreakdownRows(
@@ -865,6 +1203,34 @@ const ProfitBoardPage = () => {
       ),
     [metricKey, report?.model_breakdown, viewBatchId],
   );
+  const timeCompareChannelRows = useMemo(() => {
+    if (compareMode !== 'time' || !compareReport) return [];
+    const currentRows = aggregateBreakdownRows(
+      report?.channel_breakdown || [],
+      viewBatchId,
+      metricKey,
+    ).map((item) => ({ ...item, series: t('当前周期') }));
+    const previousRows = aggregateBreakdownRows(
+      compareReport?.channel_breakdown || [],
+      viewBatchId,
+      metricKey,
+    ).map((item) => ({ ...item, series: t('对比周期') }));
+    return [...currentRows, ...previousRows].slice(0, 24);
+  }, [compareMode, compareReport, metricKey, report?.channel_breakdown, t, viewBatchId]);
+  const timeCompareModelRows = useMemo(() => {
+    if (compareMode !== 'time' || !compareReport) return [];
+    const currentRows = aggregateBreakdownRows(
+      report?.model_breakdown || [],
+      viewBatchId,
+      metricKey,
+    ).map((item) => ({ ...item, series: t('当前周期') }));
+    const previousRows = aggregateBreakdownRows(
+      compareReport?.model_breakdown || [],
+      viewBatchId,
+      metricKey,
+    ).map((item) => ({ ...item, series: t('对比周期') }));
+    return [...currentRows, ...previousRows].slice(0, 24);
+  }, [compareMode, compareReport, metricKey, report?.model_breakdown, t, viewBatchId]);
   const filteredDetailRows = useMemo(() => {
     let rows = report?.detail_rows || [];
     if (viewBatchId !== 'all')
@@ -879,19 +1245,21 @@ const ProfitBoardPage = () => {
     if (detailFilter.type === 'trend') {
       return rows.filter(
         (row) =>
-          dayjs
-            .unix(row.created_at)
-            .format(
-              granularity === 'hour'
-                ? 'YYYY-MM-DD HH:00'
-                : granularity === 'week'
-                  ? 'GGGG-[W]WW'
-                  : 'YYYY-MM-DD',
-            ) === detailFilter.value,
+          formatBucketLabel(
+            row.created_at,
+            granularity,
+            customIntervalMinutes,
+          ) === detailFilter.value,
       );
     }
     return rows;
-  }, [detailFilter, granularity, report?.detail_rows, viewBatchId]);
+  }, [
+    customIntervalMinutes,
+    detailFilter,
+    granularity,
+    report?.detail_rows,
+    viewBatchId,
+  ]);
 
   const detailFilterText = useMemo(() => {
     if (!detailFilter?.value) return '';
@@ -907,27 +1275,56 @@ const ProfitBoardPage = () => {
     () => createTrendSpec(trendRows, metricLabel, statusState?.status, t),
     [metricLabel, statusState?.status, t, trendRows],
   );
+  const compareTrendSpec = useMemo(
+    () =>
+      createTrendSpec(compareTrendRows, metricLabel, statusState?.status, t),
+    [compareTrendRows, metricLabel, statusState?.status, t],
+  );
   const channelSpec = useMemo(
     () =>
       createBarSpec(
         t('渠道对比'),
-        channelChartRows,
+        compareMode === 'batch'
+          ? batchChannelChartRows
+          : compareMode === 'time'
+            ? timeCompareChannelRows
+            : channelChartRows,
         metricLabel,
         statusState?.status,
         t,
       ),
-    [channelChartRows, metricLabel, statusState?.status, t],
+    [
+      batchChannelChartRows,
+      channelChartRows,
+      compareMode,
+      metricLabel,
+      statusState?.status,
+      t,
+      timeCompareChannelRows,
+    ],
   );
   const modelSpec = useMemo(
     () =>
       createBarSpec(
         t('模型对比'),
-        modelChartRows,
+        compareMode === 'batch'
+          ? batchModelChartRows
+          : compareMode === 'time'
+            ? timeCompareModelRows
+            : modelChartRows,
         metricLabel,
         statusState?.status,
         t,
       ),
-    [metricLabel, modelChartRows, statusState?.status, t],
+    [
+      batchModelChartRows,
+      compareMode,
+      metricLabel,
+      modelChartRows,
+      statusState?.status,
+      t,
+      timeCompareModelRows,
+    ],
   );
   const handleChartClick = useCallback(
     (type) => (event) => {
@@ -1061,6 +1458,30 @@ const ProfitBoardPage = () => {
     [channelMap, t],
   );
 
+  const summaryMetricHelp = useMemo(
+    () => ({
+      actual_site_revenue_usd: t('日志里当时真实扣费换算出的本站收入。'),
+      configured_site_revenue_usd: t(
+        '按当前收益看板价格配置重新模拟出来的本站收入。',
+      ),
+      upstream_cost_usd: t('本次统计中可确认或可回退计算出的上游成本。'),
+      configured_profit_usd: t('配置收入减上游费用，反映当前配置下的模拟利润。'),
+      actual_profit_usd: t('真实收入减上游费用，反映历史实际利润。'),
+      configured_profit_coverage_rate: t(
+        '有已知上游费用的请求数占总请求数的比例，越高说明利润统计越完整。',
+      ),
+      missing_upstream_cost_count: t(
+        '没有拿到上游返回费用，且按当前策略也无法确认成本的请求数。',
+      ),
+      site_model_match_count: t('成功命中本站模型价格配置的请求数。'),
+      missing_site_pricing_count: t('未命中本站模型价格且无法确认本站配置收入的请求数。'),
+      returned_cost_count: t('直接使用上游返回费用完成成本统计的请求数。'),
+      manual_cost_count: t('上游没返回费用时，按手动价格回退计算成本的请求数。'),
+      request_count: t('当前筛选范围内参与统计的请求总数。'),
+    }),
+    [t],
+  );
+
   const summaryCards = useMemo(
     () => [
       {
@@ -1153,18 +1574,126 @@ const ProfitBoardPage = () => {
     ],
     [report?.summary, statusState?.status, t],
   );
+  const primarySummaryCards = useMemo(
+    () =>
+      summaryCards.filter((item) =>
+        [
+          'actual_site_revenue_usd',
+          'upstream_cost_usd',
+          'actual_profit_usd',
+          'configured_profit_usd',
+        ].includes(item.key),
+      ),
+    [summaryCards],
+  );
+  const secondarySummaryCards = useMemo(
+    () =>
+      summaryCards.filter((item) =>
+        [
+          'request_count',
+          'configured_profit_coverage_rate',
+          'missing_upstream_cost_count',
+          'missing_site_pricing_count',
+          'site_model_match_count',
+          'returned_cost_count',
+          'manual_cost_count',
+        ].includes(item.key),
+      ),
+    [summaryCards],
+  );
+  const statusSummary = useMemo(() => {
+    if (!report) return [];
+    const items = [];
+    if (reportLoadedFromCache) {
+      items.push({
+        key: 'cache',
+        color: 'blue',
+        text: t('已从本地缓存恢复，正在校验是否有新账单'),
+      });
+    }
+    if (reportHasPendingChanges) {
+      items.push({
+        key: 'dirty',
+        color: 'orange',
+        text: t('筛选或价格口径已变更，当前图表仍是上一版结果'),
+      });
+    }
+    if (activityChecking) {
+      items.push({
+        key: 'checking',
+        color: 'cyan',
+        text: t('正在检查新的请求与计费活动'),
+      });
+    }
+    if (reportIsFresh && autoRefreshEligible && autoRefreshEnabled) {
+      items.push({
+        key: 'live',
+        color: 'green',
+        text: t('自动更新已开启'),
+      });
+    }
+    if (reportIsFresh && !autoRefreshEligible) {
+      items.push({
+        key: 'history',
+        color: 'grey',
+        text: t('历史时间范围，自动更新已暂停'),
+      });
+    }
+    return items;
+  }, [
+    activityChecking,
+    autoRefreshEligible,
+    autoRefreshEnabled,
+    report,
+    reportHasPendingChanges,
+    reportIsFresh,
+    reportLoadedFromCache,
+    t,
+  ]);
 
   const chartContent = {
-    trend: trendRows.length ? (
-      <VChart
-        key={`trend-${actualTheme}-${viewBatchId}-${metricKey}`}
-        spec={trendSpec}
-        onClick={handleChartClick('trend')}
-      />
-    ) : (
-      <Empty description={t('当前没有趋势数据')} />
-    ),
-    channel: channelChartRows.length ? (
+    trend:
+      compareMode === 'time' ? (
+        trendRows.length || compareTrendRows.length ? (
+          <div className='grid gap-4 xl:grid-cols-2'>
+            <Card bordered={false} bodyStyle={{ padding: 8 }}>
+              <div className='mb-2 px-2'>
+                <Text strong>{t('当前周期')}</Text>
+              </div>
+              <VChart
+                key={`trend-current-${actualTheme}-${viewBatchId}-${metricKey}`}
+                spec={trendSpec}
+                onClick={handleChartClick('trend')}
+              />
+            </Card>
+            <Card bordered={false} bodyStyle={{ padding: 8 }}>
+              <div className='mb-2 px-2'>
+                <Text strong>{t('对比周期')}</Text>
+              </div>
+              <VChart
+                key={`trend-compare-${actualTheme}-${viewBatchId}-${metricKey}-${compareQueryKey}`}
+                spec={compareTrendSpec}
+              />
+            </Card>
+          </div>
+        ) : (
+          <Empty description={t('当前没有趋势数据')} />
+        )
+      ) : trendRows.length ? (
+        <VChart
+          key={`trend-${actualTheme}-${viewBatchId}-${metricKey}`}
+          spec={trendSpec}
+          onClick={handleChartClick('trend')}
+        />
+      ) : (
+        <Empty description={t('当前没有趋势数据')} />
+      ),
+    channel:
+      (compareMode === 'batch'
+        ? batchChannelChartRows.length
+        : compareMode === 'time'
+          ? timeCompareChannelRows.length
+          : channelChartRows.length) ? (
       <VChart
         key={`channel-${actualTheme}-${viewBatchId}-${metricKey}`}
         spec={channelSpec}
@@ -1173,7 +1702,12 @@ const ProfitBoardPage = () => {
     ) : (
       <Empty description={t('当前没有渠道数据')} />
     ),
-    model: modelChartRows.length ? (
+    model:
+      (compareMode === 'batch'
+        ? batchModelChartRows.length
+        : compareMode === 'time'
+          ? timeCompareModelRows.length
+          : modelChartRows.length) ? (
       <VChart
         key={`model-${actualTheme}-${viewBatchId}-${metricKey}`}
         spec={modelSpec}
@@ -1220,20 +1754,6 @@ const ProfitBoardPage = () => {
           </Space>
         </div>
 
-        {hasCachedReport ? (
-          <Banner
-            type='warning'
-            description={t('当前显示的是缓存结果，请重新刷新数据')}
-            closeIcon={null}
-          />
-        ) : null}
-        {reportIsStale ? (
-          <Banner
-            type='danger'
-            description={t('当前结果已过期，请重新刷新数据')}
-            closeIcon={null}
-          />
-        ) : null}
         {report?.warnings?.length ? (
           <div className='space-y-2'>
             {report.warnings.map((warning) => (
@@ -1258,22 +1778,91 @@ const ProfitBoardPage = () => {
 
         {report ? (
           <>
-            <div className='grid gap-4 md:grid-cols-2 xl:grid-cols-4'>
-              {summaryCards.map((item) => (
-                <Card key={item.key} bordered={false} bodyStyle={{ padding: 18 }}>
-                  <div className='flex items-center justify-between gap-3'>
-                    <div>
-                      <Text type='tertiary'>{item.title}</Text>
-                      <Title heading={3} style={{ margin: '8px 0 0' }}>
-                        {item.value}
-                      </Title>
+            <div className='grid gap-4 xl:grid-cols-[1.05fr_0.95fr]'>
+              <Card bordered={false} title={t('结果总览')}>
+                <div className='grid gap-4 md:grid-cols-2'>
+                  {primarySummaryCards.map((item) => (
+                    <Card
+                      key={item.key}
+                      bordered={false}
+                      bodyStyle={{ padding: 18 }}
+                      className='bg-semi-color-fill-0'
+                    >
+                      <div className='flex items-center justify-between gap-3'>
+                        <div>
+                          <Tooltip content={summaryMetricHelp[item.key] || item.title}>
+                            <div className='inline-flex cursor-help items-center gap-1'>
+                              <Text type='tertiary'>{item.title}</Text>
+                              <Info size={14} className='text-semi-color-text-2' />
+                            </div>
+                          </Tooltip>
+                          <Title heading={3} style={{ margin: '8px 0 0' }}>
+                            {item.value}
+                          </Title>
+                        </div>
+                        <div className='flex h-10 w-10 items-center justify-center rounded-full bg-semi-color-bg-2'>
+                          {item.icon}
+                        </div>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+                <div className='mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3'>
+                  {secondarySummaryCards.map((item) => (
+                    <div
+                      key={item.key}
+                      className='rounded-lg border border-semi-color-border bg-semi-color-fill-0 px-4 py-3'
+                    >
+                      <Tooltip content={summaryMetricHelp[item.key] || item.title}>
+                        <div className='inline-flex cursor-help items-center gap-1'>
+                          <Text type='tertiary'>{item.title}</Text>
+                          <Info size={13} className='text-semi-color-text-2' />
+                        </div>
+                      </Tooltip>
+                      <div className='mt-2 text-lg font-semibold'>{item.value}</div>
                     </div>
-                    <div className='flex h-10 w-10 items-center justify-center rounded-full bg-semi-color-fill-0'>
-                      {item.icon}
+                  ))}
+                </div>
+              </Card>
+
+              <Card bordered={false} title={t('数据状态')}>
+                <div className='space-y-3'>
+                  <div className='flex flex-wrap gap-2'>
+                    {statusSummary.length > 0 ? (
+                      statusSummary.map((item) => (
+                        <Tag key={item.key} color={item.color}>
+                          {item.text}
+                        </Tag>
+                      ))
+                    ) : (
+                      <Tag color='grey'>{t('等待首次查询')}</Tag>
+                    )}
+                  </div>
+                  <div className='grid gap-3 md:grid-cols-2'>
+                    <div className='rounded-lg bg-semi-color-fill-0 px-4 py-3'>
+                      <Text type='tertiary'>{t('上次更新时间')}</Text>
+                      <div className='mt-1 font-medium'>
+                        {report?.meta?.generated_at
+                          ? timestamp2string(report.meta.generated_at)
+                          : '-'}
+                      </div>
+                    </div>
+                    <div className='rounded-lg bg-semi-color-fill-0 px-4 py-3'>
+                      <Text type='tertiary'>{t('最近一条命中日志')}</Text>
+                      <div className='mt-1 font-medium'>
+                        {report?.meta?.latest_log_created_at
+                          ? timestamp2string(report.meta.latest_log_created_at)
+                          : '-'}
+                      </div>
                     </div>
                   </div>
-                </Card>
-              ))}
+                  <Text type='tertiary'>
+                    {t(
+                      '当前页面按日志实时重算；自动更新只会在时间范围接近现在且页面可见时工作。',
+                    )}
+                  </Text>
+                </div>
+              </Card>
             </div>
 
             {report.batch_summaries?.length > 1 ? (
@@ -1322,7 +1911,7 @@ const ProfitBoardPage = () => {
           </>
         ) : null}
 
-        <div className='grid gap-4 xl:grid-cols-[1.15fr_1fr_1fr]'>
+        <div className='grid gap-4 xl:grid-cols-[1.1fr_0.9fr]'>
           <Card bordered={false} title={t('查询范围与批次')}>
             <div className='space-y-4'>
               <div className='grid gap-3 md:grid-cols-[150px_1fr]'>
@@ -1463,157 +2052,28 @@ const ProfitBoardPage = () => {
               ) : null}
             </div>
           </Card>
-          <Card bordered={false} title={t('上游价格配置')}>
-            <div className='grid grid-cols-1 gap-3 md:grid-cols-2'>
-              <Select
-                value={upstreamConfig.cost_source}
-                onChange={(value) =>
-                  setUpstreamConfig((prev) => ({ ...prev, cost_source: value }))
-                }
-                optionList={[
-                  {
-                    label: t('优先读上游返回费用'),
-                    value: 'returned_cost_first',
-                  },
-                  { label: t('只读上游返回费用'), value: 'returned_cost_only' },
-                  { label: t('只按手动价格计算'), value: 'manual_only' },
-                ]}
-              />
-              <InputNumber
-                min={0}
-                value={upstreamConfig.fixed_amount}
-                onChange={(value) =>
-                  setUpstreamConfig((prev) => ({
-                    ...prev,
-                    fixed_amount: clampNumber(value),
-                  }))
-                }
-                suffix={t('固定 / 次')}
-              />
-              <InputNumber
-                min={0}
-                value={upstreamConfig.input_price}
-                onChange={(value) =>
-                  setUpstreamConfig((prev) => ({
-                    ...prev,
-                    input_price: clampNumber(value),
-                  }))
-                }
-                suffix='USD / 1M 输入'
-              />
-              <InputNumber
-                min={0}
-                value={upstreamConfig.output_price}
-                onChange={(value) =>
-                  setUpstreamConfig((prev) => ({
-                    ...prev,
-                    output_price: clampNumber(value),
-                  }))
-                }
-                suffix='USD / 1M 输出'
-              />
-              <InputNumber
-                min={0}
-                value={upstreamConfig.cache_read_price}
-                onChange={(value) =>
-                  setUpstreamConfig((prev) => ({
-                    ...prev,
-                    cache_read_price: clampNumber(value),
-                  }))
-                }
-                suffix='USD / 1M 缓存读'
-              />
-              <InputNumber
-                min={0}
-                value={upstreamConfig.cache_creation_price}
-                onChange={(value) =>
-                  setUpstreamConfig((prev) => ({
-                    ...prev,
-                    cache_creation_price: clampNumber(value),
-                  }))
-                }
-                suffix='USD / 1M 缓存写'
-              />
-            </div>
-            <Text type='tertiary' className='block mt-3'>
-              {t(
-                '优先读取日志里的上游真实费用；如果上游没返回，再按这里的手动价格回退。',
-              )}
-            </Text>
-          </Card>
-
-          <Card bordered={false} title={t('本站价格配置')}>
-            <div className='space-y-3'>
-              <Select
-                value={siteConfig.pricing_mode}
-                onChange={(value) =>
-                  setSiteConfig((prev) => ({ ...prev, pricing_mode: value }))
-                }
-                optionList={[
-                  { label: t('手动输入本站价格'), value: 'manual' },
-                  { label: t('读取本站模型价格'), value: 'site_model' },
-                ]}
-              />
-              {siteConfig.pricing_mode === 'site_model' ? (
-                <>
-                  <div className='grid gap-3 md:grid-cols-2'>
-                    <Select
-                      multiple
-                      filter
-                      value={siteConfig.model_names || []}
-                      onChange={(value) =>
-                        setSiteConfig((prev) => ({
-                          ...prev,
-                          model_names: value || [],
-                        }))
-                      }
-                      optionList={(options.local_models || []).map((item) => ({
-                        label: item.model_name,
-                        value: item.model_name,
-                      }))}
-                      placeholder={t('选择一个或多个本站模型')}
-                    />
-                    <Select
-                      value={siteConfig.group}
-                      onChange={(value) =>
-                        setSiteConfig((prev) => ({ ...prev, group: value }))
-                      }
-                      optionList={[
-                        { label: t('自动取最低分组倍率'), value: '' },
-                        ...(options.groups || []).map((item) => ({
-                          label: item,
-                          value: item,
-                        })),
-                      ]}
-                    />
-                  </div>
-                  <div className='flex items-center justify-between rounded-lg bg-semi-color-fill-0 px-3 py-2'>
-                    <div>
-                      <Text strong>{t('按充值价格读取')}</Text>
-                      <Text type='tertiary' className='block'>
-                        {t(
-                          '开启后按充值倍率重算；如果倍率正好是 1，就会和原价一样。',
-                        )}
-                      </Text>
-                    </div>
-                    <Switch
-                      checked={siteConfig.use_recharge_price}
-                      onChange={(checked) =>
-                        setSiteConfig((prev) => ({
-                          ...prev,
-                          use_recharge_price: checked,
-                        }))
-                      }
-                    />
-                  </div>
-                </>
-              ) : null}
+          <div className='space-y-4'>
+            <Card bordered={false} title={t('上游价格配置')}>
               <div className='grid grid-cols-1 gap-3 md:grid-cols-2'>
+                <Select
+                  value={upstreamConfig.cost_source}
+                  onChange={(value) =>
+                    setUpstreamConfig((prev) => ({ ...prev, cost_source: value }))
+                  }
+                  optionList={[
+                    { label: t('只按手动价格计算'), value: 'manual_only' },
+                    {
+                      label: t('优先读上游返回费用'),
+                      value: 'returned_cost_first',
+                    },
+                    { label: t('只读上游返回费用'), value: 'returned_cost_only' },
+                  ]}
+                />
                 <InputNumber
                   min={0}
-                  value={siteConfig.fixed_amount}
+                  value={upstreamConfig.fixed_amount}
                   onChange={(value) =>
-                    setSiteConfig((prev) => ({
+                    setUpstreamConfig((prev) => ({
                       ...prev,
                       fixed_amount: clampNumber(value),
                     }))
@@ -1622,9 +2082,9 @@ const ProfitBoardPage = () => {
                 />
                 <InputNumber
                   min={0}
-                  value={siteConfig.input_price}
+                  value={upstreamConfig.input_price}
                   onChange={(value) =>
-                    setSiteConfig((prev) => ({
+                    setUpstreamConfig((prev) => ({
                       ...prev,
                       input_price: clampNumber(value),
                     }))
@@ -1633,9 +2093,9 @@ const ProfitBoardPage = () => {
                 />
                 <InputNumber
                   min={0}
-                  value={siteConfig.output_price}
+                  value={upstreamConfig.output_price}
                   onChange={(value) =>
-                    setSiteConfig((prev) => ({
+                    setUpstreamConfig((prev) => ({
                       ...prev,
                       output_price: clampNumber(value),
                     }))
@@ -1644,9 +2104,9 @@ const ProfitBoardPage = () => {
                 />
                 <InputNumber
                   min={0}
-                  value={siteConfig.cache_read_price}
+                  value={upstreamConfig.cache_read_price}
                   onChange={(value) =>
-                    setSiteConfig((prev) => ({
+                    setUpstreamConfig((prev) => ({
                       ...prev,
                       cache_read_price: clampNumber(value),
                     }))
@@ -1655,9 +2115,9 @@ const ProfitBoardPage = () => {
                 />
                 <InputNumber
                   min={0}
-                  value={siteConfig.cache_creation_price}
+                  value={upstreamConfig.cache_creation_price}
                   onChange={(value) =>
-                    setSiteConfig((prev) => ({
+                    setUpstreamConfig((prev) => ({
                       ...prev,
                       cache_creation_price: clampNumber(value),
                     }))
@@ -1665,13 +2125,144 @@ const ProfitBoardPage = () => {
                   suffix='USD / 1M 缓存写'
                 />
               </div>
-              <Text type='tertiary' className='block'>
+              <Text type='tertiary' className='block mt-3'>
                 {t(
-                  '本站实际收入 = 当时真实扣费；本站配置收入 = 按你当前收益看板配置重新模拟出来的收入。',
+                  '只按手动价格计算适合先校准基线；另外两种模式会优先或只使用上游返回费用。',
                 )}
               </Text>
-            </div>
-          </Card>
+            </Card>
+
+            <Card bordered={false} title={t('本站价格配置')}>
+              <div className='space-y-3'>
+                <Select
+                  value={siteConfig.pricing_mode}
+                  onChange={(value) =>
+                    setSiteConfig((prev) => ({ ...prev, pricing_mode: value }))
+                  }
+                  optionList={[
+                    { label: t('手动输入本站价格'), value: 'manual' },
+                    { label: t('读取本站模型价格'), value: 'site_model' },
+                  ]}
+                />
+                {siteConfig.pricing_mode === 'site_model' ? (
+                  <>
+                    <div className='grid gap-3 md:grid-cols-2'>
+                      <Select
+                        multiple
+                        filter
+                        value={siteConfig.model_names || []}
+                        onChange={(value) =>
+                          setSiteConfig((prev) => ({
+                            ...prev,
+                            model_names: value || [],
+                          }))
+                        }
+                        optionList={(options.local_models || []).map((item) => ({
+                          label: item.model_name,
+                          value: item.model_name,
+                        }))}
+                        placeholder={t('选择一个或多个本站模型')}
+                      />
+                      <Select
+                        value={siteConfig.group}
+                        onChange={(value) =>
+                          setSiteConfig((prev) => ({ ...prev, group: value }))
+                        }
+                        optionList={[
+                          { label: t('自动取最低分组倍率'), value: '' },
+                          ...(options.groups || []).map((item) => ({
+                            label: item,
+                            value: item,
+                          })),
+                        ]}
+                      />
+                    </div>
+                    <div className='flex items-center justify-between rounded-lg bg-semi-color-fill-0 px-3 py-2'>
+                      <div>
+                        <Text strong>{t('按充值价格读取')}</Text>
+                        <Text type='tertiary' className='block'>
+                          {t(
+                            '开启后按充值倍率重算；如果倍率正好是 1，就会和原价一样。',
+                          )}
+                        </Text>
+                      </div>
+                      <Switch
+                        checked={siteConfig.use_recharge_price}
+                        onChange={(checked) =>
+                          setSiteConfig((prev) => ({
+                            ...prev,
+                            use_recharge_price: checked,
+                          }))
+                        }
+                      />
+                    </div>
+                  </>
+                ) : null}
+                <div className='grid grid-cols-1 gap-3 md:grid-cols-2'>
+                  <InputNumber
+                    min={0}
+                    value={siteConfig.fixed_amount}
+                    onChange={(value) =>
+                      setSiteConfig((prev) => ({
+                        ...prev,
+                        fixed_amount: clampNumber(value),
+                      }))
+                    }
+                    suffix={t('固定 / 次')}
+                  />
+                  <InputNumber
+                    min={0}
+                    value={siteConfig.input_price}
+                    onChange={(value) =>
+                      setSiteConfig((prev) => ({
+                        ...prev,
+                        input_price: clampNumber(value),
+                      }))
+                    }
+                    suffix='USD / 1M 输入'
+                  />
+                  <InputNumber
+                    min={0}
+                    value={siteConfig.output_price}
+                    onChange={(value) =>
+                      setSiteConfig((prev) => ({
+                        ...prev,
+                        output_price: clampNumber(value),
+                      }))
+                    }
+                    suffix='USD / 1M 输出'
+                  />
+                  <InputNumber
+                    min={0}
+                    value={siteConfig.cache_read_price}
+                    onChange={(value) =>
+                      setSiteConfig((prev) => ({
+                        ...prev,
+                        cache_read_price: clampNumber(value),
+                      }))
+                    }
+                    suffix='USD / 1M 缓存读'
+                  />
+                  <InputNumber
+                    min={0}
+                    value={siteConfig.cache_creation_price}
+                    onChange={(value) =>
+                      setSiteConfig((prev) => ({
+                        ...prev,
+                        cache_creation_price: clampNumber(value),
+                      }))
+                    }
+                    suffix='USD / 1M 缓存写'
+                  />
+                </div>
+                <Text type='tertiary' className='block'>
+                  {t(
+                    '本站实际收入 = 当时真实扣费；本站配置收入 = 按你当前收益看板配置重新模拟出来的收入。',
+                  )}
+                </Text>
+              </div>
+            </Card>
+          </div>
         </div>
 
         <Card
@@ -1706,9 +2297,53 @@ const ProfitBoardPage = () => {
                     { label: t('按小时'), value: 'hour' },
                     { label: t('按天'), value: 'day' },
                     { label: t('按周'), value: 'week' },
+                    { label: t('按月'), value: 'month' },
+                    { label: t('自定义分钟'), value: 'custom' },
                   ]}
                   style={{ width: 120 }}
                 />
+                {granularity === 'custom' ? (
+                  <InputNumber
+                    min={1}
+                    value={customIntervalMinutes}
+                    onChange={(value) =>
+                      setCustomIntervalMinutes(Math.max(Number(value || 1), 1))
+                    }
+                    suffix={t('分钟')}
+                    style={{ width: 140 }}
+                  />
+                ) : null}
+                <Select
+                  value={compareMode}
+                  onChange={setCompareMode}
+                  optionList={[
+                    { label: t('不对比'), value: 'none' },
+                    { label: t('批次对比'), value: 'batch' },
+                    { label: t('时间对比'), value: 'time' },
+                  ]}
+                  style={{ width: 120 }}
+                />
+                {compareMode === 'time' ? (
+                  <>
+                    <Select
+                      value={comparePeriod}
+                      onChange={setComparePeriod}
+                      optionList={[
+                        { label: t('上一等长周期'), value: 'previous' },
+                        { label: t('自定义对比周期'), value: 'custom' },
+                      ]}
+                      style={{ width: 150 }}
+                    />
+                    {comparePeriod === 'custom' ? (
+                      <DatePicker
+                        type='dateTimeRange'
+                        value={compareDateRange}
+                        onChange={setCompareDateRange}
+                        style={{ width: 280 }}
+                      />
+                    ) : null}
+                  </>
+                ) : null}
                 <Button
                   type='tertiary'
                   icon={<Filter size={14} />}
@@ -1722,7 +2357,7 @@ const ProfitBoardPage = () => {
                   icon={<ArrowDownToLine size={14} />}
                   onClick={exportCSV}
                   loading={exporting}
-                  disabled={!reportIsFresh}
+                  disabled={!report}
                 >
                   CSV
                 </Button>
@@ -1730,7 +2365,7 @@ const ProfitBoardPage = () => {
                   type='tertiary'
                   onClick={exportExcel}
                   loading={exporting}
-                  disabled={!reportIsFresh}
+                  disabled={!report}
                 >
                   Excel
                 </Button>

@@ -104,6 +104,20 @@ func QueryProfitBoard(c *gin.Context) {
 	common.ApiSuccess(c, report)
 }
 
+func GetProfitBoardActivity(c *gin.Context) {
+	query := model.ProfitBoardQuery{}
+	if err := c.ShouldBindJSON(&query); err != nil {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	activity, err := model.GetProfitBoardActivity(query)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, activity)
+}
+
 func ExportProfitBoardCSV(c *gin.Context) {
 	query := model.ProfitBoardQuery{}
 	if err := c.ShouldBindJSON(&query); err != nil {

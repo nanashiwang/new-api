@@ -3,6 +3,7 @@ package model
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/glebarez/sqlite"
@@ -376,5 +377,203 @@ func TestExportProfitBoardExcelIgnoresDetailLimitTruncation(t *testing.T) {
 	content := string(data)
 	if !strings.Contains(content, "req-1") || !strings.Contains(content, "req-2") {
 		t.Fatalf("expected excel export to include all rows: %s", content)
+	}
+}
+
+func TestGenerateProfitBoardReportSupportsMonthGranularity(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	channel := Channel{Id: 1, Name: "alpha", Status: common.ChannelStatusEnabled}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+
+	loc := time.Local
+	logs := []Log{
+		{
+			Id:               1,
+			Type:             LogTypeConsume,
+			CreatedAt:        time.Date(2026, 1, 15, 10, 0, 0, 0, loc).Unix(),
+			ChannelId:        1,
+			ModelName:        "gpt-4o",
+			Quota:            1000000,
+			PromptTokens:     1000,
+			CompletionTokens: 500,
+			RequestId:        "req-jan",
+			Other:            `{"upstream_cost":1,"upstream_cost_reported":true}`,
+		},
+		{
+			Id:               2,
+			Type:             LogTypeConsume,
+			CreatedAt:        time.Date(2026, 2, 2, 9, 0, 0, 0, loc).Unix(),
+			ChannelId:        1,
+			ModelName:        "gpt-4o",
+			Quota:            1000000,
+			PromptTokens:     1000,
+			CompletionTokens: 500,
+			RequestId:        "req-feb",
+			Other:            `{"upstream_cost":1,"upstream_cost_reported":true}`,
+		},
+	}
+	if err := db.Create(&logs).Error; err != nil {
+		t.Fatalf("seed logs: %v", err)
+	}
+
+	report, err := GenerateProfitBoardReport(ProfitBoardQuery{
+		Batches: []ProfitBoardBatch{{
+			Id:         "batch-1",
+			Name:       "批次 1",
+			ScopeType:  ProfitBoardScopeChannel,
+			ChannelIDs: []int{1},
+		}},
+		Upstream: ProfitBoardTokenPricingConfig{CostSource: ProfitBoardCostSourceReturnedOnly},
+		Site: ProfitBoardTokenPricingConfig{
+			PricingMode: ProfitBoardSitePricingManual,
+			InputPrice:  1,
+		},
+		StartTimestamp: time.Date(2026, 1, 1, 0, 0, 0, 0, loc).Unix(),
+		EndTimestamp:   time.Date(2026, 2, 28, 23, 59, 59, 0, loc).Unix(),
+		Granularity:    "month",
+	})
+	if err != nil {
+		t.Fatalf("GenerateProfitBoardReport: %v", err)
+	}
+
+	if len(report.Timeseries) != 2 {
+		t.Fatalf("expected 2 month buckets, got %d", len(report.Timeseries))
+	}
+	if report.Timeseries[0].Bucket != "2026-01" || report.Timeseries[1].Bucket != "2026-02" {
+		t.Fatalf("unexpected month buckets: %+v", report.Timeseries)
+	}
+}
+
+func TestGenerateProfitBoardReportSupportsCustomMinuteGranularity(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	channel := Channel{Id: 1, Name: "alpha", Status: common.ChannelStatusEnabled}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+
+	loc := time.Local
+	logs := []Log{
+		{
+			Id:               1,
+			Type:             LogTypeConsume,
+			CreatedAt:        time.Date(2026, 3, 1, 10, 5, 0, 0, loc).Unix(),
+			ChannelId:        1,
+			ModelName:        "gpt-4o",
+			Quota:            1000000,
+			PromptTokens:     1000,
+			CompletionTokens: 500,
+			RequestId:        "req-a",
+			Other:            `{"upstream_cost":1,"upstream_cost_reported":true}`,
+		},
+		{
+			Id:               2,
+			Type:             LogTypeConsume,
+			CreatedAt:        time.Date(2026, 3, 1, 10, 17, 0, 0, loc).Unix(),
+			ChannelId:        1,
+			ModelName:        "gpt-4o",
+			Quota:            1000000,
+			PromptTokens:     1000,
+			CompletionTokens: 500,
+			RequestId:        "req-b",
+			Other:            `{"upstream_cost":1,"upstream_cost_reported":true}`,
+		},
+	}
+	if err := db.Create(&logs).Error; err != nil {
+		t.Fatalf("seed logs: %v", err)
+	}
+
+	report, err := GenerateProfitBoardReport(ProfitBoardQuery{
+		Batches: []ProfitBoardBatch{{
+			Id:         "batch-1",
+			Name:       "批次 1",
+			ScopeType:  ProfitBoardScopeChannel,
+			ChannelIDs: []int{1},
+		}},
+		Upstream: ProfitBoardTokenPricingConfig{CostSource: ProfitBoardCostSourceReturnedOnly},
+		Site: ProfitBoardTokenPricingConfig{
+			PricingMode: ProfitBoardSitePricingManual,
+			InputPrice:  1,
+		},
+		StartTimestamp:        time.Date(2026, 3, 1, 10, 0, 0, 0, loc).Unix(),
+		EndTimestamp:          time.Date(2026, 3, 1, 10, 30, 0, 0, loc).Unix(),
+		Granularity:           "custom",
+		CustomIntervalMinutes: 15,
+	})
+	if err != nil {
+		t.Fatalf("GenerateProfitBoardReport: %v", err)
+	}
+
+	if len(report.Timeseries) != 2 {
+		t.Fatalf("expected 2 custom buckets, got %d", len(report.Timeseries))
+	}
+	if report.Timeseries[0].Bucket != "2026-03-01 10:00" || report.Timeseries[1].Bucket != "2026-03-01 10:15" {
+		t.Fatalf("unexpected custom buckets: %+v", report.Timeseries)
+	}
+}
+
+func TestGetProfitBoardActivityReturnsWatermark(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	channel := Channel{Id: 1, Name: "alpha", Status: common.ChannelStatusEnabled}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+
+	logs := []Log{
+		{
+			Id:               11,
+			Type:             LogTypeConsume,
+			CreatedAt:        1710000000,
+			ChannelId:        1,
+			ModelName:        "gpt-4o",
+			Quota:            1000000,
+			PromptTokens:     1000,
+			CompletionTokens: 500,
+			RequestId:        "req-1",
+			Other:            `{"upstream_cost":1,"upstream_cost_reported":true}`,
+		},
+		{
+			Id:               12,
+			Type:             LogTypeConsume,
+			CreatedAt:        1710003600,
+			ChannelId:        1,
+			ModelName:        "gpt-4o",
+			Quota:            1000000,
+			PromptTokens:     1000,
+			CompletionTokens: 500,
+			RequestId:        "req-2",
+			Other:            `{"upstream_cost":1,"upstream_cost_reported":true}`,
+		},
+	}
+	if err := db.Create(&logs).Error; err != nil {
+		t.Fatalf("seed logs: %v", err)
+	}
+
+	activity, err := GetProfitBoardActivity(ProfitBoardQuery{
+		Batches: []ProfitBoardBatch{{
+			Id:         "batch-1",
+			Name:       "批次 1",
+			ScopeType:  ProfitBoardScopeChannel,
+			ChannelIDs: []int{1},
+		}},
+		Upstream:       ProfitBoardTokenPricingConfig{CostSource: ProfitBoardCostSourceReturnedOnly},
+		Site:           ProfitBoardTokenPricingConfig{PricingMode: ProfitBoardSitePricingManual},
+		StartTimestamp: 1709990000,
+		EndTimestamp:   1710010000,
+		Granularity:    "day",
+	})
+	if err != nil {
+		t.Fatalf("GetProfitBoardActivity: %v", err)
+	}
+
+	if activity.RequestCount != 2 || activity.LatestLogId != 12 || activity.LatestLogCreatedAt != 1710003600 {
+		t.Fatalf("unexpected activity payload: %+v", activity)
+	}
+	if activity.ActivityWatermark != "2:12:1710003600" {
+		t.Fatalf("unexpected watermark: %s", activity.ActivityWatermark)
 	}
 }

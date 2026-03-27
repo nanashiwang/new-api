@@ -80,14 +80,15 @@ type ProfitBoardConfigPayload struct {
 }
 
 type ProfitBoardQuery struct {
-	Batches        []ProfitBoardBatch            `json:"batches,omitempty"`
-	Selection      ProfitBoardSelection          `json:"selection,omitempty"`
-	Upstream       ProfitBoardTokenPricingConfig `json:"upstream"`
-	Site           ProfitBoardTokenPricingConfig `json:"site"`
-	StartTimestamp int64                         `json:"start_timestamp"`
-	EndTimestamp   int64                         `json:"end_timestamp"`
-	Granularity    string                        `json:"granularity"`
-	DetailLimit    int                           `json:"detail_limit"`
+	Batches               []ProfitBoardBatch            `json:"batches,omitempty"`
+	Selection             ProfitBoardSelection          `json:"selection,omitempty"`
+	Upstream              ProfitBoardTokenPricingConfig `json:"upstream"`
+	Site                  ProfitBoardTokenPricingConfig `json:"site"`
+	StartTimestamp        int64                         `json:"start_timestamp"`
+	EndTimestamp          int64                         `json:"end_timestamp"`
+	Granularity           string                        `json:"granularity"`
+	CustomIntervalMinutes int                           `json:"custom_interval_minutes,omitempty"`
+	DetailLimit           int                           `json:"detail_limit"`
 }
 
 type ProfitBoardChannelOption struct {
@@ -206,6 +207,19 @@ type ProfitBoardMeta struct {
 	SiteUseRechargePrice bool    `json:"site_use_recharge_price"`
 	SitePriceFactor      float64 `json:"site_price_factor"`
 	SitePriceFactorNote  string  `json:"site_price_factor_note"`
+	GeneratedAt          int64   `json:"generated_at"`
+	ActivityWatermark    string  `json:"activity_watermark"`
+	LatestLogId          int     `json:"latest_log_id"`
+	LatestLogCreatedAt   int64   `json:"latest_log_created_at"`
+}
+
+type ProfitBoardActivity struct {
+	Signature          string `json:"signature"`
+	GeneratedAt        int64  `json:"generated_at"`
+	ActivityWatermark  string `json:"activity_watermark"`
+	LatestLogId        int    `json:"latest_log_id"`
+	LatestLogCreatedAt int64  `json:"latest_log_created_at"`
+	RequestCount       int    `json:"request_count"`
 }
 
 type ProfitBoardReport struct {
@@ -606,8 +620,16 @@ func normalizeProfitBoardQuery(query ProfitBoardQuery) (ProfitBoardQuery, string
 		} else {
 			query.Granularity = "week"
 		}
-	case "hour", "day", "week":
+	case "hour", "day", "week", "month":
 		query.Granularity = strings.ToLower(strings.TrimSpace(query.Granularity))
+	case "custom":
+		query.Granularity = "custom"
+		if query.CustomIntervalMinutes <= 0 {
+			return ProfitBoardQuery{}, "", errors.New("自定义时间粒度必须大于 0 分钟")
+		}
+		if query.CustomIntervalMinutes > 43200 {
+			return ProfitBoardQuery{}, "", errors.New("自定义时间粒度不能超过 43200 分钟")
+		}
 	default:
 		return ProfitBoardQuery{}, "", errors.New("无效的时间粒度")
 	}
@@ -626,6 +648,10 @@ func normalizeProfitBoardQuery(query ProfitBoardQuery) (ProfitBoardQuery, string
 	query.Batches = normalizedBatches
 	query.Selection = ProfitBoardSelection{}
 	return query, signature, nil
+}
+
+func buildProfitBoardActivityWatermark(requestCount int, latestLogID int, latestCreatedAt int64) string {
+	return fmt.Sprintf("%d:%d:%d", requestCount, latestLogID, latestCreatedAt)
 }
 
 func resolveProfitBoardChannels(selection ProfitBoardSelection) ([]ProfitBoardChannelOption, []int, error) {
@@ -729,12 +755,15 @@ func resolveProfitBoardBatches(batches []ProfitBoardBatch) ([]ProfitBoardBatchIn
 	return resolved, nil
 }
 
-func buildProfitBoardBucket(timestamp int64, granularity string) (int64, string) {
+func buildProfitBoardBucket(timestamp int64, granularity string, customIntervalMinutes int) (int64, string) {
 	t := time.Unix(timestamp, 0).In(time.Local)
 	switch granularity {
 	case "hour":
 		bucket := time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, t.Location())
 		return bucket.Unix(), bucket.Format("2006-01-02 15:00")
+	case "month":
+		bucket := time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, t.Location())
+		return bucket.Unix(), bucket.Format("2006-01")
 	case "week":
 		weekday := int(t.Weekday())
 		if weekday == 0 {
@@ -743,10 +772,101 @@ func buildProfitBoardBucket(timestamp int64, granularity string) (int64, string)
 		bucket := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location()).AddDate(0, 0, -(weekday - 1))
 		year, week := bucket.ISOWeek()
 		return bucket.Unix(), fmt.Sprintf("%d-W%02d", year, week)
+	case "custom":
+		intervalSeconds := int64(customIntervalMinutes) * 60
+		current := time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), 0, 0, t.Location())
+		minutesSinceMidnight := int64(current.Hour()*60 + current.Minute())
+		bucketMinutes := (minutesSinceMidnight / int64(customIntervalMinutes)) * int64(customIntervalMinutes)
+		bucket := time.Date(
+			current.Year(),
+			current.Month(),
+			current.Day(),
+			int(bucketMinutes/60),
+			int(bucketMinutes%60),
+			0,
+			0,
+			current.Location(),
+		)
+		if intervalSeconds <= 3600 {
+			return bucket.Unix(), bucket.Format("2006-01-02 15:04")
+		}
+		return bucket.Unix(), bucket.Format("2006-01-02 15:04")
 	default:
 		bucket := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 		return bucket.Unix(), bucket.Format("2006-01-02")
 	}
+}
+
+func collectProfitBoardChannelIDs(batches []ProfitBoardBatchInfo) []int {
+	ids := make([]int, 0)
+	seen := make(map[int]struct{})
+	for _, batch := range batches {
+		for _, channelID := range batch.ChannelIDs {
+			if _, ok := seen[channelID]; ok {
+				continue
+			}
+			seen[channelID] = struct{}{}
+			ids = append(ids, channelID)
+		}
+	}
+	sort.Ints(ids)
+	return ids
+}
+
+func GetProfitBoardActivity(query ProfitBoardQuery) (*ProfitBoardActivity, error) {
+	normalizedQuery, signature, err := normalizeProfitBoardQuery(query)
+	if err != nil {
+		return nil, err
+	}
+
+	resolvedBatches, err := resolveProfitBoardBatches(normalizedQuery.Batches)
+	if err != nil {
+		return nil, err
+	}
+
+	channelIDs := collectProfitBoardChannelIDs(resolvedBatches)
+	if len(channelIDs) == 0 {
+		return &ProfitBoardActivity{
+			Signature:         signature,
+			GeneratedAt:       common.GetTimestamp(),
+			ActivityWatermark: buildProfitBoardActivityWatermark(0, 0, 0),
+		}, nil
+	}
+
+	baseQuery := LOG_DB.Table("logs").
+		Where("type = ?", LogTypeConsume).
+		Where("created_at >= ? AND created_at <= ?", normalizedQuery.StartTimestamp, normalizedQuery.EndTimestamp).
+		Where("channel_id IN ?", channelIDs)
+
+	var requestCount int64
+	if err := baseQuery.Count(&requestCount).Error; err != nil {
+		return nil, err
+	}
+
+	type latestLogRow struct {
+		Id        int   `gorm:"column:id"`
+		CreatedAt int64 `gorm:"column:created_at"`
+	}
+	latestRow := latestLogRow{}
+	if err := LOG_DB.Table("logs").
+		Select("id, created_at").
+		Where("type = ?", LogTypeConsume).
+		Where("created_at >= ? AND created_at <= ?", normalizedQuery.StartTimestamp, normalizedQuery.EndTimestamp).
+		Where("channel_id IN ?", channelIDs).
+		Order("id desc").
+		Limit(1).
+		Scan(&latestRow).Error; err != nil {
+		return nil, err
+	}
+
+	return &ProfitBoardActivity{
+		Signature:          signature,
+		GeneratedAt:        common.GetTimestamp(),
+		ActivityWatermark:  buildProfitBoardActivityWatermark(int(requestCount), latestRow.Id, latestRow.CreatedAt),
+		LatestLogId:        latestRow.Id,
+		LatestLogCreatedAt: latestRow.CreatedAt,
+		RequestCount:       int(requestCount),
+	}, nil
 }
 
 func roundProfitBoardAmount(value float64) float64 {
@@ -1011,6 +1131,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 			SiteUseRechargePrice: normalizedQuery.Site.UseRechargePrice,
 			SitePriceFactor:      roundProfitBoardAmount(sitePriceFactor),
 			SitePriceFactorNote:  sitePriceFactorNote,
+			GeneratedAt:          common.GetTimestamp(),
 		},
 		DetailRows: make([]ProfitBoardDetailRow, 0),
 	}
@@ -1020,6 +1141,8 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 	modelBreakdown := make(map[string]*ProfitBoardBreakdownItem)
 	batchSummaryMap := make(map[string]*ProfitBoardBatchSummary, len(resolvedBatches))
 	channelNameMap := make(map[int]string)
+	latestLogId := 0
+	latestLogCreatedAt := int64(0)
 	for _, batch := range resolvedBatches {
 		batchSummaryMap[batch.Id] = &ProfitBoardBatchSummary{
 			BatchId:   batch.Id,
@@ -1034,6 +1157,12 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		row := prepared.Row
 		batch := prepared.Batch
 		batchSummary := batchSummaryMap[batch.Id]
+		if row.Id > latestLogId {
+			latestLogId = row.Id
+			latestLogCreatedAt = row.CreatedAt
+		} else if row.Id == latestLogId && row.CreatedAt > latestLogCreatedAt {
+			latestLogCreatedAt = row.CreatedAt
+		}
 		actualSiteRevenueUSD := float64(row.Quota) / common.QuotaPerUnit
 		configuredSiteRevenueUSD, sitePricingSource, sitePricingKnown := profitBoardSiteRevenueUSD(
 			row,
@@ -1101,7 +1230,11 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 			batchSummary.ActualProfitUSD += actualProfitUSD
 		}
 
-		bucketTimestamp, bucketLabel := buildProfitBoardBucket(row.CreatedAt, normalizedQuery.Granularity)
+		bucketTimestamp, bucketLabel := buildProfitBoardBucket(
+			row.CreatedAt,
+			normalizedQuery.Granularity,
+			normalizedQuery.CustomIntervalMinutes,
+		)
 		timeKey := fmt.Sprintf("%s:%d", batch.Id, bucketTimestamp)
 		point, ok := timeBuckets[timeKey]
 		if !ok {
@@ -1322,6 +1455,13 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 	report.Summary.ConfiguredProfitUSD = roundProfitBoardAmount(report.Summary.ConfiguredProfitUSD)
 	report.Summary.ActualProfitUSD = roundProfitBoardAmount(report.Summary.ActualProfitUSD)
 	report.Summary.ConfiguredProfitCoverageRate = roundProfitBoardAmount(report.Summary.ConfiguredProfitCoverageRate)
+	report.Meta.LatestLogId = latestLogId
+	report.Meta.LatestLogCreatedAt = latestLogCreatedAt
+	report.Meta.ActivityWatermark = buildProfitBoardActivityWatermark(
+		report.Summary.RequestCount,
+		latestLogId,
+		latestLogCreatedAt,
+	)
 	return report, nil
 }
 
