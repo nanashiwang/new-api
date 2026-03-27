@@ -90,6 +90,20 @@ func SaveProfitBoardConfig(c *gin.Context) {
 	})
 }
 
+func GetProfitBoardOverview(c *gin.Context) {
+	payload := model.ProfitBoardConfigPayload{}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	report, err := model.GenerateProfitBoardOverview(payload)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, report)
+}
+
 func QueryProfitBoard(c *gin.Context) {
 	query := model.ProfitBoardQuery{}
 	if err := c.ShouldBindJSON(&query); err != nil {

@@ -67,6 +67,7 @@ type ProfitBoardTokenPricingConfig struct {
 	CacheReadPrice     float64  `json:"cache_read_price"`
 	CacheCreationPrice float64  `json:"cache_creation_price"`
 	FixedAmount        float64  `json:"fixed_amount"`
+	FixedTotalAmount   float64  `json:"fixed_total_amount"`
 	ModelNames         []string `json:"model_names,omitempty"`
 	Group              string   `json:"group,omitempty"`
 	UseRechargePrice   bool     `json:"use_recharge_price,omitempty"`
@@ -204,13 +205,20 @@ type ProfitBoardBatchSummary struct {
 }
 
 type ProfitBoardMeta struct {
-	SiteUseRechargePrice bool    `json:"site_use_recharge_price"`
-	SitePriceFactor      float64 `json:"site_price_factor"`
-	SitePriceFactorNote  string  `json:"site_price_factor_note"`
-	GeneratedAt          int64   `json:"generated_at"`
-	ActivityWatermark    string  `json:"activity_watermark"`
-	LatestLogId          int     `json:"latest_log_id"`
-	LatestLogCreatedAt   int64   `json:"latest_log_created_at"`
+	SiteUseRechargePrice      bool    `json:"site_use_recharge_price"`
+	SitePriceFactor           float64 `json:"site_price_factor"`
+	SitePriceFactorNote       string  `json:"site_price_factor_note"`
+	GeneratedAt               int64   `json:"generated_at"`
+	ActivityWatermark         string  `json:"activity_watermark"`
+	LatestLogId               int     `json:"latest_log_id"`
+	LatestLogCreatedAt        int64   `json:"latest_log_created_at"`
+	CumulativeScope           string  `json:"cumulative_scope,omitempty"`
+	FixedTotalAmountScope     string  `json:"fixed_total_amount_scope,omitempty"`
+	FixedAmountAllocationMode string  `json:"fixed_amount_allocation_mode,omitempty"`
+	UpstreamFixedTotalAmount  float64 `json:"upstream_fixed_total_amount_usd,omitempty"`
+	SiteFixedTotalAmount      float64 `json:"site_fixed_total_amount_usd,omitempty"`
+	LegacyUpstreamFixedAmount bool    `json:"legacy_upstream_fixed_amount,omitempty"`
+	LegacySiteFixedAmount     bool    `json:"legacy_site_fixed_amount,omitempty"`
 }
 
 type ProfitBoardActivity struct {
@@ -406,6 +414,19 @@ func parseProfitBoardConfigBatches(raw string) []ProfitBoardBatch {
 	return nil
 }
 
+func normalizeProfitBoardPricingConfig(config ProfitBoardTokenPricingConfig, isSite bool) ProfitBoardTokenPricingConfig {
+	if !isSite {
+		config.CostSource = ProfitBoardCostSourceManualOnly
+	}
+	if isSite && config.PricingMode == "" {
+		config.PricingMode = ProfitBoardSitePricingManual
+	}
+	if !isSite {
+		config.PricingMode = ""
+	}
+	return config
+}
+
 func validateProfitBoardPricingConfig(config ProfitBoardTokenPricingConfig, isSite bool) error {
 	numbers := []float64{
 		config.InputPrice,
@@ -413,6 +434,7 @@ func validateProfitBoardPricingConfig(config ProfitBoardTokenPricingConfig, isSi
 		config.CacheReadPrice,
 		config.CacheCreationPrice,
 		config.FixedAmount,
+		config.FixedTotalAmount,
 	}
 	for _, num := range numbers {
 		if math.IsNaN(num) || math.IsInf(num, 0) || num < 0 {
@@ -446,12 +468,12 @@ func GetProfitBoardConfig(batches []ProfitBoardBatch, selection ProfitBoardSelec
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return &ProfitBoardConfigPayload{
 				Batches: normalized,
-				Upstream: ProfitBoardTokenPricingConfig{
+				Upstream: normalizeProfitBoardPricingConfig(ProfitBoardTokenPricingConfig{
 					CostSource: ProfitBoardCostSourceManualOnly,
-				},
-				Site: ProfitBoardTokenPricingConfig{
+				}, false),
+				Site: normalizeProfitBoardPricingConfig(ProfitBoardTokenPricingConfig{
 					PricingMode: ProfitBoardSitePricingManual,
-				},
+				}, true),
 			}, signature, nil
 		}
 		return nil, "", err
@@ -459,18 +481,20 @@ func GetProfitBoardConfig(batches []ProfitBoardBatch, selection ProfitBoardSelec
 
 	payload := &ProfitBoardConfigPayload{
 		Batches: normalized,
-		Upstream: ProfitBoardTokenPricingConfig{
-			CostSource: ProfitBoardCostSourceReturnedFirst,
-		},
-		Site: ProfitBoardTokenPricingConfig{
+		Upstream: normalizeProfitBoardPricingConfig(ProfitBoardTokenPricingConfig{
+			CostSource: ProfitBoardCostSourceManualOnly,
+		}, false),
+		Site: normalizeProfitBoardPricingConfig(ProfitBoardTokenPricingConfig{
 			PricingMode: ProfitBoardSitePricingManual,
-		},
+		}, true),
 	}
 	if parsedBatches := parseProfitBoardConfigBatches(config.SelectionValues); len(parsedBatches) > 0 {
 		payload.Batches = parsedBatches
 	}
 	_ = common.UnmarshalJsonStr(config.UpstreamConfig, &payload.Upstream)
 	_ = common.UnmarshalJsonStr(config.SiteConfig, &payload.Site)
+	payload.Upstream = normalizeProfitBoardPricingConfig(payload.Upstream, false)
+	payload.Site = normalizeProfitBoardPricingConfig(payload.Site, true)
 	return payload, signature, nil
 }
 
@@ -479,6 +503,8 @@ func SaveProfitBoardConfig(payload ProfitBoardConfigPayload) (*ProfitBoardConfig
 	if err != nil {
 		return nil, "", err
 	}
+	payload.Upstream = normalizeProfitBoardPricingConfig(payload.Upstream, false)
+	payload.Site = normalizeProfitBoardPricingConfig(payload.Site, true)
 	if err := validateProfitBoardPricingConfig(payload.Upstream, false); err != nil {
 		return nil, "", err
 	}
@@ -595,6 +621,8 @@ func normalizeProfitBoardQuery(query ProfitBoardQuery) (ProfitBoardQuery, string
 	if err != nil {
 		return ProfitBoardQuery{}, "", err
 	}
+	query.Upstream = normalizeProfitBoardPricingConfig(query.Upstream, false)
+	query.Site = normalizeProfitBoardPricingConfig(query.Site, true)
 	if err := validateProfitBoardPricingConfig(query.Upstream, false); err != nil {
 		return ProfitBoardQuery{}, "", err
 	}
@@ -638,12 +666,6 @@ func normalizeProfitBoardQuery(query ProfitBoardQuery) (ProfitBoardQuery, string
 	}
 	if query.DetailLimit > 2000 {
 		query.DetailLimit = 2000
-	}
-	if query.Upstream.CostSource == "" {
-		query.Upstream.CostSource = ProfitBoardCostSourceManualOnly
-	}
-	if query.Site.PricingMode == "" {
-		query.Site.PricingMode = ProfitBoardSitePricingManual
 	}
 	query.Batches = normalizedBatches
 	query.Selection = ProfitBoardSelection{}
@@ -885,6 +907,76 @@ func profitBoardTokenMoneyUSD(inputTokens, completionTokens, cacheReadTokens, ca
 		config.FixedAmount
 }
 
+func profitBoardLegacyFixedAmountEnabled(config ProfitBoardTokenPricingConfig) bool {
+	return config.FixedAmount > 0
+}
+
+func profitBoardFixedAllocationShare(total float64, totalRequests int, itemRequests int) float64 {
+	if total == 0 || totalRequests <= 0 || itemRequests <= 0 {
+		return 0
+	}
+	return total * float64(itemRequests) / float64(totalRequests)
+}
+
+func applyProfitBoardFixedTotals(report *ProfitBoardReport, siteFixedTotal float64, upstreamFixedTotal float64) {
+	if report == nil {
+		return
+	}
+	if report.Meta.FixedAmountAllocationMode == "" {
+		report.Meta.FixedAmountAllocationMode = "request_count"
+	}
+	if report.Meta.FixedTotalAmountScope == "" {
+		report.Meta.FixedTotalAmountScope = "period_only"
+	}
+	report.Meta.SiteFixedTotalAmount = roundProfitBoardAmount(siteFixedTotal)
+	report.Meta.UpstreamFixedTotalAmount = roundProfitBoardAmount(upstreamFixedTotal)
+
+	report.Summary.ConfiguredSiteRevenueUSD += siteFixedTotal
+	report.Summary.UpstreamCostUSD += upstreamFixedTotal
+	report.Summary.ConfiguredProfitUSD += siteFixedTotal - upstreamFixedTotal
+	report.Summary.ActualProfitUSD -= upstreamFixedTotal
+
+	if report.Summary.RequestCount <= 0 {
+		return
+	}
+
+	for index := range report.BatchSummaries {
+		siteShare := profitBoardFixedAllocationShare(siteFixedTotal, report.Summary.RequestCount, report.BatchSummaries[index].RequestCount)
+		upstreamShare := profitBoardFixedAllocationShare(upstreamFixedTotal, report.Summary.RequestCount, report.BatchSummaries[index].RequestCount)
+		report.BatchSummaries[index].ConfiguredSiteRevenueUSD += siteShare
+		report.BatchSummaries[index].UpstreamCostUSD += upstreamShare
+		report.BatchSummaries[index].ConfiguredProfitUSD += siteShare - upstreamShare
+		report.BatchSummaries[index].ActualProfitUSD -= upstreamShare
+	}
+
+	for index := range report.Timeseries {
+		siteShare := profitBoardFixedAllocationShare(siteFixedTotal, report.Summary.RequestCount, report.Timeseries[index].RequestCount)
+		upstreamShare := profitBoardFixedAllocationShare(upstreamFixedTotal, report.Summary.RequestCount, report.Timeseries[index].RequestCount)
+		report.Timeseries[index].ConfiguredSiteRevenueUSD += siteShare
+		report.Timeseries[index].UpstreamCostUSD += upstreamShare
+		report.Timeseries[index].ConfiguredProfitUSD += siteShare - upstreamShare
+		report.Timeseries[index].ActualProfitUSD -= upstreamShare
+	}
+
+	for index := range report.ChannelBreakdown {
+		siteShare := profitBoardFixedAllocationShare(siteFixedTotal, report.Summary.RequestCount, report.ChannelBreakdown[index].RequestCount)
+		upstreamShare := profitBoardFixedAllocationShare(upstreamFixedTotal, report.Summary.RequestCount, report.ChannelBreakdown[index].RequestCount)
+		report.ChannelBreakdown[index].ConfiguredSiteRevenueUSD += siteShare
+		report.ChannelBreakdown[index].UpstreamCostUSD += upstreamShare
+		report.ChannelBreakdown[index].ConfiguredProfitUSD += siteShare - upstreamShare
+		report.ChannelBreakdown[index].ActualProfitUSD -= upstreamShare
+	}
+
+	for index := range report.ModelBreakdown {
+		siteShare := profitBoardFixedAllocationShare(siteFixedTotal, report.Summary.RequestCount, report.ModelBreakdown[index].RequestCount)
+		upstreamShare := profitBoardFixedAllocationShare(upstreamFixedTotal, report.Summary.RequestCount, report.ModelBreakdown[index].RequestCount)
+		report.ModelBreakdown[index].ConfiguredSiteRevenueUSD += siteShare
+		report.ModelBreakdown[index].UpstreamCostUSD += upstreamShare
+		report.ModelBreakdown[index].ConfiguredProfitUSD += siteShare - upstreamShare
+		report.ModelBreakdown[index].ActualProfitUSD -= upstreamShare
+	}
+}
+
 func profitBoardPriceFactor(useRechargePrice bool) float64 {
 	if !useRechargePrice {
 		return 1
@@ -1024,25 +1116,8 @@ func profitBoardUpstreamCostUSD(
 	cacheCreationTokens int,
 	config ProfitBoardTokenPricingConfig,
 ) (float64, string, bool) {
-	hasReturnedCost := other.UpstreamCostReported || strings.TrimSpace(other.UpstreamCostSource) != "" || other.UpstreamCost > 0
-	switch config.CostSource {
-	case ProfitBoardCostSourceReturnedOnly:
-		if hasReturnedCost {
-			return other.UpstreamCost, "returned_cost", true
-		}
-		return 0, "", false
-	case ProfitBoardCostSourceManualOnly:
-		return profitBoardTokenMoneyUSD(inputTokens, row.CompletionTokens, cacheReadTokens, cacheCreationTokens, config), "manual", true
-	default:
-		if hasReturnedCost {
-			return other.UpstreamCost, "returned_cost", true
-		}
-		manual := profitBoardTokenMoneyUSD(inputTokens, row.CompletionTokens, cacheReadTokens, cacheCreationTokens, config)
-		if manual == 0 {
-			return 0, "", false
-		}
-		return manual, "manual", true
-	}
+	_ = other
+	return profitBoardTokenMoneyUSD(inputTokens, row.CompletionTokens, cacheReadTokens, cacheCreationTokens, config), "manual", true
 }
 
 type profitBoardPreparedRow struct {
@@ -1059,9 +1134,14 @@ func iterateProfitBoardRows(query ProfitBoardQuery, batches []ProfitBoardBatchIn
 		tx := LOG_DB.Table("logs").
 			Select("id, created_at, request_id, channel_id, model_name, quota, prompt_tokens, completion_tokens, other").
 			Where("type = ?", LogTypeConsume).
-			Where("created_at >= ? AND created_at <= ?", query.StartTimestamp, query.EndTimestamp).
-			Where("channel_id IN ?", batch.ChannelIDs).
-			Order("id desc")
+			Where("channel_id IN ?", batch.ChannelIDs)
+		if query.StartTimestamp > 0 {
+			tx = tx.Where("created_at >= ?", query.StartTimestamp)
+		}
+		if query.EndTimestamp > 0 {
+			tx = tx.Where("created_at <= ?", query.EndTimestamp)
+		}
+		tx = tx.Order("id desc")
 
 		rows, err := tx.Rows()
 		if err != nil {
@@ -1128,10 +1208,14 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		Batches:        resolvedBatches,
 		BatchSummaries: make([]ProfitBoardBatchSummary, 0, len(resolvedBatches)),
 		Meta: ProfitBoardMeta{
-			SiteUseRechargePrice: normalizedQuery.Site.UseRechargePrice,
-			SitePriceFactor:      roundProfitBoardAmount(sitePriceFactor),
-			SitePriceFactorNote:  sitePriceFactorNote,
-			GeneratedAt:          common.GetTimestamp(),
+			SiteUseRechargePrice:      normalizedQuery.Site.UseRechargePrice,
+			SitePriceFactor:           roundProfitBoardAmount(sitePriceFactor),
+			SitePriceFactorNote:       sitePriceFactorNote,
+			GeneratedAt:               common.GetTimestamp(),
+			FixedTotalAmountScope:     "period_only",
+			FixedAmountAllocationMode: "request_count",
+			LegacyUpstreamFixedAmount: profitBoardLegacyFixedAmountEnabled(normalizedQuery.Upstream),
+			LegacySiteFixedAmount:     profitBoardLegacyFixedAmountEnabled(normalizedQuery.Site),
 		},
 		DetailRows: make([]ProfitBoardDetailRow, 0),
 	}
@@ -1365,6 +1449,13 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 	if report.Summary.MissingSitePricingCount > 0 {
 		report.Warnings = append(report.Warnings, "部分日志没有命中本站模型定价，已按手动价格或零值处理")
 	}
+	if report.Meta.LegacyUpstreamFixedAmount {
+		report.Warnings = append(report.Warnings, "当前上游价格配置仍包含旧版按次固定金额，请确认后改成固定总金额")
+	}
+	if report.Meta.LegacySiteFixedAmount {
+		report.Warnings = append(report.Warnings, "当前本站价格配置仍包含旧版按次固定金额，请确认后改成固定总金额")
+	}
+	applyProfitBoardFixedTotals(report, normalizedQuery.Site.FixedTotalAmount, normalizedQuery.Upstream.FixedTotalAmount)
 
 	report.BatchSummaries = make([]ProfitBoardBatchSummary, 0, len(batchSummaryMap))
 	for _, batch := range resolvedBatches {
@@ -1462,6 +1553,178 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		latestLogId,
 		latestLogCreatedAt,
 	)
+	return report, nil
+}
+
+func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoardReport, error) {
+	normalizedBatches, signature, _, err := normalizeProfitBoardBatches(payload.Batches, payload.Selection)
+	if err != nil {
+		return nil, err
+	}
+	payload.Upstream = normalizeProfitBoardPricingConfig(payload.Upstream, false)
+	payload.Site = normalizeProfitBoardPricingConfig(payload.Site, true)
+	if err := validateProfitBoardPricingConfig(payload.Upstream, false); err != nil {
+		return nil, err
+	}
+	if err := validateProfitBoardPricingConfig(payload.Site, true); err != nil {
+		return nil, err
+	}
+
+	resolvedBatches, err := resolveProfitBoardBatches(normalizedBatches)
+	if err != nil {
+		return nil, err
+	}
+	pricingMap := make(map[string]Pricing)
+	for _, pricing := range GetPricing() {
+		pricingMap[pricing.ModelName] = pricing
+	}
+	groupRatios := ratio_setting.GetGroupRatioCopy()
+	sitePriceFactor, sitePriceFactorNote := profitBoardPriceFactorMeta(payload.Site.UseRechargePrice)
+
+	report := &ProfitBoardReport{
+		Signature:      signature,
+		Batches:        resolvedBatches,
+		BatchSummaries: make([]ProfitBoardBatchSummary, 0, len(resolvedBatches)),
+		Meta: ProfitBoardMeta{
+			SiteUseRechargePrice:      payload.Site.UseRechargePrice,
+			SitePriceFactor:           roundProfitBoardAmount(sitePriceFactor),
+			SitePriceFactorNote:       sitePriceFactorNote,
+			GeneratedAt:               common.GetTimestamp(),
+			CumulativeScope:           "all_time",
+			FixedTotalAmountScope:     "period_only",
+			FixedAmountAllocationMode: "request_count",
+			UpstreamFixedTotalAmount:  roundProfitBoardAmount(payload.Upstream.FixedTotalAmount),
+			SiteFixedTotalAmount:      roundProfitBoardAmount(payload.Site.FixedTotalAmount),
+			LegacyUpstreamFixedAmount: profitBoardLegacyFixedAmountEnabled(payload.Upstream),
+			LegacySiteFixedAmount:     profitBoardLegacyFixedAmountEnabled(payload.Site),
+		},
+	}
+
+	batchSummaryMap := make(map[string]*ProfitBoardBatchSummary, len(resolvedBatches))
+	latestLogId := 0
+	latestLogCreatedAt := int64(0)
+	for _, batch := range resolvedBatches {
+		batchSummaryMap[batch.Id] = &ProfitBoardBatchSummary{BatchId: batch.Id, BatchName: batch.Name}
+	}
+
+	query := ProfitBoardQuery{Batches: normalizedBatches}
+	if err := iterateProfitBoardRows(query, resolvedBatches, func(prepared profitBoardPreparedRow) error {
+		row := prepared.Row
+		batchSummary := batchSummaryMap[prepared.Batch.Id]
+		if row.Id > latestLogId {
+			latestLogId = row.Id
+			latestLogCreatedAt = row.CreatedAt
+		} else if row.Id == latestLogId && row.CreatedAt > latestLogCreatedAt {
+			latestLogCreatedAt = row.CreatedAt
+		}
+
+		actualSiteRevenueUSD := float64(row.Quota) / common.QuotaPerUnit
+		configuredSiteRevenueUSD, sitePricingSource, sitePricingKnown := profitBoardSiteRevenueUSD(
+			row,
+			prepared.InputTokens,
+			prepared.CacheReadTokens,
+			prepared.CacheCreationTokens,
+			payload.Site,
+			pricingMap,
+			groupRatios,
+		)
+		upstreamCostUSD, upstreamCostSource, upstreamCostKnown := profitBoardUpstreamCostUSD(
+			row,
+			prepared.Other,
+			prepared.InputTokens,
+			prepared.CacheReadTokens,
+			prepared.CacheCreationTokens,
+			payload.Upstream,
+		)
+
+		report.Summary.RequestCount++
+		batchSummary.RequestCount++
+		if sitePricingKnown && strings.HasPrefix(sitePricingSource, "site_model_") {
+			report.Summary.SiteModelMatchCount++
+			batchSummary.SiteModelMatchCount++
+		}
+		if !sitePricingKnown {
+			report.Summary.MissingSitePricingCount++
+			batchSummary.MissingSitePricingCount++
+		}
+		if upstreamCostKnown {
+			report.Summary.KnownUpstreamCostCount++
+			batchSummary.KnownUpstreamCostCount++
+			report.Summary.UpstreamCostUSD += upstreamCostUSD
+			batchSummary.UpstreamCostUSD += upstreamCostUSD
+			switch upstreamCostSource {
+			case "returned_cost":
+				report.Summary.ReturnedCostCount++
+				batchSummary.ReturnedCostCount++
+			case "manual":
+				report.Summary.ManualCostCount++
+				batchSummary.ManualCostCount++
+			}
+		} else {
+			report.Summary.MissingUpstreamCostCount++
+			batchSummary.MissingUpstreamCostCount++
+		}
+
+		report.Summary.ActualSiteRevenueUSD += actualSiteRevenueUSD
+		batchSummary.ActualSiteRevenueUSD += actualSiteRevenueUSD
+		if sitePricingKnown {
+			report.Summary.ConfiguredSiteRevenueUSD += configuredSiteRevenueUSD
+			batchSummary.ConfiguredSiteRevenueUSD += configuredSiteRevenueUSD
+		}
+		if upstreamCostKnown && sitePricingKnown {
+			configuredProfitUSD := configuredSiteRevenueUSD - upstreamCostUSD
+			report.Summary.ConfiguredProfitUSD += configuredProfitUSD
+			batchSummary.ConfiguredProfitUSD += configuredProfitUSD
+		}
+		if upstreamCostKnown {
+			actualProfitUSD := actualSiteRevenueUSD - upstreamCostUSD
+			report.Summary.ActualProfitUSD += actualProfitUSD
+			batchSummary.ActualProfitUSD += actualProfitUSD
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	for _, summary := range batchSummaryMap {
+		summary.ActualSiteRevenueUSD = roundProfitBoardAmount(summary.ActualSiteRevenueUSD)
+		summary.ConfiguredSiteRevenueUSD = roundProfitBoardAmount(summary.ConfiguredSiteRevenueUSD)
+		summary.UpstreamCostUSD = roundProfitBoardAmount(summary.UpstreamCostUSD)
+		summary.ConfiguredProfitUSD = roundProfitBoardAmount(summary.ConfiguredProfitUSD)
+		summary.ActualProfitUSD = roundProfitBoardAmount(summary.ActualProfitUSD)
+		report.BatchSummaries = append(report.BatchSummaries, *summary)
+	}
+	sort.Slice(report.BatchSummaries, func(i, j int) bool {
+		return report.BatchSummaries[i].BatchName < report.BatchSummaries[j].BatchName
+	})
+	if report.Summary.RequestCount > 0 {
+		report.Summary.ConfiguredProfitCoverageRate = float64(report.Summary.KnownUpstreamCostCount) / float64(report.Summary.RequestCount)
+	}
+	if report.Summary.MissingUpstreamCostCount > 0 {
+		report.Warnings = append(report.Warnings, "累计总览中部分日志没有上游返回费用，当前已按你的上游费用策略回退或标记为未知")
+	}
+	if report.Summary.MissingSitePricingCount > 0 {
+		report.Warnings = append(report.Warnings, "累计总览中部分日志没有命中本站模型定价，已按手动价格或零值处理")
+	}
+	if report.Meta.LegacyUpstreamFixedAmount {
+		report.Warnings = append(report.Warnings, "当前上游价格配置仍包含旧版按次固定金额，请确认后改成固定总金额")
+	}
+	if report.Meta.LegacySiteFixedAmount {
+		report.Warnings = append(report.Warnings, "当前本站价格配置仍包含旧版按次固定金额，请确认后改成固定总金额")
+	}
+	if payload.Upstream.FixedTotalAmount > 0 || payload.Site.FixedTotalAmount > 0 {
+		report.Warnings = append(report.Warnings, "固定总金额只参与时间分析，不计入累计总览")
+	}
+
+	report.Summary.ActualSiteRevenueUSD = roundProfitBoardAmount(report.Summary.ActualSiteRevenueUSD)
+	report.Summary.ConfiguredSiteRevenueUSD = roundProfitBoardAmount(report.Summary.ConfiguredSiteRevenueUSD)
+	report.Summary.UpstreamCostUSD = roundProfitBoardAmount(report.Summary.UpstreamCostUSD)
+	report.Summary.ConfiguredProfitUSD = roundProfitBoardAmount(report.Summary.ConfiguredProfitUSD)
+	report.Summary.ActualProfitUSD = roundProfitBoardAmount(report.Summary.ActualProfitUSD)
+	report.Summary.ConfiguredProfitCoverageRate = roundProfitBoardAmount(report.Summary.ConfiguredProfitCoverageRate)
+	report.Meta.LatestLogId = latestLogId
+	report.Meta.LatestLogCreatedAt = latestLogCreatedAt
+	report.Meta.ActivityWatermark = buildProfitBoardActivityWatermark(report.Summary.RequestCount, latestLogId, latestLogCreatedAt)
 	return report, nil
 }
 
