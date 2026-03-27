@@ -278,22 +278,23 @@ func PostClaudeConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, 
 	cacheCreationTokens := usage.PromptTokensDetails.CachedCreationTokens
 	cacheCreationTokens5m := usage.ClaudeCacheCreation5mTokens
 	cacheCreationTokens1h := usage.ClaudeCacheCreation1hTokens
+	billablePromptTokens := promptTokens
 
 	if relayInfo.ChannelType == constant.ChannelTypeOpenRouter {
-		promptTokens -= cacheTokens
+		billablePromptTokens -= cacheTokens
 		isUsingCustomSettings := relayInfo.PriceData.UsePrice || hasCustomModelRatio(modelName, relayInfo.PriceData.ModelRatio)
 		if cacheCreationTokens == 0 && relayInfo.PriceData.CacheCreationRatio != 1 && usage.Cost != 0 && !isUsingCustomSettings {
 			maybeCacheCreationTokens := CalcOpenRouterCacheCreateTokens(*usage, relayInfo.PriceData)
-			if maybeCacheCreationTokens >= 0 && promptTokens >= maybeCacheCreationTokens {
+			if maybeCacheCreationTokens >= 0 && billablePromptTokens >= maybeCacheCreationTokens {
 				cacheCreationTokens = maybeCacheCreationTokens
 			}
 		}
-		promptTokens -= cacheCreationTokens
+		billablePromptTokens -= cacheCreationTokens
 	}
 
 	calculateQuota := 0.0
 	if !relayInfo.PriceData.UsePrice {
-		calculateQuota = float64(promptTokens)
+		calculateQuota = float64(billablePromptTokens)
 		calculateQuota += float64(cacheTokens) * cacheRatio
 		calculateQuota += float64(cacheCreationTokens5m) * cacheCreationRatio5m
 		calculateQuota += float64(cacheCreationTokens1h) * cacheCreationRatio1h
