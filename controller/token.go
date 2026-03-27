@@ -713,6 +713,21 @@ func AddToken(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	channelLimitsEnabled, channelLimits, err := normalizeTokenChannelLimitsForSave(
+		c.GetInt("id"),
+		c.GetInt("role"),
+		token.Group,
+		token.ModelLimits,
+		token.ModelLimitsEnabled,
+		token.ChannelLimits,
+		token.ChannelLimitsEnabled,
+	)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	token.ChannelLimitsEnabled = channelLimitsEnabled
+	token.ChannelLimits = channelLimits
 	if err := model.ValidateTokenPackageConfig(&token); err != nil {
 		common.ApiError(c, err)
 		return
@@ -764,6 +779,8 @@ func AddToken(c *gin.Context) {
 		UnlimitedQuota:       token.UnlimitedQuota,
 		ModelLimitsEnabled:   token.ModelLimitsEnabled,
 		ModelLimits:          token.ModelLimits,
+		ChannelLimitsEnabled: token.ChannelLimitsEnabled,
+		ChannelLimits:        token.ChannelLimits,
 		AllowIps:             token.AllowIps,
 		Group:                token.Group,
 		CrossGroupRetry:      token.CrossGroupRetry,
@@ -827,6 +844,21 @@ func UpdateToken(c *gin.Context) {
 			common.ApiError(c, err)
 			return
 		}
+		channelLimitsEnabled, channelLimits, err := normalizeTokenChannelLimitsForSave(
+			userId,
+			c.GetInt("role"),
+			token.Group,
+			token.ModelLimits,
+			token.ModelLimitsEnabled,
+			token.ChannelLimits,
+			token.ChannelLimitsEnabled,
+		)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		token.ChannelLimitsEnabled = channelLimitsEnabled
+		token.ChannelLimits = channelLimits
 	}
 	if err := model.ValidateTokenPackageConfig(&token); err != nil {
 		common.ApiError(c, err)
@@ -884,6 +916,8 @@ func UpdateToken(c *gin.Context) {
 			cleanToken.UnlimitedQuota = token.UnlimitedQuota
 			cleanToken.ModelLimitsEnabled = token.ModelLimitsEnabled
 			cleanToken.ModelLimits = token.ModelLimits
+			cleanToken.ChannelLimitsEnabled = token.ChannelLimitsEnabled
+			cleanToken.ChannelLimits = token.ChannelLimits
 			cleanToken.AllowIps = token.AllowIps
 			cleanToken.CrossGroupRetry = token.CrossGroupRetry
 			cleanToken.MaxConcurrency = token.MaxConcurrency

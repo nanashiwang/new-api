@@ -393,6 +393,12 @@ func SetupContextForToken(c *gin.Context, token *model.Token, parts ...string) e
 	} else {
 		c.Set("token_model_limit_enabled", false)
 	}
+	if token.ChannelLimitsEnabled {
+		common.SetContextKey(c, constant.ContextKeyTokenChannelLimitEnabled, true)
+		common.SetContextKey(c, constant.ContextKeyTokenChannelLimit, token.GetChannelLimitsMap())
+	} else {
+		common.SetContextKey(c, constant.ContextKeyTokenChannelLimitEnabled, false)
+	}
 	common.SetContextKey(c, constant.ContextKeyTokenGroup, token.Group)
 	common.SetContextKey(c, constant.ContextKeyTokenCrossGroupRetry, token.CrossGroupRetry)
 	if len(parts) > 1 {

@@ -54,7 +54,7 @@ func TestInitChannelCache_UsesAbilitiesAsSourceOfTruth(t *testing.T) {
 
 	InitChannelCache()
 
-	channel, err := GetRandomSatisfiedChannel("default", "gpt-5.4", 0, nil)
+	channel, err := GetRandomSatisfiedChannel("default", "gpt-5.4", 0, nil, nil)
 	if err != nil {
 		t.Fatalf("get channel: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestGetRandomSatisfiedChannelFallsBackWhenTotalWeightIsNonPositive(t *testi
 		}
 	}()
 
-	channel, err := GetRandomSatisfiedChannel("default", "gpt-5.4", 0, nil)
+	channel, err := GetRandomSatisfiedChannel("default", "gpt-5.4", 0, nil, nil)
 	if err != nil {
 		t.Fatalf("get channel: %v", err)
 	}
@@ -103,5 +103,39 @@ func TestGetRandomSatisfiedChannelFallsBackWhenTotalWeightIsNonPositive(t *testi
 	}
 	if channel.Id != 1 && channel.Id != 2 {
 		t.Fatalf("expected one of the fallback channels, got %d", channel.Id)
+	}
+}
+
+func TestGetRandomSatisfiedChannel_RespectsAllowedChannels(t *testing.T) {
+	originMemoryCacheEnabled := common.MemoryCacheEnabled
+	originGroupMap := group2model2channels
+	originChannels := channelsIDM
+	common.MemoryCacheEnabled = true
+	group2model2channels = map[string]map[string][]int{
+		"default": {
+			"gpt-5.4": {1, 2},
+		},
+	}
+	priority := int64(0)
+	weight := uint(100)
+	channelsIDM = map[int]*Channel{
+		1: {Id: 1, Name: "allowed", Weight: &weight, Priority: &priority},
+		2: {Id: 2, Name: "blocked", Weight: &weight, Priority: &priority},
+	}
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = originMemoryCacheEnabled
+		group2model2channels = originGroupMap
+		channelsIDM = originChannels
+	})
+
+	channel, err := GetRandomSatisfiedChannel("default", "gpt-5.4", 0, []int{1}, nil)
+	if err != nil {
+		t.Fatalf("get channel: %v", err)
+	}
+	if channel == nil {
+		t.Fatal("expected channel, got nil")
+	}
+	if channel.Id != 1 {
+		t.Fatalf("expected allowed channel 1, got %d", channel.Id)
 	}
 }

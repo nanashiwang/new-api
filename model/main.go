@@ -585,6 +585,8 @@ func ensureTokenColumnsSQLite() error {
 		{Name: "billing_mode", DDL: "`billing_mode` varchar(32) DEFAULT ''"},
 		{Name: "sellable_token_product_id", DDL: "`sellable_token_product_id` integer DEFAULT 0"},
 		{Name: "sellable_token_issuance_id", DDL: "`sellable_token_issuance_id` integer DEFAULT 0"},
+		{Name: "channel_limits_enabled", DDL: "`channel_limits_enabled` numeric DEFAULT 0"},
+		{Name: "channel_limits", DDL: "`channel_limits` text DEFAULT ''"},
 		{Name: "max_concurrency", DDL: "`max_concurrency` integer DEFAULT 0"},
 		{Name: "window_request_limit", DDL: "`window_request_limit` integer DEFAULT 0"},
 		{Name: "window_seconds", DDL: "`window_seconds` bigint DEFAULT 0"},

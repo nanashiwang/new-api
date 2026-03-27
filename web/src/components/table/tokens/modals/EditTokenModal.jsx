@@ -27,6 +27,7 @@ import {
   renderGroupOption,
   getModelCategories,
   selectFilter,
+  isAdmin,
 } from '../../../../helpers';
 import {
   quotaToUSDAmount,
@@ -67,9 +68,12 @@ const EditTokenModal = (props) => {
   const loadedTokenValuesRef = useRef(null);
   const [models, setModels] = useState([]);
   const [groups, setGroups] = useState([]);
+  const [channelOptions, setChannelOptions] = useState([]);
   const [tokenMode, setTokenMode] = useState('standard');
+  const isAdminUser = isAdmin();
   const isEdit = props.editingToken.id !== undefined;
   const isSellableToken = props.editingToken?.source_type === 'sellable_token';
+  const channelRequestRef = useRef(0);
 
   const getInitValues = () => ({
     name: '',
@@ -79,6 +83,8 @@ const EditTokenModal = (props) => {
     unlimited_quota: true,
     model_limits_enabled: false,
     model_limits: [],
+    channel_limits_enabled: false,
+    channel_limits: [],
     allow_ips: '',
     group: '',
     cross_group_retry: false,
@@ -167,6 +173,64 @@ const EditTokenModal = (props) => {
     }
   };
 
+  const buildChannelOptions = (data) => {
+    return (Array.isArray(data) ? data : []).map((channel) => {
+      const channelId = String(channel.id);
+      const matchedGroups = Array.isArray(channel.matched_groups)
+        ? channel.matched_groups.join(', ')
+        : '';
+      const matchedModels = Array.isArray(channel.matched_models)
+        ? channel.matched_models.slice(0, 3).join(', ')
+        : '';
+      const hiddenModelCount = Array.isArray(channel.matched_models)
+        ? Math.max(channel.matched_models.length - 3, 0)
+        : 0;
+      const summaryParts = [];
+      if (matchedGroups) {
+        summaryParts.push(`${t('分组')}: ${matchedGroups}`);
+      }
+      if (matchedModels) {
+        summaryParts.push(
+          `${t('模型')}: ${matchedModels}${hiddenModelCount > 0 ? ` +${hiddenModelCount}` : ''}`,
+        );
+      }
+      const summary = summaryParts.join(' | ');
+      return {
+        label: (
+          <div className='flex flex-col'>
+            <span>{`${channel.name} (#${channel.id})`}</span>
+            {summary ? (
+              <span className='text-xs text-gray-500'>{summary}</span>
+            ) : null}
+          </div>
+        ),
+        value: channelId,
+        channelName: `${channel.name} (#${channel.id})`,
+        channelSummary: summary,
+      };
+    });
+  };
+
+  const syncChannelLimitsWithOptions = (optionList, shouldNotify = false) => {
+    if (!formApiRef.current) return;
+    const allowedValues = new Set(optionList.map((item) => item.value));
+    const currentValues = formApiRef.current.getValue('channel_limits') || [];
+    const nextValues = currentValues.filter((channelId) =>
+      allowedValues.has(String(channelId)),
+    );
+    if (nextValues.length === currentValues.length) return;
+    formApiRef.current.setValue('channel_limits', nextValues);
+    if (loadedTokenValuesRef.current) {
+      loadedTokenValuesRef.current = {
+        ...loadedTokenValuesRef.current,
+        channel_limits: nextValues,
+      };
+    }
+    if (shouldNotify) {
+      showInfo(t('已自动移除当前分组或模型限制下不可用的渠道'));
+    }
+  };
+
   const loadModels = async (groupValue = '', shouldNotify = false) => {
     let res = await API.get(`/api/token/models`, {
       params: {
@@ -180,6 +244,37 @@ const EditTokenModal = (props) => {
       syncModelLimitsWithOptions(localModelOptions, shouldNotify);
     } else {
       setModels([]);
+      showError(t(message));
+    }
+  };
+
+  const loadChannels = async (
+    groupValue = '',
+    modelLimits = [],
+    shouldNotify = false,
+  ) => {
+    if (!isAdminUser || isSellableToken) {
+      setChannelOptions([]);
+      return;
+    }
+    const requestId = ++channelRequestRef.current;
+    let res = await API.get(`/api/token/channels`, {
+      params: {
+        group: groupValue,
+        model_limits: Array.isArray(modelLimits)
+          ? modelLimits.join(',')
+          : String(modelLimits || ''),
+        token_id: isEdit ? props.editingToken.id : undefined,
+      },
+    });
+    if (requestId !== channelRequestRef.current) return;
+    const { success, message, data } = res.data;
+    if (success) {
+      const localChannelOptions = buildChannelOptions(data);
+      setChannelOptions(localChannelOptions);
+      syncChannelLimitsWithOptions(localChannelOptions, shouldNotify);
+    } else {
+      setChannelOptions([]);
       showError(t(message));
     }
   };
@@ -238,6 +333,11 @@ const EditTokenModal = (props) => {
       } else {
         data.model_limits = [];
       }
+      if (data.channel_limits !== '') {
+        data.channel_limits = data.channel_limits.split(',');
+      } else {
+        data.channel_limits = [];
+      }
       if (!data.package_period || data.package_period === 'none') {
         data.package_period = 'daily';
       }
@@ -246,6 +346,7 @@ const EditTokenModal = (props) => {
       loadedTokenValuesRef.current = { ...getInitValues(), ...data };
       applyLoadedTokenValues();
       await loadModels(data.group || '');
+      await loadChannels(data.group || '', data.model_limits || []);
       setTokenMode(data.package_enabled ? 'package' : 'standard');
     } else {
       showError(message);
@@ -255,12 +356,14 @@ const EditTokenModal = (props) => {
 
   useEffect(() => {
     loadedTokenValuesRef.current = null;
+    setChannelOptions([]);
     if (formApiRef.current) {
       if (!isEdit) {
         formApiRef.current.setValues(getInitValues());
       }
     }
     loadModels(props.editingToken.group || '');
+    loadChannels(props.editingToken.group || '', props.editingToken.channel_limits || []);
     loadGroups();
   }, [props.editingToken.id]);
 
@@ -273,10 +376,12 @@ const EditTokenModal = (props) => {
         formApiRef.current?.setValues(getInitValues());
         setTokenMode('standard');
         loadModels('');
+        loadChannels('', []);
       }
     } else {
       loadedTokenValuesRef.current = null;
       formApiRef.current?.reset();
+      setChannelOptions([]);
     }
   }, [props.visiable, props.editingToken.id]);
 
@@ -415,6 +520,13 @@ const EditTokenModal = (props) => {
     return (modelLimits || []).filter((model) => allowedValues.has(model));
   };
 
+  const sanitizeChannelLimits = (channelLimits) => {
+    const allowedValues = new Set(channelOptions.map((item) => item.value));
+    return (channelLimits || []).filter((channelId) =>
+      allowedValues.has(String(channelId)),
+    );
+  };
+
   const submit = async (values) => {
     setLoading(true);
     if (isEdit) {
@@ -439,6 +551,9 @@ const EditTokenModal = (props) => {
           return;
         }
         localInputs.model_limits = sanitizeModelLimits(localInputs.model_limits);
+        localInputs.channel_limits = isAdminUser
+          ? sanitizeChannelLimits(localInputs.channel_limits)
+          : [];
         delete localInputs.remain_amount;
         delete localInputs.package_limit_amount;
         if (localInputs.expired_time !== -1) {
@@ -452,6 +567,9 @@ const EditTokenModal = (props) => {
         }
         localInputs.model_limits = localInputs.model_limits.join(',');
         localInputs.model_limits_enabled = localInputs.model_limits.length > 0;
+        localInputs.channel_limits = localInputs.channel_limits.join(',');
+        localInputs.channel_limits_enabled =
+          localInputs.channel_limits.length > 0;
       } else {
         localInputs = {
           name: localInputs.name,
@@ -490,6 +608,9 @@ const EditTokenModal = (props) => {
           break;
         }
         localInputs.model_limits = sanitizeModelLimits(localInputs.model_limits);
+        localInputs.channel_limits = isAdminUser
+          ? sanitizeChannelLimits(localInputs.channel_limits)
+          : [];
 
         if (localInputs.expired_time !== -1) {
           let time = Date.parse(localInputs.expired_time);
@@ -502,6 +623,9 @@ const EditTokenModal = (props) => {
         }
         localInputs.model_limits = localInputs.model_limits.join(',');
         localInputs.model_limits_enabled = localInputs.model_limits.length > 0;
+        localInputs.channel_limits = localInputs.channel_limits.join(',');
+        localInputs.channel_limits_enabled =
+          localInputs.channel_limits.length > 0;
         const packageResult = normalizePackageFields(localInputs);
         if (!packageResult.ok) {
           showError(packageResult.message);
@@ -595,6 +719,18 @@ const EditTokenModal = (props) => {
           onValueChange={(values) => {
             if (Object.prototype.hasOwnProperty.call(values, 'group')) {
               loadModels(values.group || '', true);
+              loadChannels(
+                values.group || '',
+                formApiRef.current?.getValue('model_limits') || [],
+                true,
+              );
+            }
+            if (Object.prototype.hasOwnProperty.call(values, 'model_limits')) {
+              loadChannels(
+                formApiRef.current?.getValue('group') || '',
+                values.model_limits || [],
+                true,
+              );
             }
           }}
           onSubmit={submit}
@@ -957,6 +1093,46 @@ const EditTokenModal = (props) => {
                       style={{ width: '100%' }}
                     />
                   </Col>
+                  {isAdminUser && (
+                    <Col span={24}>
+                      <Form.Select
+                        field='channel_limits'
+                        label={t('渠道限制列表')}
+                        placeholder={t(
+                          '请选择该令牌允许使用的渠道，留空表示不限制渠道',
+                        )}
+                        multiple
+                        optionList={channelOptions}
+                        extraText={t(
+                          '仅管理员可配置；可选渠道会随分组和模型限制自动联动',
+                        )}
+                        filter={selectFilter}
+                        autoClearSearchValue={false}
+                        searchPosition='dropdown'
+                        renderSelectedItem={(optionNode) => {
+                          const channelName =
+                            optionNode?.channelName ||
+                            optionNode?.value ||
+                            t('未知渠道');
+                          return {
+                            isRenderInTag: true,
+                            content: (
+                              <span
+                                className='cursor-default select-none'
+                                title={
+                                  optionNode?.channelSummary || channelName
+                                }
+                              >
+                                {channelName}
+                              </span>
+                            ),
+                          };
+                        }}
+                        showClear
+                        style={{ width: '100%' }}
+                      />
+                    </Col>
+                  )}
                   <Col span={24}>
                     <Form.TextArea
                       field='allow_ips'

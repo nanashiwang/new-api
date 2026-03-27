@@ -88,12 +88,18 @@ func getPriority(group string, model string, retry int) (int, error) {
 	return priorityToUse, nil
 }
 
-func getChannelQuery(group string, model string, retry int, excludeChannels []int) (*gorm.DB, error) {
+func getChannelQuery(group string, model string, retry int, allowedChannels []int, excludeChannels []int) (*gorm.DB, error) {
 	maxPrioritySubQuery := DB.Model(&Ability{}).Select("MAX(priority)").Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true)
+	if len(allowedChannels) > 0 {
+		maxPrioritySubQuery = maxPrioritySubQuery.Where("channel_id IN ?", allowedChannels)
+	}
 	if len(excludeChannels) > 0 {
 		maxPrioritySubQuery = maxPrioritySubQuery.Where("channel_id NOT IN ?", excludeChannels)
 	}
 	channelQuery := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ? and priority = (?)", group, model, true, maxPrioritySubQuery)
+	if len(allowedChannels) > 0 {
+		channelQuery = channelQuery.Where("channel_id IN ?", allowedChannels)
+	}
 	if len(excludeChannels) > 0 {
 		channelQuery = channelQuery.Where("channel_id NOT IN ?", excludeChannels)
 	}
@@ -103,6 +109,9 @@ func getChannelQuery(group string, model string, retry int, excludeChannels []in
 			return nil, err
 		} else {
 			channelQuery = DB.Where(commonGroupCol+" = ? and model = ? and enabled = ? and priority = ?", group, model, true, priority)
+			if len(allowedChannels) > 0 {
+				channelQuery = channelQuery.Where("channel_id IN ?", allowedChannels)
+			}
 			if len(excludeChannels) > 0 {
 				channelQuery = channelQuery.Where("channel_id NOT IN ?", excludeChannels)
 			}
@@ -112,11 +121,11 @@ func getChannelQuery(group string, model string, retry int, excludeChannels []in
 	return channelQuery, nil
 }
 
-func GetChannel(group string, model string, retry int, excludeChannels []int) (*Channel, error) {
+func GetChannel(group string, model string, retry int, allowedChannels []int, excludeChannels []int) (*Channel, error) {
 	var abilities []Ability
 
 	var err error = nil
-	channelQuery, err := getChannelQuery(group, model, retry, excludeChannels)
+	channelQuery, err := getChannelQuery(group, model, retry, allowedChannels, excludeChannels)
 	if err != nil {
 		return nil, err
 	}

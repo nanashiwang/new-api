@@ -365,12 +365,12 @@ func selectTokenTestChannelByAbility(c *gin.Context, modelName string) (*model.C
 
 	normalizedModel := ratio_setting.FormatMatchingModelName(modelName)
 	for _, group := range groups {
-		channel, err := model.GetChannel(group, modelName, 0, nil)
+		channel, err := model.GetChannel(group, modelName, 0, nil, nil)
 		if err != nil {
 			return nil, "", err
 		}
 		if channel == nil && normalizedModel != "" && normalizedModel != modelName {
-			channel, err = model.GetChannel(group, normalizedModel, 0, nil)
+			channel, err = model.GetChannel(group, normalizedModel, 0, nil, nil)
 			if err != nil {
 				return nil, "", err
 			}
@@ -403,10 +403,11 @@ func runTokenRelayTest(parent *gin.Context, token *model.Token, modelName string
 	defer releaseRuntimeLimit()
 	start := time.Now()
 	retryParam := &service.RetryParam{
-		Ctx:        selectCtx,
-		TokenGroup: common.GetContextKeyString(selectCtx, constant.ContextKeyTokenGroup),
-		ModelName:  modelName,
-		Retry:      common.GetPointer(0),
+		Ctx:             selectCtx,
+		TokenGroup:      common.GetContextKeyString(selectCtx, constant.ContextKeyTokenGroup),
+		ModelName:       modelName,
+		AllowedChannels: middleware.GetAllowedTokenChannelIDs(selectCtx),
+		Retry:           common.GetPointer(0),
 	}
 
 	var lastErr error

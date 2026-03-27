@@ -293,6 +293,7 @@ func SetApiRouter(router *gin.Engine) {
 			tokenRoute.GET("/", controller.GetAllTokens)
 			tokenRoute.GET("/search", middleware.SearchRateLimit(), controller.SearchTokens)
 			tokenRoute.GET("/models", controller.GetTokenModels)
+			tokenRoute.GET("/channels", middleware.AdminAuth(), controller.GetTokenChannels)
 			tokenRoute.POST("/test/:id", controller.TestToken)
 			tokenRoute.GET("/:id", controller.GetToken)
 			tokenRoute.POST("/", controller.AddToken)

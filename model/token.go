@@ -3,6 +3,8 @@ package model
 import (
 	"errors"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -28,6 +30,8 @@ type Token struct {
 	UnlimitedQuota          bool           `json:"unlimited_quota"`
 	ModelLimitsEnabled      bool           `json:"model_limits_enabled"`
 	ModelLimits             string         `json:"model_limits" gorm:"type:varchar(1024);default:''"`
+	ChannelLimitsEnabled    bool           `json:"channel_limits_enabled"`
+	ChannelLimits           string         `json:"channel_limits" gorm:"type:text"`
 	AllowIps                *string        `json:"allow_ips" gorm:"default:''"`
 	UsedQuota               int            `json:"used_quota" gorm:"default:0"` // used quota
 	Group                   string         `json:"group" gorm:"default:''"`
@@ -413,7 +417,7 @@ func (token *Token) Update() (err error) {
 	}()
 	err = DB.Model(token).Select("name", "status", "source_type", "billing_mode",
 		"sellable_token_product_id", "sellable_token_issuance_id", "expired_time", "remain_quota",
-		"unlimited_quota", "model_limits_enabled", "model_limits", "allow_ips", "group",
+		"unlimited_quota", "model_limits_enabled", "model_limits", "channel_limits_enabled", "channel_limits", "allow_ips", "group",
 		"cross_group_retry", "max_concurrency", "window_request_limit", "window_seconds",
 		"package_enabled", "package_limit_quota", "package_period", "package_custom_seconds",
 		"package_used_quota", "package_next_reset_time", "package_period_mode").Updates(token).Error
@@ -466,6 +470,36 @@ func (token *Token) GetModelLimitsMap() map[string]bool {
 	limitsMap := make(map[string]bool)
 	for _, limit := range limits {
 		limitsMap[limit] = true
+	}
+	return limitsMap
+}
+
+func (token *Token) GetChannelLimitIDs() []int {
+	if token == nil || strings.TrimSpace(token.ChannelLimits) == "" {
+		return []int{}
+	}
+	parts := strings.Split(token.ChannelLimits, ",")
+	ids := make([]int, 0, len(parts))
+	seen := make(map[int]struct{}, len(parts))
+	for _, part := range parts {
+		id, err := strconv.Atoi(strings.TrimSpace(part))
+		if err != nil || id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	sort.Ints(ids)
+	return ids
+}
+
+func (token *Token) GetChannelLimitsMap() map[int]bool {
+	limitsMap := make(map[int]bool)
+	for _, id := range token.GetChannelLimitIDs() {
+		limitsMap[id] = true
 	}
 	return limitsMap
 }

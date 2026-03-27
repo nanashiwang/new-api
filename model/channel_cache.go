@@ -99,15 +99,19 @@ func SyncChannelCache(frequency int) {
 	}
 }
 
-func GetRandomSatisfiedChannel(group string, model string, retry int, excludeChannels []int) (*Channel, error) {
+func GetRandomSatisfiedChannel(group string, model string, retry int, allowedChannels []int, excludeChannels []int) (*Channel, error) {
 	// if memory cache is disabled, get channel directly from database
 	if !common.MemoryCacheEnabled {
-		return GetChannel(group, model, retry, excludeChannels)
+		return GetChannel(group, model, retry, allowedChannels, excludeChannels)
 	}
 
 	channelSyncLock.RLock()
 	defer channelSyncLock.RUnlock()
 
+	allowedSet := make(map[int]bool, len(allowedChannels))
+	for _, id := range allowedChannels {
+		allowedSet[id] = true
+	}
 	// 构建排除集合，用于 O(1) 查找
 	excludeSet := make(map[int]bool, len(excludeChannels))
 	for _, id := range excludeChannels {
@@ -130,9 +134,13 @@ func GetRandomSatisfiedChannel(group string, model string, retry int, excludeCha
 	// 过滤掉已排除的渠道
 	var filteredChannels []int
 	for _, channelId := range channels {
-		if !excludeSet[channelId] {
-			filteredChannels = append(filteredChannels, channelId)
+		if len(allowedSet) > 0 && !allowedSet[channelId] {
+			continue
 		}
+		if excludeSet[channelId] {
+			continue
+		}
+		filteredChannels = append(filteredChannels, channelId)
 	}
 
 	if len(filteredChannels) == 0 {

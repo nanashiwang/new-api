@@ -51,6 +51,10 @@ func Distribute() func(c *gin.Context) {
 				abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorChannelDisabled))
 				return
 			}
+			if !IsTokenChannelAllowed(c, channel.Id) {
+				abortWithOpenAiMessage(c, http.StatusForbidden, "当前令牌不允许使用该渠道", types.ErrorCodeAccessDenied)
+				return
+			}
 		} else {
 			// Select a channel for the user
 			// check token model mapping
@@ -102,7 +106,9 @@ func Distribute() func(c *gin.Context) {
 				if preferredChannelID, found := service.GetPreferredChannelByAffinity(c, modelRequest.Model, usingGroup); found {
 					preferred, err := model.CacheGetChannel(preferredChannelID)
 					if err == nil && preferred != nil {
-						if preferred.Status != common.ChannelStatusEnabled {
+						if !IsTokenChannelAllowed(c, preferred.Id) {
+							channel = nil
+						} else if preferred.Status != common.ChannelStatusEnabled {
 							if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
 								abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorChannelDisabled))
 								return
@@ -129,10 +135,11 @@ func Distribute() func(c *gin.Context) {
 
 				if channel == nil {
 					channel, selectGroup, err = service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
-						Ctx:        c,
-						ModelName:  modelRequest.Model,
-						TokenGroup: usingGroup,
-						Retry:      common.GetPointer(0),
+						Ctx:             c,
+						ModelName:       modelRequest.Model,
+						TokenGroup:      usingGroup,
+						AllowedChannels: GetAllowedTokenChannelIDs(c),
+						Retry:           common.GetPointer(0),
 					})
 					if err != nil {
 						showGroup := usingGroup
