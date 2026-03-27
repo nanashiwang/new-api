@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFormatClaudeResponseInfo_MessageStart(t *testing.T) {
@@ -172,4 +174,139 @@ func TestFormatClaudeResponseInfo_ContentBlockDelta(t *testing.T) {
 	if claudeInfo.ResponseText.String() != "hello" {
 		t.Errorf("ResponseText = %q, want %q", claudeInfo.ResponseText.String(), "hello")
 	}
+}
+
+func TestRequestOpenAI2ClaudeMessage_AssistantToolCallWithMalformedArguments(t *testing.T) {
+	assistantMessage := dto.Message{
+		Role:    "assistant",
+		Content: "calling tool",
+	}
+	assistantMessage.SetToolCalls([]dto.ToolCallRequest{
+		{
+			ID:   "call_1",
+			Type: "function",
+			Function: dto.FunctionRequest{
+				Name:      "search_notes",
+				Arguments: `{"query":`,
+			},
+		},
+	})
+
+	claudeReq, err := RequestOpenAI2ClaudeMessage(nil, dto.GeneralOpenAIRequest{
+		Model: "claude-3-5-sonnet",
+		Messages: []dto.Message{
+			{
+				Role:    "user",
+				Content: "find it",
+			},
+			assistantMessage,
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, claudeReq.Messages, 2)
+
+	content, err := claudeReq.Messages[1].ParseContent()
+	require.NoError(t, err)
+	require.Len(t, content, 2)
+	assert.Equal(t, "tool_use", content[1].Type)
+	assert.Equal(t, "call_1", content[1].Id)
+	assert.Equal(t, "search_notes", content[1].Name)
+
+	inputObj, ok := content[1].Input.(map[string]any)
+	require.True(t, ok)
+	assert.Empty(t, inputObj)
+}
+
+func TestStreamResponseClaude2OpenAI_EmptyInputJSONDeltaIgnored(t *testing.T) {
+	empty := ""
+	resp := &dto.ClaudeResponse{
+		Type:  "content_block_delta",
+		Index: func() *int { v := 1; return &v }(),
+		Delta: &dto.ClaudeMediaMessage{
+			Type:        "input_json_delta",
+			PartialJson: &empty,
+		},
+	}
+
+	chunk := StreamResponseClaude2OpenAI(resp, &ClaudeResponseInfo{})
+	require.Nil(t, chunk)
+}
+
+func TestStreamResponseClaude2OpenAI_NonEmptyInputJSONDeltaPreserved(t *testing.T) {
+	partial := `{"query":"today"}`
+	resp := &dto.ClaudeResponse{
+		Type:  "content_block_delta",
+		Index: func() *int { v := 1; return &v }(),
+		Delta: &dto.ClaudeMediaMessage{
+			Type:        "input_json_delta",
+			PartialJson: &partial,
+		},
+	}
+
+	chunk := StreamResponseClaude2OpenAI(resp, &ClaudeResponseInfo{})
+	require.NotNil(t, chunk)
+	require.Len(t, chunk.Choices, 1)
+	require.Len(t, chunk.Choices[0].Delta.ToolCalls, 1)
+	assert.Equal(t, partial, chunk.Choices[0].Delta.ToolCalls[0].Function.Arguments)
+}
+
+func TestStreamResponseClaude2OpenAI_NoArgToolEmitsObjectAtStop(t *testing.T) {
+	claudeInfo := &ClaudeResponseInfo{}
+	start := &dto.ClaudeResponse{
+		Type:  "content_block_start",
+		Index: func() *int { v := 1; return &v }(),
+		ContentBlock: &dto.ClaudeMediaMessage{
+			Type: "tool_use",
+			Id:   "toolu_1",
+			Name: "get_current_time",
+		},
+	}
+	stop := &dto.ClaudeResponse{
+		Type:  "content_block_stop",
+		Index: func() *int { v := 1; return &v }(),
+	}
+
+	startChunk := StreamResponseClaude2OpenAI(start, claudeInfo)
+	require.Nil(t, startChunk)
+
+	stopChunk := StreamResponseClaude2OpenAI(stop, claudeInfo)
+	require.NotNil(t, stopChunk)
+	require.Len(t, stopChunk.Choices, 1)
+	require.Len(t, stopChunk.Choices[0].Delta.ToolCalls, 1)
+	assert.Equal(t, "toolu_1", stopChunk.Choices[0].Delta.ToolCalls[0].ID)
+	assert.Equal(t, "get_current_time", stopChunk.Choices[0].Delta.ToolCalls[0].Function.Name)
+	assert.Equal(t, "{}", stopChunk.Choices[0].Delta.ToolCalls[0].Function.Arguments)
+}
+
+func TestStreamResponseClaude2OpenAI_ArgToolKeepsIDNameOnDelta(t *testing.T) {
+	claudeInfo := &ClaudeResponseInfo{}
+	start := &dto.ClaudeResponse{
+		Type:  "content_block_start",
+		Index: func() *int { v := 1; return &v }(),
+		ContentBlock: &dto.ClaudeMediaMessage{
+			Type: "tool_use",
+			Id:   "toolu_2",
+			Name: "search_notes",
+		},
+	}
+	partial := `{"query":"today"}`
+	delta := &dto.ClaudeResponse{
+		Type:  "content_block_delta",
+		Index: func() *int { v := 1; return &v }(),
+		Delta: &dto.ClaudeMediaMessage{
+			Type:        "input_json_delta",
+			PartialJson: &partial,
+		},
+	}
+
+	startChunk := StreamResponseClaude2OpenAI(start, claudeInfo)
+	require.Nil(t, startChunk)
+
+	deltaChunk := StreamResponseClaude2OpenAI(delta, claudeInfo)
+	require.NotNil(t, deltaChunk)
+	require.Len(t, deltaChunk.Choices, 1)
+	require.Len(t, deltaChunk.Choices[0].Delta.ToolCalls, 1)
+	assert.Equal(t, "toolu_2", deltaChunk.Choices[0].Delta.ToolCalls[0].ID)
+	assert.Equal(t, "search_notes", deltaChunk.Choices[0].Delta.ToolCalls[0].Function.Name)
+	assert.Equal(t, partial, deltaChunk.Choices[0].Delta.ToolCalls[0].Function.Arguments)
 }

@@ -364,9 +364,9 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 				if message.ToolCalls != nil {
 					for _, toolCall := range message.ParseToolCalls() {
 						inputObj := make(map[string]any)
-						if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &inputObj); err != nil {
+						if err := common.UnmarshalJsonStr(toolCall.Function.Arguments, &inputObj); err != nil {
 							common.SysLog("tool call function arguments is not a map[string]any: " + fmt.Sprintf("%v", toolCall.Function.Arguments))
-							continue
+							inputObj = map[string]any{}
 						}
 						claudeMediaMessages = append(claudeMediaMessages, dto.ClaudeMediaMessage{
 							Type:  "tool_use",
@@ -392,12 +392,15 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 	return &claudeRequest, nil
 }
 
-func StreamResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.ChatCompletionsStreamResponse {
+func StreamResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse, claudeInfo *ClaudeResponseInfo) *dto.ChatCompletionsStreamResponse {
 	var response dto.ChatCompletionsStreamResponse
 	response.Object = "chat.completion.chunk"
 	response.Model = claudeResponse.Model
 	response.Choices = make([]dto.ChatCompletionsStreamResponseChoice, 0)
 	tools := make([]dto.ToolCallResponse, 0)
+	if claudeInfo != nil && claudeInfo.ToolCallStreamStates == nil {
+		claudeInfo.ToolCallStreamStates = make(map[int]*ToolCallStreamState)
+	}
 	fcIdx := 0
 	if claudeResponse.Index != nil {
 		fcIdx = *claudeResponse.Index - 1
@@ -421,6 +424,13 @@ func StreamResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.ChatCo
 				choice.Delta.SetContentString(*claudeResponse.ContentBlock.Text)
 			}
 			if claudeResponse.ContentBlock.Type == "tool_use" {
+				if claudeInfo != nil {
+					claudeInfo.ToolCallStreamStates[fcIdx] = &ToolCallStreamState{
+						ID:   claudeResponse.ContentBlock.Id,
+						Name: claudeResponse.ContentBlock.Name,
+					}
+					return nil
+				}
 				tools = append(tools, dto.ToolCallResponse{
 					Index: common.GetPointer(fcIdx),
 					ID:    claudeResponse.ContentBlock.Id,
@@ -439,13 +449,28 @@ func StreamResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.ChatCo
 			choice.Delta.Content = claudeResponse.Delta.Text
 			switch claudeResponse.Delta.Type {
 			case "input_json_delta":
-				tools = append(tools, dto.ToolCallResponse{
+				if claudeResponse.Delta.PartialJson == nil {
+					return nil
+				}
+				arguments := *claudeResponse.Delta.PartialJson
+				if strings.TrimSpace(arguments) == "" {
+					return nil
+				}
+				toolCall := dto.ToolCallResponse{
 					Type:  "function",
 					Index: common.GetPointer(fcIdx),
 					Function: dto.FunctionResponse{
-						Arguments: *claudeResponse.Delta.PartialJson,
+						Arguments: arguments,
 					},
-				})
+				}
+				if claudeInfo != nil {
+					if state, ok := claudeInfo.ToolCallStreamStates[fcIdx]; ok {
+						state.Emitted = true
+						toolCall.ID = state.ID
+						toolCall.Function.Name = state.Name
+					}
+				}
+				tools = append(tools, toolCall)
 			case "signature_delta":
 				// 加密的不处理
 				signatureContent := "\n"
@@ -454,6 +479,27 @@ func StreamResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.ChatCo
 				choice.Delta.ReasoningContent = claudeResponse.Delta.Thinking
 			}
 		}
+	} else if claudeResponse.Type == "content_block_stop" {
+		if claudeInfo == nil {
+			return nil
+		}
+		state, ok := claudeInfo.ToolCallStreamStates[fcIdx]
+		if !ok {
+			return nil
+		}
+		delete(claudeInfo.ToolCallStreamStates, fcIdx)
+		if state.Emitted {
+			return nil
+		}
+		tools = append(tools, dto.ToolCallResponse{
+			Index: common.GetPointer(fcIdx),
+			ID:    state.ID,
+			Type:  "function",
+			Function: dto.FunctionResponse{
+				Name:      state.Name,
+				Arguments: "{}",
+			},
+		})
 	} else if claudeResponse.Type == "message_delta" {
 		if claudeResponse.Delta != nil && claudeResponse.Delta.StopReason != nil {
 			finishReason := stopReasonClaude2OpenAI(*claudeResponse.Delta.StopReason)
@@ -538,12 +584,19 @@ func ResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.OpenAITextRe
 }
 
 type ClaudeResponseInfo struct {
-	ResponseId   string
-	Created      int64
-	Model        string
-	ResponseText strings.Builder
-	Usage        *dto.Usage
-	Done         bool
+	ResponseId           string
+	Created              int64
+	Model                string
+	ResponseText         strings.Builder
+	Usage                *dto.Usage
+	Done                 bool
+	ToolCallStreamStates map[int]*ToolCallStreamState
+}
+
+type ToolCallStreamState struct {
+	ID      string
+	Name    string
+	Emitted bool
 }
 
 func buildMessageDeltaPatchUsage(claudeResponse *dto.ClaudeResponse, claudeInfo *ClaudeResponseInfo) *dto.ClaudeUsage {
@@ -676,7 +729,7 @@ func FormatClaudeResponseInfo(claudeResponse *dto.ClaudeResponse, oaiResponse *d
 
 		// 判断是否完整
 		claudeInfo.Done = true
-	} else if claudeResponse.Type == "content_block_start" {
+	} else if claudeResponse.Type == "content_block_start" || claudeResponse.Type == "content_block_stop" {
 	} else {
 		return false
 	}
@@ -721,7 +774,10 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		}
 		helper.ClaudeChunkData(c, claudeResponse, data)
 	} else if info.RelayFormat == types.RelayFormatOpenAI {
-		response := StreamResponseClaude2OpenAI(&claudeResponse)
+		response := StreamResponseClaude2OpenAI(&claudeResponse, claudeInfo)
+		if response == nil {
+			return nil
+		}
 
 		if !FormatClaudeResponseInfo(&claudeResponse, response, claudeInfo) {
 			return nil
