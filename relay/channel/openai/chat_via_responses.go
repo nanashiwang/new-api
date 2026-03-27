@@ -139,10 +139,6 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	if resp == nil || resp.Body == nil {
 		return nil, types.NewOpenAIError(fmt.Errorf("invalid response"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
 	}
-	if info != nil && info.RelayFormat == types.RelayFormatClaude {
-		return OaiResponsesToClaudeStreamHandler(c, info, resp)
-	}
-
 	defer service.CloseResponseBodyGracefully(resp)
 
 	responseId := helper.GetResponseID(c)
