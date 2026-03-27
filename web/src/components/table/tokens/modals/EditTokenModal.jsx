@@ -402,6 +402,7 @@ const EditTokenModal = (props) => {
       applyLoadedTokenValues();
       await loadModels(data.group || '');
       await loadChannels(data.group || '', data.model_limits || []);
+      applyChannelLimitValues(data.channel_limits || []);
       setTokenMode(data.package_enabled ? 'package' : 'standard');
     } else {
       showError(message);
