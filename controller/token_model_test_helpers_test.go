@@ -61,8 +61,8 @@ func seedTokenModelHelperData(t *testing.T) {
 	}
 
 	channels := []model.Channel{
-		{Id: 1, Name: "default-openai", Key: "sk-test-1"},
-		{Id: 2, Name: "default-anthropic", Key: "sk-test-2", Type: constant.ChannelTypeAnthropic},
+		{Id: 1, Name: "default-openai", Key: "sk-test-1", Tag: common.GetPointer[string]("shared-openai")},
+		{Id: 2, Name: "default-anthropic", Key: "sk-test-2", Tag: common.GetPointer[string]("shared-claude"), Type: constant.ChannelTypeAnthropic},
 		{Id: 3, Name: "default-gemini", Key: "sk-test-3", Type: constant.ChannelTypeGemini},
 	}
 	if err := model.DB.Create(&channels).Error; err != nil {

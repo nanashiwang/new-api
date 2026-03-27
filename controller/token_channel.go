@@ -17,6 +17,7 @@ import (
 type tokenChannelOption struct {
 	ID            int      `json:"id"`
 	Name          string   `json:"name"`
+	Tag           string   `json:"tag"`
 	Type          int      `json:"type"`
 	Status        int      `json:"status"`
 	BaseURL       string   `json:"base_url"`
@@ -27,6 +28,7 @@ type tokenChannelOption struct {
 type tokenChannelCandidateRow struct {
 	ChannelID int     `json:"channel_id"`
 	Name      string  `json:"name"`
+	Tag       *string `json:"tag"`
 	Type      int     `json:"type"`
 	Status    int     `json:"status"`
 	BaseURL   *string `json:"base_url"`
@@ -117,7 +119,7 @@ func buildTokenChannelOptions(userID int, requestedGroup string, modelLimits str
 
 	rows := make([]tokenChannelCandidateRow, 0)
 	query := model.DB.Table("abilities").
-		Select("channels.id as channel_id, channels.name, channels.type, channels.status, channels.base_url, abilities.group, abilities.model").
+		Select("channels.id as channel_id, channels.name, channels.tag, channels.type, channels.status, channels.base_url, abilities.group, abilities.model").
 		Joins("left join channels on abilities.channel_id = channels.id").
 		Where(clause.Eq{Column: clause.Column{Table: "abilities", Name: "enabled"}, Value: true}).
 		Where(clause.Eq{Column: clause.Column{Table: "channels", Name: "status"}, Value: common.ChannelStatusEnabled}).
@@ -139,9 +141,14 @@ func buildTokenChannelOptions(userID int, requestedGroup string, modelLimits str
 			if row.BaseURL != nil {
 				baseURL = *row.BaseURL
 			}
+			tag := ""
+			if row.Tag != nil {
+				tag = strings.TrimSpace(*row.Tag)
+			}
 			option = &tokenChannelOption{
 				ID:      row.ChannelID,
 				Name:    row.Name,
+				Tag:     tag,
 				Type:    row.Type,
 				Status:  row.Status,
 				BaseURL: baseURL,

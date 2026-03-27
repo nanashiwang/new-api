@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -43,7 +42,7 @@ func TestGetTokenChannels_RejectsNonAdmin(t *testing.T) {
 		Success bool   `json:"success"`
 		Message string `json:"message"`
 	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &resp); err != nil {
+	if err := common.Unmarshal(recorder.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
 	if resp.Success {
@@ -72,7 +71,7 @@ func TestGetTokenChannels_FiltersByGroupAndModel(t *testing.T) {
 		Success bool                 `json:"success"`
 		Data    []tokenChannelOption `json:"data"`
 	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &resp); err != nil {
+	if err := common.Unmarshal(recorder.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
 	if !resp.Success {
@@ -83,6 +82,9 @@ func TestGetTokenChannels_FiltersByGroupAndModel(t *testing.T) {
 	}
 	if resp.Data[0].ID != 1 {
 		t.Fatalf("expected channel 1, got %#v", resp.Data[0])
+	}
+	if resp.Data[0].Tag != "shared-openai" {
+		t.Fatalf("unexpected channel tag: %#v", resp.Data[0])
 	}
 	if len(resp.Data[0].MatchedGroups) != 2 || resp.Data[0].MatchedGroups[0] != "default" || resp.Data[0].MatchedGroups[1] != "vip" {
 		t.Fatalf("unexpected matched groups: %#v", resp.Data[0].MatchedGroups)
