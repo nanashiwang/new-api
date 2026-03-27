@@ -53,7 +53,7 @@ func GetUserLogs(c *gin.Context) {
 	return
 }
 
-// Deprecated: SearchAllLogs 已废弃，前端未使用该接口。
+// SearchAllLogs 保留兼容入口，当前仅返回接口已废弃提示。
 func SearchAllLogs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": false,
@@ -61,7 +61,7 @@ func SearchAllLogs(c *gin.Context) {
 	})
 }
 
-// Deprecated: SearchUserLogs 已废弃，前端未使用该接口。
+// SearchUserLogs 保留兼容入口，当前仅返回接口已废弃提示。
 func SearchUserLogs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": false,

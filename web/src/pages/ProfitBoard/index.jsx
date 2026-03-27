@@ -71,7 +71,7 @@ import {
   showSuccess,
   timestamp2string,
 } from '../../helpers';
-import { useIsMobile } from '../../hooks/common/useIsMobile';
+import { useIsMobile } from '@/hooks/common/useIsMobile';
 
 const STORAGE_KEY = 'profit-board:state';
 const REPORT_CACHE_KEY = 'profit-board:report';
@@ -1044,7 +1044,11 @@ const ProfitBoardPage = () => {
     }
     try {
       const res = await API.post('/api/profit_board/query', payload);
-      if (!res.data.success) throw new Error(res.data.message);
+      if (!res.data.success) {
+        setCompareReport(null);
+        if (!silent) showError(res.data.message);
+        return null;
+      }
       setCompareReport(res.data.data);
       return res.data.data;
     } catch (error) {
@@ -1066,7 +1070,10 @@ const ProfitBoardPage = () => {
           '/api/profit_board/overview',
           buildOverviewPayload(),
         );
-        if (!res.data.success) throw new Error(res.data.message);
+        if (!res.data.success) {
+          showError(res.data.message);
+          return null;
+        }
         setOverviewReport(res.data.data);
         if (!silent) showSuccess(t('累计总览已更新'));
         return res.data.data;
@@ -1091,7 +1098,10 @@ const ProfitBoardPage = () => {
         const payload = buildQueryPayload();
         const queryKey = buildQueryKey(payload);
         const res = await API.post('/api/profit_board/query', payload);
-        if (!res.data.success) throw new Error(res.data.message);
+        if (!res.data.success) {
+          showError(res.data.message);
+          return null;
+        }
         setReport(res.data.data);
         setLastQueryKey(queryKey);
         setReportLoadedFromCache(false);
@@ -1206,7 +1216,10 @@ const ProfitBoardPage = () => {
       setActivityChecking(true);
       try {
         const res = await API.post('/api/profit_board/activity', buildActivityPayload());
-        if (!res.data.success) throw new Error(res.data.message);
+        if (!res.data.success) {
+          if (notifyOnError) showError(res.data.message);
+          return null;
+        }
         const activity = res.data.data;
         if (
           activity?.activity_watermark &&
@@ -1272,7 +1285,10 @@ const ProfitBoardPage = () => {
         '/api/profit_board/config',
         buildOverviewPayload(),
       );
-      if (!res.data.success) throw new Error(res.data.message);
+      if (!res.data.success) {
+        showError(res.data.message);
+        return;
+      }
       showSuccess(t('长期配置已保存'));
     } catch (error) {
       showError(error);
@@ -1306,7 +1322,7 @@ const ProfitBoardPage = () => {
         { responseType: 'blob' },
       );
       const disposition = res.headers?.['content-disposition'] || '';
-      const matched = disposition.match(/filename=\"(.+)\"/);
+      const matched = disposition.match(/filename="(.+)"/);
       downloadBlob(
         new Blob([res.data], { type: 'text/csv;charset=utf-8' }),
         matched?.[1] || 'profit-board.csv',
@@ -1329,7 +1345,7 @@ const ProfitBoardPage = () => {
         { responseType: 'blob' },
       );
       const disposition = res.headers?.['content-disposition'] || '';
-      const matched = disposition.match(/filename=\"(.+)\"/);
+      const matched = disposition.match(/filename="(.+)"/);
       downloadBlob(
         new Blob([res.data], {
           type: 'application/vnd.ms-excel;charset=utf-8',

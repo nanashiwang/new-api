@@ -1148,11 +1148,12 @@ func iterateProfitBoardRows(query ProfitBoardQuery, batches []ProfitBoardBatchIn
 			return err
 		}
 
+		var rowIterErr error
 		for rows.Next() {
 			var row profitBoardLogRow
 			if err := LOG_DB.ScanRows(rows, &row); err != nil {
-				rows.Close()
-				return err
+				rowIterErr = err
+				break
 			}
 			other := profitBoardOtherInfo{}
 			if row.Other != "" {
@@ -1176,11 +1177,19 @@ func iterateProfitBoardRows(query ProfitBoardQuery, batches []ProfitBoardBatchIn
 				CacheReadTokens:     cacheReadTokens,
 				CacheCreationTokens: cacheCreationTokens,
 			}); err != nil {
-				rows.Close()
-				return err
+				rowIterErr = err
+				break
 			}
 		}
-		rows.Close()
+		if rowIterErr == nil {
+			rowIterErr = rows.Err()
+		}
+		if closeErr := rows.Close(); rowIterErr == nil && closeErr != nil {
+			rowIterErr = closeErr
+		}
+		if rowIterErr != nil {
+			return rowIterErr
+		}
 	}
 	return nil
 }
