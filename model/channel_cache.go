@@ -200,6 +200,10 @@ func GetRandomSatisfiedChannel(group string, model string, retry int, excludeCha
 	// Calculate the total weight of all channels up to endIdx
 	totalWeight := sumWeight * smoothingFactor
 
+	if totalWeight <= 0 {
+		return targetChannels[rand.Intn(len(targetChannels))], nil
+	}
+
 	// Generate a random value in the range [0, totalWeight)
 	randomWeight := rand.Intn(totalWeight)
 
