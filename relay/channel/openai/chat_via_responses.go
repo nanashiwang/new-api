@@ -392,6 +392,12 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			if streamResp.Item == nil {
 				break
 			}
+			if streamResp.Item.Type == dto.BuildInCallWebSearchCall {
+				if streamResp.Type == dto.ResponsesOutputTypeItemDone {
+					usage.WebSearchRequests++
+				}
+				break
+			}
 			if streamResp.Item.Type != "function_call" {
 				break
 			}
@@ -473,6 +479,13 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 					}
 					if streamResp.Response.Usage.CompletionTokenDetails.ReasoningTokens != 0 {
 						usage.CompletionTokenDetails.ReasoningTokens = streamResp.Response.Usage.CompletionTokenDetails.ReasoningTokens
+					}
+				}
+				if usage.WebSearchRequests == 0 {
+					for _, output := range streamResp.Response.Output {
+						if output.Type == dto.BuildInCallWebSearchCall {
+							usage.WebSearchRequests++
+						}
 					}
 				}
 			}

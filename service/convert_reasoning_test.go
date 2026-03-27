@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -91,4 +92,67 @@ func TestGetClaudeToOpenAIReasoningMap_FallsBackToDefaultsOnInvalidOption(t *tes
 
 	mapping := getClaudeToOpenAIReasoningMap()
 	require.Equal(t, defaultClaudeToOpenAIReasoningMap, mapping)
+}
+
+func TestClaudeToOpenAIRequest_MapsClaudeWebSearchToolToWebSearchOptions(t *testing.T) {
+	userLocation, err := json.Marshal(map[string]any{
+		"approximate": map[string]any{
+			"timezone": "Asia/Shanghai",
+			"country":  "CN",
+			"city":     "Shanghai",
+		},
+	})
+	require.NoError(t, err)
+
+	request, err := ClaudeToOpenAIRequest(nil, dto.ClaudeRequest{
+		Model: "claude-3-7-sonnet",
+		Tools: []any{
+			dto.ClaudeWebSearchTool{
+				Type:    dto.ClaudeWebSearchTool20250305,
+				Name:    "web_search",
+				MaxUses: 10,
+				UserLocation: &dto.ClaudeWebSearchUserLocation{
+					Type:     "approximate",
+					Timezone: "Asia/Shanghai",
+					Country:  "CN",
+					City:     "Shanghai",
+				},
+			},
+		},
+	}, &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeOpenAI},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, request.WebSearchOptions)
+	require.Equal(t, "high", request.WebSearchOptions.SearchContextSize)
+	require.JSONEq(t, string(userLocation), string(request.WebSearchOptions.UserLocation))
+}
+
+func TestClaudeToOpenAIRequest_ParsesClaudeWebSearchToolFromRawMap(t *testing.T) {
+	request, err := ClaudeToOpenAIRequest(nil, dto.ClaudeRequest{
+		Model: "claude-3-7-sonnet",
+		Tools: []any{
+			map[string]any{
+				"type":     dto.ClaudeWebSearchTool20260209,
+				"name":     "web_search",
+				"max_uses": 1,
+			},
+		},
+	}, &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeOpenAI},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, request.WebSearchOptions)
+	require.Equal(t, "low", request.WebSearchOptions.SearchContextSize)
+}
+
+func TestBuildClaudeUsageFromOpenAIUsage_MapsWebSearchRequests(t *testing.T) {
+	usage := buildClaudeUsageFromOpenAIUsage(&dto.Usage{
+		PromptTokens:      12,
+		CompletionTokens:  34,
+		WebSearchRequests: 2,
+	})
+	require.NotNil(t, usage)
+	require.NotNil(t, usage.ServerToolUse)
+	require.Equal(t, 2, usage.ServerToolUse.WebSearchRequests)
 }

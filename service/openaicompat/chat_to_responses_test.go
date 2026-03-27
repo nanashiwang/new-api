@@ -57,6 +57,38 @@ func TestChatCompletionsRequestToResponsesRequest_MapsAssistantContentAndFields(
 	require.Equal(t, "done", assistantPart["text"])
 }
 
+func TestChatCompletionsRequestToResponsesRequest_AppendsBuiltInWebSearchTool(t *testing.T) {
+	req := &dto.GeneralOpenAIRequest{
+		Model: "gpt-4.1",
+		WebSearchOptions: &dto.WebSearchOptions{
+			SearchContextSize: "high",
+			UserLocation:      json.RawMessage(`{"approximate":{"timezone":"Asia/Shanghai","country":"CN"}}`),
+		},
+		Tools: []dto.ToolCallRequest{
+			{
+				Type: "function",
+				Function: dto.FunctionRequest{
+					Name:        "get_weather",
+					Description: "Get weather",
+					Parameters:  map[string]any{"type": "object"},
+				},
+			},
+		},
+	}
+
+	out, err := ChatCompletionsRequestToResponsesRequest(req)
+	require.NoError(t, err)
+
+	var tools []map[string]any
+	err = common.Unmarshal(out.Tools, &tools)
+	require.NoError(t, err)
+	require.Len(t, tools, 2)
+	require.Equal(t, "function", tools[0]["type"])
+	require.Equal(t, dto.BuildInToolWebSearch, tools[1]["type"])
+	require.Equal(t, "high", tools[1]["search_context_size"])
+	require.NotNil(t, tools[1]["user_location"])
+}
+
 func TestChatCompletionsRequestToResponsesRequest_OmitsEmptyInstructionsWithoutSystemMessages(t *testing.T) {
 	t.Parallel()
 

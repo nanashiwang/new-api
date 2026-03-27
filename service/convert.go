@@ -72,9 +72,9 @@ func ClaudeToOpenAIRequest(c *gin.Context, claudeRequest dto.ClaudeRequest, info
 	}
 
 	// Convert tools
-	tools, _ := common.Any2Type[[]dto.Tool](claudeRequest.Tools)
 	openAITools := make([]dto.ToolCallRequest, 0)
-	for _, claudeTool := range tools {
+	normalTools, webSearchTools := dto.ProcessTools(claudeRequest.GetTools())
+	for _, claudeTool := range normalTools {
 		openAITool := dto.ToolCallRequest{
 			Type: "function",
 			Function: dto.FunctionRequest{
@@ -86,6 +86,9 @@ func ClaudeToOpenAIRequest(c *gin.Context, claudeRequest dto.ClaudeRequest, info
 		openAITools = append(openAITools, openAITool)
 	}
 	openAIRequest.Tools = openAITools
+	if len(webSearchTools) > 0 {
+		openAIRequest.WebSearchOptions = convertClaudeWebSearchToolToOpenAIOptions(webSearchTools[0])
+	}
 
 	// Convert messages
 	openAIMessages := make([]dto.Message, 0)
@@ -278,6 +281,39 @@ func getClaudeToOpenAIReasoningMap() map[string]string {
 	return mapping
 }
 
+func convertClaudeWebSearchToolToOpenAIOptions(tool *dto.ClaudeWebSearchTool) *dto.WebSearchOptions {
+	if tool == nil {
+		return nil
+	}
+
+	options := &dto.WebSearchOptions{
+		SearchContextSize: claudeWebSearchMaxUsesToContextSize(tool.MaxUses),
+	}
+	if tool.UserLocation != nil {
+		userLocation := map[string]any{
+			"approximate": tool.UserLocation,
+		}
+		userLocationRaw, err := common.Marshal(userLocation)
+		if err == nil {
+			options.UserLocation = userLocationRaw
+		}
+	}
+	return options
+}
+
+func claudeWebSearchMaxUsesToContextSize(maxUses int) string {
+	switch maxUses {
+	case 1:
+		return "low"
+	case 5:
+		return "medium"
+	case 10:
+		return "high"
+	default:
+		return "medium"
+	}
+}
+
 func generateStopBlock(index int) *dto.ClaudeResponse {
 	return &dto.ClaudeResponse{
 		Type:  "content_block_stop",
@@ -453,13 +489,8 @@ func StreamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 			}
 			if oaiUsage != nil {
 				claudeResponses = append(claudeResponses, &dto.ClaudeResponse{
-					Type: "message_delta",
-					Usage: &dto.ClaudeUsage{
-						InputTokens:              oaiUsage.PromptTokens,
-						OutputTokens:             oaiUsage.CompletionTokens,
-						CacheCreationInputTokens: oaiUsage.PromptTokensDetails.CachedCreationTokens,
-						CacheReadInputTokens:     oaiUsage.PromptTokensDetails.CachedTokens,
-					},
+					Type:  "message_delta",
+					Usage: buildClaudeUsageFromOpenAIUsage(oaiUsage),
 					Delta: &dto.ClaudeMediaMessage{
 						StopReason: common.GetPointer[string](stopReasonOpenAI2Claude(info.FinishReason)),
 					},
@@ -481,13 +512,8 @@ func StreamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 			oaiUsage := info.ClaudeConvertInfo.Usage
 			if oaiUsage != nil {
 				claudeResponses = append(claudeResponses, &dto.ClaudeResponse{
-					Type: "message_delta",
-					Usage: &dto.ClaudeUsage{
-						InputTokens:              oaiUsage.PromptTokens,
-						OutputTokens:             oaiUsage.CompletionTokens,
-						CacheCreationInputTokens: oaiUsage.PromptTokensDetails.CachedCreationTokens,
-						CacheReadInputTokens:     oaiUsage.PromptTokensDetails.CachedTokens,
-					},
+					Type:  "message_delta",
+					Usage: buildClaudeUsageFromOpenAIUsage(oaiUsage),
 					Delta: &dto.ClaudeMediaMessage{
 						StopReason: common.GetPointer[string](stopReasonOpenAI2Claude(info.FinishReason)),
 					},
@@ -617,13 +643,8 @@ func StreamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 			}
 			if oaiUsage != nil {
 				claudeResponses = append(claudeResponses, &dto.ClaudeResponse{
-					Type: "message_delta",
-					Usage: &dto.ClaudeUsage{
-						InputTokens:              oaiUsage.PromptTokens,
-						OutputTokens:             oaiUsage.CompletionTokens,
-						CacheCreationInputTokens: oaiUsage.PromptTokensDetails.CachedCreationTokens,
-						CacheReadInputTokens:     oaiUsage.PromptTokensDetails.CachedTokens,
-					},
+					Type:  "message_delta",
+					Usage: buildClaudeUsageFromOpenAIUsage(oaiUsage),
 					Delta: &dto.ClaudeMediaMessage{
 						StopReason: common.GetPointer[string](stopReasonOpenAI2Claude(info.FinishReason)),
 					},
@@ -683,12 +704,18 @@ func buildClaudeUsageFromOpenAIUsage(usage *dto.Usage) *dto.ClaudeUsage {
 	if usage == nil {
 		return nil
 	}
-	return &dto.ClaudeUsage{
+	claudeUsage := &dto.ClaudeUsage{
 		InputTokens:              usage.PromptTokens,
 		OutputTokens:             usage.CompletionTokens,
 		CacheCreationInputTokens: usage.PromptTokensDetails.CachedCreationTokens,
 		CacheReadInputTokens:     usage.PromptTokensDetails.CachedTokens,
 	}
+	if usage.WebSearchRequests > 0 {
+		claudeUsage.ServerToolUse = &dto.ClaudeServerToolUse{
+			WebSearchRequests: usage.WebSearchRequests,
+		}
+	}
+	return claudeUsage
 }
 
 func stopReasonOpenAI2Claude(reason string) string {

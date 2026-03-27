@@ -168,6 +168,20 @@ type InputSchema struct {
 	Required   any    `json:"required,omitempty"`
 }
 
+const (
+	ClaudeWebSearchTool20250305 = "web_search_20250305"
+	ClaudeWebSearchTool20260209 = "web_search_20260209"
+)
+
+func IsClaudeWebSearchToolType(toolType string) bool {
+	switch strings.TrimSpace(toolType) {
+	case ClaudeWebSearchTool20250305, ClaudeWebSearchTool20260209:
+		return true
+	default:
+		return false
+	}
+}
+
 type ClaudeWebSearchTool struct {
 	Type         string                       `json:"type"`
 	Name         string                       `json:"name"`
@@ -417,6 +431,21 @@ func ProcessTools(tools []any) ([]*Tool, []*ClaudeWebSearchTool) {
 			normalTools = append(normalTools, &t)
 		case ClaudeWebSearchTool:
 			webSearchTools = append(webSearchTools, &t)
+		case map[string]any:
+			toolType := common.Interface2String(t["type"])
+			if IsClaudeWebSearchToolType(toolType) {
+				webSearchTool, err := common.Any2Type[ClaudeWebSearchTool](t)
+				if err == nil {
+					webSearchTools = append(webSearchTools, &webSearchTool)
+				}
+				continue
+			}
+			if _, hasInputSchema := t["input_schema"]; hasInputSchema {
+				normalTool, err := common.Any2Type[Tool](t)
+				if err == nil {
+					normalTools = append(normalTools, &normalTool)
+				}
+			}
 		default:
 			// 未知类型，跳过
 			continue

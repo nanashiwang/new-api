@@ -72,6 +72,25 @@ func convertChatResponseFormatToResponsesText(reqFormat *dto.ResponseFormat) jso
 	return textRaw
 }
 
+func buildResponsesWebSearchTool(options *dto.WebSearchOptions) map[string]any {
+	tool := map[string]any{
+		"type": dto.BuildInToolWebSearch,
+	}
+	if options == nil {
+		return tool
+	}
+	if size := strings.TrimSpace(options.SearchContextSize); size != "" {
+		tool["search_context_size"] = size
+	}
+	if len(options.UserLocation) > 0 {
+		var userLocation any
+		if err := common.Unmarshal(options.UserLocation, &userLocation); err == nil {
+			tool["user_location"] = userLocation
+		}
+	}
+	return tool
+}
+
 func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*dto.OpenAIResponsesRequest, error) {
 	if req == nil {
 		return nil, errors.New("request is nil")
@@ -287,6 +306,7 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 	var toolsRaw json.RawMessage
 	if req.Tools != nil {
 		tools := make([]map[string]any, 0, len(req.Tools))
+		hasBuiltInWebSearch := false
 		for _, tool := range req.Tools {
 			switch tool.Type {
 			case "function":
@@ -309,10 +329,18 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 				if len(m) == 0 {
 					m = map[string]any{"type": tool.Type}
 				}
+				if dto.IsBuiltInWebSearchToolType(common.Interface2String(m["type"])) {
+					hasBuiltInWebSearch = true
+				}
 				tools = append(tools, m)
 			}
 		}
+		if req.WebSearchOptions != nil && !hasBuiltInWebSearch {
+			tools = append(tools, buildResponsesWebSearchTool(req.WebSearchOptions))
+		}
 		toolsRaw, _ = common.Marshal(tools)
+	} else if req.WebSearchOptions != nil {
+		toolsRaw, _ = common.Marshal([]map[string]any{buildResponsesWebSearchTool(req.WebSearchOptions)})
 	}
 
 	var toolChoiceRaw json.RawMessage

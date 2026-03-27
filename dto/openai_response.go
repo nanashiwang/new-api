@@ -3,6 +3,7 @@ package dto
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/QuantumNous/new-api/types"
 )
@@ -224,6 +225,7 @@ type Usage struct {
 	CompletionTokens     int `json:"completion_tokens"`
 	TotalTokens          int `json:"total_tokens"`
 	PromptCacheHitTokens int `json:"prompt_cache_hit_tokens,omitempty"`
+	WebSearchRequests    int `json:"-"`
 
 	PromptTokensDetails    InputTokenDetails  `json:"prompt_tokens_details"`
 	CompletionTokenDetails OutputTokenDetails `json:"completion_tokens_details"`
@@ -358,6 +360,7 @@ type ResponsesReasoningSummaryPart struct {
 }
 
 const (
+	BuildInToolWebSearch        = "web_search"
 	BuildInToolWebSearchPreview = "web_search_preview"
 	BuildInToolFileSearch       = "file_search"
 )
@@ -365,6 +368,19 @@ const (
 const (
 	BuildInCallWebSearchCall = "web_search_call"
 )
+
+func NormalizeBuiltInToolType(toolType string) string {
+	switch strings.TrimSpace(toolType) {
+	case BuildInToolWebSearch, BuildInToolWebSearchPreview:
+		return BuildInToolWebSearchPreview
+	default:
+		return strings.TrimSpace(toolType)
+	}
+}
+
+func IsBuiltInWebSearchToolType(toolType string) bool {
+	return NormalizeBuiltInToolType(toolType) == BuildInToolWebSearchPreview
+}
 
 const (
 	ResponsesOutputTypeItemAdded = "response.output_item.added"

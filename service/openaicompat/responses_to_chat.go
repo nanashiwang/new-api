@@ -43,6 +43,10 @@ func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesRespons
 
 	var toolCalls []dto.ToolCallResponse
 	for _, out := range resp.Output {
+		if out.Type == dto.BuildInCallWebSearchCall {
+			usage.WebSearchRequests++
+			continue
+		}
 		if out.Type != "function_call" {
 			continue
 		}

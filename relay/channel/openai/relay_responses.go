@@ -53,14 +53,29 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 			usage.PromptTokensDetails.CachedTokens = responsesResponse.Usage.InputTokensDetails.CachedTokens
 		}
 	}
+	for _, output := range responsesResponse.Output {
+		if output.Type == dto.BuildInCallWebSearchCall {
+			usage.WebSearchRequests++
+		}
+	}
 	if info == nil || info.ResponsesUsageInfo == nil || info.ResponsesUsageInfo.BuiltInTools == nil {
 		return &usage, nil
 	}
+	if usage.WebSearchRequests > 0 {
+		if webSearchTool, exists := info.ResponsesUsageInfo.BuiltInTools[dto.NormalizeBuiltInToolType(dto.BuildInToolWebSearch)]; exists && webSearchTool != nil {
+			webSearchTool.CallCount = usage.WebSearchRequests
+		}
+	}
 	// 解析 Tools 用量
 	for _, tool := range responsesResponse.Tools {
-		buildToolinfo, ok := info.ResponsesUsageInfo.BuiltInTools[common.Interface2String(tool["type"])]
+		toolType := dto.NormalizeBuiltInToolType(common.Interface2String(tool["type"]))
+		buildToolinfo, ok := info.ResponsesUsageInfo.BuiltInTools[toolType]
 		if !ok || buildToolinfo == nil {
 			logger.LogError(c, fmt.Sprintf("BuiltInTools not found for tool type: %v", tool["type"]))
+			continue
+		}
+		if dto.IsBuiltInWebSearchToolType(toolType) {
+			buildToolinfo.CallCount = usage.WebSearchRequests
 			continue
 		}
 		buildToolinfo.CallCount++
@@ -116,8 +131,9 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 				if streamResponse.Item != nil {
 					switch streamResponse.Item.Type {
 					case dto.BuildInCallWebSearchCall:
+						usage.WebSearchRequests++
 						if info != nil && info.ResponsesUsageInfo != nil && info.ResponsesUsageInfo.BuiltInTools != nil {
-							if webSearchTool, exists := info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearchPreview]; exists && webSearchTool != nil {
+							if webSearchTool, exists := info.ResponsesUsageInfo.BuiltInTools[dto.NormalizeBuiltInToolType(dto.BuildInToolWebSearch)]; exists && webSearchTool != nil {
 								webSearchTool.CallCount++
 							}
 						}
