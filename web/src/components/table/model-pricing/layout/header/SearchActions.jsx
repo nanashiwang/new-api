@@ -99,8 +99,8 @@ const SearchActions = memo(
               />
             </div>
 
-            {/* 货币单位选择 */}
-            {showWithRecharge && (
+            {/* 货币单位选择：保留逻辑，仅通过样式隐藏 */}
+            <div style={{ display: 'none' }} aria-hidden='true'>
               <Select
                 value={currency}
                 onChange={setCurrency}
@@ -110,7 +110,7 @@ const SearchActions = memo(
                   { value: 'CUSTOM', label: t('自定义货币') },
                 ]}
               />
-            )}
+            </div>
 
             {/* 显示倍率开关 */}
             <div className='flex items-center gap-2'>

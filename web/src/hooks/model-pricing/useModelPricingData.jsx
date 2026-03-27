@@ -42,7 +42,7 @@ export const useModelPricingData = () => {
   const [pageSize, setPageSize] = useState(20);
   const [currentPage, setCurrentPage] = useState(1);
   const [currency, setCurrency] = useState('USD');
-  const [showWithRecharge, setShowWithRecharge] = useState(true);
+  const [showWithRecharge, setShowWithRecharge] = useState(false);
   const [tokenUnit, setTokenUnit] = useState('M');
   const [models, setModels] = useState([]);
   const [vendorsMap, setVendorsMap] = useState({});
@@ -73,20 +73,9 @@ export const useModelPricingData = () => {
     [statusState],
   );
 
-  // 默认货币与站点展示类型同步（USD/CNY），TOKENS 时仍允许切换视图内货币
-  const siteDisplayType = useMemo(
-    () => statusState?.status?.quota_display_type || 'USD',
-    [statusState],
-  );
   useEffect(() => {
-    if (
-      siteDisplayType === 'USD' ||
-      siteDisplayType === 'CNY' ||
-      siteDisplayType === 'CUSTOM'
-    ) {
-      setCurrency(siteDisplayType);
-    }
-  }, [siteDisplayType]);
+    setCurrency(showWithRecharge ? 'CNY' : 'USD');
+  }, [showWithRecharge]);
 
   const filteredModels = useMemo(() => {
     let result = models;

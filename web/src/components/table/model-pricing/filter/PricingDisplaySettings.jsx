@@ -98,7 +98,7 @@ const PricingDisplaySettings = ({
         t={t}
       />
 
-      {showWithRecharge && (
+      <div style={{ display: 'none' }} aria-hidden='true'>
         <SelectableButtonGroup
           title={t('货币单位')}
           items={currencyItems}
@@ -108,7 +108,7 @@ const PricingDisplaySettings = ({
           loading={loading}
           t={t}
         />
-      )}
+      </div>
     </div>
   );
 };
