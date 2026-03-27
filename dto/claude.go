@@ -27,6 +27,8 @@ type ClaudeMediaMessage struct {
 	Thinking     *string              `json:"thinking,omitempty"`
 	Signature    string               `json:"signature,omitempty"`
 	Delta        string               `json:"delta,omitempty"`
+	Citations    any                  `json:"citations,omitempty"`
+	ErrorCode    string               `json:"error_code,omitempty"`
 	CacheControl json.RawMessage      `json:"cache_control,omitempty"`
 	// tool_calls
 	Id        string `json:"id,omitempty"`
@@ -602,4 +604,23 @@ func (u *ClaudeUsage) GetCacheCreationTotalTokens() int {
 
 type ClaudeServerToolUse struct {
 	WebSearchRequests int `json:"web_search_requests"`
+}
+
+type ClaudeTextCitation struct {
+	Type             string `json:"type"`
+	URL              string `json:"url,omitempty"`
+	Title            string `json:"title,omitempty"`
+	CitedText        string `json:"cited_text,omitempty"`
+	EncryptedIndex   string `json:"encrypted_index,omitempty"`
+	EncryptedContent string `json:"encrypted_content,omitempty"`
+}
+
+type ClaudeWebSearchResult struct {
+	Type             string `json:"type"`
+	URL              string `json:"url,omitempty"`
+	Title            string `json:"title,omitempty"`
+	Text             string `json:"text,omitempty"`
+	PageAge          string `json:"page_age,omitempty"`
+	EncryptedIndex   string `json:"encrypted_index,omitempty"`
+	EncryptedContent string `json:"encrypted_content,omitempty"`
 }

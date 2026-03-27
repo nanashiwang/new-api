@@ -13,6 +13,7 @@ func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesRespons
 	}
 
 	text := ExtractOutputTextFromResponses(resp)
+	reasoningSummary := ExtractReasoningSummaryTextFromResponses(resp)
 
 	usage := &dto.Usage{}
 	if resp.Usage != nil {
@@ -74,8 +75,9 @@ func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesRespons
 	}
 
 	msg := dto.Message{
-		Role:    "assistant",
-		Content: text,
+		Role:             "assistant",
+		Content:          text,
+		ReasoningContent: reasoningSummary,
 	}
 	if len(toolCalls) > 0 {
 		msg.SetToolCalls(toolCalls)
@@ -134,4 +136,33 @@ func ExtractOutputTextFromResponses(resp *dto.OpenAIResponsesResponse) string {
 		}
 	}
 	return sb.String()
+}
+
+func ExtractReasoningSummaryTextFromResponses(resp *dto.OpenAIResponsesResponse) string {
+	if resp == nil || len(resp.Output) == 0 {
+		return ""
+	}
+
+	parts := make([]string, 0)
+	for _, out := range resp.Output {
+		if out.Type != "reasoning" || len(out.Summary) == 0 {
+			continue
+		}
+		var section strings.Builder
+		for _, summary := range out.Summary {
+			text := strings.TrimSpace(summary.Text)
+			if text == "" {
+				continue
+			}
+			if section.Len() > 0 {
+				section.WriteString("\n\n")
+			}
+			section.WriteString(text)
+		}
+		if section.Len() > 0 {
+			parts = append(parts, section.String())
+		}
+	}
+
+	return strings.Join(parts, "\n\n")
 }

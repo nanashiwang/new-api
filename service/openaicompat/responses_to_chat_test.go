@@ -35,3 +35,33 @@ func TestResponsesResponseToChatCompletionsResponse_CountsWebSearchCallsWithoutT
 	require.Nil(t, out.Choices[0].Message.ToolCalls)
 	require.Equal(t, "Found the result.", out.Choices[0].Message.StringContent())
 }
+
+func TestResponsesResponseToChatCompletionsResponse_PreservesReasoningSummary(t *testing.T) {
+	t.Parallel()
+
+	resp := &dto.OpenAIResponsesResponse{
+		Model:     "gpt-5",
+		CreatedAt: 1700000000,
+		Output: []dto.ResponsesOutput{
+			{
+				Type: "reasoning",
+				Summary: []dto.ResponsesReasoningSummaryPart{
+					{Type: "summary_text", Text: "Checked constraints."},
+					{Type: "summary_text", Text: "Picked the shortest plan."},
+				},
+			},
+			{
+				Type: "message",
+				Role: "assistant",
+				Content: []dto.ResponsesOutputContent{
+					{Type: "output_text", Text: "Here is the answer."},
+				},
+			},
+		},
+	}
+
+	out, _, err := ResponsesResponseToChatCompletionsResponse(resp, "chatcmpl-reasoning")
+	require.NoError(t, err)
+	require.Equal(t, "Here is the answer.", out.Choices[0].Message.StringContent())
+	require.Equal(t, "Checked constraints.\n\nPicked the shortest plan.", out.Choices[0].Message.ReasoningContent)
+}

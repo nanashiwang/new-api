@@ -336,27 +336,68 @@ type IncompleteDetails struct {
 }
 
 type ResponsesOutput struct {
-	Type      string                   `json:"type"`
-	ID        string                   `json:"id"`
-	Status    string                   `json:"status"`
-	Role      string                   `json:"role"`
-	Content   []ResponsesOutputContent `json:"content"`
-	Quality   string                   `json:"quality"`
-	Size      string                   `json:"size"`
-	CallId    string                   `json:"call_id,omitempty"`
-	Name      string                   `json:"name,omitempty"`
-	Arguments string                   `json:"arguments,omitempty"`
+	Type      string                          `json:"type"`
+	ID        string                          `json:"id"`
+	Status    string                          `json:"status"`
+	Role      string                          `json:"role"`
+	Content   []ResponsesOutputContent        `json:"content"`
+	Summary   []ResponsesReasoningSummaryPart `json:"summary,omitempty"`
+	Quality   string                          `json:"quality"`
+	Size      string                          `json:"size"`
+	CallId    string                          `json:"call_id,omitempty"`
+	Name      string                          `json:"name,omitempty"`
+	Arguments string                          `json:"arguments,omitempty"`
+	Action    json.RawMessage                 `json:"action,omitempty"`
 }
 
 type ResponsesOutputContent struct {
-	Type        string        `json:"type"`
-	Text        string        `json:"text"`
-	Annotations []interface{} `json:"annotations"`
+	Type        string                      `json:"type"`
+	Text        string                      `json:"text"`
+	Annotations []ResponsesOutputAnnotation `json:"annotations"`
 }
 
 type ResponsesReasoningSummaryPart struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
+}
+
+type ResponsesOutputAnnotation struct {
+	Type             string                           `json:"type"`
+	URL              string                           `json:"url,omitempty"`
+	Title            string                           `json:"title,omitempty"`
+	StartIndex       int                              `json:"start_index,omitempty"`
+	EndIndex         int                              `json:"end_index,omitempty"`
+	Text             string                           `json:"text,omitempty"`
+	URLCitation      *ResponsesURLCitationAnnotation  `json:"url_citation,omitempty"`
+	FileCitation     json.RawMessage                  `json:"file_citation,omitempty"`
+	FilePathCitation json.RawMessage                  `json:"file_path_citation,omitempty"`
+}
+
+type ResponsesURLCitationAnnotation struct {
+	URL              string `json:"url,omitempty"`
+	Title            string `json:"title,omitempty"`
+	StartIndex       int    `json:"start_index,omitempty"`
+	EndIndex         int    `json:"end_index,omitempty"`
+	Text             string `json:"text,omitempty"`
+	EncryptedIndex   string `json:"encrypted_index,omitempty"`
+	EncryptedContent string `json:"encrypted_content,omitempty"`
+}
+
+type ResponsesWebSearchAction struct {
+	Query   string                     `json:"query,omitempty"`
+	Queries []string                   `json:"queries,omitempty"`
+	Sources []ResponsesWebSearchSource `json:"sources,omitempty"`
+}
+
+type ResponsesWebSearchSource struct {
+	Type             string `json:"type,omitempty"`
+	URL              string `json:"url,omitempty"`
+	Title            string `json:"title,omitempty"`
+	Text             string `json:"text,omitempty"`
+	Snippet          string `json:"snippet,omitempty"`
+	PageAge          string `json:"page_age,omitempty"`
+	EncryptedIndex   string `json:"encrypted_index,omitempty"`
+	EncryptedContent string `json:"encrypted_content,omitempty"`
 }
 
 const (

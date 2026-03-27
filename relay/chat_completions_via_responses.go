@@ -202,6 +202,7 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 				return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 			}
 		}
+		service.SyncRelayReasoningEffortFromResponsesPayload(info, jsonData)
 
 		resp, err := adaptor.DoRequest(c, info, bytes.NewBuffer(jsonData))
 		if err != nil {

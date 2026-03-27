@@ -87,6 +87,11 @@ func TestChatCompletionsRequestToResponsesRequest_AppendsBuiltInWebSearchTool(t 
 	require.Equal(t, dto.BuildInToolWebSearch, tools[1]["type"])
 	require.Equal(t, "high", tools[1]["search_context_size"])
 	require.NotNil(t, tools[1]["user_location"])
+
+	var include []string
+	err = common.Unmarshal(out.Include, &include)
+	require.NoError(t, err)
+	require.Equal(t, []string{"web_search_call.action.sources"}, include)
 }
 
 func TestChatCompletionsRequestToResponsesRequest_OmitsEmptyInstructionsWithoutSystemMessages(t *testing.T) {
@@ -169,6 +174,22 @@ func TestChatToResponses_ToolStrictFieldPreserved(t *testing.T) {
 	// Second tool should NOT have strict field
 	_, hasStrict := tools[1]["strict"]
 	require.False(t, hasStrict, "strict field should be absent when not set")
+}
+
+func TestChatCompletionsRequestToResponsesRequest_UsesAutoReasoningSummary(t *testing.T) {
+	t.Parallel()
+
+	req := &dto.GeneralOpenAIRequest{
+		Model:           "gpt-5",
+		Messages:        []dto.Message{{Role: "user", Content: "hello"}},
+		ReasoningEffort: "high",
+	}
+
+	out, err := ChatCompletionsRequestToResponsesRequest(req)
+	require.NoError(t, err)
+	require.NotNil(t, out.Reasoning)
+	require.Equal(t, "high", out.Reasoning.Effort)
+	require.Equal(t, "auto", out.Reasoning.Summary)
 }
 
 func TestResponsesToChat_ToolCallsExtractedWithText(t *testing.T) {

@@ -11,8 +11,36 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func setConvertReasoningTestOptions(t *testing.T, updates map[string]string) {
+	t.Helper()
+
+	common.OptionMapRWMutex.Lock()
+	if common.OptionMap == nil {
+		common.OptionMap = make(map[string]string)
+	}
+	originalValues := make(map[string]string, len(updates))
+	originalExists := make(map[string]bool, len(updates))
+	for key, value := range updates {
+		originalValues[key], originalExists[key] = common.OptionMap[key]
+		common.OptionMap[key] = value
+	}
+	common.OptionMapRWMutex.Unlock()
+
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		for key := range updates {
+			if originalExists[key] {
+				common.OptionMap[key] = originalValues[key]
+			} else {
+				delete(common.OptionMap, key)
+			}
+		}
+		common.OptionMapRWMutex.Unlock()
+	})
+}
+
 func TestClaudeToOpenAIRequest_MapsThinkingBudgetToReasoningEffort(t *testing.T) {
-	setResponsesBridgeTestOptions(t, map[string]string{
+	setConvertReasoningTestOptions(t, map[string]string{
 		claudeToOpenAIReasoningMapOption: `{"low":"minimal","medium":"low","high":"high","max":"xhigh"}`,
 	})
 
@@ -31,7 +59,7 @@ func TestClaudeToOpenAIRequest_MapsThinkingBudgetToReasoningEffort(t *testing.T)
 }
 
 func TestClaudeToOpenAIRequest_UsesMaxBucketForLargeThinkingBudget(t *testing.T) {
-	setResponsesBridgeTestOptions(t, map[string]string{
+	setConvertReasoningTestOptions(t, map[string]string{
 		claudeToOpenAIReasoningMapOption: `{"low":"minimal","medium":"low","high":"medium","max":"xhigh"}`,
 	})
 
@@ -66,7 +94,7 @@ func TestClaudeToOpenAIRequest_PreservesOpenRouterReasoningPayload(t *testing.T)
 }
 
 func TestClaudeToOpenAIRequest_AddsThinkingSuffixAlongsideReasoningEffort(t *testing.T) {
-	setResponsesBridgeTestOptions(t, map[string]string{
+	setConvertReasoningTestOptions(t, map[string]string{
 		claudeToOpenAIReasoningMapOption: `{"low":"minimal","medium":"medium","high":"high","max":"xhigh"}`,
 	})
 
@@ -86,12 +114,40 @@ func TestClaudeToOpenAIRequest_AddsThinkingSuffixAlongsideReasoningEffort(t *tes
 }
 
 func TestGetClaudeToOpenAIReasoningMap_FallsBackToDefaultsOnInvalidOption(t *testing.T) {
-	setResponsesBridgeTestOptions(t, map[string]string{
+	setConvertReasoningTestOptions(t, map[string]string{
 		claudeToOpenAIReasoningMapOption: `not-json`,
 	})
 
 	mapping := getClaudeToOpenAIReasoningMap()
 	require.Equal(t, defaultClaudeToOpenAIReasoningMap, mapping)
+}
+
+func TestResponseOpenAI2Claude_PreservesReasoningContent(t *testing.T) {
+	response := &dto.OpenAITextResponse{
+		Id:      "chatcmpl-1",
+		Model:   "gpt-5",
+		Object:  "chat.completion",
+		Created: 1700000000,
+		Choices: []dto.OpenAITextResponseChoice{
+			{
+				Index: 0,
+				Message: dto.Message{
+					Role:             "assistant",
+					Content:          "Final answer",
+					ReasoningContent: "Reasoning summary",
+				},
+				FinishReason: "stop",
+			},
+		},
+	}
+
+	claudeResp := ResponseOpenAI2Claude(response, &relaycommon.RelayInfo{})
+	require.Len(t, claudeResp.Content, 2)
+	require.Equal(t, "thinking", claudeResp.Content[0].Type)
+	require.NotNil(t, claudeResp.Content[0].Thinking)
+	require.Equal(t, "Reasoning summary", *claudeResp.Content[0].Thinking)
+	require.Equal(t, "text", claudeResp.Content[1].Type)
+	require.Equal(t, "Final answer", claudeResp.Content[1].GetText())
 }
 
 func TestClaudeToOpenAIRequest_MapsClaudeWebSearchToolToWebSearchOptions(t *testing.T) {

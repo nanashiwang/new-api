@@ -91,6 +91,14 @@ func buildResponsesWebSearchTool(options *dto.WebSearchOptions) map[string]any {
 	return tool
 }
 
+func buildResponsesInclude(webSearchEnabled bool) json.RawMessage {
+	if !webSearchEnabled {
+		return nil
+	}
+	includeRaw, _ := common.Marshal([]string{"web_search_call.action.sources"})
+	return includeRaw
+}
+
 func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*dto.OpenAIResponsesRequest, error) {
 	if req == nil {
 		return nil, errors.New("request is nil")
@@ -304,6 +312,7 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 	}
 
 	var toolsRaw json.RawMessage
+	webSearchEnabled := false
 	if req.Tools != nil {
 		tools := make([]map[string]any, 0, len(req.Tools))
 		hasBuiltInWebSearch := false
@@ -337,9 +346,12 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 		}
 		if req.WebSearchOptions != nil && !hasBuiltInWebSearch {
 			tools = append(tools, buildResponsesWebSearchTool(req.WebSearchOptions))
+			hasBuiltInWebSearch = true
 		}
+		webSearchEnabled = hasBuiltInWebSearch
 		toolsRaw, _ = common.Marshal(tools)
 	} else if req.WebSearchOptions != nil {
+		webSearchEnabled = true
 		toolsRaw, _ = common.Marshal([]map[string]any{buildResponsesWebSearchTool(req.WebSearchOptions)})
 	}
 
@@ -415,6 +427,7 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 	out := &dto.OpenAIResponsesRequest{
 		Model:                req.Model,
 		Input:                inputRaw,
+		Include:              buildResponsesInclude(webSearchEnabled),
 		Instructions:         instructionsRaw,
 		MaxOutputTokens:      maxOutputTokens,
 		TopLogProbs:          topLogProbs,
@@ -438,7 +451,7 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 	if req.ReasoningEffort != "" {
 		out.Reasoning = &dto.Reasoning{
 			Effort:  req.ReasoningEffort,
-			Summary: "detailed",
+			Summary: "auto",
 		}
 	}
 
