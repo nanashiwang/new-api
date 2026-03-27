@@ -283,6 +283,7 @@ func SetApiRouter(router *gin.Engine) {
 			profitBoardRoute.PUT("/config", controller.SaveProfitBoardConfig)
 			profitBoardRoute.POST("/query", controller.QueryProfitBoard)
 			profitBoardRoute.POST("/export/csv", controller.ExportProfitBoardCSV)
+			profitBoardRoute.POST("/export/excel", controller.ExportProfitBoardExcel)
 		}
 		tokenRoute := apiRouter.Group("/token")
 		tokenRoute.Use(middleware.UserAuth())

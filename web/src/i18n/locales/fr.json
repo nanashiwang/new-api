@@ -3505,6 +3505,17 @@
     "总剩余额度": "Quota total restant",
     "暂无重置时间": "Pas encore d'heure de réinitialisation",
     "由 {{systemName}} 提供支持": "Fourni par {{systemName}}",
+    "请求 ID": "ID de requête",
+    "复制请求 ID": "Copier l'ID de requête",
+    "请求 ID 已复制到剪贴板": "ID de requête copié dans le presse-papiers",
+    "当前显示的是缓存结果，请重新刷新数据": "Vous consultez des résultats en cache. Actualisez les données.",
+    "当前结果已过期，请重新刷新数据": "Les résultats affichés sont obsolètes. Actualisez les données.",
+    "费用覆盖率": "Taux de couverture des coûts",
+    "缺失上游费用": "Coût amont manquant",
+    "命中本站模型价格": "Tarification du modèle local trouvée",
+    "缺失本站价格": "Tarification locale manquante",
+    "上游返回费用条数": "Lignes avec coût amont retourné",
+    "手动回退条数": "Lignes avec repli manuel",
     "进度条现在直接对应已用比例": "La barre de progression reflète désormais directement le ratio utilisé"
   }
 }

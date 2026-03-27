@@ -50,12 +50,19 @@ func GetProfitBoardOptions(c *gin.Context) {
 }
 
 func GetProfitBoardConfig(c *gin.Context) {
+	batches := make([]model.ProfitBoardBatch, 0)
+	if raw := strings.TrimSpace(c.Query("batches")); raw != "" {
+		if err := common.UnmarshalJsonStr(raw, &batches); err != nil {
+			common.ApiErrorMsg(c, "批次参数格式错误")
+			return
+		}
+	}
 	selection := model.ProfitBoardSelection{
 		ScopeType:  c.DefaultQuery("scope_type", model.ProfitBoardScopeChannel),
 		ChannelIDs: parseProfitBoardIntList(c.Query("channel_ids")),
 		Tags:       parseProfitBoardStringList(c.Query("tags")),
 	}
-	config, signature, err := model.GetProfitBoardConfig(selection)
+	config, signature, err := model.GetProfitBoardConfig(batches, selection)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -111,4 +118,20 @@ func ExportProfitBoardCSV(c *gin.Context) {
 	c.Header("Content-Type", "text/csv; charset=utf-8")
 	c.Header("Content-Disposition", "attachment; filename=\""+filename+"\"")
 	c.Data(http.StatusOK, "text/csv; charset=utf-8", data)
+}
+
+func ExportProfitBoardExcel(c *gin.Context) {
+	query := model.ProfitBoardQuery{}
+	if err := c.ShouldBindJSON(&query); err != nil {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	data, filename, err := model.ExportProfitBoardExcel(query)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.Header("Content-Type", "application/vnd.ms-excel; charset=utf-8")
+	c.Header("Content-Disposition", "attachment; filename=\""+filename+"\"")
+	c.Data(http.StatusOK, "application/vnd.ms-excel; charset=utf-8", data)
 }

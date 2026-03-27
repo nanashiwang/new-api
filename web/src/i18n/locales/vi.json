@@ -3890,6 +3890,16 @@
     "总剩余额度": "Tổng hạn mức còn lại",
     "暂无重置时间": "Chưa có thời điểm đặt lại",
     "由 {{systemName}} 提供支持": "Được cung cấp bởi {{systemName}}",
+    "复制请求 ID": "Sao chép ID yêu cầu",
+    "请求 ID 已复制到剪贴板": "Đã sao chép ID yêu cầu vào bộ nhớ tạm",
+    "当前显示的是缓存结果，请重新刷新数据": "Đang hiển thị kết quả từ bộ nhớ đệm. Hãy làm mới dữ liệu.",
+    "当前结果已过期，请重新刷新数据": "Kết quả hiện tại đã cũ. Hãy làm mới dữ liệu.",
+    "费用覆盖率": "Tỷ lệ bao phủ chi phí",
+    "缺失上游费用": "Thiếu chi phí upstream",
+    "命中本站模型价格": "Khớp giá model tại site",
+    "缺失本站价格": "Thiếu giá tại site",
+    "上游返回费用条数": "Số dòng có chi phí upstream trả về",
+    "手动回退条数": "Số dòng fallback thủ công",
     "进度条现在直接对应已用比例": "Thanh tiến độ giờ phản ánh trực tiếp tỷ lệ đã dùng"
   }
 }

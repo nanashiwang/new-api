@@ -3422,6 +3422,17 @@
     "总剩余额度": "Total remaining quota",
     "暂无重置时间": "No reset time yet",
     "由 {{systemName}} 提供支持": "Powered by {{systemName}}",
+    "请求 ID": "Request ID",
+    "复制请求 ID": "Copy Request ID",
+    "请求 ID 已复制到剪贴板": "Request ID copied to clipboard",
+    "当前显示的是缓存结果，请重新刷新数据": "You are viewing cached results. Refresh the data.",
+    "当前结果已过期，请重新刷新数据": "Results are stale. Refresh the data.",
+    "费用覆盖率": "Cost coverage",
+    "缺失上游费用": "Missing upstream cost",
+    "命中本站模型价格": "Matched site model pricing",
+    "缺失本站价格": "Missing site pricing",
+    "上游返回费用条数": "Rows with returned upstream cost",
+    "手动回退条数": "Rows with manual fallback",
     "进度条现在直接对应已用比例": "The progress bar now directly reflects the used ratio"
   }
 }

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -48,9 +49,12 @@ func TestSaveProfitBoardConfigUsesStableSignature(t *testing.T) {
 	setupProfitBoardTestDB(t)
 
 	payload := ProfitBoardConfigPayload{
-		Selection: ProfitBoardSelection{
-			ScopeType:  ProfitBoardScopeChannel,
-			ChannelIDs: []int{9, 3, 9, 1},
+		Batches: []ProfitBoardBatch{
+			{
+				Name:       "批次 A",
+				ScopeType:  ProfitBoardScopeChannel,
+				ChannelIDs: []int{9, 3, 9, 1},
+			},
 		},
 		Upstream: ProfitBoardTokenPricingConfig{
 			CostSource: ProfitBoardCostSourceReturnedFirst,
@@ -68,18 +72,21 @@ func TestSaveProfitBoardConfigUsesStableSignature(t *testing.T) {
 		t.Fatalf("unexpected signature: %s", signature)
 	}
 
-	loaded, loadedSignature, err := GetProfitBoardConfig(ProfitBoardSelection{
-		ScopeType:  ProfitBoardScopeChannel,
-		ChannelIDs: []int{3, 1, 9},
-	})
+	loaded, loadedSignature, err := GetProfitBoardConfig([]ProfitBoardBatch{
+		{
+			Name:       "批次 B",
+			ScopeType:  ProfitBoardScopeChannel,
+			ChannelIDs: []int{3, 1, 9},
+		},
+	}, ProfitBoardSelection{})
 	if err != nil {
 		t.Fatalf("GetProfitBoardConfig: %v", err)
 	}
 	if loadedSignature != signature {
 		t.Fatalf("signature mismatch: got=%s want=%s", loadedSignature, signature)
 	}
-	if len(loaded.Selection.ChannelIDs) != 3 {
-		t.Fatalf("expected 3 channel ids, got %d", len(loaded.Selection.ChannelIDs))
+	if len(loaded.Batches) != 1 || len(loaded.Batches[0].ChannelIDs) != 3 {
+		t.Fatalf("expected 1 batch with 3 channel ids, got %+v", loaded.Batches)
 	}
 }
 
@@ -125,9 +132,13 @@ func TestGenerateProfitBoardReportUsesReturnedAndManualFallback(t *testing.T) {
 	}
 
 	report, err := GenerateProfitBoardReport(ProfitBoardQuery{
-		Selection: ProfitBoardSelection{
-			ScopeType: ProfitBoardScopeTag,
-			Tags:      []string{"tag-a"},
+		Batches: []ProfitBoardBatch{
+			{
+				Id:        "batch-tag-a",
+				Name:      "Tag A",
+				ScopeType: ProfitBoardScopeTag,
+				Tags:      []string{"tag-a"},
+			},
 		},
 		Upstream: ProfitBoardTokenPricingConfig{
 			CostSource:         ProfitBoardCostSourceReturnedFirst,
@@ -179,5 +190,191 @@ func TestGenerateProfitBoardReportUsesReturnedAndManualFallback(t *testing.T) {
 	}
 	if len(report.DetailRows) != 2 {
 		t.Fatalf("expected 2 detail rows, got %d", len(report.DetailRows))
+	}
+	if len(report.BatchSummaries) != 1 || report.BatchSummaries[0].BatchName != "Tag A" {
+		t.Fatalf("unexpected batch summaries: %+v", report.BatchSummaries)
+	}
+	if report.DetailRows[0].BatchName == "" {
+		t.Fatalf("expected detail rows to include batch name")
+	}
+}
+
+func TestGetProfitBoardConfigUsesManualOnlyForNewSelection(t *testing.T) {
+	setupProfitBoardTestDB(t)
+
+	config, _, err := GetProfitBoardConfig([]ProfitBoardBatch{
+		{
+			Name:       "批次 A",
+			ScopeType:  ProfitBoardScopeChannel,
+			ChannelIDs: []int{1},
+		},
+	}, ProfitBoardSelection{})
+	if err != nil {
+		t.Fatalf("GetProfitBoardConfig: %v", err)
+	}
+	if config.Upstream.CostSource != ProfitBoardCostSourceManualOnly {
+		t.Fatalf("unexpected default cost source: %s", config.Upstream.CostSource)
+	}
+}
+
+func TestGetProfitBoardConfigKeepsLegacySavedDefault(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	record := ProfitBoardConfig{
+		SelectionType:      ProfitBoardScopeChannel,
+		SelectionSignature: "channel:1",
+		SelectionValues:    `[{"id":"batch-1","name":"批次 1","scope_type":"channel","channel_ids":[1]}]`,
+		UpstreamConfig:     `{}`,
+		SiteConfig:         `{"pricing_mode":"manual"}`,
+		CreatedAt:          1,
+		UpdatedAt:          1,
+	}
+	if err := db.Create(&record).Error; err != nil {
+		t.Fatalf("create config: %v", err)
+	}
+
+	config, _, err := GetProfitBoardConfig([]ProfitBoardBatch{
+		{
+			Name:       "批次 A",
+			ScopeType:  ProfitBoardScopeChannel,
+			ChannelIDs: []int{1},
+		},
+	}, ProfitBoardSelection{})
+	if err != nil {
+		t.Fatalf("GetProfitBoardConfig: %v", err)
+	}
+	if config.Upstream.CostSource != ProfitBoardCostSourceReturnedFirst {
+		t.Fatalf("unexpected saved default cost source: %s", config.Upstream.CostSource)
+	}
+}
+
+func TestGenerateProfitBoardReportTreatsZeroReturnedCostAsKnown(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	channel := Channel{Id: 1, Name: "alpha", Status: common.ChannelStatusEnabled}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+	logEntry := Log{
+		Id:               1,
+		Type:             LogTypeConsume,
+		CreatedAt:        1710000000,
+		ChannelId:        1,
+		ModelName:        "gpt-4o",
+		Quota:            1000000,
+		PromptTokens:     1000,
+		CompletionTokens: 500,
+		RequestId:        "req-zero",
+		Other:            `{"upstream_cost":0,"upstream_cost_reported":true,"upstream_cost_source":"provider"}`,
+	}
+	if err := db.Create(&logEntry).Error; err != nil {
+		t.Fatalf("seed log: %v", err)
+	}
+
+	report, err := GenerateProfitBoardReport(ProfitBoardQuery{
+		Batches: []ProfitBoardBatch{
+			{
+				Id:         "batch-1",
+				Name:       "批次 1",
+				ScopeType:  ProfitBoardScopeChannel,
+				ChannelIDs: []int{1},
+			},
+		},
+		Upstream: ProfitBoardTokenPricingConfig{
+			CostSource: ProfitBoardCostSourceReturnedOnly,
+		},
+		Site: ProfitBoardTokenPricingConfig{
+			PricingMode: ProfitBoardSitePricingManual,
+			InputPrice:  1,
+		},
+		StartTimestamp: 1709990000,
+		EndTimestamp:   1710010000,
+		Granularity:    "hour",
+	})
+	if err != nil {
+		t.Fatalf("GenerateProfitBoardReport: %v", err)
+	}
+
+	if report.Summary.KnownUpstreamCostCount != 1 {
+		t.Fatalf("unexpected known upstream count: %d", report.Summary.KnownUpstreamCostCount)
+	}
+	if report.Summary.ReturnedCostCount != 1 {
+		t.Fatalf("unexpected returned cost count: %d", report.Summary.ReturnedCostCount)
+	}
+	if report.Summary.UpstreamCostUSD != 0 {
+		t.Fatalf("unexpected upstream cost amount: %v", report.Summary.UpstreamCostUSD)
+	}
+	if len(report.DetailRows) != 1 || !report.DetailRows[0].UpstreamCostKnown {
+		t.Fatalf("expected detail row to keep zero returned cost as known: %+v", report.DetailRows)
+	}
+}
+
+func TestExportProfitBoardExcelIgnoresDetailLimitTruncation(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	channel := Channel{Id: 1, Name: "alpha", Status: common.ChannelStatusEnabled}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+	logs := []Log{
+		{
+			Id:               1,
+			Type:             LogTypeConsume,
+			CreatedAt:        1710000000,
+			ChannelId:        1,
+			ModelName:        "gpt-4o",
+			Quota:            1000000,
+			PromptTokens:     1000,
+			CompletionTokens: 500,
+			RequestId:        "req-1",
+			Other:            `{"upstream_cost":1,"upstream_cost_reported":true}`,
+		},
+		{
+			Id:               2,
+			Type:             LogTypeConsume,
+			CreatedAt:        1710003600,
+			ChannelId:        1,
+			ModelName:        "gpt-4o",
+			Quota:            1000000,
+			PromptTokens:     1000,
+			CompletionTokens: 500,
+			RequestId:        "req-2",
+			Other:            `{"upstream_cost":2,"upstream_cost_reported":true}`,
+		},
+	}
+	if err := db.Create(&logs).Error; err != nil {
+		t.Fatalf("seed logs: %v", err)
+	}
+
+	data, filename, err := ExportProfitBoardExcel(ProfitBoardQuery{
+		Batches: []ProfitBoardBatch{
+			{
+				Id:         "batch-1",
+				Name:       "批次 1",
+				ScopeType:  ProfitBoardScopeChannel,
+				ChannelIDs: []int{1},
+			},
+		},
+		Upstream: ProfitBoardTokenPricingConfig{
+			CostSource: ProfitBoardCostSourceReturnedOnly,
+		},
+		Site: ProfitBoardTokenPricingConfig{
+			PricingMode: ProfitBoardSitePricingManual,
+			InputPrice:  1,
+		},
+		StartTimestamp: 1709990000,
+		EndTimestamp:   1710010000,
+		Granularity:    "hour",
+		DetailLimit:    1,
+	})
+	if err != nil {
+		t.Fatalf("ExportProfitBoardExcel: %v", err)
+	}
+	if !strings.HasSuffix(filename, ".xls") {
+		t.Fatalf("unexpected filename: %s", filename)
+	}
+	content := string(data)
+	if !strings.Contains(content, "req-1") || !strings.Contains(content, "req-2") {
+		t.Fatalf("expected excel export to include all rows: %s", content)
 	}
 }

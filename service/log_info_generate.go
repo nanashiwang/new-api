@@ -83,30 +83,30 @@ func normalizeUsageCostUSD(cost any) (float64, bool) {
 	case nil:
 		return 0, false
 	case float64:
-		return value, value > 0
+		return value, value >= 0
 	case float32:
-		return float64(value), value > 0
+		return float64(value), value >= 0
 	case int:
-		return float64(value), value > 0
+		return float64(value), value >= 0
 	case int64:
-		return float64(value), value > 0
+		return float64(value), value >= 0
 	case int32:
-		return float64(value), value > 0
+		return float64(value), value >= 0
 	case uint:
-		return float64(value), value > 0
+		return float64(value), value >= 0
 	case uint64:
-		return float64(value), value > 0
+		return float64(value), value >= 0
 	case uint32:
-		return float64(value), value > 0
+		return float64(value), value >= 0
 	case string:
 		parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
-		if err != nil || parsed <= 0 {
+		if err != nil || parsed < 0 {
 			return 0, false
 		}
 		return parsed, true
 	default:
 		parsed, err := strconv.ParseFloat(strings.TrimSpace(common.Interface2String(value)), 64)
-		if err != nil || parsed <= 0 {
+		if err != nil || parsed < 0 {
 			return 0, false
 		}
 		return parsed, true
@@ -122,6 +122,7 @@ func AppendUsageCost(other map[string]interface{}, cost any) {
 		return
 	}
 	other["upstream_cost"] = costUSD
+	other["upstream_cost_reported"] = true
 	other["upstream_cost_currency"] = "USD"
 	other["upstream_cost_source"] = "provider"
 }
