@@ -78,7 +78,7 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	var responseBody []byte
 	switch info.RelayFormat {
 	case types.RelayFormatClaude:
-		claudeResp := service.ResponseOpenAI2Claude(chatResp, info)
+		claudeResp := service.ResponseOpenAIResponses2Claude(&responsesResp, chatId)
 		responseBody, err = common.Marshal(claudeResp)
 	case types.RelayFormatGemini:
 		geminiResp := service.ResponseOpenAI2Gemini(chatResp, info)
@@ -97,6 +97,9 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	if resp == nil || resp.Body == nil {
 		return nil, types.NewOpenAIError(fmt.Errorf("invalid response"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+	}
+	if info != nil && info.RelayFormat == types.RelayFormatClaude {
+		return OaiResponsesToClaudeStreamHandler(c, info, resp)
 	}
 
 	defer service.CloseResponseBodyGracefully(resp)
