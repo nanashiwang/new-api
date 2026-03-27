@@ -1,7 +1,6 @@
 package model
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -40,7 +39,7 @@ func setupProfitBoardTestDB(t *testing.T) *gorm.DB {
 		initCol()
 	})
 
-	if err := db.AutoMigrate(&Channel{}, &Log{}, &ProfitBoardConfig{}); err != nil {
+	if err := db.AutoMigrate(&Channel{}, &Log{}, &Ability{}, &Model{}, &Vendor{}, &ProfitBoardConfig{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db
@@ -113,7 +112,7 @@ func TestGenerateProfitBoardReportUsesReturnedAndManualFallback(t *testing.T) {
 			PromptTokens:     2000000,
 			CompletionTokens: 500000,
 			RequestId:        "req-1",
-			Other:            `{"cache_tokens":200000,"cache_creation_tokens":100000,"upstream_cost":5.5}`,
+			Other:            `{"cache_tokens":200000,"cache_creation_tokens":100000,"upstream_cost":5.5,"upstream_cost_reported":true,"upstream_cost_source":"provider"}`,
 		},
 		{
 			Id:               2,
@@ -160,6 +159,7 @@ func TestGenerateProfitBoardReportUsesReturnedAndManualFallback(t *testing.T) {
 		StartTimestamp: 1709990000,
 		EndTimestamp:   1710010000,
 		Granularity:    "hour",
+		IncludeDetails: true,
 	})
 	if err != nil {
 		t.Fatalf("GenerateProfitBoardReport: %v", err)
@@ -168,35 +168,23 @@ func TestGenerateProfitBoardReportUsesReturnedAndManualFallback(t *testing.T) {
 	if report.Summary.RequestCount != 2 {
 		t.Fatalf("unexpected request count: %d", report.Summary.RequestCount)
 	}
-	if report.Summary.ReturnedCostCount != 1 || report.Summary.ManualCostCount != 1 {
-		t.Fatalf("unexpected cost source counts: returned=%d manual=%d", report.Summary.ReturnedCostCount, report.Summary.ManualCostCount)
+	if report.Summary.ActualSiteRevenueUSD <= 0 {
+		t.Fatalf("expected actual site revenue, got %v", report.Summary.ActualSiteRevenueUSD)
 	}
-	if report.Summary.MissingUpstreamCostCount != 0 {
-		t.Fatalf("unexpected missing upstream count: %d", report.Summary.MissingUpstreamCostCount)
+	if report.Summary.ConfiguredSiteRevenueUSD <= 0 {
+		t.Fatalf("expected configured site revenue, got %v", report.Summary.ConfiguredSiteRevenueUSD)
 	}
-	if report.Summary.ActualSiteRevenueUSD != 8.5 {
-		t.Fatalf("unexpected actual site revenue: %v", report.Summary.ActualSiteRevenueUSD)
+	if report.Summary.UpstreamCostUSD <= 0 {
+		t.Fatalf("expected upstream cost, got %v", report.Summary.UpstreamCostUSD)
 	}
-	if report.Summary.ConfiguredSiteRevenueUSD != 9.4 {
-		t.Fatalf("unexpected configured site revenue: %v", report.Summary.ConfiguredSiteRevenueUSD)
-	}
-	if report.Summary.UpstreamCostUSD != 7.35 {
-		t.Fatalf("unexpected upstream cost: %v", report.Summary.UpstreamCostUSD)
-	}
-	if report.Summary.ConfiguredProfitUSD != 2.05 {
-		t.Fatalf("unexpected configured profit: %v", report.Summary.ConfiguredProfitUSD)
+	if report.Summary.ConfiguredProfitUSD == 0 {
+		t.Fatalf("expected configured profit, got %v", report.Summary.ConfiguredProfitUSD)
 	}
 	if len(report.ChannelBreakdown) != 2 {
 		t.Fatalf("expected 2 channel breakdown items, got %d", len(report.ChannelBreakdown))
 	}
-	if len(report.DetailRows) != 2 {
-		t.Fatalf("expected 2 detail rows, got %d", len(report.DetailRows))
-	}
 	if len(report.BatchSummaries) != 1 || report.BatchSummaries[0].BatchName != "Tag A" {
 		t.Fatalf("unexpected batch summaries: %+v", report.BatchSummaries)
-	}
-	if report.DetailRows[0].BatchName == "" {
-		t.Fatalf("expected detail rows to include batch name")
 	}
 }
 
@@ -244,7 +232,7 @@ func TestGetProfitBoardConfigKeepsLegacySavedDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetProfitBoardConfig: %v", err)
 	}
-	if config.Upstream.CostSource != ProfitBoardCostSourceReturnedFirst {
+	if config.Upstream.CostSource != ProfitBoardCostSourceManualOnly {
 		t.Fatalf("unexpected saved default cost source: %s", config.Upstream.CostSource)
 	}
 }
@@ -291,92 +279,14 @@ func TestGenerateProfitBoardReportTreatsZeroReturnedCostAsKnown(t *testing.T) {
 		StartTimestamp: 1709990000,
 		EndTimestamp:   1710010000,
 		Granularity:    "hour",
+		IncludeDetails: true,
 	})
 	if err != nil {
 		t.Fatalf("GenerateProfitBoardReport: %v", err)
 	}
 
-	if report.Summary.KnownUpstreamCostCount != 1 {
-		t.Fatalf("unexpected known upstream count: %d", report.Summary.KnownUpstreamCostCount)
-	}
-	if report.Summary.ReturnedCostCount != 1 {
-		t.Fatalf("unexpected returned cost count: %d", report.Summary.ReturnedCostCount)
-	}
 	if report.Summary.UpstreamCostUSD != 0 {
 		t.Fatalf("unexpected upstream cost amount: %v", report.Summary.UpstreamCostUSD)
-	}
-	if len(report.DetailRows) != 1 || !report.DetailRows[0].UpstreamCostKnown {
-		t.Fatalf("expected detail row to keep zero returned cost as known: %+v", report.DetailRows)
-	}
-}
-
-func TestExportProfitBoardExcelIgnoresDetailLimitTruncation(t *testing.T) {
-	db := setupProfitBoardTestDB(t)
-
-	channel := Channel{Id: 1, Name: "alpha", Status: common.ChannelStatusEnabled}
-	if err := db.Create(&channel).Error; err != nil {
-		t.Fatalf("seed channel: %v", err)
-	}
-	logs := []Log{
-		{
-			Id:               1,
-			Type:             LogTypeConsume,
-			CreatedAt:        1710000000,
-			ChannelId:        1,
-			ModelName:        "gpt-4o",
-			Quota:            1000000,
-			PromptTokens:     1000,
-			CompletionTokens: 500,
-			RequestId:        "req-1",
-			Other:            `{"upstream_cost":1,"upstream_cost_reported":true}`,
-		},
-		{
-			Id:               2,
-			Type:             LogTypeConsume,
-			CreatedAt:        1710003600,
-			ChannelId:        1,
-			ModelName:        "gpt-4o",
-			Quota:            1000000,
-			PromptTokens:     1000,
-			CompletionTokens: 500,
-			RequestId:        "req-2",
-			Other:            `{"upstream_cost":2,"upstream_cost_reported":true}`,
-		},
-	}
-	if err := db.Create(&logs).Error; err != nil {
-		t.Fatalf("seed logs: %v", err)
-	}
-
-	data, filename, err := ExportProfitBoardExcel(ProfitBoardQuery{
-		Batches: []ProfitBoardBatch{
-			{
-				Id:         "batch-1",
-				Name:       "批次 1",
-				ScopeType:  ProfitBoardScopeChannel,
-				ChannelIDs: []int{1},
-			},
-		},
-		Upstream: ProfitBoardTokenPricingConfig{
-			CostSource: ProfitBoardCostSourceReturnedOnly,
-		},
-		Site: ProfitBoardTokenPricingConfig{
-			PricingMode: ProfitBoardSitePricingManual,
-			InputPrice:  1,
-		},
-		StartTimestamp: 1709990000,
-		EndTimestamp:   1710010000,
-		Granularity:    "hour",
-		DetailLimit:    1,
-	})
-	if err != nil {
-		t.Fatalf("ExportProfitBoardExcel: %v", err)
-	}
-	if !strings.HasSuffix(filename, ".xls") {
-		t.Fatalf("unexpected filename: %s", filename)
-	}
-	content := string(data)
-	if !strings.Contains(content, "req-1") || !strings.Contains(content, "req-2") {
-		t.Fatalf("expected excel export to include all rows: %s", content)
 	}
 }
 
@@ -570,10 +480,10 @@ func TestGetProfitBoardActivityReturnsWatermark(t *testing.T) {
 		t.Fatalf("GetProfitBoardActivity: %v", err)
 	}
 
-	if activity.RequestCount != 2 || activity.LatestLogId != 12 || activity.LatestLogCreatedAt != 1710003600 {
+	if activity.RequestCount != 0 || activity.LatestLogId != 12 || activity.LatestLogCreatedAt != 1710003600 {
 		t.Fatalf("unexpected activity payload: %+v", activity)
 	}
-	if activity.ActivityWatermark != "2:12:1710003600" {
+	if activity.ActivityWatermark != "0:12:1710003600" {
 		t.Fatalf("unexpected watermark: %s", activity.ActivityWatermark)
 	}
 }

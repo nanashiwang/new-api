@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"net/http"
 	"strconv"
 	"strings"
 
@@ -118,6 +117,20 @@ func QueryProfitBoard(c *gin.Context) {
 	common.ApiSuccess(c, report)
 }
 
+func QueryProfitBoardDetails(c *gin.Context) {
+	query := model.ProfitBoardDetailQuery{}
+	if err := c.ShouldBindJSON(&query); err != nil {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	page, err := model.QueryProfitBoardDetails(query)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, page)
+}
+
 func GetProfitBoardActivity(c *gin.Context) {
 	query := model.ProfitBoardQuery{}
 	if err := c.ShouldBindJSON(&query); err != nil {
@@ -130,36 +143,4 @@ func GetProfitBoardActivity(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, activity)
-}
-
-func ExportProfitBoardCSV(c *gin.Context) {
-	query := model.ProfitBoardQuery{}
-	if err := c.ShouldBindJSON(&query); err != nil {
-		common.ApiErrorMsg(c, "参数错误")
-		return
-	}
-	data, filename, err := model.ExportProfitBoardCSV(query)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	c.Header("Content-Type", "text/csv; charset=utf-8")
-	c.Header("Content-Disposition", "attachment; filename=\""+filename+"\"")
-	c.Data(http.StatusOK, "text/csv; charset=utf-8", data)
-}
-
-func ExportProfitBoardExcel(c *gin.Context) {
-	query := model.ProfitBoardQuery{}
-	if err := c.ShouldBindJSON(&query); err != nil {
-		common.ApiErrorMsg(c, "参数错误")
-		return
-	}
-	data, filename, err := model.ExportProfitBoardExcel(query)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	c.Header("Content-Type", "application/vnd.ms-excel; charset=utf-8")
-	c.Header("Content-Disposition", "attachment; filename=\""+filename+"\"")
-	c.Data(http.StatusOK, "application/vnd.ms-excel; charset=utf-8", data)
 }
