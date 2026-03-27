@@ -31,6 +31,7 @@ import {
   getSystemName,
   getOAuthProviderIcon,
   setUserData,
+  getSafeLoginRedirectPath,
   onGitHubOAuthClicked,
   onDiscordOAuthClicked,
   onOIDCClicked,
@@ -115,6 +116,7 @@ const LoginForm = () => {
 
   const logo = getLogo();
   const systemName = getSystemName();
+  const navigateToPostLogin = () => navigate(getSafeLoginRedirectPath());
 
   let affCode = new URLSearchParams(window.location.search).get('aff');
   if (affCode) {
@@ -255,7 +257,7 @@ const LoginForm = () => {
               centered: true,
             });
           }
-          navigate('/console');
+          navigateToPostLogin();
         } else {
           showError(message);
         }
@@ -456,7 +458,7 @@ const LoginForm = () => {
         setUserData(finish.data);
         updateAPI();
         showSuccess('登录成功！');
-        navigate('/console');
+        navigateToPostLogin();
       } else {
         showError(finish.message || 'Passkey 登录失败，请重试');
       }
@@ -491,7 +493,7 @@ const LoginForm = () => {
     setUserData(data);
     updateAPI();
     showSuccess('登录成功！');
-    navigate('/console');
+    navigateToPostLogin();
   };
 
   // 返回登录页面
@@ -958,8 +960,7 @@ const LoginForm = () => {
         style={{ top: '50%', left: '-120px' }}
       />
       <div className='w-full max-w-sm mt-[60px]'>
-        {showEmailLogin ||
-        !hasOAuthLoginOptions
+        {showEmailLogin || !hasOAuthLoginOptions
           ? renderEmailLoginForm()
           : renderOAuthOptions()}
         {renderWeChatLoginModal()}

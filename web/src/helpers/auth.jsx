@@ -32,11 +32,22 @@ export function authHeader() {
   }
 }
 
+export function getSafeLoginRedirectPath(search, fallback = '/console') {
+  let rawSearch = search;
+  if (typeof rawSearch !== 'string') {
+    rawSearch = typeof window !== 'undefined' ? window.location.search : '';
+  }
+  const next = new URLSearchParams(rawSearch).get('next');
+  const isSafeInternalPath =
+    next && next.startsWith('/') && !next.startsWith('//');
+  return isSafeInternalPath ? next : fallback;
+}
+
 export const AuthRedirect = ({ children }) => {
   const user = localStorage.getItem('user');
 
   if (user) {
-    return <Navigate to='/console' replace />;
+    return <Navigate to={getSafeLoginRedirectPath()} replace />;
   }
 
   return children;
