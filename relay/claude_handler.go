@@ -112,6 +112,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	if !model_setting.GetGlobalSettings().PassThroughRequestEnabled &&
 		!info.ChannelSetting.PassThroughBodyEnabled &&
 		shouldUseResponsesBridgeForClaude(info) {
+		webSearchRequested := claudeRequestUsesWebSearch(request)
 		openAIRequest, convErr := service.ClaudeToOpenAIRequest(c, *request, info)
 		if convErr != nil {
 			return types.NewError(convErr, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
@@ -119,7 +120,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 
 		usage, newApiErr := chatCompletionsViaResponses(c, info, adaptor, openAIRequest)
 		if newApiErr != nil {
-			if !shouldFallbackToNativeChat(c) {
+			if webSearchRequested || !shouldFallbackToNativeChat(c) {
 				return newApiErr
 			}
 		} else {
@@ -194,4 +195,12 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 
 	service.PostClaudeConsumeQuota(c, info, usage.(*dto.Usage))
 	return nil
+}
+
+func claudeRequestUsesWebSearch(request *dto.ClaudeRequest) bool {
+	if request == nil {
+		return false
+	}
+	_, webSearchTools := dto.ProcessTools(request.GetTools())
+	return len(webSearchTools) > 0
 }

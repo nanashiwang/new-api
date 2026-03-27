@@ -805,6 +805,114 @@ type WebSearchOptions struct {
 	UserLocation      json.RawMessage `json:"user_location,omitempty"`
 }
 
+func buildApproximateWebSearchLocationFields(location *ClaudeWebSearchUserLocation) map[string]any {
+	if location == nil {
+		return nil
+	}
+
+	fields := make(map[string]any, 4)
+	if timezone := strings.TrimSpace(location.Timezone); timezone != "" {
+		fields["timezone"] = timezone
+	}
+	if country := strings.TrimSpace(location.Country); country != "" {
+		fields["country"] = country
+	}
+	if region := strings.TrimSpace(location.Region); region != "" {
+		fields["region"] = region
+	}
+	if city := strings.TrimSpace(location.City); city != "" {
+		fields["city"] = city
+	}
+	return fields
+}
+
+func BuildChatWebSearchUserLocation(location *ClaudeWebSearchUserLocation) json.RawMessage {
+	if location == nil {
+		return nil
+	}
+
+	payload := map[string]any{
+		"type": "approximate",
+	}
+	if approximate := buildApproximateWebSearchLocationFields(location); len(approximate) > 0 {
+		payload["approximate"] = approximate
+	}
+
+	raw, err := common.Marshal(payload)
+	if err != nil {
+		return nil
+	}
+	return raw
+}
+
+func BuildResponsesWebSearchUserLocation(location *ClaudeWebSearchUserLocation) json.RawMessage {
+	if location == nil {
+		return nil
+	}
+
+	payload := buildApproximateWebSearchLocationFields(location)
+	if payload == nil {
+		payload = make(map[string]any, 1)
+	}
+	payload["type"] = "approximate"
+
+	raw, err := common.Marshal(payload)
+	if err != nil {
+		return nil
+	}
+	return raw
+}
+
+func ParseApproximateWebSearchUserLocation(raw json.RawMessage) *ClaudeWebSearchUserLocation {
+	if len(raw) == 0 {
+		return nil
+	}
+
+	var payload map[string]any
+	if err := common.Unmarshal(raw, &payload); err != nil {
+		return nil
+	}
+
+	location := &ClaudeWebSearchUserLocation{Type: "approximate"}
+	assignLocationFields := func(source map[string]any) {
+		if source == nil {
+			return
+		}
+		if timezone := common.Interface2String(source["timezone"]); timezone != "" {
+			location.Timezone = timezone
+		}
+		if country := common.Interface2String(source["country"]); country != "" {
+			location.Country = country
+		}
+		if region := common.Interface2String(source["region"]); region != "" {
+			location.Region = region
+		}
+		if city := common.Interface2String(source["city"]); city != "" {
+			location.City = city
+		}
+	}
+
+	if locationType := strings.TrimSpace(common.Interface2String(payload["type"])); locationType != "" {
+		location.Type = locationType
+	}
+	if approximate, ok := payload["approximate"].(map[string]any); ok {
+		assignLocationFields(approximate)
+		if location.Type == "" {
+			location.Type = strings.TrimSpace(common.Interface2String(approximate["type"]))
+		}
+	} else {
+		assignLocationFields(payload)
+	}
+	if location.Type == "" {
+		location.Type = "approximate"
+	}
+
+	if location.Timezone == "" && location.Country == "" && location.Region == "" && location.City == "" && location.Type == "" {
+		return nil
+	}
+	return location
+}
+
 // https://platform.openai.com/docs/api-reference/responses/create
 type OpenAIResponsesRequest struct {
 	Model   string          `json:"model"`

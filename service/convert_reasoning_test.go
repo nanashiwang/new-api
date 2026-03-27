@@ -113,6 +113,18 @@ func TestClaudeToOpenAIRequest_AddsThinkingSuffixAlongsideReasoningEffort(t *tes
 	require.Equal(t, "medium", request.ReasoningEffort)
 }
 
+func TestClaudeToOpenAIRequest_MapsOutputConfigEffortToReasoningEffort(t *testing.T) {
+	request, err := ClaudeToOpenAIRequest(nil, dto.ClaudeRequest{
+		Model:        "claude-4.5",
+		OutputConfig: json.RawMessage(`{"effort":"max"}`),
+	}, &relaycommon.RelayInfo{
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeOpenAI},
+		OriginModelName: "gpt-5",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "xhigh", request.ReasoningEffort)
+}
+
 func TestGetClaudeToOpenAIReasoningMap_FallsBackToDefaultsOnInvalidOption(t *testing.T) {
 	setConvertReasoningTestOptions(t, map[string]string{
 		claudeToOpenAIReasoningMapOption: `not-json`,
@@ -152,6 +164,7 @@ func TestResponseOpenAI2Claude_PreservesReasoningContent(t *testing.T) {
 
 func TestClaudeToOpenAIRequest_MapsClaudeWebSearchToolToWebSearchOptions(t *testing.T) {
 	userLocation, err := json.Marshal(map[string]any{
+		"type": "approximate",
 		"approximate": map[string]any{
 			"timezone": "Asia/Shanghai",
 			"country":  "CN",

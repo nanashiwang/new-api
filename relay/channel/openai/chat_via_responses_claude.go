@@ -3,6 +3,7 @@ package openai
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -50,6 +51,10 @@ func OaiResponsesToClaudeStreamHandler(c *gin.Context, info *relaycommon.RelayIn
 		case "response.completed":
 			completedResp = streamResp.Response
 			if completedResp != nil {
+				if strings.EqualFold(strings.TrimSpace(completedResp.Status), "incomplete") {
+					streamErr = newResponsesIncompleteError(completedResp)
+					return false
+				}
 				if completedResp.ID != "" {
 					upstreamRespID = completedResp.ID
 				}
@@ -57,14 +62,8 @@ func OaiResponsesToClaudeStreamHandler(c *gin.Context, info *relaycommon.RelayIn
 					model = completedResp.Model
 				}
 			}
-		case "response.error", "response.failed":
-			if streamResp.Response != nil {
-				if oaiErr := streamResp.Response.GetOpenAIError(); oaiErr != nil && oaiErr.Type != "" {
-					streamErr = types.WithOpenAIError(*oaiErr, http.StatusInternalServerError)
-					return false
-				}
-			}
-			streamErr = types.NewOpenAIError(fmt.Errorf("responses stream error: %s", streamResp.Type), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+		case "error", "response.error", "response.failed", "response.incomplete":
+			streamErr = newResponsesStreamEventError(streamResp)
 			return false
 		}
 		return true

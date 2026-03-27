@@ -79,31 +79,9 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 
 		// 处理 user_location
 		if textRequest.WebSearchOptions.UserLocation != nil {
-			anthropicUserLocation := &dto.ClaudeWebSearchUserLocation{
-				Type: "approximate", // 固定为 "approximate"
+			if anthropicUserLocation := dto.ParseApproximateWebSearchUserLocation(textRequest.WebSearchOptions.UserLocation); anthropicUserLocation != nil {
+				webSearchTool.UserLocation = anthropicUserLocation
 			}
-
-			// 解析 UserLocation JSON
-			var userLocationMap map[string]interface{}
-			if err := json.Unmarshal(textRequest.WebSearchOptions.UserLocation, &userLocationMap); err == nil {
-				// 检查是否有 approximate 字段
-				if approximateData, ok := userLocationMap["approximate"].(map[string]interface{}); ok {
-					if timezone, ok := approximateData["timezone"].(string); ok && timezone != "" {
-						anthropicUserLocation.Timezone = timezone
-					}
-					if country, ok := approximateData["country"].(string); ok && country != "" {
-						anthropicUserLocation.Country = country
-					}
-					if region, ok := approximateData["region"].(string); ok && region != "" {
-						anthropicUserLocation.Region = region
-					}
-					if city, ok := approximateData["city"].(string); ok && city != "" {
-						anthropicUserLocation.City = city
-					}
-				}
-			}
-
-			webSearchTool.UserLocation = anthropicUserLocation
 		}
 
 		// 处理 search_context_size 转换为 max_uses

@@ -62,7 +62,7 @@ func TestChatCompletionsRequestToResponsesRequest_AppendsBuiltInWebSearchTool(t 
 		Model: "gpt-4.1",
 		WebSearchOptions: &dto.WebSearchOptions{
 			SearchContextSize: "high",
-			UserLocation:      json.RawMessage(`{"approximate":{"timezone":"Asia/Shanghai","country":"CN"}}`),
+			UserLocation:      json.RawMessage(`{"type":"approximate","approximate":{"timezone":"Asia/Shanghai","country":"CN"}}`),
 		},
 		Tools: []dto.ToolCallRequest{
 			{
@@ -87,6 +87,11 @@ func TestChatCompletionsRequestToResponsesRequest_AppendsBuiltInWebSearchTool(t 
 	require.Equal(t, dto.BuildInToolWebSearch, tools[1]["type"])
 	require.Equal(t, "high", tools[1]["search_context_size"])
 	require.NotNil(t, tools[1]["user_location"])
+	userLocation, ok := tools[1]["user_location"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "approximate", userLocation["type"])
+	require.Equal(t, "Asia/Shanghai", userLocation["timezone"])
+	require.Equal(t, "CN", userLocation["country"])
 
 	var include []string
 	err = common.Unmarshal(out.Include, &include)

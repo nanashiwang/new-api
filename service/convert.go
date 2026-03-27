@@ -42,6 +42,11 @@ func ClaudeToOpenAIRequest(c *gin.Context, claudeRequest dto.ClaudeRequest, info
 
 	isOpenRouter := info.ChannelType == constant.ChannelTypeOpenRouter
 
+	reasoningEffort := inferClaudeReasoningEffort(claudeRequest)
+	if info != nil && reasoningEffort != "" {
+		info.ReasoningEffort = reasoningEffort
+	}
+
 	if claudeRequest.Thinking != nil && claudeRequest.Thinking.Type == "enabled" {
 		if isOpenRouter {
 			reasoning := openrouter.RequestReasoning{
@@ -53,8 +58,8 @@ func ClaudeToOpenAIRequest(c *gin.Context, claudeRequest dto.ClaudeRequest, info
 			}
 			openAIRequest.Reasoning = reasoningJSON
 		} else {
-			if effort := mapClaudeThinkingToOpenAIReasoningEffort(claudeRequest.Thinking); effort != "" {
-				openAIRequest.ReasoningEffort = effort
+			if reasoningEffort != "" {
+				openAIRequest.ReasoningEffort = reasoningEffort
 			}
 			thinkingSuffix := "-thinking"
 			if strings.HasSuffix(info.OriginModelName, thinkingSuffix) &&
@@ -62,6 +67,8 @@ func ClaudeToOpenAIRequest(c *gin.Context, claudeRequest dto.ClaudeRequest, info
 				openAIRequest.Model = openAIRequest.Model + thinkingSuffix
 			}
 		}
+	} else if !isOpenRouter && reasoningEffort != "" {
+		openAIRequest.ReasoningEffort = reasoningEffort
 	}
 
 	// Convert stop sequences
@@ -230,6 +237,13 @@ func mapClaudeThinkingToOpenAIReasoningEffort(thinking *dto.Thinking) string {
 	return getClaudeToOpenAIReasoningMap()[level]
 }
 
+func inferClaudeReasoningEffort(request dto.ClaudeRequest) string {
+	if effort := mapClaudeOutputConfigToOpenAIReasoningEffort(request.OutputConfig); effort != "" {
+		return effort
+	}
+	return mapClaudeThinkingToOpenAIReasoningEffort(request.Thinking)
+}
+
 func inferClaudeThinkingLevel(thinking *dto.Thinking) string {
 	if thinking == nil || thinking.Type != "enabled" {
 		return ""
@@ -281,6 +295,52 @@ func getClaudeToOpenAIReasoningMap() map[string]string {
 	return mapping
 }
 
+func mapClaudeOutputConfigToOpenAIReasoningEffort(outputConfig any) string {
+	if outputConfig == nil {
+		return ""
+	}
+
+	var payload struct {
+		Effort string `json:"effort"`
+	}
+	switch value := outputConfig.(type) {
+	case string:
+		if strings.TrimSpace(value) == "" {
+			return ""
+		}
+		if err := common.UnmarshalJsonStr(value, &payload); err != nil {
+			return ""
+		}
+	case []byte:
+		if len(value) == 0 {
+			return ""
+		}
+		if err := common.Unmarshal(value, &payload); err != nil {
+			return ""
+		}
+	default:
+		marshal, err := common.Marshal(value)
+		if err != nil {
+			return ""
+		}
+		if err := common.Unmarshal(marshal, &payload); err != nil {
+			return ""
+		}
+	}
+
+	effort := strings.TrimSpace(strings.ToLower(payload.Effort))
+	if effort == "" {
+		return ""
+	}
+	if mapped, ok := getClaudeToOpenAIReasoningMap()[effort]; ok {
+		return mapped
+	}
+	if _, ok := allowedOpenAIReasoningEfforts[effort]; ok {
+		return effort
+	}
+	return ""
+}
+
 func convertClaudeWebSearchToolToOpenAIOptions(tool *dto.ClaudeWebSearchTool) *dto.WebSearchOptions {
 	if tool == nil {
 		return nil
@@ -290,11 +350,7 @@ func convertClaudeWebSearchToolToOpenAIOptions(tool *dto.ClaudeWebSearchTool) *d
 		SearchContextSize: claudeWebSearchMaxUsesToContextSize(tool.MaxUses),
 	}
 	if tool.UserLocation != nil {
-		userLocation := map[string]any{
-			"approximate": tool.UserLocation,
-		}
-		userLocationRaw, err := common.Marshal(userLocation)
-		if err == nil {
+		if userLocationRaw := dto.BuildChatWebSearchUserLocation(tool.UserLocation); len(userLocationRaw) > 0 {
 			options.UserLocation = userLocationRaw
 		}
 	}

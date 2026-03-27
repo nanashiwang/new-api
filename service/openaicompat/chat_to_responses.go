@@ -83,9 +83,11 @@ func buildResponsesWebSearchTool(options *dto.WebSearchOptions) map[string]any {
 		tool["search_context_size"] = size
 	}
 	if len(options.UserLocation) > 0 {
-		var userLocation any
-		if err := common.Unmarshal(options.UserLocation, &userLocation); err == nil {
-			tool["user_location"] = userLocation
+		if userLocation := dto.ParseApproximateWebSearchUserLocation(options.UserLocation); userLocation != nil {
+			var normalized any
+			if raw := dto.BuildResponsesWebSearchUserLocation(userLocation); len(raw) > 0 && common.Unmarshal(raw, &normalized) == nil {
+				tool["user_location"] = normalized
+			}
 		}
 	}
 	return tool

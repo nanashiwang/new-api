@@ -39,6 +39,44 @@ func stringDeltaFromPrefix(prev string, next string) string {
 	return next
 }
 
+func getResponsesIncompleteReason(resp *dto.OpenAIResponsesResponse) string {
+	if resp == nil || resp.IncompleteDetails == nil {
+		return ""
+	}
+	if reason := strings.TrimSpace(resp.IncompleteDetails.Reason); reason != "" {
+		return reason
+	}
+	return strings.TrimSpace(resp.IncompleteDetails.Reasoning)
+}
+
+func newResponsesIncompleteError(resp *dto.OpenAIResponsesResponse) *types.NewAPIError {
+	message := "responses stream incomplete"
+	if reason := getResponsesIncompleteReason(resp); reason != "" {
+		message = fmt.Sprintf("%s: %s", message, reason)
+	} else if resp != nil && strings.TrimSpace(resp.Status) != "" {
+		message = fmt.Sprintf("%s: status=%s", message, strings.TrimSpace(resp.Status))
+	}
+	return types.NewOpenAIError(fmt.Errorf("%s", message), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+}
+
+func newResponsesStreamEventError(streamResp dto.ResponsesStreamResponse) *types.NewAPIError {
+	if streamResp.Response != nil {
+		if oaiErr := streamResp.Response.GetOpenAIError(); oaiErr != nil && oaiErr.Type != "" {
+			return types.WithOpenAIError(*oaiErr, http.StatusInternalServerError)
+		}
+		if strings.EqualFold(strings.TrimSpace(streamResp.Response.Status), "incomplete") {
+			return newResponsesIncompleteError(streamResp.Response)
+		}
+	}
+	if oaiErr := dto.GetOpenAIError(streamResp.Error); oaiErr != nil && oaiErr.Type != "" {
+		return types.WithOpenAIError(*oaiErr, http.StatusInternalServerError)
+	}
+	if streamResp.Type == "response.incomplete" {
+		return newResponsesIncompleteError(streamResp.Response)
+	}
+	return types.NewOpenAIError(fmt.Errorf("responses stream error: %s", streamResp.Type), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+}
+
 func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	if resp == nil || resp.Body == nil {
 		return nil, types.NewOpenAIError(fmt.Errorf("invalid response"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
@@ -58,6 +96,9 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 
 	if oaiError := responsesResp.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
+	}
+	if strings.EqualFold(strings.TrimSpace(responsesResp.Status), "incomplete") {
+		return nil, newResponsesIncompleteError(&responsesResp)
 	}
 
 	chatId := helper.GetResponseID(c)
@@ -452,6 +493,10 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 
 		case "response.completed":
 			if streamResp.Response != nil {
+				if strings.EqualFold(strings.TrimSpace(streamResp.Response.Status), "incomplete") {
+					streamErr = newResponsesIncompleteError(streamResp.Response)
+					return false
+				}
 				if streamResp.Response.ID != "" {
 					upstreamResponse = streamResp.Response.ID
 				}
@@ -511,14 +556,8 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 				sentStop = true
 			}
 
-		case "response.error", "response.failed":
-			if streamResp.Response != nil {
-				if oaiErr := streamResp.Response.GetOpenAIError(); oaiErr != nil && oaiErr.Type != "" {
-					streamErr = types.WithOpenAIError(*oaiErr, http.StatusInternalServerError)
-					return false
-				}
-			}
-			streamErr = types.NewOpenAIError(fmt.Errorf("responses stream error: %s", streamResp.Type), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+		case "error", "response.error", "response.failed", "response.incomplete":
+			streamErr = newResponsesStreamEventError(streamResp)
 			return false
 
 		default:
