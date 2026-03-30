@@ -10,6 +10,7 @@ export const metricOptions = [
   { value: 'actual_site_revenue_usd', label: '本站实际收入' },
   { value: 'configured_site_revenue_usd', label: '本站配置收入' },
   { value: 'upstream_cost_usd', label: '上游费用' },
+  { value: 'remote_observed_cost_usd', label: '远端观测消耗' },
 ];
 
 export const sitePricingSourceLabelMap = {
@@ -65,6 +66,14 @@ export const createDefaultPricingRule = (overrides = {}) => ({
   ...overrides,
 });
 
+export const createDefaultRemoteObserverConfig = () => ({
+  enabled: false,
+  base_url: '',
+  user_id: 0,
+  access_token: '',
+  access_token_masked: '',
+});
+
 export const createDefaultComboPricingConfig = (comboId, legacySite, legacyUpstream) => ({
   combo_id: comboId,
   site_mode:
@@ -91,6 +100,7 @@ export const createDefaultComboPricingConfig = (comboId, legacySite, legacyUpstr
   ],
   site_fixed_total_amount: clampNumber(legacySite?.fixed_total_amount),
   upstream_fixed_total_amount: clampNumber(legacyUpstream?.fixed_total_amount),
+  remote_observer: createDefaultRemoteObserverConfig(),
 });
 
 export const createDefaultDraft = () => ({
@@ -209,6 +219,10 @@ export const normalizeRestoredState = (state) => {
     upstream_rules: (item?.upstream_rules || []).map((rule) =>
       createDefaultPricingRule(rule),
     ),
+    remote_observer: {
+      ...createDefaultRemoteObserverConfig(),
+      ...(item?.remote_observer || {}),
+    },
   }));
   next.viewBatchId = next.viewBatchId || 'all';
   next.lastQueryKey = next.lastQueryKey || '';

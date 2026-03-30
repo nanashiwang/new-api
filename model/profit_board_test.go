@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -39,10 +40,34 @@ func setupProfitBoardTestDB(t *testing.T) *gorm.DB {
 		initCol()
 	})
 
-	if err := db.AutoMigrate(&Channel{}, &Log{}, &Ability{}, &Model{}, &Vendor{}, &ProfitBoardConfig{}); err != nil {
+	if err := db.AutoMigrate(&Channel{}, &Log{}, &Ability{}, &Model{}, &Vendor{}, &ProfitBoardConfig{}, &ProfitBoardRemoteSnapshot{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db
+}
+
+func seedProfitBoardRemoteSnapshot(t *testing.T, selectionSignature string, comboID string, config ProfitBoardRemoteObserverConfig, syncedAt int64, walletQuota int64, walletUsedQuota int64, subscriptions []ProfitBoardRemoteSubscriptionSnapshot) {
+	t.Helper()
+
+	payload, err := common.Marshal(subscriptions)
+	if err != nil {
+		t.Fatalf("marshal subscriptions: %v", err)
+	}
+	snapshot := ProfitBoardRemoteSnapshot{
+		SelectionSignature: selectionSignature,
+		ComboId:            comboID,
+		ConfigHash:         profitBoardRemoteObserverConfigHash(config),
+		Status:             profitBoardRemoteSnapshotStatusSuccess,
+		RemoteQuotaPerUnit: common.QuotaPerUnit,
+		WalletQuota:        walletQuota,
+		WalletUsedQuota:    walletUsedQuota,
+		SubscriptionStates: string(payload),
+		SyncedAt:           syncedAt,
+		CreatedAt:          syncedAt,
+	}
+	if err = DB.Create(&snapshot).Error; err != nil {
+		t.Fatalf("seed remote snapshot: %v", err)
+	}
 }
 
 func TestSaveProfitBoardConfigUsesStableSignature(t *testing.T) {
@@ -485,5 +510,244 @@ func TestGetProfitBoardActivityReturnsWatermark(t *testing.T) {
 	}
 	if activity.ActivityWatermark != "0:12:1710003600" {
 		t.Fatalf("unexpected watermark: %s", activity.ActivityWatermark)
+	}
+}
+
+func TestSaveProfitBoardConfigMasksRemoteObserverToken(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	payload := ProfitBoardConfigPayload{
+		Batches: []ProfitBoardBatch{{
+			Id:         "batch-1",
+			Name:       "批次 1",
+			ScopeType:  ProfitBoardScopeChannel,
+			ChannelIDs: []int{1},
+		}},
+		Upstream: ProfitBoardTokenPricingConfig{
+			CostSource: ProfitBoardCostSourceManualOnly,
+		},
+		Site: ProfitBoardTokenPricingConfig{
+			PricingMode: ProfitBoardSitePricingManual,
+		},
+		ComboConfigs: []ProfitBoardComboPricingConfig{{
+			ComboId: "batch-1",
+			RemoteObserver: ProfitBoardRemoteObserverConfig{
+				Enabled:     true,
+				BaseURL:     "https://remote.example.com",
+				UserID:      9,
+				AccessToken: "secret-token-value",
+			},
+		}},
+	}
+
+	saved, signature, err := SaveProfitBoardConfig(payload)
+	if err != nil {
+		t.Fatalf("SaveProfitBoardConfig: %v", err)
+	}
+
+	observer := saved.ComboConfigs[0].RemoteObserver
+	if observer.AccessToken != "" || observer.AccessTokenEncrypted != "" {
+		t.Fatalf("remote observer token should be stripped from response: %+v", observer)
+	}
+	if observer.AccessTokenMasked == "" {
+		t.Fatalf("expected masked token in response")
+	}
+
+	record := ProfitBoardConfig{}
+	if err = db.Where("selection_signature = ?", signature).First(&record).Error; err != nil {
+		t.Fatalf("load saved config: %v", err)
+	}
+	if strings.Contains(record.SiteConfig, "secret-token-value") {
+		t.Fatalf("plain text token leaked into site config")
+	}
+
+	loaded, _, err := GetProfitBoardConfig(payload.Batches, ProfitBoardSelection{})
+	if err != nil {
+		t.Fatalf("GetProfitBoardConfig: %v", err)
+	}
+	loadedObserver := loaded.ComboConfigs[0].RemoteObserver
+	if loadedObserver.AccessToken != "" || loadedObserver.AccessTokenEncrypted != "" {
+		t.Fatalf("loaded remote observer should keep token hidden: %+v", loadedObserver)
+	}
+	if loadedObserver.AccessTokenMasked == "" {
+		t.Fatalf("expected masked token after reload")
+	}
+}
+
+func TestCollectProfitBoardRemoteObserverAggregateUsesUsedQuotaDelta(t *testing.T) {
+	setupProfitBoardTestDB(t)
+
+	originQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 1000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originQuotaPerUnit
+	})
+
+	now := common.GetTimestamp()
+	config := ProfitBoardRemoteObserverConfig{
+		Enabled:     true,
+		BaseURL:     "https://remote.example.com",
+		UserID:      7,
+		AccessToken: "remote-token",
+	}
+	selectionSignature := "channel:1"
+	subscriptionA := []ProfitBoardRemoteSubscriptionSnapshot{{
+		SubscriptionID: 1,
+		AmountTotal:    400,
+		AmountUsed:     50,
+		NextResetTime:  now + 1800,
+		EndTime:        now + 7200,
+	}}
+	subscriptionB := []ProfitBoardRemoteSubscriptionSnapshot{{
+		SubscriptionID: 1,
+		AmountTotal:    400,
+		AmountUsed:     80,
+		NextResetTime:  now + 1800,
+		EndTime:        now + 7200,
+	}}
+	subscriptionC := []ProfitBoardRemoteSubscriptionSnapshot{{
+		SubscriptionID: 1,
+		AmountTotal:    400,
+		AmountUsed:     20,
+		LastResetTime:  now - 90,
+		NextResetTime:  now + 3600,
+		EndTime:        now + 10800,
+	}}
+	seedProfitBoardRemoteSnapshot(t, selectionSignature, "batch-1", config, now-240, 600, 100, subscriptionA)
+	seedProfitBoardRemoteSnapshot(t, selectionSignature, "batch-1", config, now-120, 600, 160, subscriptionB)
+	seedProfitBoardRemoteSnapshot(t, selectionSignature, "batch-1", config, now-60, 620, 180, subscriptionC)
+
+	aggregate, err := collectProfitBoardRemoteObserverAggregate(
+		selectionSignature,
+		[]ProfitBoardBatchInfo{{Id: "batch-1", Name: "批次 1"}},
+		[]ProfitBoardComboPricingConfig{{ComboId: "batch-1", RemoteObserver: config}},
+		now-180,
+		now,
+		"day",
+		0,
+		false,
+		true,
+	)
+	if err != nil {
+		t.Fatalf("collectProfitBoardRemoteObserverAggregate: %v", err)
+	}
+
+	if aggregate.TotalCostUSD != 0.13 {
+		t.Fatalf("unexpected remote observed cost: %v", aggregate.TotalCostUSD)
+	}
+	if aggregate.BatchCostUSD["batch-1"] != 0.13 {
+		t.Fatalf("unexpected batch remote observed cost: %+v", aggregate.BatchCostUSD)
+	}
+	if len(aggregate.Timeseries) != 1 || aggregate.Timeseries[0].RemoteObservedCostUSD != 0.13 {
+		t.Fatalf("unexpected remote timeseries: %+v", aggregate.Timeseries)
+	}
+	if len(aggregate.States) != 1 || aggregate.States[0].Status != profitBoardRemoteObserverStatusReady || !aggregate.States[0].BaselineReady {
+		t.Fatalf("unexpected remote observer states: %+v", aggregate.States)
+	}
+}
+
+func TestProfitBoardReportAndOverviewIncludeRemoteObservedCost(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	originQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 1000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originQuotaPerUnit
+	})
+
+	channel := Channel{Id: 1, Name: "alpha", Status: common.ChannelStatusEnabled}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+
+	now := common.GetTimestamp()
+	config := ProfitBoardRemoteObserverConfig{
+		Enabled:     true,
+		BaseURL:     "https://remote.example.com",
+		UserID:      11,
+		AccessToken: "remote-token",
+	}
+	selectionSignature := "channel:1"
+	seedProfitBoardRemoteSnapshot(t, selectionSignature, "batch-1", config, now-240, 600, 100, []ProfitBoardRemoteSubscriptionSnapshot{{
+		SubscriptionID: 1,
+		AmountTotal:    400,
+		AmountUsed:     50,
+		NextResetTime:  now + 1800,
+		EndTime:        now + 7200,
+	}})
+	seedProfitBoardRemoteSnapshot(t, selectionSignature, "batch-1", config, now-120, 600, 160, []ProfitBoardRemoteSubscriptionSnapshot{{
+		SubscriptionID: 1,
+		AmountTotal:    400,
+		AmountUsed:     80,
+		NextResetTime:  now + 1800,
+		EndTime:        now + 7200,
+	}})
+	seedProfitBoardRemoteSnapshot(t, selectionSignature, "batch-1", config, now-60, 620, 180, []ProfitBoardRemoteSubscriptionSnapshot{{
+		SubscriptionID: 1,
+		AmountTotal:    400,
+		AmountUsed:     20,
+		LastResetTime:  now - 90,
+		NextResetTime:  now + 3600,
+		EndTime:        now + 10800,
+	}})
+
+	batches := []ProfitBoardBatch{{
+		Id:         "batch-1",
+		Name:       "批次 1",
+		ScopeType:  ProfitBoardScopeChannel,
+		ChannelIDs: []int{1},
+	}}
+	comboConfigs := []ProfitBoardComboPricingConfig{{
+		ComboId:        "batch-1",
+		RemoteObserver: config,
+	}}
+
+	overview, err := GenerateProfitBoardOverview(ProfitBoardConfigPayload{
+		Batches:      batches,
+		ComboConfigs: comboConfigs,
+		Upstream: ProfitBoardTokenPricingConfig{
+			CostSource: ProfitBoardCostSourceManualOnly,
+		},
+		Site: ProfitBoardTokenPricingConfig{
+			PricingMode: ProfitBoardSitePricingManual,
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateProfitBoardOverview: %v", err)
+	}
+	if overview.Summary.RemoteObservedCostUSD != 0.13 {
+		t.Fatalf("unexpected overview remote observed cost: %v", overview.Summary.RemoteObservedCostUSD)
+	}
+	if len(overview.BatchSummaries) != 1 || overview.BatchSummaries[0].RemoteObservedCostUSD != 0.13 {
+		t.Fatalf("unexpected overview batch summaries: %+v", overview.BatchSummaries)
+	}
+	if len(overview.RemoteObserverStates) != 1 {
+		t.Fatalf("expected remote observer state in overview")
+	}
+
+	report, err := GenerateProfitBoardReport(ProfitBoardQuery{
+		Batches:               batches,
+		ComboConfigs:          comboConfigs,
+		Upstream:              ProfitBoardTokenPricingConfig{CostSource: ProfitBoardCostSourceManualOnly},
+		Site:                  ProfitBoardTokenPricingConfig{PricingMode: ProfitBoardSitePricingManual},
+		StartTimestamp:        now - 180,
+		EndTimestamp:          now,
+		Granularity:           "day",
+		CustomIntervalMinutes: 0,
+	})
+	if err != nil {
+		t.Fatalf("GenerateProfitBoardReport: %v", err)
+	}
+	if report.Summary.RemoteObservedCostUSD != 0.13 {
+		t.Fatalf("unexpected report remote observed cost: %v", report.Summary.RemoteObservedCostUSD)
+	}
+	if len(report.BatchSummaries) != 1 || report.BatchSummaries[0].RemoteObservedCostUSD != 0.13 {
+		t.Fatalf("unexpected report batch summaries: %+v", report.BatchSummaries)
+	}
+	if len(report.RemoteObserverStates) != 1 {
+		t.Fatalf("expected remote observer state in report")
+	}
+	if len(report.Timeseries) != 1 || report.Timeseries[0].RemoteObservedCostUSD != 0.13 {
+		t.Fatalf("unexpected report remote timeseries: %+v", report.Timeseries)
 	}
 }

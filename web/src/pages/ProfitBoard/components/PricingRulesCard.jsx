@@ -1,8 +1,10 @@
 import React from 'react';
 import {
+  Banner,
   Card,
   Collapse,
   Empty,
+  Input,
   InputNumber,
   Select,
   Space,
@@ -225,6 +227,94 @@ const PricingRulesCard = ({
                       onRemove={removeComboRule}
                       onAdd={addComboRule}
                       t={t}
+                    />
+                  </div>
+
+                  <div className='rounded-xl border border-semi-color-border bg-white p-4'>
+                    <div className='mb-3 flex flex-wrap items-center justify-between gap-3'>
+                      <div>
+                        <Text strong>{t('远端额度观测')}</Text>
+                        <Text type='tertiary' className='mt-1 block'>
+                          {t('仅支持 new-api 远端实例。系统会读取远端钱包已用额度和订阅已用额度的增量，换算成当前组合的上游观测消耗。')}
+                        </Text>
+                      </div>
+                      <div className='flex items-center justify-between rounded-xl border border-semi-color-border bg-semi-color-fill-0 px-3 py-2'>
+                        <Text>{t('启用')}</Text>
+                        <Switch
+                          checked={!!comboConfig.remote_observer?.enabled}
+                          onChange={(checked) =>
+                            updateComboConfig(batch.id, {
+                              remote_observer: {
+                                ...(comboConfig.remote_observer || {}),
+                                enabled: checked,
+                              },
+                            })
+                          }
+                        />
+                      </div>
+                    </div>
+                    <div className='grid gap-3 xl:grid-cols-[1.4fr_220px]'>
+                      <Input
+                        value={comboConfig.remote_observer?.base_url || ''}
+                        onChange={(value) =>
+                          updateComboConfig(batch.id, {
+                            remote_observer: {
+                              ...(comboConfig.remote_observer || {}),
+                              base_url: value,
+                            },
+                          })
+                        }
+                        placeholder={t('https://your-new-api.example.com')}
+                        disabled={!comboConfig.remote_observer?.enabled}
+                      />
+                      <InputNumber
+                        min={0}
+                        value={comboConfig.remote_observer?.user_id || 0}
+                        onChange={(value) =>
+                          updateComboConfig(batch.id, {
+                            remote_observer: {
+                              ...(comboConfig.remote_observer || {}),
+                              user_id: Math.max(Number(value || 0), 0),
+                            },
+                          })
+                        }
+                        suffix='User ID'
+                        disabled={!comboConfig.remote_observer?.enabled}
+                      />
+                    </div>
+                    <div className='mt-3 grid gap-3 xl:grid-cols-[1fr_auto] xl:items-center'>
+                      <Input
+                        value={comboConfig.remote_observer?.access_token || ''}
+                        onChange={(value) =>
+                          updateComboConfig(batch.id, {
+                            remote_observer: {
+                              ...(comboConfig.remote_observer || {}),
+                              access_token: value,
+                            },
+                          })
+                        }
+                        type='password'
+                        mode='password'
+                        placeholder={
+                          comboConfig.remote_observer?.access_token_masked
+                            ? t('留空表示继续使用已保存 token')
+                            : t('输入远端用户 access token')
+                        }
+                        disabled={!comboConfig.remote_observer?.enabled}
+                      />
+                      {comboConfig.remote_observer?.access_token_masked ? (
+                        <Tag color='blue'>
+                          {t('已保存 token')} {comboConfig.remote_observer.access_token_masked}
+                        </Tag>
+                      ) : (
+                        <Tag color='grey'>{t('未保存 token')}</Tag>
+                      )}
+                    </div>
+                    <Banner
+                      className='mt-3'
+                      type='info'
+                      closeIcon={null}
+                      description={t('认证方式固定为远端用户自己的 access token + New-Api-User。观测成本按远端 used_quota 增量计算，但金额始终按本站额度口径换算。')}
                     />
                   </div>
                 </div>

@@ -76,6 +76,7 @@ const ProfitBoardPage = () => {
   const [querying, setQuerying] = useState(false);
   const [overviewQuerying, setOverviewQuerying] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [remoteSyncing, setRemoteSyncing] = useState(false);
   const [activityChecking, setActivityChecking] = useState(false);
   const [options, setOptions] = useState({ channels: [], tags: [], groups: [], local_models: [] });
   const [batches, setBatches] = useState(restoredState.batches || []);
@@ -124,6 +125,7 @@ const ProfitBoardPage = () => {
   const currentQueryKey = useMemo(() => buildQueryKey({ batches: batchPayload, shared_site: siteConfig, combo_configs: comboConfigs, upstream: upstreamConfig, site: siteConfig, start_timestamp: Math.floor(new Date(dateRange?.[0] || 0).getTime() / 1000), end_timestamp: Math.floor(new Date(dateRange?.[1] || 0).getTime() / 1000), granularity, custom_interval_minutes: granularity === 'custom' ? customIntervalMinutes : 0 }), [batchPayload, comboConfigs, customIntervalMinutes, dateRange, granularity, siteConfig, upstreamConfig]);
   const reportMatchesCurrentFilters = !!report && lastQueryKey === currentQueryKey;
   const autoRefreshEligible = useMemo(() => !!dateRange?.[1] && Math.abs(Date.now() - new Date(dateRange[1]).getTime()) <= 15 * 60 * 1000, [dateRange]);
+  const hasRemoteObserver = useMemo(() => comboConfigs.some((item) => item.remote_observer?.enabled), [comboConfigs]);
 
   const duplicateBatchError = useMemo(() => {
     const ownerMap = new Map();
@@ -276,9 +278,35 @@ const ProfitBoardPage = () => {
     try {
       const res = await API.put('/api/profit_board/config', configPayload);
       if (!res.data.success) return showError(res.data.message);
+      const savedConfig = res.data.data?.config;
+      if (savedConfig) {
+        setSiteConfig((prev) => ({ ...prev, ...(savedConfig.shared_site || {}) }));
+        setUpstreamConfig((prev) => ({ ...prev, ...(savedConfig.upstream || {}) }));
+        setComboConfigs((savedConfig.combo_configs || []).map((item) => ({
+          ...createDefaultComboPricingConfig(item.combo_id || '', savedConfig.site, savedConfig.upstream),
+          ...item,
+          site_rules: (item.site_rules || []).map((rule) => createDefaultPricingRule(rule)),
+          upstream_rules: (item.upstream_rules || []).map((rule) => createDefaultPricingRule(rule)),
+        })));
+      }
       showSuccess(t('收益看板配置已保存'));
     } catch (error) { showError(error); } finally { setSaving(false); }
   }, [configPayload, t, validationErrors]);
+
+  const syncRemoteObservers = useCallback(async () => {
+    if (validationErrors.length > 0) return showError(validationErrors[0]);
+    setRemoteSyncing(true);
+    try {
+      const res = await API.post('/api/profit_board/sync_remote', configPayload);
+      if (!res.data.success) return showError(res.data.message);
+      showSuccess(t('远端额度已同步'));
+      await runFullRefresh();
+    } catch (error) {
+      showError(error);
+    } finally {
+      setRemoteSyncing(false);
+    }
+  }, [configPayload, runFullRefresh, t, validationErrors]);
 
   const loadDetailPage = useCallback(async (page = detailPage, pageSize = detailPageSize) => {
     if (!reportMatchesCurrentFilters || validationErrors.length > 0) {
@@ -344,8 +372,20 @@ const ProfitBoardPage = () => {
   const metricLabel = useMemo(() => t(metricOptions.find((item) => item.value === metricKey)?.label || metricOptions[0].label), [metricKey, t]);
   const chartSubtitle = analysisMode === 'business_compare' ? t('本站配置收入 / 上游费用 / 配置利润') : metricLabel;
   const trendRows = useMemo(() => !report ? [] : analysisMode === 'business_compare' ? combineTimeseriesMetrics(report.timeseries || [], viewBatchId, businessMetrics) : (viewBatchId === 'all' ? report.timeseries || [] : (report.timeseries || []).filter((item) => item.batch_id === viewBatchId)).map((item) => ({ bucket: item.bucket, value: Number(item[metricKey] || 0), batch_id: item.batch_id })), [analysisMode, businessMetrics, metricKey, report, viewBatchId]);
-  const channelRows = useMemo(() => !report ? [] : analysisMode === 'business_compare' ? combineBreakdownMetrics(report.channel_breakdown || [], viewBatchId, businessMetrics) : aggregateBreakdownRows(report.channel_breakdown || [], viewBatchId, metricKey), [analysisMode, businessMetrics, metricKey, report, viewBatchId]);
-  const modelRows = useMemo(() => !report ? [] : analysisMode === 'business_compare' ? combineBreakdownMetrics(report.model_breakdown || [], viewBatchId, businessMetrics) : aggregateBreakdownRows(report.model_breakdown || [], viewBatchId, metricKey), [analysisMode, businessMetrics, metricKey, report, viewBatchId]);
+  const channelRows = useMemo(() => {
+    if (!report) return [];
+    if (analysisMode === 'single_metric' && metricKey === 'remote_observed_cost_usd') return [];
+    return analysisMode === 'business_compare'
+      ? combineBreakdownMetrics(report.channel_breakdown || [], viewBatchId, businessMetrics)
+      : aggregateBreakdownRows(report.channel_breakdown || [], viewBatchId, metricKey);
+  }, [analysisMode, businessMetrics, metricKey, report, viewBatchId]);
+  const modelRows = useMemo(() => {
+    if (!report) return [];
+    if (analysisMode === 'single_metric' && metricKey === 'remote_observed_cost_usd') return [];
+    return analysisMode === 'business_compare'
+      ? combineBreakdownMetrics(report.model_breakdown || [], viewBatchId, businessMetrics)
+      : aggregateBreakdownRows(report.model_breakdown || [], viewBatchId, metricKey);
+  }, [analysisMode, businessMetrics, metricKey, report, viewBatchId]);
   const trendSpec = useMemo(() => createTrendSpec(trendRows, chartSubtitle, statusState?.status, t), [chartSubtitle, statusState?.status, t, trendRows]);
   const channelSpec = useMemo(() => createBarSpec(t('渠道分布'), channelRows, chartSubtitle, statusState?.status, t), [channelRows, chartSubtitle, statusState?.status, t]);
   const modelSpec = useMemo(() => createBarSpec(t('模型分布'), modelRows, chartSubtitle, statusState?.status, t), [chartSubtitle, modelRows, statusState?.status, t]);
@@ -375,10 +415,14 @@ const ProfitBoardPage = () => {
     { title: t('实际利润'), dataIndex: 'actual_profit_usd', render: (value, row) => row.upstream_cost_known ? formatMoney(value, statusState?.status) : <Text type='tertiary'>-</Text> },
   ], [statusState?.status, t]);
 
-  const summaryMetricHelp = useMemo(() => ({ request_count: t('当前口径内命中的消费日志数量。') }), [t]);
+  const summaryMetricHelp = useMemo(() => ({
+    request_count: t('当前口径内命中的消费日志数量。'),
+    remote_observed_cost_usd: t('来自远端 new-api 实例的钱包已用额度 + 订阅已用额度增量，金额按本站额度口径换算。'),
+  }), [t]);
   const cumulativeSummaryCards = useMemo(() => !overviewReport?.summary ? [] : [
     { key: 'configured_site_revenue_usd', title: t('本站配置收入'), value: formatMoney(overviewReport.summary.configured_site_revenue_usd, statusState?.status), icon: <CircleDollarSign size={18} className='text-emerald-500' /> },
     { key: 'upstream_cost_usd', title: t('上游费用'), value: formatMoney(overviewReport.summary.upstream_cost_usd, statusState?.status), icon: <BadgeDollarSign size={18} className='text-amber-500' /> },
+    { key: 'remote_observed_cost_usd', title: t('远端观测消耗'), value: formatMoney(overviewReport.summary.remote_observed_cost_usd, statusState?.status), icon: <BadgeDollarSign size={18} className='text-rose-500' /> },
     { key: 'configured_profit_usd', title: t('配置利润'), value: formatMoney(overviewReport.summary.configured_profit_usd, statusState?.status), icon: <BarChart3 size={18} className='text-sky-500' /> },
     { key: 'actual_profit_usd', title: t('实际利润'), value: formatMoney(overviewReport.summary.actual_profit_usd, statusState?.status), icon: <BarChart3 size={18} className='text-violet-500' /> },
   ], [overviewReport?.summary, statusState?.status, t]);
@@ -408,10 +452,10 @@ const ProfitBoardPage = () => {
   return (
     <Spin spinning={loading}>
       <div className='mt-[60px] space-y-4 px-2 pb-6'>
-        <ProfitBoardHeader querying={querying} overviewQuerying={overviewQuerying} runFullRefresh={runFullRefresh} saving={saving} saveConfig={saveConfig} autoRefreshMode={autoRefreshMode} setAutoRefreshMode={setAutoRefreshMode} statusSummary={statusSummary} hasNewActivity={hasNewActivity} generatedAtText={generatedAtText} sharedSiteModelCount={sharedSiteModelCount} warningSummary={warningSummary} combinedWarnings={combinedWarnings} sitePriceFactorNote={sitePriceFactorNote} t={t} />
+        <ProfitBoardHeader querying={querying} overviewQuerying={overviewQuerying} runFullRefresh={runFullRefresh} remoteSyncing={remoteSyncing} syncRemoteObservers={syncRemoteObservers} saving={saving} saveConfig={saveConfig} autoRefreshMode={autoRefreshMode} setAutoRefreshMode={setAutoRefreshMode} statusSummary={statusSummary} hasNewActivity={hasNewActivity} hasRemoteObserver={hasRemoteObserver} generatedAtText={generatedAtText} sharedSiteModelCount={sharedSiteModelCount} warningSummary={warningSummary} combinedWarnings={combinedWarnings} sitePriceFactorNote={sitePriceFactorNote} t={t} />
         <div className='grid gap-4 xl:grid-cols-[0.96fr_1.04fr]'>
           <ComboManagerCard draft={draft} setDraft={setDraft} channelOptions={channelOptions} options={options} isMobile={isMobile} addOrUpdateBatch={addOrUpdateBatch} editingBatchId={editingBatchId} resetDraft={resetDraft} batches={batches} batchDigest={batchDigest} editBatch={editBatch} removeBatch={removeBatch} batchValidationError={duplicateBatchError} t={t} />
-          <OverviewPanel overviewQuerying={overviewQuerying} overviewReport={overviewReport} cumulativeSummaryCards={cumulativeSummaryCards} diagnosticSummaryCards={diagnosticSummaryCards} summaryMetricHelp={summaryMetricHelp} formatMoney={formatMoney} status={statusState?.status} t={t} />
+          <OverviewPanel overviewQuerying={overviewQuerying} overviewReport={overviewReport} report={report} reportMatchesCurrentFilters={reportMatchesCurrentFilters} cumulativeSummaryCards={cumulativeSummaryCards} diagnosticSummaryCards={diagnosticSummaryCards} summaryMetricHelp={summaryMetricHelp} formatMoney={formatMoney} status={statusState?.status} t={t} />
         </div>
         <PricingRulesCard batches={batches} comboConfigs={comboConfigs} siteConfig={siteConfig} setSiteConfig={setSiteConfig} modelNameOptions={modelNameOptions} options={options} resolveSharedSitePreview={resolveSharedSitePreview} upstreamConfig={upstreamConfig} setUpstreamConfig={setUpstreamConfig} isMobile={isMobile} createDefaultComboPricingConfig={createDefaultComboPricingConfig} updateComboConfig={updateComboConfig} updateComboRule={updateComboRule} removeComboRule={removeComboRule} addComboRule={addComboRule} localModelMap={localModelMap} clampNumber={clampNumber} t={t} />
         <TimeRangePanel datePresets={createPresetRanges()} dateRange={dateRange} setDateRange={setDateRange} currentRangeText={formatRangeLabel(dateRange)} currentRangeDuration={formatRangeDuration(dateRange)} validationErrors={validationErrors} statusSummary={statusSummary} report={report} t={t} />

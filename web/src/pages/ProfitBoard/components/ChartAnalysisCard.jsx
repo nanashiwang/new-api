@@ -105,7 +105,9 @@ const ChartAnalysisCard = ({
     <Text type='tertiary' className='mb-3 block'>
       {analysisMode === 'business_compare'
         ? t('默认直接看本站配置收入和上游费用的金额对比，更适合判断渠道是否赚钱。')
-        : t('单指标分析适合单独观察某一个指标在时间、渠道或模型上的变化。')}
+        : metricKey === 'remote_observed_cost_usd'
+          ? t('远端观测消耗目前只支持趋势图，渠道和模型分布暂不拆分。')
+          : t('单指标分析适合单独观察某一个指标在时间、渠道或模型上的变化。')}
     </Text>
     <Tabs activeKey={chartTab} onChange={setChartTab} type='line'>
       <Tabs.TabPane tab={t('趋势')} itemKey='trend' />

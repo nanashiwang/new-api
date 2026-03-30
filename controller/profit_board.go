@@ -103,6 +103,22 @@ func GetProfitBoardOverview(c *gin.Context) {
 	common.ApiSuccess(c, report)
 }
 
+func SyncProfitBoardRemote(c *gin.Context) {
+	payload := model.ProfitBoardConfigPayload{}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	states, err := model.SyncProfitBoardRemoteObservers(payload, true)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{
+		"states": states,
+	})
+}
+
 func QueryProfitBoard(c *gin.Context) {
 	query := model.ProfitBoardQuery{}
 	if err := c.ShouldBindJSON(&query); err != nil {

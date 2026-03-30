@@ -92,36 +92,77 @@ type ProfitBoardSharedSitePricingConfig struct {
 }
 
 type ProfitBoardComboPricingConfig struct {
-	ComboId                string                        `json:"combo_id"`
-	SiteMode               string                        `json:"site_mode,omitempty"`
-	SiteRules              []ProfitBoardModelPricingRule `json:"site_rules,omitempty"`
-	UpstreamRules          []ProfitBoardModelPricingRule `json:"upstream_rules,omitempty"`
-	SiteFixedTotalAmount   float64                       `json:"site_fixed_total_amount"`
-	UpstreamFixedTotalAmount float64                     `json:"upstream_fixed_total_amount"`
+	ComboId                  string                          `json:"combo_id"`
+	SiteMode                 string                          `json:"site_mode,omitempty"`
+	SiteRules                []ProfitBoardModelPricingRule   `json:"site_rules,omitempty"`
+	UpstreamRules            []ProfitBoardModelPricingRule   `json:"upstream_rules,omitempty"`
+	SiteFixedTotalAmount     float64                         `json:"site_fixed_total_amount"`
+	UpstreamFixedTotalAmount float64                         `json:"upstream_fixed_total_amount"`
+	RemoteObserver           ProfitBoardRemoteObserverConfig `json:"remote_observer,omitempty"`
+}
+
+type ProfitBoardRemoteObserverConfig struct {
+	Enabled              bool   `json:"enabled,omitempty"`
+	BaseURL              string `json:"base_url,omitempty"`
+	UserID               int    `json:"user_id,omitempty"`
+	AccessToken          string `json:"access_token,omitempty"`
+	AccessTokenMasked    string `json:"access_token_masked,omitempty"`
+	AccessTokenEncrypted string `json:"access_token_encrypted,omitempty"`
+}
+
+type ProfitBoardRemoteSubscriptionSnapshot struct {
+	SubscriptionID int    `json:"subscription_id"`
+	PlanID         int    `json:"plan_id"`
+	AmountTotal    int64  `json:"amount_total"`
+	AmountUsed     int64  `json:"amount_used"`
+	LastResetTime  int64  `json:"last_reset_time"`
+	NextResetTime  int64  `json:"next_reset_time"`
+	StartTime      int64  `json:"start_time"`
+	EndTime        int64  `json:"end_time"`
+	Status         string `json:"status,omitempty"`
+}
+
+type ProfitBoardRemoteObserverState struct {
+	BatchId                   string  `json:"batch_id"`
+	BatchName                 string  `json:"batch_name"`
+	Enabled                   bool    `json:"enabled"`
+	Configured                bool    `json:"configured"`
+	Status                    string  `json:"status"`
+	ErrorMessage              string  `json:"error_message,omitempty"`
+	LastSyncedAt              int64   `json:"last_synced_at"`
+	LastSuccessAt             int64   `json:"last_success_at"`
+	ObservedCostUSD           float64 `json:"observed_cost_usd"`
+	WalletQuotaUSD            float64 `json:"wallet_quota_usd"`
+	WalletUsedQuotaUSD        float64 `json:"wallet_used_quota_usd"`
+	SubscriptionTotalQuotaUSD float64 `json:"subscription_total_quota_usd"`
+	SubscriptionUsedQuotaUSD  float64 `json:"subscription_used_quota_usd"`
+	RemoteQuotaPerUnit        float64 `json:"remote_quota_per_unit"`
+	QuotaPerUnitMismatch      bool    `json:"quota_per_unit_mismatch"`
+	BaselineReady             bool    `json:"baseline_ready"`
 }
 
 type ProfitBoardConfigPayload struct {
-	Batches      []ProfitBoardBatch              `json:"batches,omitempty"`
-	Selection    ProfitBoardSelection            `json:"selection,omitempty"`
+	Batches      []ProfitBoardBatch                 `json:"batches,omitempty"`
+	Selection    ProfitBoardSelection               `json:"selection,omitempty"`
 	SharedSite   ProfitBoardSharedSitePricingConfig `json:"shared_site,omitempty"`
-	ComboConfigs []ProfitBoardComboPricingConfig `json:"combo_configs,omitempty"`
-	Upstream     ProfitBoardTokenPricingConfig   `json:"upstream"`
-	Site         ProfitBoardTokenPricingConfig   `json:"site"`
+	ComboConfigs []ProfitBoardComboPricingConfig    `json:"combo_configs,omitempty"`
+	Upstream     ProfitBoardTokenPricingConfig      `json:"upstream"`
+	Site         ProfitBoardTokenPricingConfig      `json:"site"`
 }
 
 type ProfitBoardQuery struct {
-	Batches               []ProfitBoardBatch              `json:"batches,omitempty"`
-	Selection             ProfitBoardSelection            `json:"selection,omitempty"`
+	Batches               []ProfitBoardBatch                 `json:"batches,omitempty"`
+	Selection             ProfitBoardSelection               `json:"selection,omitempty"`
 	SharedSite            ProfitBoardSharedSitePricingConfig `json:"shared_site,omitempty"`
-	ComboConfigs          []ProfitBoardComboPricingConfig `json:"combo_configs,omitempty"`
-	Upstream              ProfitBoardTokenPricingConfig   `json:"upstream"`
-	Site                  ProfitBoardTokenPricingConfig   `json:"site"`
-	StartTimestamp        int64                           `json:"start_timestamp"`
-	EndTimestamp          int64                           `json:"end_timestamp"`
-	Granularity           string                          `json:"granularity"`
-	CustomIntervalMinutes int                             `json:"custom_interval_minutes,omitempty"`
-	IncludeDetails        bool                            `json:"include_details,omitempty"`
-	DetailLimit           int                             `json:"detail_limit"`
+	ComboConfigs          []ProfitBoardComboPricingConfig    `json:"combo_configs,omitempty"`
+	Upstream              ProfitBoardTokenPricingConfig      `json:"upstream"`
+	Site                  ProfitBoardTokenPricingConfig      `json:"site"`
+	StartTimestamp        int64                              `json:"start_timestamp"`
+	EndTimestamp          int64                              `json:"end_timestamp"`
+	Granularity           string                             `json:"granularity"`
+	CustomIntervalMinutes int                                `json:"custom_interval_minutes,omitempty"`
+	IncludeDetails        bool                               `json:"include_details,omitempty"`
+	DetailLimit           int                                `json:"detail_limit"`
 }
 
 type ProfitBoardChannelOption struct {
@@ -156,6 +197,7 @@ type ProfitBoardSummary struct {
 	ActualSiteRevenueUSD         float64 `json:"actual_site_revenue_usd"`
 	ConfiguredSiteRevenueUSD     float64 `json:"configured_site_revenue_usd"`
 	UpstreamCostUSD              float64 `json:"upstream_cost_usd"`
+	RemoteObservedCostUSD        float64 `json:"remote_observed_cost_usd"`
 	ConfiguredProfitUSD          float64 `json:"configured_profit_usd"`
 	ActualProfitUSD              float64 `json:"actual_profit_usd"`
 	KnownUpstreamCostCount       int     `json:"known_upstream_cost_count"`
@@ -176,6 +218,7 @@ type ProfitBoardTimeseriesPoint struct {
 	ActualSiteRevenueUSD     float64 `json:"actual_site_revenue_usd"`
 	ConfiguredSiteRevenueUSD float64 `json:"configured_site_revenue_usd"`
 	UpstreamCostUSD          float64 `json:"upstream_cost_usd"`
+	RemoteObservedCostUSD    float64 `json:"remote_observed_cost_usd"`
 	ConfiguredProfitUSD      float64 `json:"configured_profit_usd"`
 	ActualProfitUSD          float64 `json:"actual_profit_usd"`
 	KnownUpstreamCostCount   int     `json:"known_upstream_cost_count"`
@@ -275,10 +318,10 @@ type ProfitBoardDetailFilter struct {
 
 type ProfitBoardDetailQuery struct {
 	ProfitBoardQuery
-	ViewBatchId  string                 `json:"view_batch_id,omitempty"`
+	ViewBatchId  string                  `json:"view_batch_id,omitempty"`
 	DetailFilter ProfitBoardDetailFilter `json:"detail_filter,omitempty"`
-	Page         int                    `json:"page,omitempty"`
-	PageSize     int                    `json:"page_size,omitempty"`
+	Page         int                     `json:"page,omitempty"`
+	PageSize     int                     `json:"page_size,omitempty"`
 }
 
 type ProfitBoardDetailPage struct {
@@ -289,17 +332,18 @@ type ProfitBoardDetailPage struct {
 }
 
 type ProfitBoardReport struct {
-	Signature        string                       `json:"signature"`
-	Batches          []ProfitBoardBatchInfo       `json:"batches"`
-	BatchSummaries   []ProfitBoardBatchSummary    `json:"batch_summaries"`
-	Summary          ProfitBoardSummary           `json:"summary"`
-	Meta             ProfitBoardMeta              `json:"meta"`
-	Timeseries       []ProfitBoardTimeseriesPoint `json:"timeseries"`
-	ChannelBreakdown []ProfitBoardBreakdownItem   `json:"channel_breakdown"`
-	ModelBreakdown   []ProfitBoardBreakdownItem   `json:"model_breakdown"`
-	DetailRows       []ProfitBoardDetailRow       `json:"detail_rows"`
-	DetailTruncated  bool                         `json:"detail_truncated"`
-	Warnings         []string                     `json:"warnings,omitempty"`
+	Signature            string                           `json:"signature"`
+	Batches              []ProfitBoardBatchInfo           `json:"batches"`
+	BatchSummaries       []ProfitBoardBatchSummary        `json:"batch_summaries"`
+	Summary              ProfitBoardSummary               `json:"summary"`
+	Meta                 ProfitBoardMeta                  `json:"meta"`
+	Timeseries           []ProfitBoardTimeseriesPoint     `json:"timeseries"`
+	ChannelBreakdown     []ProfitBoardBreakdownItem       `json:"channel_breakdown"`
+	ModelBreakdown       []ProfitBoardBreakdownItem       `json:"model_breakdown"`
+	DetailRows           []ProfitBoardDetailRow           `json:"detail_rows"`
+	DetailTruncated      bool                             `json:"detail_truncated"`
+	RemoteObserverStates []ProfitBoardRemoteObserverState `json:"remote_observer_states,omitempty"`
+	Warnings             []string                         `json:"warnings,omitempty"`
 }
 
 type profitBoardOtherInfo struct {
@@ -323,18 +367,18 @@ type profitBoardLogRow struct {
 }
 
 type profitBoardResolvedComboPricing struct {
-	ComboId                string
-	SiteMode               string
-	SiteRules              []ProfitBoardModelPricingRule
-	UpstreamRules          []ProfitBoardModelPricingRule
-	SiteFixedTotalAmount   float64
+	ComboId                  string
+	SiteMode                 string
+	SiteRules                []ProfitBoardModelPricingRule
+	UpstreamRules            []ProfitBoardModelPricingRule
+	SiteFixedTotalAmount     float64
 	UpstreamFixedTotalAmount float64
 }
 
 type profitBoardPersistedSiteConfig struct {
-	LegacySite   ProfitBoardTokenPricingConfig   `json:"legacy_site"`
+	LegacySite   ProfitBoardTokenPricingConfig      `json:"legacy_site"`
 	SharedSite   ProfitBoardSharedSitePricingConfig `json:"shared_site,omitempty"`
-	ComboConfigs []ProfitBoardComboPricingConfig `json:"combo_configs,omitempty"`
+	ComboConfigs []ProfitBoardComboPricingConfig    `json:"combo_configs,omitempty"`
 }
 
 var (
@@ -601,6 +645,7 @@ func normalizeProfitBoardComboConfigs(batches []ProfitBoardBatch, comboConfigs [
 		config.UpstreamRules = normalizeProfitBoardModelPricingRules(config.UpstreamRules, legacyUpstream)
 		config.SiteFixedTotalAmount = clampProfitBoardNumber(config.SiteFixedTotalAmount)
 		config.UpstreamFixedTotalAmount = clampProfitBoardNumber(config.UpstreamFixedTotalAmount)
+		config.RemoteObserver = normalizeProfitBoardRemoteObserverConfig(config.RemoteObserver)
 		configMap[comboID] = config
 	}
 
@@ -609,11 +654,11 @@ func normalizeProfitBoardComboConfigs(batches []ProfitBoardBatch, comboConfigs [
 		config, ok := configMap[batch.Id]
 		if !ok {
 			config = ProfitBoardComboPricingConfig{
-				ComboId:       batch.Id,
-				SiteMode:      defaultProfitBoardComboSiteMode(sharedSite, legacySite),
-				SiteRules:     normalizeProfitBoardModelPricingRules(nil, legacySite),
-				UpstreamRules: normalizeProfitBoardModelPricingRules(nil, legacyUpstream),
-				SiteFixedTotalAmount: clampProfitBoardNumber(legacySite.FixedTotalAmount),
+				ComboId:                  batch.Id,
+				SiteMode:                 defaultProfitBoardComboSiteMode(sharedSite, legacySite),
+				SiteRules:                normalizeProfitBoardModelPricingRules(nil, legacySite),
+				UpstreamRules:            normalizeProfitBoardModelPricingRules(nil, legacyUpstream),
+				SiteFixedTotalAmount:     clampProfitBoardNumber(legacySite.FixedTotalAmount),
 				UpstreamFixedTotalAmount: clampProfitBoardNumber(legacyUpstream.FixedTotalAmount),
 			}
 		}
@@ -652,6 +697,9 @@ func validateProfitBoardComboConfigs(comboConfigs []ProfitBoardComboPricingConfi
 		}
 		if math.IsNaN(config.UpstreamFixedTotalAmount) || math.IsInf(config.UpstreamFixedTotalAmount, 0) || config.UpstreamFixedTotalAmount < 0 {
 			return errors.New("组合固定上游费用必须是非负数字")
+		}
+		if err := validateProfitBoardRemoteObserverConfig(config.RemoteObserver); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -809,6 +857,7 @@ func GetProfitBoardConfig(batches []ProfitBoardBatch, selection ProfitBoardSelec
 				Upstream: defaultUpstream,
 				Site:     defaultSite,
 			}
+			payload.ComboConfigs = stripProfitBoardRemoteObserverSecrets(payload.ComboConfigs)
 			return payload, signature, nil
 		}
 		return nil, "", err
@@ -840,6 +889,7 @@ func GetProfitBoardConfig(batches []ProfitBoardBatch, selection ProfitBoardSelec
 		payload.SharedSite = normalizeProfitBoardSharedSiteConfig(ProfitBoardSharedSitePricingConfig{}, payload.Site)
 		payload.ComboConfigs = normalizeProfitBoardComboConfigs(payload.Batches, nil, payload.SharedSite, payload.Site, payload.Upstream)
 	}
+	payload.ComboConfigs = stripProfitBoardRemoteObserverSecrets(payload.ComboConfigs)
 	return payload, signature, nil
 }
 
@@ -859,6 +909,10 @@ func SaveProfitBoardConfig(payload ProfitBoardConfigPayload) (*ProfitBoardConfig
 		return nil, "", err
 	}
 	if err := validateProfitBoardComboConfigs(payload.ComboConfigs); err != nil {
+		return nil, "", err
+	}
+	payload.ComboConfigs, err = prepareProfitBoardRemoteObserverConfigsForStorage(signature, payload.ComboConfigs)
+	if err != nil {
 		return nil, "", err
 	}
 
@@ -911,7 +965,7 @@ func SaveProfitBoardConfig(payload ProfitBoardConfigPayload) (*ProfitBoardConfig
 	return &ProfitBoardConfigPayload{
 		Batches:      normalized,
 		SharedSite:   payload.SharedSite,
-		ComboConfigs: payload.ComboConfigs,
+		ComboConfigs: stripProfitBoardRemoteObserverSecrets(payload.ComboConfigs),
 		Upstream:     payload.Upstream,
 		Site:         payload.Site,
 	}, signature, nil
@@ -986,6 +1040,7 @@ func normalizeProfitBoardQuery(query ProfitBoardQuery) (ProfitBoardQuery, string
 	query.Site = normalizeProfitBoardPricingConfig(query.Site, true)
 	query.SharedSite = normalizeProfitBoardSharedSiteConfig(query.SharedSite, query.Site)
 	query.ComboConfigs = normalizeProfitBoardComboConfigs(normalizedBatches, query.ComboConfigs, query.SharedSite, query.Site, query.Upstream)
+	query.ComboConfigs = hydrateProfitBoardRemoteObserverSecrets(signature, query.ComboConfigs)
 	if err := validateProfitBoardPricingConfig(query.Upstream, false); err != nil {
 		return ProfitBoardQuery{}, "", err
 	}
@@ -1565,11 +1620,11 @@ func resolveProfitBoardComboPricingMap(query ProfitBoardQuery, batches []ProfitB
 	configMap := make(map[string]profitBoardResolvedComboPricing, len(batches))
 	for _, batch := range batches {
 		configMap[batch.Id] = profitBoardResolvedComboPricing{
-			ComboId:                batch.Id,
-			SiteMode:               ProfitBoardComboSiteModeManual,
-			SiteRules:              normalizeProfitBoardModelPricingRules(nil, query.Site),
-			UpstreamRules:          normalizeProfitBoardModelPricingRules(nil, query.Upstream),
-			SiteFixedTotalAmount:   clampProfitBoardNumber(query.Site.FixedTotalAmount),
+			ComboId:                  batch.Id,
+			SiteMode:                 ProfitBoardComboSiteModeManual,
+			SiteRules:                normalizeProfitBoardModelPricingRules(nil, query.Site),
+			UpstreamRules:            normalizeProfitBoardModelPricingRules(nil, query.Upstream),
+			SiteFixedTotalAmount:     clampProfitBoardNumber(query.Site.FixedTotalAmount),
 			UpstreamFixedTotalAmount: clampProfitBoardNumber(query.Upstream.FixedTotalAmount),
 		}
 	}
@@ -1598,14 +1653,17 @@ func profitBoardHasSharedSiteMode(comboPricingMap map[string]profitBoardResolved
 }
 
 func buildProfitBoardReportCacheKey(query ProfitBoardQuery) string {
+	if profitBoardHasEnabledRemoteObserver(query.ComboConfigs) {
+		return ""
+	}
 	payloadBytes, err := common.Marshal(struct {
-		Batches               []ProfitBoardBatch               `json:"batches"`
+		Batches               []ProfitBoardBatch                 `json:"batches"`
 		SharedSite            ProfitBoardSharedSitePricingConfig `json:"shared_site"`
-		ComboConfigs          []ProfitBoardComboPricingConfig  `json:"combo_configs"`
-		StartTimestamp        int64                            `json:"start_timestamp"`
-		EndTimestamp          int64                            `json:"end_timestamp"`
-		Granularity           string                           `json:"granularity"`
-		CustomIntervalMinutes int                              `json:"custom_interval_minutes"`
+		ComboConfigs          []ProfitBoardComboPricingConfig    `json:"combo_configs"`
+		StartTimestamp        int64                              `json:"start_timestamp"`
+		EndTimestamp          int64                              `json:"end_timestamp"`
+		Granularity           string                             `json:"granularity"`
+		CustomIntervalMinutes int                                `json:"custom_interval_minutes"`
 	}{
 		Batches:               query.Batches,
 		SharedSite:            query.SharedSite,
@@ -1764,6 +1822,39 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		for _, channel := range batch.ResolvedChannels {
 			channelNameMap[channel.Id] = channel.Name
 		}
+	}
+
+	remoteAggregate, err := collectProfitBoardRemoteObserverAggregate(
+		signature,
+		resolvedBatches,
+		normalizedQuery.ComboConfigs,
+		normalizedQuery.StartTimestamp,
+		normalizedQuery.EndTimestamp,
+		normalizedQuery.Granularity,
+		normalizedQuery.CustomIntervalMinutes,
+		false,
+		true,
+	)
+	if err != nil {
+		return nil, err
+	}
+	report.RemoteObserverStates = remoteAggregate.States
+	report.Summary.RemoteObservedCostUSD += remoteAggregate.TotalCostUSD
+	report.Warnings = append(report.Warnings, remoteAggregate.Warnings...)
+	for batchID, observedCostUSD := range remoteAggregate.BatchCostUSD {
+		if summary := batchSummaryMap[batchID]; summary != nil {
+			summary.RemoteObservedCostUSD += observedCostUSD
+		}
+	}
+	for _, remotePoint := range remoteAggregate.Timeseries {
+		timeKey := fmt.Sprintf("%s:%d", remotePoint.BatchId, remotePoint.BucketTimestamp)
+		point, ok := timeBuckets[timeKey]
+		if !ok {
+			current := remotePoint
+			timeBuckets[timeKey] = &current
+			continue
+		}
+		point.RemoteObservedCostUSD += remotePoint.RemoteObservedCostUSD
 	}
 
 	if err := iterateProfitBoardRows(normalizedQuery, resolvedBatches, func(prepared profitBoardPreparedRow) error {
@@ -2031,6 +2122,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		current.ActualSiteRevenueUSD = roundProfitBoardAmount(current.ActualSiteRevenueUSD)
 		current.ConfiguredSiteRevenueUSD = roundProfitBoardAmount(current.ConfiguredSiteRevenueUSD)
 		current.UpstreamCostUSD = roundProfitBoardAmount(current.UpstreamCostUSD)
+		current.RemoteObservedCostUSD = roundProfitBoardAmount(current.RemoteObservedCostUSD)
 		current.ConfiguredProfitUSD = roundProfitBoardAmount(current.ConfiguredProfitUSD)
 		current.ActualProfitUSD = roundProfitBoardAmount(current.ActualProfitUSD)
 		current.ConfiguredProfitCoverageRate = roundProfitBoardAmount(current.ConfiguredProfitCoverageRate)
@@ -2043,6 +2135,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		current.ActualSiteRevenueUSD = roundProfitBoardAmount(current.ActualSiteRevenueUSD)
 		current.ConfiguredSiteRevenueUSD = roundProfitBoardAmount(current.ConfiguredSiteRevenueUSD)
 		current.UpstreamCostUSD = roundProfitBoardAmount(current.UpstreamCostUSD)
+		current.RemoteObservedCostUSD = roundProfitBoardAmount(current.RemoteObservedCostUSD)
 		current.ConfiguredProfitUSD = roundProfitBoardAmount(current.ConfiguredProfitUSD)
 		current.ActualProfitUSD = roundProfitBoardAmount(current.ActualProfitUSD)
 		report.Timeseries = append(report.Timeseries, current)
@@ -2099,6 +2192,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		report.BatchSummaries[index].ActualSiteRevenueUSD = roundProfitBoardAmount(report.BatchSummaries[index].ActualSiteRevenueUSD)
 		report.BatchSummaries[index].ConfiguredSiteRevenueUSD = roundProfitBoardAmount(report.BatchSummaries[index].ConfiguredSiteRevenueUSD)
 		report.BatchSummaries[index].UpstreamCostUSD = roundProfitBoardAmount(report.BatchSummaries[index].UpstreamCostUSD)
+		report.BatchSummaries[index].RemoteObservedCostUSD = roundProfitBoardAmount(report.BatchSummaries[index].RemoteObservedCostUSD)
 		report.BatchSummaries[index].ConfiguredProfitUSD = roundProfitBoardAmount(report.BatchSummaries[index].ConfiguredProfitUSD)
 		report.BatchSummaries[index].ActualProfitUSD = roundProfitBoardAmount(report.BatchSummaries[index].ActualProfitUSD)
 	}
@@ -2106,6 +2200,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		report.Timeseries[index].ActualSiteRevenueUSD = roundProfitBoardAmount(report.Timeseries[index].ActualSiteRevenueUSD)
 		report.Timeseries[index].ConfiguredSiteRevenueUSD = roundProfitBoardAmount(report.Timeseries[index].ConfiguredSiteRevenueUSD)
 		report.Timeseries[index].UpstreamCostUSD = roundProfitBoardAmount(report.Timeseries[index].UpstreamCostUSD)
+		report.Timeseries[index].RemoteObservedCostUSD = roundProfitBoardAmount(report.Timeseries[index].RemoteObservedCostUSD)
 		report.Timeseries[index].ConfiguredProfitUSD = roundProfitBoardAmount(report.Timeseries[index].ConfiguredProfitUSD)
 		report.Timeseries[index].ActualProfitUSD = roundProfitBoardAmount(report.Timeseries[index].ActualProfitUSD)
 	}
@@ -2138,6 +2233,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 	report.Summary.ActualSiteRevenueUSD = roundProfitBoardAmount(report.Summary.ActualSiteRevenueUSD)
 	report.Summary.ConfiguredSiteRevenueUSD = roundProfitBoardAmount(report.Summary.ConfiguredSiteRevenueUSD)
 	report.Summary.UpstreamCostUSD = roundProfitBoardAmount(report.Summary.UpstreamCostUSD)
+	report.Summary.RemoteObservedCostUSD = roundProfitBoardAmount(report.Summary.RemoteObservedCostUSD)
 	report.Summary.ConfiguredProfitUSD = roundProfitBoardAmount(report.Summary.ConfiguredProfitUSD)
 	report.Summary.ActualProfitUSD = roundProfitBoardAmount(report.Summary.ActualProfitUSD)
 	report.Summary.ConfiguredProfitCoverageRate = roundProfitBoardAmount(report.Summary.ConfiguredProfitCoverageRate)
@@ -2148,6 +2244,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		latestLogId,
 		latestLogCreatedAt,
 	)
+	report.Warnings = uniqueProfitBoardWarnings(report.Warnings)
 	if !normalizedQuery.IncludeDetails {
 		if cacheKey := buildProfitBoardReportCacheKey(normalizedQuery); cacheKey != "" {
 			_ = getProfitBoardReportCache().SetWithTTL(cacheKey, *report, profitBoardReportCacheTTL())
@@ -2222,6 +2319,29 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 	latestLogCreatedAt := int64(0)
 	for _, batch := range resolvedBatches {
 		batchSummaryMap[batch.Id] = &ProfitBoardBatchSummary{BatchId: batch.Id, BatchName: batch.Name}
+	}
+
+	remoteAggregate, err := collectProfitBoardRemoteObserverAggregate(
+		signature,
+		resolvedBatches,
+		payload.ComboConfigs,
+		0,
+		common.GetTimestamp(),
+		"day",
+		0,
+		false,
+		false,
+	)
+	if err != nil {
+		return nil, err
+	}
+	report.RemoteObserverStates = remoteAggregate.States
+	report.Summary.RemoteObservedCostUSD += remoteAggregate.TotalCostUSD
+	report.Warnings = append(report.Warnings, remoteAggregate.Warnings...)
+	for batchID, observedCostUSD := range remoteAggregate.BatchCostUSD {
+		if summary := batchSummaryMap[batchID]; summary != nil {
+			summary.RemoteObservedCostUSD += observedCostUSD
+		}
 	}
 
 	if err := iterateProfitBoardRows(query, resolvedBatches, func(prepared profitBoardPreparedRow) error {
@@ -2341,6 +2461,7 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 		summary.ActualSiteRevenueUSD = roundProfitBoardAmount(summary.ActualSiteRevenueUSD)
 		summary.ConfiguredSiteRevenueUSD = roundProfitBoardAmount(summary.ConfiguredSiteRevenueUSD)
 		summary.UpstreamCostUSD = roundProfitBoardAmount(summary.UpstreamCostUSD)
+		summary.RemoteObservedCostUSD = roundProfitBoardAmount(summary.RemoteObservedCostUSD)
 		summary.ConfiguredProfitUSD = roundProfitBoardAmount(summary.ConfiguredProfitUSD)
 		summary.ActualProfitUSD = roundProfitBoardAmount(summary.ActualProfitUSD)
 		report.BatchSummaries = append(report.BatchSummaries, *summary)
@@ -2377,12 +2498,14 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 	report.Summary.ActualSiteRevenueUSD = roundProfitBoardAmount(report.Summary.ActualSiteRevenueUSD)
 	report.Summary.ConfiguredSiteRevenueUSD = roundProfitBoardAmount(report.Summary.ConfiguredSiteRevenueUSD)
 	report.Summary.UpstreamCostUSD = roundProfitBoardAmount(report.Summary.UpstreamCostUSD)
+	report.Summary.RemoteObservedCostUSD = roundProfitBoardAmount(report.Summary.RemoteObservedCostUSD)
 	report.Summary.ConfiguredProfitUSD = roundProfitBoardAmount(report.Summary.ConfiguredProfitUSD)
 	report.Summary.ActualProfitUSD = roundProfitBoardAmount(report.Summary.ActualProfitUSD)
 	report.Summary.ConfiguredProfitCoverageRate = roundProfitBoardAmount(report.Summary.ConfiguredProfitCoverageRate)
 	report.Meta.LatestLogId = latestLogId
 	report.Meta.LatestLogCreatedAt = latestLogCreatedAt
 	report.Meta.ActivityWatermark = buildProfitBoardActivityWatermark(report.Summary.RequestCount, latestLogId, latestLogCreatedAt)
+	report.Warnings = uniqueProfitBoardWarnings(report.Warnings)
 	return report, nil
 }
 

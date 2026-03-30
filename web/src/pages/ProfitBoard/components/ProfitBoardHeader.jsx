@@ -9,7 +9,7 @@ import {
   Tag,
   Typography,
 } from '@douyinfe/semi-ui';
-import { Info, RefreshCw, Save } from 'lucide-react';
+import { Info, RefreshCw, Save, Wifi } from 'lucide-react';
 
 const { Paragraph, Text, Title } = Typography;
 
@@ -17,12 +17,15 @@ const ProfitBoardHeader = ({
   querying,
   overviewQuerying,
   runFullRefresh,
+  remoteSyncing,
+  syncRemoteObservers,
   saving,
   saveConfig,
   autoRefreshMode,
   setAutoRefreshMode,
   statusSummary,
   hasNewActivity,
+  hasRemoteObserver,
   generatedAtText,
   sharedSiteModelCount,
   warningSummary,
@@ -50,6 +53,17 @@ const ProfitBoardHeader = ({
         >
           {t('刷新收益看板')}
         </Button>
+        {hasRemoteObserver ? (
+          <Button
+            theme='solid'
+            type='warning'
+            icon={<Wifi size={16} />}
+            loading={remoteSyncing}
+            onClick={syncRemoteObservers}
+          >
+            {t('立即同步远端额度')}
+          </Button>
+        ) : null}
         <Button
           theme='solid'
           type='tertiary'
