@@ -846,7 +846,6 @@ type ChannelTag struct {
 	ClientRestrictionMode   *string  `json:"client_restriction_mode"`
 	ClientRestrictionClients []string `json:"client_restriction_clients"`
 }
-}
 
 func DisableTagChannels(c *gin.Context) {
 	channelTag := ChannelTag{}
@@ -937,7 +936,7 @@ func EditTagChannels(c *gin.Context) {
 	if channelTag.ClientRestrictionMode != nil {
 		mode := dto.ClientRestrictionMode(*channelTag.ClientRestrictionMode)
 		switch mode {
-		case "", dto.ClientRestrictionModeNone, dto.ClientRestrictionModeAllowlist, dto.ClientRestrictionModeBlocklist:
+		case "", dto.ClientRestrictionModeAllowlist, dto.ClientRestrictionModeBlocklist:
 		default:
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,

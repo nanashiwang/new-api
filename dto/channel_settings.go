@@ -104,7 +104,7 @@ func (s ChannelSettings) Validate() error {
 
 func (s ChannelSettings) ValidateClientRestriction() error {
 	switch s.ClientRestrictionMode {
-	case "", ClientRestrictionModeNone, ClientRestrictionModeAllowlist, ClientRestrictionModeBlocklist:
+	case "", ClientRestrictionModeAllowlist, ClientRestrictionModeBlocklist:
 		return nil
 	default:
 		return fmt.Errorf("invalid client_restriction_mode: %s", s.ClientRestrictionMode)
