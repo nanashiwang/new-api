@@ -73,4 +73,7 @@ const (
 
 	// ContextKeyLanguage stores the user's language preference for i18n
 	ContextKeyLanguage ContextKey = "language"
+
+	// ContextKeyClientID stores the detected client tool identifier (e.g., "claude-code", "cursor")
+	ContextKeyClientID ContextKey = "client_id"
 )

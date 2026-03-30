@@ -73,6 +73,8 @@ const EditTagModal = (props) => {
     models: [],
     param_override: null,
     header_override: null,
+    client_restriction_mode: null,
+    client_restriction_clients: [],
   };
   const [inputs, setInputs] = useState(originInputs);
   const modelSearchMatchedCount = useMemo(() => {
@@ -248,13 +250,23 @@ const EditTagModal = (props) => {
       data.header_override = trimmedHeaderOverride;
     }
     data.new_tag = formVals.new_tag;
+    // Handle client restriction
+    if (
+      formVals.client_restriction_mode !== undefined &&
+      formVals.client_restriction_mode !== null
+    ) {
+      data.client_restriction_mode = formVals.client_restriction_mode;
+      data.client_restriction_clients =
+        formVals.client_restriction_clients || [];
+    }
     if (
       data.model_mapping === undefined &&
       data.groups === undefined &&
       data.models === undefined &&
       data.new_tag === undefined &&
       data.param_override === undefined &&
-      data.header_override === undefined
+      data.header_override === undefined &&
+      data.client_restriction_mode === undefined
     ) {
       showWarning('没有任何修改！');
       setLoading(false);
@@ -710,6 +722,70 @@ const EditTagModal = (props) => {
                       </div>
                     }
                   />
+
+                  <Form.Select
+                    field='client_restriction_mode'
+                    label={t('客户端限制')}
+                    placeholder={t('不更改')}
+                    optionList={[
+                      { label: t('不限制'), value: '' },
+                      { label: t('仅允许（白名单）'), value: 'allowlist' },
+                      { label: t('禁止（黑名单）'), value: 'blocklist' },
+                    ]}
+                    onChange={(value) =>
+                      handleInputChange('client_restriction_mode', value)
+                    }
+                    showClear
+                    extraText={t(
+                      '限制哪些客户端工具可以使用该标签下的渠道，留空则不更改',
+                    )}
+                  />
+
+                  {inputs.client_restriction_mode !== null &&
+                    inputs.client_restriction_mode !== undefined &&
+                    inputs.client_restriction_mode !== '' && (
+                      <Form.Select
+                        field='client_restriction_clients'
+                        label={t('客户端列表')}
+                        placeholder={t('选择客户端工具')}
+                        multiple
+                        filter
+                        optionList={[
+                          { label: 'Claude Code CLI', value: 'claude-code' },
+                          { label: 'Codex CLI', value: 'codex-cli' },
+                          { label: 'Gemini CLI', value: 'gemini-cli' },
+                          { label: 'Droid CLI', value: 'droid-cli' },
+                          { label: 'Aider', value: 'aider' },
+                          { label: 'Cursor', value: 'cursor' },
+                          { label: 'Windsurf', value: 'windsurf' },
+                          { label: 'Cline', value: 'cline' },
+                          { label: 'Roo Code', value: 'roo-code' },
+                          { label: 'Continue', value: 'continue' },
+                          { label: 'Trae', value: 'trae' },
+                          { label: 'Zed', value: 'zed' },
+                          { label: 'JetBrains AI', value: 'jetbrains' },
+                          { label: 'Augment', value: 'augment' },
+                          { label: 'Cherry Studio', value: 'cherry-studio' },
+                          { label: 'ChatBox', value: 'chatbox' },
+                          { label: 'NextChat', value: 'nextchat' },
+                          { label: 'LobeChat', value: 'lobechat' },
+                          { label: 'Open WebUI', value: 'open-webui' },
+                          { label: 'LibreChat', value: 'librechat' },
+                          { label: 'TypingMind', value: 'typingmind' },
+                          { label: 'OpenCat', value: 'opencat' },
+                          { label: 'BotGem', value: 'botgem' },
+                          { label: 'Jan', value: 'jan' },
+                          { label: t('API 直连'), value: 'api-direct' },
+                        ]}
+                        style={{ width: '100%' }}
+                        onChange={(value) =>
+                          handleInputChange(
+                            'client_restriction_clients',
+                            value,
+                          )
+                        }
+                      />
+                    )}
                 </div>
               </Card>
 

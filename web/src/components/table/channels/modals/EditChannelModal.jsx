@@ -169,6 +169,9 @@ const EditChannelModal = (props) => {
     system_prompt: '',
     system_prompt_override: false,
     settings: '',
+    // 客户端限制设置
+    client_restriction_mode: '',
+    client_restriction_clients: [],
     // 仅 Vertex: 密钥格式（存入 settings.vertex_key_type）
     vertex_key_type: 'json',
     // 仅 AWS: 密钥格式和区域（存入 settings.aws_key_type 和 settings.aws_region）
@@ -431,6 +434,8 @@ const EditChannelModal = (props) => {
     proxy: '',
     pass_through_body_enabled: false,
     system_prompt: '',
+    client_restriction_mode: '',
+    client_restriction_clients: [],
   });
   const showApiConfigCard = true; // 控制是否显示 API 配置卡片
   const getInitValues = () => ({ ...originInputs });
@@ -653,6 +658,10 @@ const EditChannelModal = (props) => {
           data.system_prompt = parsedSettings.system_prompt || '';
           data.system_prompt_override =
             parsedSettings.system_prompt_override || false;
+          data.client_restriction_mode =
+            parsedSettings.client_restriction_mode || '';
+          data.client_restriction_clients =
+            parsedSettings.client_restriction_clients || [];
         } catch (error) {
           console.error('解析渠道设置失败:', error);
           data.force_format = false;
@@ -661,6 +670,8 @@ const EditChannelModal = (props) => {
           data.pass_through_body_enabled = false;
           data.system_prompt = '';
           data.system_prompt_override = false;
+          data.client_restriction_mode = '';
+          data.client_restriction_clients = [];
         }
       } else {
         data.force_format = false;
@@ -669,6 +680,8 @@ const EditChannelModal = (props) => {
         data.pass_through_body_enabled = false;
         data.system_prompt = '';
         data.system_prompt_override = false;
+        data.client_restriction_mode = '';
+        data.client_restriction_clients = [];
       }
 
       if (data.settings) {
@@ -1144,6 +1157,8 @@ const EditChannelModal = (props) => {
       pass_through_body_enabled: false,
       system_prompt: '',
       system_prompt_override: false,
+      client_restriction_mode: '',
+      client_restriction_clients: [],
     });
     // 重置密钥模式状态
     setKeyMode('append');
@@ -1509,6 +1524,8 @@ const EditChannelModal = (props) => {
       pass_through_body_enabled: localInputs.pass_through_body_enabled || false,
       system_prompt: localInputs.system_prompt || '',
       system_prompt_override: localInputs.system_prompt_override || false,
+      client_restriction_mode: localInputs.client_restriction_mode || '',
+      client_restriction_clients: localInputs.client_restriction_clients || [],
     };
     localInputs.setting = JSON.stringify(channelExtraSettings);
 
@@ -1605,6 +1622,8 @@ const EditChannelModal = (props) => {
     // 清理不需要发送到后端的字段
     delete localInputs.force_format;
     delete localInputs.thinking_to_content;
+    delete localInputs.client_restriction_mode;
+    delete localInputs.client_restriction_clients;
     delete localInputs.proxy;
     delete localInputs.pass_through_body_enabled;
     delete localInputs.system_prompt;
@@ -3854,6 +3873,70 @@ const EditChannelModal = (props) => {
                         '如果用户请求中包含系统提示词，则使用此设置拼接到用户的系统提示词前面',
                       )}
                     />
+
+                    <Form.Select
+                      field='client_restriction_mode'
+                      label={t('客户端限制')}
+                      placeholder={t('不限制')}
+                      optionList={[
+                        { label: t('不限制'), value: '' },
+                        { label: t('仅允许（白名单）'), value: 'allowlist' },
+                        { label: t('禁止（黑名单）'), value: 'blocklist' },
+                      ]}
+                      onChange={(value) =>
+                        handleChannelSettingsChange(
+                          'client_restriction_mode',
+                          value,
+                        )
+                      }
+                      extraText={t(
+                        '限制哪些客户端工具可以使用该渠道',
+                      )}
+                    />
+
+                    {inputs.client_restriction_mode && (
+                      <Form.Select
+                        field='client_restriction_clients'
+                        label={t('客户端列表')}
+                        placeholder={t('选择客户端工具')}
+                        multiple
+                        filter
+                        optionList={[
+                          { label: 'Claude Code CLI', value: 'claude-code' },
+                          { label: 'Codex CLI', value: 'codex-cli' },
+                          { label: 'Gemini CLI', value: 'gemini-cli' },
+                          { label: 'Droid CLI', value: 'droid-cli' },
+                          { label: 'Aider', value: 'aider' },
+                          { label: 'Cursor', value: 'cursor' },
+                          { label: 'Windsurf', value: 'windsurf' },
+                          { label: 'Cline', value: 'cline' },
+                          { label: 'Roo Code', value: 'roo-code' },
+                          { label: 'Continue', value: 'continue' },
+                          { label: 'Trae', value: 'trae' },
+                          { label: 'Zed', value: 'zed' },
+                          { label: 'JetBrains AI', value: 'jetbrains' },
+                          { label: 'Augment', value: 'augment' },
+                          { label: 'Cherry Studio', value: 'cherry-studio' },
+                          { label: 'ChatBox', value: 'chatbox' },
+                          { label: 'NextChat', value: 'nextchat' },
+                          { label: 'LobeChat', value: 'lobechat' },
+                          { label: 'Open WebUI', value: 'open-webui' },
+                          { label: 'LibreChat', value: 'librechat' },
+                          { label: 'TypingMind', value: 'typingmind' },
+                          { label: 'OpenCat', value: 'opencat' },
+                          { label: 'BotGem', value: 'botgem' },
+                          { label: 'Jan', value: 'jan' },
+                          { label: t('API 直连'), value: 'api-direct' },
+                        ]}
+                        style={{ width: '100%' }}
+                        onChange={(value) =>
+                          handleChannelSettingsChange(
+                            'client_restriction_clients',
+                            value,
+                          )
+                        }
+                      />
+                    )}
                   </Card>
                 </div>
               </div>

@@ -834,15 +834,18 @@ func DeleteDisabledChannel(c *gin.Context) {
 }
 
 type ChannelTag struct {
-	Tag            string  `json:"tag"`
-	NewTag         *string `json:"new_tag"`
-	Priority       *int64  `json:"priority"`
-	Weight         *uint   `json:"weight"`
-	ModelMapping   *string `json:"model_mapping"`
-	Models         *string `json:"models"`
-	Groups         *string `json:"groups"`
-	ParamOverride  *string `json:"param_override"`
-	HeaderOverride *string `json:"header_override"`
+	Tag                     string   `json:"tag"`
+	NewTag                  *string  `json:"new_tag"`
+	Priority                *int64   `json:"priority"`
+	Weight                  *uint    `json:"weight"`
+	ModelMapping            *string  `json:"model_mapping"`
+	Models                  *string  `json:"models"`
+	Groups                  *string  `json:"groups"`
+	ParamOverride           *string  `json:"param_override"`
+	HeaderOverride          *string  `json:"header_override"`
+	ClientRestrictionMode   *string  `json:"client_restriction_mode"`
+	ClientRestrictionClients []string `json:"client_restriction_clients"`
+}
 }
 
 func DisableTagChannels(c *gin.Context) {
@@ -930,10 +933,31 @@ func EditTagChannels(c *gin.Context) {
 		}
 		channelTag.HeaderOverride = common.GetPointer[string](trimmed)
 	}
+	// Validate client restriction mode
+	if channelTag.ClientRestrictionMode != nil {
+		mode := dto.ClientRestrictionMode(*channelTag.ClientRestrictionMode)
+		switch mode {
+		case "", dto.ClientRestrictionModeNone, dto.ClientRestrictionModeAllowlist, dto.ClientRestrictionModeBlocklist:
+		default:
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "无效的客户端限制模式",
+			})
+			return
+		}
+	}
 	err = model.EditChannelByTag(channelTag.Tag, channelTag.NewTag, channelTag.ModelMapping, channelTag.Models, channelTag.Groups, channelTag.Priority, channelTag.Weight, channelTag.ParamOverride, channelTag.HeaderOverride)
 	if err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	// Handle client restriction update via Setting merge
+	if channelTag.ClientRestrictionMode != nil {
+		err = model.UpdateChannelClientRestrictionByTag(channelTag.Tag, channelTag.NewTag, channelTag.ClientRestrictionMode, channelTag.ClientRestrictionClients)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
 	}
 	model.InitChannelCache()
 	c.JSON(http.StatusOK, gin.H{
@@ -941,6 +965,13 @@ func EditTagChannels(c *gin.Context) {
 		"message": "",
 	})
 	return
+}
+
+func GetKnownClients(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    service.AllKnownClients(),
+	})
 }
 
 type ChannelBatch struct {

@@ -68,6 +68,14 @@ func NormalizeClaudeImageTransportMode(mode ClaudeImageTransportMode) ClaudeImag
 	}
 }
 
+type ClientRestrictionMode string
+
+const (
+	ClientRestrictionModeNone      ClientRestrictionMode = ""
+	ClientRestrictionModeAllowlist ClientRestrictionMode = "allowlist"
+	ClientRestrictionModeBlocklist ClientRestrictionMode = "blocklist"
+)
+
 type ChannelSettings struct {
 	ForceFormat                    bool                           `json:"force_format,omitempty"`
 	ThinkingToContent              bool                           `json:"thinking_to_content,omitempty"`
@@ -77,6 +85,8 @@ type ChannelSettings struct {
 	SystemPromptOverride           bool                           `json:"system_prompt_override,omitempty"`
 	ChatCompletionsToResponsesMode ChatCompletionsToResponsesMode `json:"chat_completions_to_responses_mode,omitempty"`
 	ClaudeImageTransportMode       ClaudeImageTransportMode       `json:"claude_image_transport_mode,omitempty"`
+	ClientRestrictionMode          ClientRestrictionMode          `json:"client_restriction_mode,omitempty"`
+	ClientRestrictionClients       []string                       `json:"client_restriction_clients,omitempty"`
 }
 
 func (s ChannelSettings) Validate() error {
@@ -86,7 +96,19 @@ func (s ChannelSettings) Validate() error {
 	if err := s.ValidateClaudeImageTransportMode(); err != nil {
 		return err
 	}
+	if err := s.ValidateClientRestriction(); err != nil {
+		return err
+	}
 	return nil
+}
+
+func (s ChannelSettings) ValidateClientRestriction() error {
+	switch s.ClientRestrictionMode {
+	case "", ClientRestrictionModeNone, ClientRestrictionModeAllowlist, ClientRestrictionModeBlocklist:
+		return nil
+	default:
+		return fmt.Errorf("invalid client_restriction_mode: %s", s.ClientRestrictionMode)
+	}
 }
 
 func (s ChannelSettings) ValidateChatCompletionsToResponsesMode() error {

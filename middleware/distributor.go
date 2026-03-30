@@ -29,6 +29,10 @@ type ModelRequest struct {
 
 func Distribute() func(c *gin.Context) {
 	return func(c *gin.Context) {
+		// Detect client tool type from request headers
+		clientID := service.DetectClient(c)
+		common.SetContextKey(c, constant.ContextKeyClientID, clientID)
+
 		var channel *model.Channel
 		channelId, ok := common.GetContextKey(c, constant.ContextKeyTokenSpecificChannelId)
 		modelRequest, shouldSelectChannel, err := getModelRequest(c)
@@ -53,6 +57,11 @@ func Distribute() func(c *gin.Context) {
 			}
 			if !IsTokenChannelAllowed(c, channel.Id) {
 				abortWithOpenAiMessage(c, http.StatusForbidden, "当前令牌不允许使用该渠道", types.ErrorCodeAccessDenied)
+				return
+			}
+			// Check client restriction for specific channel
+			if !service.IsChannelAllowedForClient(channel, clientID) {
+				abortWithOpenAiMessage(c, http.StatusForbidden, "当前客户端工具不允许使用该渠道", types.ErrorCodeAccessDenied)
 				return
 			}
 		} else {
@@ -108,6 +117,8 @@ func Distribute() func(c *gin.Context) {
 					if err == nil && preferred != nil {
 						if !IsTokenChannelAllowed(c, preferred.Id) {
 							channel = nil
+						} else if !service.IsChannelAllowedForClient(preferred, clientID) {
+							channel = nil // client restriction blocks affinity, fall through to normal selection
 						} else if preferred.Status != common.ChannelStatusEnabled {
 							if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
 								abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorChannelDisabled))

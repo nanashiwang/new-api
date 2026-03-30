@@ -17,6 +17,10 @@ var group2model2channels map[string]map[string][]int // enabled channel
 var channelsIDM map[int]*Channel                     // all channels include disabled
 var channelSyncLock sync.RWMutex
 
+// ChannelFilter is an optional filter function used during channel selection.
+// Return true to keep the channel, false to skip it.
+type ChannelFilter func(channel *Channel) bool
+
 func InitChannelCache() {
 	if !common.MemoryCacheEnabled {
 		return
@@ -99,7 +103,7 @@ func SyncChannelCache(frequency int) {
 	}
 }
 
-func GetRandomSatisfiedChannel(group string, model string, retry int, allowedChannels []int, excludeChannels []int) (*Channel, error) {
+func GetRandomSatisfiedChannel(group string, model string, retry int, allowedChannels []int, excludeChannels []int, filters ...ChannelFilter) (*Channel, error) {
 	// if memory cache is disabled, get channel directly from database
 	if !common.MemoryCacheEnabled {
 		return GetChannel(group, model, retry, allowedChannels, excludeChannels)
@@ -139,6 +143,23 @@ func GetRandomSatisfiedChannel(group string, model string, retry int, allowedCha
 		}
 		if excludeSet[channelId] {
 			continue
+		}
+		// Apply optional filters
+		if len(filters) > 0 {
+			channel, ok := channelsIDM[channelId]
+			if !ok {
+				continue
+			}
+			pass := true
+			for _, f := range filters {
+				if !f(channel) {
+					pass = false
+					break
+				}
+			}
+			if !pass {
+				continue
+			}
 		}
 		filteredChannels = append(filteredChannels, channelId)
 	}

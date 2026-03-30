@@ -762,6 +762,40 @@ func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *
 	return nil
 }
 
+// UpdateChannelClientRestrictionByTag merges client restriction settings into
+// each channel's Setting JSON for all channels with the given tag.
+// This uses a merge strategy to avoid overwriting other ChannelSettings fields.
+func UpdateChannelClientRestrictionByTag(tag string, newTag *string, mode *string, clients []string) error {
+	// Use the updated tag if newTag was provided and differs
+	targetTag := tag
+	if newTag != nil && *newTag != tag {
+		targetTag = *newTag
+	}
+
+	channels, err := GetChannelsByTag(targetTag, false, false)
+	if err != nil {
+		return err
+	}
+
+	for _, channel := range channels {
+		settings := channel.GetSetting()
+		if mode != nil {
+			settings.ClientRestrictionMode = dto.ClientRestrictionMode(*mode)
+		}
+		settings.ClientRestrictionClients = clients
+		settingBytes, err := common.Marshal(settings)
+		if err != nil {
+			return fmt.Errorf("failed to marshal setting: channel_id=%d, error=%v", channel.Id, err)
+		}
+		settingStr := string(settingBytes)
+		if err := DB.Model(&Channel{}).Where("id = ?", channel.Id).Update("setting", settingStr).Error; err != nil {
+			common.SysLog(fmt.Sprintf("failed to update client restriction: channel_id=%d, tag=%s, error=%v", channel.Id, targetTag, err))
+			return err
+		}
+	}
+	return nil
+}
+
 func UpdateChannelUsedQuota(id int, quota int) {
 	if common.BatchUpdateEnabled {
 		addNewRecord(BatchUpdateTypeChannelUsedQuota, id, quota)

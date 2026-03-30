@@ -90,6 +90,13 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 	selectGroup := param.TokenGroup
 	userGroup := common.GetContextKeyString(param.Ctx, constant.ContextKeyUserGroup)
 
+	// Build client restriction filter
+	clientFilter := buildClientFilter(param.Ctx)
+	var filters []model.ChannelFilter
+	if clientFilter != nil {
+		filters = append(filters, clientFilter)
+	}
+
 	if param.TokenGroup == "auto" {
 		if len(setting.GetAutoGroups()) == 0 {
 			return nil, selectGroup, errors.New("auto groups is not enabled")
@@ -119,7 +126,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			}
 			logger.LogDebug(param.Ctx, "Auto selecting group: %s, priorityRetry: %d", autoGroup, priorityRetry)
 
-			channel, _ = model.GetRandomSatisfiedChannel(autoGroup, param.ModelName, priorityRetry, param.AllowedChannels, param.ExcludeChannels)
+			channel, _ = model.GetRandomSatisfiedChannel(autoGroup, param.ModelName, priorityRetry, param.AllowedChannels, param.ExcludeChannels, filters...)
 			if channel == nil {
 				// Current group has no available channel for this model, try next group
 				// 当前分组没有该模型的可用渠道，尝试下一个分组
@@ -157,10 +164,25 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			break
 		}
 	} else {
-		channel, err = model.GetRandomSatisfiedChannel(param.TokenGroup, param.ModelName, param.GetRetry(), param.AllowedChannels, param.ExcludeChannels)
+		channel, err = model.GetRandomSatisfiedChannel(param.TokenGroup, param.ModelName, param.GetRetry(), param.AllowedChannels, param.ExcludeChannels, filters...)
 		if err != nil {
 			return nil, param.TokenGroup, err
 		}
 	}
 	return channel, selectGroup, nil
+}
+
+// buildClientFilter creates a ChannelFilter that checks client restriction settings.
+// Returns nil if no client ID is detected (meaning no filtering needed).
+func buildClientFilter(ctx *gin.Context) model.ChannelFilter {
+	if ctx == nil {
+		return nil
+	}
+	clientID := common.GetContextKeyString(ctx, constant.ContextKeyClientID)
+	if clientID == "" {
+		return nil
+	}
+	return func(ch *model.Channel) bool {
+		return IsChannelAllowedForClient(ch, clientID)
+	}
 }

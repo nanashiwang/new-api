@@ -274,6 +274,7 @@ func SetApiRouter(router *gin.Engine) {
 			channelRoute.GET("/tag/models", controller.GetTagModels)
 			channelRoute.POST("/copy/:id", controller.CopyChannel)
 			channelRoute.POST("/multi_key/manage", controller.ManageMultiKeys)
+			channelRoute.GET("/known_clients", controller.GetKnownClients)
 		}
 		profitBoardRoute := apiRouter.Group("/profit_board")
 		profitBoardRoute.Use(middleware.AdminAuth())
