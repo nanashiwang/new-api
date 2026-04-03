@@ -64,13 +64,21 @@ const ComboManagerCard = ({
             ? channelOptions
             : (options.tags || []).map((item) => ({ label: item, value: item }))
         }
-        value={draft.scope_type === 'channel' ? draft.channel_ids || [] : draft.tags || []}
+        value={
+          draft.scope_type === 'channel'
+            ? draft.channel_ids || []
+            : draft.tags || []
+        }
         onChange={(value) =>
           draft.scope_type === 'channel'
             ? setDraft((prev) => ({ ...prev, channel_ids: value || [] }))
             : setDraft((prev) => ({ ...prev, tags: value || [] }))
         }
-        placeholder={draft.scope_type === 'channel' ? t('选择一个或多个渠道') : t('选择一个或多个标签')}
+        placeholder={
+          draft.scope_type === 'channel'
+            ? t('选择一个或多个渠道')
+            : t('选择一个或多个标签')
+        }
         style={{ width: '100%' }}
       />
       <div className='flex flex-wrap items-center gap-2'>
@@ -98,8 +106,12 @@ const ComboManagerCard = ({
                 <div>
                   <Space wrap>
                     <Text strong>{batch.name}</Text>
-                    <Tag color={batch.scope_type === 'channel' ? 'blue' : 'cyan'}>
-                      {batch.scope_type === 'channel' ? t('渠道') : t('标签聚合渠道')}
+                    <Tag
+                      color={batch.scope_type === 'channel' ? 'blue' : 'cyan'}
+                    >
+                      {batch.scope_type === 'channel'
+                        ? t('渠道')
+                        : t('标签聚合渠道')}
                     </Tag>
                   </Space>
                   <Text type='tertiary' className='mt-1 block'>
@@ -128,11 +140,18 @@ const ComboManagerCard = ({
             ))}
           </div>
         ) : (
-          <Empty image={null} description={t('还没有组合，先添加一组渠道或标签')} />
+          <Empty
+            image={null}
+            description={t('还没有组合，先添加一组渠道或标签')}
+          />
         )}
       </div>
       {batchValidationError ? (
-        <Banner type='danger' description={batchValidationError} closeIcon={null} />
+        <Banner
+          type='danger'
+          description={batchValidationError}
+          closeIcon={null}
+        />
       ) : (
         <Text type='tertiary'>
           {t('这里决定你长期盯哪些渠道；顶部累计总览会一直按这些组合统计。')}

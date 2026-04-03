@@ -119,6 +119,64 @@ func SyncProfitBoardRemote(c *gin.Context) {
 	})
 }
 
+func GetProfitBoardUpstreamAccounts(c *gin.Context) {
+	accounts, err := model.GetProfitBoardUpstreamAccountOptions()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, accounts)
+}
+
+func SaveProfitBoardUpstreamAccount(c *gin.Context) {
+	account := model.ProfitBoardUpstreamAccount{}
+	if err := c.ShouldBindJSON(&account); err != nil {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	if rawID := strings.TrimSpace(c.Param("id")); rawID != "" {
+		id, err := strconv.Atoi(rawID)
+		if err != nil || id <= 0 {
+			common.ApiErrorMsg(c, "无效的上游账户")
+			return
+		}
+		account.Id = id
+	}
+	saved, err := model.SaveProfitBoardUpstreamAccount(account)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, saved)
+}
+
+func DeleteProfitBoardUpstreamAccount(c *gin.Context) {
+	id, err := strconv.Atoi(strings.TrimSpace(c.Param("id")))
+	if err != nil || id <= 0 {
+		common.ApiErrorMsg(c, "无效的上游账户")
+		return
+	}
+	if err := model.DeleteProfitBoardUpstreamAccount(id); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"deleted": true})
+}
+
+func SyncProfitBoardUpstreamAccount(c *gin.Context) {
+	id, err := strconv.Atoi(strings.TrimSpace(c.Param("id")))
+	if err != nil || id <= 0 {
+		common.ApiErrorMsg(c, "无效的上游账户")
+		return
+	}
+	account, syncErr := model.SyncProfitBoardUpstreamAccount(id, true)
+	if syncErr != nil {
+		common.ApiError(c, syncErr)
+		return
+	}
+	common.ApiSuccess(c, account)
+}
+
 func QueryProfitBoard(c *gin.Context) {
 	query := model.ProfitBoardQuery{}
 	if err := c.ShouldBindJSON(&query); err != nil {

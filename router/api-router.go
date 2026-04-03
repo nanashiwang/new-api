@@ -280,6 +280,11 @@ func SetApiRouter(router *gin.Engine) {
 		profitBoardRoute.Use(middleware.AdminAuth())
 		{
 			profitBoardRoute.GET("/options", controller.GetProfitBoardOptions)
+			profitBoardRoute.GET("/upstream_accounts", controller.GetProfitBoardUpstreamAccounts)
+			profitBoardRoute.POST("/upstream_accounts", controller.SaveProfitBoardUpstreamAccount)
+			profitBoardRoute.PUT("/upstream_accounts/:id", controller.SaveProfitBoardUpstreamAccount)
+			profitBoardRoute.DELETE("/upstream_accounts/:id", controller.DeleteProfitBoardUpstreamAccount)
+			profitBoardRoute.POST("/upstream_accounts/:id/sync", controller.SyncProfitBoardUpstreamAccount)
 			profitBoardRoute.GET("/config", controller.GetProfitBoardConfig)
 			profitBoardRoute.PUT("/config", controller.SaveProfitBoardConfig)
 			profitBoardRoute.POST("/overview", controller.GetProfitBoardOverview)

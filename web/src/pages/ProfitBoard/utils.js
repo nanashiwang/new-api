@@ -34,6 +34,8 @@ export const clampNumber = (value) => {
 
 export const createDefaultUpstreamConfig = () => ({
   cost_source: 'manual_only',
+  upstream_mode: 'manual_rules',
+  upstream_account_id: 0,
   input_price: 0,
   output_price: 0,
   cache_read_price: 0,
@@ -74,12 +76,14 @@ export const createDefaultRemoteObserverConfig = () => ({
   access_token_masked: '',
 });
 
-export const createDefaultComboPricingConfig = (comboId, legacySite, legacyUpstream) => ({
+export const createDefaultComboPricingConfig = (
+  comboId,
+  legacySite,
+  legacyUpstream,
+) => ({
   combo_id: comboId,
   site_mode:
-    legacySite?.pricing_mode === 'site_model'
-      ? 'shared_site_model'
-      : 'manual',
+    legacySite?.pricing_mode === 'site_model' ? 'shared_site_model' : 'manual',
   site_rules: [
     createDefaultPricingRule({
       is_default: true,
@@ -109,6 +113,18 @@ export const createDefaultDraft = () => ({
   scope_type: 'channel',
   channel_ids: [],
   tags: [],
+});
+
+export const createDefaultUpstreamAccountDraft = () => ({
+  id: 0,
+  name: '',
+  remark: '',
+  account_type: 'newapi',
+  base_url: '',
+  user_id: 0,
+  access_token: '',
+  access_token_masked: '',
+  enabled: true,
 });
 
 export const createDefaultState = () => {
@@ -160,7 +176,8 @@ export const normalizeRestoredState = (state) => {
   const next = { ...defaults, ...(state || {}) };
   const legacyHasSelection =
     !next.batches?.length &&
-    ((next.scopeType === 'channel' && (next.selectedChannels || []).length > 0) ||
+    ((next.scopeType === 'channel' &&
+      (next.selectedChannels || []).length > 0) ||
       (next.scopeType === 'tag' && (next.selectedTags || []).length > 0));
 
   if (legacyHasSelection) {
@@ -203,9 +220,18 @@ export const normalizeRestoredState = (state) => {
   next.upstreamConfig = {
     ...createDefaultUpstreamConfig(),
     ...(next.upstreamConfig || {}),
-    cost_source: 'manual_only',
+    upstream_mode:
+      next.upstreamConfig?.upstream_mode ||
+      (next.upstreamConfig?.cost_source &&
+      next.upstreamConfig.cost_source !== 'manual_only'
+        ? 'wallet_observer'
+        : 'manual_rules'),
     fixed_amount: 0,
   };
+  if (next.upstreamConfig.upstream_mode !== 'wallet_observer') {
+    next.upstreamConfig.upstream_account_id = 0;
+    next.upstreamConfig.cost_source = 'manual_only';
+  }
   next.siteConfig = {
     ...createDefaultSiteConfig(),
     ...(next.siteConfig || {}),
@@ -215,7 +241,9 @@ export const normalizeRestoredState = (state) => {
   next.comboConfigs = (next.comboConfigs || []).map((item) => ({
     ...createDefaultComboPricingConfig(item?.combo_id || ''),
     ...item,
-    site_rules: (item?.site_rules || []).map((rule) => createDefaultPricingRule(rule)),
+    site_rules: (item?.site_rules || []).map((rule) =>
+      createDefaultPricingRule(rule),
+    ),
     upstream_rules: (item?.upstream_rules || []).map((rule) =>
       createDefaultPricingRule(rule),
     ),
@@ -259,11 +287,26 @@ export const formatMoney = (value, status, digits = 3) => {
 export const createPresetRanges = () => {
   const now = dayjs();
   return [
-    { label: '今天', value: [now.startOf('day').toDate(), now.endOf('day').toDate()] },
-    { label: '最近 24 小时', value: [now.subtract(24, 'hour').toDate(), now.toDate()] },
-    { label: '近 7 天', value: [now.subtract(7, 'day').toDate(), now.toDate()] },
-    { label: '近 30 天', value: [now.subtract(30, 'day').toDate(), now.toDate()] },
-    { label: '本月', value: [now.startOf('month').toDate(), now.endOf('month').toDate()] },
+    {
+      label: '今天',
+      value: [now.startOf('day').toDate(), now.endOf('day').toDate()],
+    },
+    {
+      label: '最近 24 小时',
+      value: [now.subtract(24, 'hour').toDate(), now.toDate()],
+    },
+    {
+      label: '近 7 天',
+      value: [now.subtract(7, 'day').toDate(), now.toDate()],
+    },
+    {
+      label: '近 30 天',
+      value: [now.subtract(30, 'day').toDate(), now.toDate()],
+    },
+    {
+      label: '本月',
+      value: [now.startOf('month').toDate(), now.endOf('month').toDate()],
+    },
     {
       label: '上月',
       value: [
@@ -298,7 +341,8 @@ export const normalizeCachedReportBundle = (raw) => {
     return {
       report: raw.report,
       queryKey: raw.queryKey || '',
-      activityWatermark: raw.activityWatermark || raw.report?.meta?.activity_watermark || '',
+      activityWatermark:
+        raw.activityWatermark || raw.report?.meta?.activity_watermark || '',
       generatedAt: raw.generatedAt || raw.report?.meta?.generated_at || 0,
     };
   }
@@ -310,13 +354,20 @@ export const normalizeCachedReportBundle = (raw) => {
   };
 };
 
-export const formatRatio = (value) => `${(Number(value || 0) * 100).toFixed(1)}%`;
+export const formatRatio = (value) =>
+  `${(Number(value || 0) * 100).toFixed(1)}%`;
 
-export const formatBucketLabel = (timestamp, granularity, customIntervalMinutes) => {
+export const formatBucketLabel = (
+  timestamp,
+  granularity,
+  customIntervalMinutes,
+) => {
   const current = dayjs.unix(timestamp);
   if (granularity === 'hour') return current.format('YYYY-MM-DD HH:00');
-  if (granularity === 'week') return current.startOf('week').add(1, 'day').format('GGGG-[W]WW');
-  if (granularity === 'month') return current.startOf('month').format('YYYY-MM');
+  if (granularity === 'week')
+    return current.startOf('week').add(1, 'day').format('GGGG-[W]WW');
+  if (granularity === 'month')
+    return current.startOf('month').format('YYYY-MM');
   if (granularity === 'custom') {
     const interval = Math.max(Number(customIntervalMinutes || 1), 1);
     const totalMinutes = current.hour() * 60 + current.minute();

@@ -23,6 +23,7 @@ const PricingRuleList = ({
         <Select
           allowCreate
           filter
+          showClear
           value={rule.is_default ? '__default__' : rule.model_name}
           onChange={(value) =>
             onUpdate(comboId, field, index, {
@@ -35,25 +36,37 @@ const PricingRuleList = ({
             { label: t('默认规则'), value: '__default__' },
             ...modelNameOptions,
           ]}
-          placeholder={t('选择或输入模型')}
+          placeholder={
+            field === 'site_rules'
+              ? t('选择本站模型或输入自定义')
+              : t('选择或输入上游模型名')
+          }
         />
         <InputNumber
           min={0}
           value={rule.input_price}
-          onChange={(value) => onUpdate(comboId, field, index, { input_price: clampNumber(value) })}
+          onChange={(value) =>
+            onUpdate(comboId, field, index, { input_price: clampNumber(value) })
+          }
           suffix='输入'
         />
         <InputNumber
           min={0}
           value={rule.output_price}
-          onChange={(value) => onUpdate(comboId, field, index, { output_price: clampNumber(value) })}
+          onChange={(value) =>
+            onUpdate(comboId, field, index, {
+              output_price: clampNumber(value),
+            })
+          }
           suffix='输出'
         />
         <InputNumber
           min={0}
           value={rule.cache_read_price}
           onChange={(value) =>
-            onUpdate(comboId, field, index, { cache_read_price: clampNumber(value) })
+            onUpdate(comboId, field, index, {
+              cache_read_price: clampNumber(value),
+            })
           }
           suffix='缓存读'
         />
@@ -61,7 +74,9 @@ const PricingRuleList = ({
           min={0}
           value={rule.cache_creation_price}
           onChange={(value) =>
-            onUpdate(comboId, field, index, { cache_creation_price: clampNumber(value) })
+            onUpdate(comboId, field, index, {
+              cache_creation_price: clampNumber(value),
+            })
           }
           suffix='缓存写'
         />
@@ -81,7 +96,11 @@ const PricingRuleList = ({
         </Button>
       </div>
     ))}
-    <Button type='tertiary' icon={<Plus size={14} />} onClick={() => onAdd(comboId, field)}>
+    <Button
+      type='tertiary'
+      icon={<Plus size={14} />}
+      onClick={() => onAdd(comboId, field)}
+    >
       {field === 'site_rules' ? t('新增本站模型规则') : t('新增上游模型规则')}
     </Button>
   </div>

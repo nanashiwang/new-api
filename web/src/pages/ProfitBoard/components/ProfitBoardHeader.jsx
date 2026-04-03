@@ -3,13 +3,12 @@ import {
   Banner,
   Button,
   Card,
-  Collapse,
   Space,
   Switch,
   Tag,
   Typography,
 } from '@douyinfe/semi-ui';
-import { Info, RefreshCw, Save, Wifi } from 'lucide-react';
+import { RefreshCw, Save, Wallet } from 'lucide-react';
 
 const { Paragraph, Text, Title } = Typography;
 
@@ -17,20 +16,19 @@ const ProfitBoardHeader = ({
   querying,
   overviewQuerying,
   runFullRefresh,
-  remoteSyncing,
-  syncRemoteObservers,
   saving,
   saveConfig,
   autoRefreshMode,
   setAutoRefreshMode,
   statusSummary,
   hasNewActivity,
-  hasRemoteObserver,
   generatedAtText,
   sharedSiteModelCount,
   warningSummary,
   combinedWarnings,
   sitePriceFactorNote,
+  walletModeEnabled,
+  selectedAccount,
   t,
 }) => (
   <>
@@ -40,7 +38,7 @@ const ProfitBoardHeader = ({
           {t('收益看板')}
         </Title>
         <Paragraph type='tertiary' style={{ margin: 0 }}>
-          {t('先维护组合和价格规则，再按时间范围看收入、成本、利润和对账明细。')}
+          {t('先维护组合、站点收入规则和上游账户，再按统一口径看收入、成本、利润。')}
         </Paragraph>
       </div>
       <Space wrap>
@@ -53,17 +51,6 @@ const ProfitBoardHeader = ({
         >
           {t('刷新收益看板')}
         </Button>
-        {hasRemoteObserver ? (
-          <Button
-            theme='solid'
-            type='warning'
-            icon={<Wifi size={16} />}
-            loading={remoteSyncing}
-            onClick={syncRemoteObservers}
-          >
-            {t('立即同步远端额度')}
-          </Button>
-        ) : null}
         <Button
           theme='solid'
           type='tertiary'
@@ -81,7 +68,13 @@ const ProfitBoardHeader = ({
     </div>
 
     <Card bordered={false} bodyStyle={{ padding: 16 }}>
-      <div className='grid gap-3 lg:grid-cols-[1.4fr_1fr_1fr_1fr]'>
+      <div
+        className={`grid gap-3 ${
+          walletModeEnabled
+            ? 'lg:grid-cols-[1.2fr_1fr_1fr_1fr_1fr]'
+            : 'lg:grid-cols-[1.4fr_1fr_1fr_1fr]'
+        }`}
+      >
         <div className='rounded-xl bg-semi-color-fill-0 px-4 py-3'>
           <Text type='tertiary'>{t('状态')}</Text>
           <div className='mt-2 flex flex-wrap gap-2'>
@@ -94,7 +87,9 @@ const ProfitBoardHeader = ({
             ) : (
               <Tag color='grey'>{t('等待首次刷新')}</Tag>
             )}
-            {hasNewActivity ? <Tag color='orange'>{t('检测到新数据，请手动刷新')}</Tag> : null}
+            {hasNewActivity ? (
+              <Tag color='orange'>{t('检测到新数据，请手动刷新')}</Tag>
+            ) : null}
           </div>
         </div>
         <div className='rounded-xl bg-semi-color-fill-0 px-4 py-3'>
@@ -106,30 +101,63 @@ const ProfitBoardHeader = ({
           <div className='mt-2 text-base font-semibold'>{warningSummary}</div>
         </div>
         <div className='rounded-xl bg-semi-color-fill-0 px-4 py-3'>
-          <Text type='tertiary'>{t('共享本站模型价格')}</Text>
+          <Text type='tertiary'>{t('共享本站模型')}</Text>
           <div className='mt-2 text-base font-semibold'>
-            {sharedSiteModelCount > 0 ? `${sharedSiteModelCount} ${t('个模型')}` : t('未启用')}
+            {sharedSiteModelCount > 0
+              ? `${sharedSiteModelCount} ${t('个模型')}`
+              : t('未启用')}
           </div>
         </div>
-      </div>
-      {(combinedWarnings.length > 0 || sitePriceFactorNote) ? (
-        <Collapse className='mt-3'>
-          <Collapse.Panel header={t('展开问题详情')} itemKey='warnings'>
-            <div className='space-y-2'>
-              {combinedWarnings.map((warning) => (
-                <Banner key={warning} type='warning' description={warning} closeIcon={null} />
-              ))}
-              {sitePriceFactorNote ? (
-                <Banner
-                  type='info'
-                  icon={<Info size={16} />}
-                  description={sitePriceFactorNote}
-                  closeIcon={null}
-                />
-              ) : null}
+        {walletModeEnabled ? (
+          <div className='rounded-xl bg-semi-color-fill-0 px-4 py-3'>
+            <div className='flex items-center gap-2'>
+              <Wallet size={15} />
+              <Text type='tertiary'>{t('上游钱包')}</Text>
             </div>
-          </Collapse.Panel>
-        </Collapse>
+            <div className='mt-2 text-sm font-semibold'>
+              {selectedAccount?.name || t('未选择账户')}
+            </div>
+            <div className='mt-2 flex flex-wrap gap-2'>
+              {selectedAccount?.status ? (
+                <Tag
+                  color={
+                    {
+                      ready: 'green',
+                      needs_baseline: 'orange',
+                      failed: 'red',
+                      disabled: 'grey',
+                      not_configured: 'grey',
+                    }[selectedAccount.status] || 'grey'
+                  }
+                >
+                  {selectedAccount.status}
+                </Tag>
+              ) : (
+                <Tag color='orange'>{t('等待绑定')}</Tag>
+              )}
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      {combinedWarnings.length > 0 || sitePriceFactorNote ? (
+        <div className='mt-3 space-y-2'>
+          {combinedWarnings.map((warning) => (
+            <Banner
+              key={warning}
+              type='warning'
+              description={warning}
+              closeIcon={null}
+            />
+          ))}
+          {sitePriceFactorNote ? (
+            <Banner
+              type='info'
+              description={sitePriceFactorNote}
+              closeIcon={null}
+            />
+          ) : null}
+        </div>
       ) : null}
     </Card>
   </>
