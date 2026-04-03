@@ -57,6 +57,13 @@ export const createDefaultSiteConfig = () => ({
   use_recharge_price: false,
 });
 
+export const createDefaultSharedSiteConfig = (overrides = {}) => ({
+  model_names: [],
+  group: '',
+  use_recharge_price: false,
+  ...overrides,
+});
+
 export const createDefaultPricingRule = (overrides = {}) => ({
   model_name: '',
   input_price: 0,
@@ -78,12 +85,21 @@ export const createDefaultRemoteObserverConfig = () => ({
 
 export const createDefaultComboPricingConfig = (
   comboId,
+  sharedSite,
   legacySite,
   legacyUpstream,
 ) => ({
   combo_id: comboId,
   site_mode:
     legacySite?.pricing_mode === 'site_model' ? 'shared_site_model' : 'manual',
+  shared_site: createDefaultSharedSiteConfig({
+    model_names: sharedSite?.model_names || legacySite?.model_names || [],
+    group: sharedSite?.group || legacySite?.group || '',
+    use_recharge_price:
+      typeof sharedSite?.use_recharge_price === 'boolean'
+        ? sharedSite.use_recharge_price
+        : !!legacySite?.use_recharge_price,
+  }),
   site_rules: [
     createDefaultPricingRule({
       is_default: true,
@@ -239,8 +255,14 @@ export const normalizeRestoredState = (state) => {
     fixed_amount: 0,
   };
   next.comboConfigs = (next.comboConfigs || []).map((item) => ({
-    ...createDefaultComboPricingConfig(item?.combo_id || ''),
+    ...createDefaultComboPricingConfig(
+      item?.combo_id || '',
+      item?.shared_site,
+      next.siteConfig,
+      next.upstreamConfig,
+    ),
     ...item,
+    shared_site: createDefaultSharedSiteConfig(item?.shared_site || {}),
     site_rules: (item?.site_rules || []).map((rule) =>
       createDefaultPricingRule(rule),
     ),

@@ -12,7 +12,7 @@ import {
   Tabs,
   Typography,
 } from '@douyinfe/semi-ui';
-import { Filter, RefreshCw, Settings2, X } from 'lucide-react';
+import { Filter, RefreshCw, Settings2 } from 'lucide-react';
 
 const { Text } = Typography;
 
@@ -50,6 +50,7 @@ const ChartAnalysisCard = ({
   report,
   chartContent,
   trendRowCount,
+  trendBucketCount,
   t,
 }) => {
   const [filterExpanded, setFilterExpanded] = useState(false);
@@ -287,12 +288,13 @@ const ChartAnalysisCard = ({
         {report ? (
           <>
             {chartTab === 'trend' &&
-              trendRowCount > 0 &&
-              trendRowCount < 5 && (
+              trendBucketCount > 0 &&
+              trendBucketCount < 4 && (
                 <Banner
                   type='info'
                   description={t(
-                    '数据点较少，建议扩大时间范围或使用更细粒度',
+                    '当前趋势图只有 {{count}} 个时间点。即使请求很多，也会先汇总进这些时间桶；想看更明显的趋势，请扩大时间范围或调整粒度。',
+                    { count: trendBucketCount },
                   )}
                   closeIcon={null}
                   className='mb-3'

@@ -97,13 +97,14 @@ type ProfitBoardSharedSitePricingConfig struct {
 }
 
 type ProfitBoardComboPricingConfig struct {
-	ComboId                  string                          `json:"combo_id"`
-	SiteMode                 string                          `json:"site_mode,omitempty"`
-	SiteRules                []ProfitBoardModelPricingRule   `json:"site_rules,omitempty"`
-	UpstreamRules            []ProfitBoardModelPricingRule   `json:"upstream_rules,omitempty"`
-	SiteFixedTotalAmount     float64                         `json:"site_fixed_total_amount"`
-	UpstreamFixedTotalAmount float64                         `json:"upstream_fixed_total_amount"`
-	RemoteObserver           ProfitBoardRemoteObserverConfig `json:"remote_observer,omitempty"`
+	ComboId                  string                             `json:"combo_id"`
+	SiteMode                 string                             `json:"site_mode,omitempty"`
+	SharedSite               ProfitBoardSharedSitePricingConfig `json:"shared_site,omitempty"`
+	SiteRules                []ProfitBoardModelPricingRule      `json:"site_rules,omitempty"`
+	UpstreamRules            []ProfitBoardModelPricingRule      `json:"upstream_rules,omitempty"`
+	SiteFixedTotalAmount     float64                            `json:"site_fixed_total_amount"`
+	UpstreamFixedTotalAmount float64                            `json:"upstream_fixed_total_amount"`
+	RemoteObserver           ProfitBoardRemoteObserverConfig    `json:"remote_observer,omitempty"`
 }
 
 type ProfitBoardRemoteObserverConfig struct {
@@ -376,6 +377,7 @@ type profitBoardLogRow struct {
 type profitBoardResolvedComboPricing struct {
 	ComboId                  string
 	SiteMode                 string
+	SharedSite               ProfitBoardSharedSitePricingConfig
 	SiteRules                []ProfitBoardModelPricingRule
 	UpstreamRules            []ProfitBoardModelPricingRule
 	SiteFixedTotalAmount     float64
@@ -627,6 +629,10 @@ func normalizeProfitBoardSharedSiteConfig(config ProfitBoardSharedSitePricingCon
 	return config
 }
 
+func profitBoardSharedSiteConfigEmpty(config ProfitBoardSharedSitePricingConfig) bool {
+	return len(config.ModelNames) == 0 && strings.TrimSpace(config.Group) == "" && !config.UseRechargePrice
+}
+
 func defaultProfitBoardComboSiteMode(sharedSite ProfitBoardSharedSitePricingConfig, legacySite ProfitBoardTokenPricingConfig) string {
 	if legacySite.PricingMode == ProfitBoardSitePricingSiteModel || len(sharedSite.ModelNames) > 0 {
 		return ProfitBoardComboSiteModeSharedSite
@@ -648,6 +654,11 @@ func normalizeProfitBoardComboConfigs(batches []ProfitBoardBatch, comboConfigs [
 		default:
 			config.SiteMode = ProfitBoardComboSiteModeManual
 		}
+		if profitBoardSharedSiteConfigEmpty(config.SharedSite) {
+			config.SharedSite = normalizeProfitBoardSharedSiteConfig(sharedSite, legacySite)
+		} else {
+			config.SharedSite = normalizeProfitBoardSharedSiteConfig(config.SharedSite, legacySite)
+		}
 		config.SiteRules = normalizeProfitBoardModelPricingRules(config.SiteRules, legacySite)
 		config.UpstreamRules = normalizeProfitBoardModelPricingRules(config.UpstreamRules, legacyUpstream)
 		config.SiteFixedTotalAmount = clampProfitBoardNumber(config.SiteFixedTotalAmount)
@@ -663,6 +674,7 @@ func normalizeProfitBoardComboConfigs(batches []ProfitBoardBatch, comboConfigs [
 			config = ProfitBoardComboPricingConfig{
 				ComboId:                  batch.Id,
 				SiteMode:                 defaultProfitBoardComboSiteMode(sharedSite, legacySite),
+				SharedSite:               normalizeProfitBoardSharedSiteConfig(sharedSite, legacySite),
 				SiteRules:                normalizeProfitBoardModelPricingRules(nil, legacySite),
 				UpstreamRules:            normalizeProfitBoardModelPricingRules(nil, legacyUpstream),
 				SiteFixedTotalAmount:     clampProfitBoardNumber(legacySite.FixedTotalAmount),
@@ -671,6 +683,9 @@ func normalizeProfitBoardComboConfigs(batches []ProfitBoardBatch, comboConfigs [
 		}
 		if config.SiteMode == "" {
 			config.SiteMode = defaultProfitBoardComboSiteMode(sharedSite, legacySite)
+		}
+		if profitBoardSharedSiteConfigEmpty(config.SharedSite) {
+			config.SharedSite = normalizeProfitBoardSharedSiteConfig(sharedSite, legacySite)
 		}
 		normalized = append(normalized, config)
 	}
@@ -1770,6 +1785,7 @@ func resolveProfitBoardComboPricingMap(query ProfitBoardQuery, batches []ProfitB
 		configMap[batch.Id] = profitBoardResolvedComboPricing{
 			ComboId:                  batch.Id,
 			SiteMode:                 ProfitBoardComboSiteModeManual,
+			SharedSite:               normalizeProfitBoardSharedSiteConfig(query.SharedSite, query.Site),
 			SiteRules:                normalizeProfitBoardModelPricingRules(nil, query.Site),
 			UpstreamRules:            normalizeProfitBoardModelPricingRules(nil, query.Upstream),
 			SiteFixedTotalAmount:     clampProfitBoardNumber(query.Site.FixedTotalAmount),
@@ -1781,6 +1797,12 @@ func resolveProfitBoardComboPricingMap(query ProfitBoardQuery, batches []ProfitB
 		current.ComboId = config.ComboId
 		if config.SiteMode != "" {
 			current.SiteMode = config.SiteMode
+		}
+		if !profitBoardSharedSiteConfigEmpty(config.SharedSite) {
+			current.SharedSite = normalizeProfitBoardSharedSiteConfig(
+				config.SharedSite,
+				query.Site,
+			)
 		}
 		current.SiteRules = config.SiteRules
 		current.UpstreamRules = config.UpstreamRules
@@ -1798,6 +1820,32 @@ func profitBoardHasSharedSiteMode(comboPricingMap map[string]profitBoardResolved
 		}
 	}
 	return false
+}
+
+func profitBoardSharedSiteMeta(comboPricingMap map[string]profitBoardResolvedComboPricing) (bool, float64, string) {
+	sharedCount := 0
+	useRechargeCount := 0
+	for _, config := range comboPricingMap {
+		if config.SiteMode != ProfitBoardComboSiteModeSharedSite {
+			continue
+		}
+		sharedCount++
+		if config.SharedSite.UseRechargePrice {
+			useRechargeCount++
+		}
+	}
+	if sharedCount == 0 {
+		return false, 0, ""
+	}
+	if useRechargeCount == 0 {
+		factor, note := profitBoardPriceFactorMeta(false)
+		return false, factor, note
+	}
+	if useRechargeCount == sharedCount {
+		factor, note := profitBoardPriceFactorMeta(true)
+		return true, factor, note
+	}
+	return false, 0, "不同组合使用了不同的本站价格口径：部分按原价，部分按充值价"
 }
 
 func buildProfitBoardReportCacheKey(query ProfitBoardQuery) string {
@@ -1932,18 +1980,14 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 	}
 	groupRatios := ratio_setting.GetGroupRatioCopy()
 	comboPricingMap := resolveProfitBoardComboPricingMap(normalizedQuery, resolvedBatches)
-	sitePriceFactor := 0.0
-	sitePriceFactorNote := ""
-	if profitBoardHasSharedSiteMode(comboPricingMap) {
-		sitePriceFactor, sitePriceFactorNote = profitBoardPriceFactorMeta(normalizedQuery.SharedSite.UseRechargePrice)
-	}
+	siteUseRechargePrice, sitePriceFactor, sitePriceFactorNote := profitBoardSharedSiteMeta(comboPricingMap)
 
 	report := &ProfitBoardReport{
 		Signature:      signature,
 		Batches:        resolvedBatches,
 		BatchSummaries: make([]ProfitBoardBatchSummary, 0, len(resolvedBatches)),
 		Meta: ProfitBoardMeta{
-			SiteUseRechargePrice:      normalizedQuery.SharedSite.UseRechargePrice,
+			SiteUseRechargePrice:      siteUseRechargePrice,
 			SitePriceFactor:           roundProfitBoardAmount(sitePriceFactor),
 			SitePriceFactorNote:       sitePriceFactorNote,
 			GeneratedAt:               common.GetTimestamp(),
@@ -2037,6 +2081,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		sitePricingSource := ""
 		sitePricingKnown := false
 		if comboPricing.SiteMode == ProfitBoardComboSiteModeSharedSite {
+			sharedSiteConfig := comboPricing.SharedSite
 			configuredSiteRevenueUSD, sitePricingSource, sitePricingKnown = profitBoardSiteModelRevenueUSD(
 				row,
 				prepared.InputTokens,
@@ -2044,9 +2089,9 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 				prepared.CacheCreationTokens,
 				ProfitBoardTokenPricingConfig{
 					PricingMode:      ProfitBoardSitePricingSiteModel,
-					ModelNames:       normalizedQuery.SharedSite.ModelNames,
-					Group:            normalizedQuery.SharedSite.Group,
-					UseRechargePrice: normalizedQuery.SharedSite.UseRechargePrice,
+					ModelNames:       sharedSiteConfig.ModelNames,
+					Group:            sharedSiteConfig.Group,
+					UseRechargePrice: sharedSiteConfig.UseRechargePrice,
 				},
 				pricingMap,
 				groupRatios,
@@ -2471,18 +2516,14 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 		Site:         payload.Site,
 	}
 	comboPricingMap := resolveProfitBoardComboPricingMap(query, resolvedBatches)
-	sitePriceFactor := 0.0
-	sitePriceFactorNote := ""
-	if profitBoardHasSharedSiteMode(comboPricingMap) {
-		sitePriceFactor, sitePriceFactorNote = profitBoardPriceFactorMeta(payload.SharedSite.UseRechargePrice)
-	}
+	siteUseRechargePrice, sitePriceFactor, sitePriceFactorNote := profitBoardSharedSiteMeta(comboPricingMap)
 
 	report := &ProfitBoardReport{
 		Signature:      signature,
 		Batches:        resolvedBatches,
 		BatchSummaries: make([]ProfitBoardBatchSummary, 0, len(resolvedBatches)),
 		Meta: ProfitBoardMeta{
-			SiteUseRechargePrice:      payload.SharedSite.UseRechargePrice,
+			SiteUseRechargePrice:      siteUseRechargePrice,
 			SitePriceFactor:           roundProfitBoardAmount(sitePriceFactor),
 			SitePriceFactorNote:       sitePriceFactorNote,
 			GeneratedAt:               common.GetTimestamp(),
@@ -2558,6 +2599,7 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 		sitePricingSource := ""
 		sitePricingKnown := false
 		if comboPricing.SiteMode == ProfitBoardComboSiteModeSharedSite {
+			sharedSiteConfig := comboPricing.SharedSite
 			configuredSiteRevenueUSD, sitePricingSource, sitePricingKnown = profitBoardSiteModelRevenueUSD(
 				row,
 				prepared.InputTokens,
@@ -2565,9 +2607,9 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 				prepared.CacheCreationTokens,
 				ProfitBoardTokenPricingConfig{
 					PricingMode:      ProfitBoardSitePricingSiteModel,
-					ModelNames:       payload.SharedSite.ModelNames,
-					Group:            payload.SharedSite.Group,
-					UseRechargePrice: payload.SharedSite.UseRechargePrice,
+					ModelNames:       sharedSiteConfig.ModelNames,
+					Group:            sharedSiteConfig.Group,
+					UseRechargePrice: sharedSiteConfig.UseRechargePrice,
 				},
 				pricingMap,
 				groupRatios,

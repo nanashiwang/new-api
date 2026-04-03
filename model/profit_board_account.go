@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -128,6 +127,13 @@ func profitBoardUpstreamAccountSnapshotSignature(accountID int) string {
 	return fmt.Sprintf("profit_board_account:%d", accountID)
 }
 
+func profitBoardUpstreamAccountSnapshotBatch(account ProfitBoardUpstreamAccount) ProfitBoardBatchInfo {
+	return ProfitBoardBatchInfo{
+		Id:   profitBoardUpstreamAccountSnapshotComboID,
+		Name: account.Name,
+	}
+}
+
 func buildProfitBoardUpstreamAccountOption(
 	account ProfitBoardUpstreamAccount,
 	state ProfitBoardRemoteObserverState,
@@ -192,10 +198,7 @@ func listProfitBoardUpstreamAccounts() ([]ProfitBoardUpstreamAccount, error) {
 func buildProfitBoardUpstreamAccountState(account ProfitBoardUpstreamAccount, observedCostUSD float64) (ProfitBoardRemoteObserverState, error) {
 	signature := profitBoardUpstreamAccountSnapshotSignature(account.Id)
 	config := account.remoteObserverConfig()
-	batch := ProfitBoardBatchInfo{
-		Id:   strconv.Itoa(account.Id),
-		Name: account.Name,
-	}
+	batch := profitBoardUpstreamAccountSnapshotBatch(account)
 	latestAny, err := getLatestProfitBoardRemoteSnapshot(signature, profitBoardUpstreamAccountSnapshotComboID)
 	if err != nil {
 		return ProfitBoardRemoteObserverState{}, err
@@ -301,10 +304,7 @@ func SyncProfitBoardUpstreamAccount(id int, force bool) (*ProfitBoardUpstreamAcc
 	config := account.remoteObserverConfig()
 	config.Enabled = true
 	signature := profitBoardUpstreamAccountSnapshotSignature(account.Id)
-	batch := ProfitBoardBatchInfo{
-		Id:   strconv.Itoa(account.Id),
-		Name: account.Name,
-	}
+	batch := profitBoardUpstreamAccountSnapshotBatch(*account)
 	latestAny, latestSuccess, err := syncProfitBoardRemoteObserverSnapshot(signature, batch, config, force)
 	if err != nil {
 		return nil, err
@@ -322,10 +322,7 @@ func collectProfitBoardUpstreamAccountObservedAggregate(accountID int, startTime
 	config := account.remoteObserverConfig()
 	config.Enabled = true
 	signature := profitBoardUpstreamAccountSnapshotSignature(account.Id)
-	batch := ProfitBoardBatchInfo{
-		Id:   strconv.Itoa(account.Id),
-		Name: account.Name,
-	}
+	batch := profitBoardUpstreamAccountSnapshotBatch(*account)
 	latestAny, latestSuccess, err := syncProfitBoardRemoteObserverSnapshot(signature, batch, config, forceSync)
 	if err != nil {
 		return nil, err

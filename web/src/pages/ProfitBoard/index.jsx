@@ -32,7 +32,7 @@ import { BadgeDollarSign, BarChart3, CircleDollarSign } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { StatusContext } from '../../context/Status';
 import { useActualTheme } from '../../context/Theme';
-import { API, showError, showInfo, showSuccess, timestamp2string } from '../../helpers';
+import { API, showError, showSuccess, timestamp2string } from '../../helpers';
 import { useIsMobile } from '@/hooks/common/useIsMobile';
 import ChartAnalysisCard from './components/ChartAnalysisCard';
 import ComboManagerCard from './components/ComboManagerCard';
@@ -292,10 +292,13 @@ const ProfitBoardPage = () => {
     if (!batches.length) errors.push(t('请至少添加一个组合'));
     if (duplicateBatchError) errors.push(duplicateBatchError);
     if (
-      comboConfigs.some((item) => item.site_mode === 'shared_site_model') &&
-      !(siteConfig.model_names || []).length
+      comboConfigs.some(
+        (item) =>
+          item.site_mode === 'shared_site_model' &&
+          !(item.shared_site?.model_names || []).length,
+      )
     ) {
-      errors.push(t('有组合启用了读取本站模型价格，请至少选择一个本站模型'));
+      errors.push(t('启用了本站模型价格的组合必须至少选择一个模型'));
     }
     if (
       upstreamConfig.upstream_mode === 'wallet_observer' &&
@@ -311,7 +314,6 @@ const ProfitBoardPage = () => {
     comboConfigs,
     dateRange,
     duplicateBatchError,
-    siteConfig.model_names,
     upstreamConfig.upstream_account_id,
     upstreamConfig.upstream_mode,
     t,
@@ -405,6 +407,7 @@ const ProfitBoardPage = () => {
         const fallback = createDefaultComboPricingConfig(
           batch.id,
           siteConfig,
+          siteConfig,
           upstreamConfig,
         );
         return {
@@ -459,6 +462,7 @@ const ProfitBoardPage = () => {
       (config.combo_configs || []).map((item) => ({
         ...createDefaultComboPricingConfig(
           item.combo_id || '',
+          item.shared_site || config.shared_site,
           config.site,
           config.upstream,
         ),
@@ -592,6 +596,7 @@ const ProfitBoardPage = () => {
           (savedConfig.combo_configs || []).map((item) => ({
             ...createDefaultComboPricingConfig(
               item.combo_id || '',
+              item.shared_site || savedConfig.shared_site,
               savedConfig.site,
               savedConfig.upstream,
             ),
@@ -663,7 +668,7 @@ const ProfitBoardPage = () => {
                 : ''),
           );
         } else if (syncedStatus === 'needs_baseline') {
-          showInfo(t('已同步，等待首次数据采集'));
+          showSuccess(t('余额已同步；本期消耗会在下次同步后开始统计'));
         } else {
           showSuccess(t('上游钱包已同步'));
         }
@@ -859,13 +864,14 @@ const ProfitBoardPage = () => {
   );
 
   const resolveSharedSitePreview = useCallback(
-    (modelName) => {
+    (sharedSiteConfig, modelName) => {
       const model = localModelMap.get(modelName);
       if (!model) return null;
+      const currentSharedSite = sharedSiteConfig || {};
       if (
-        siteConfig.group &&
+        currentSharedSite.group &&
         (model.enable_groups || []).length > 0 &&
-        !(model.enable_groups || []).includes(siteConfig.group)
+        !(model.enable_groups || []).includes(currentSharedSite.group)
       )
         return null;
       if (model.quota_type === 1)
@@ -875,7 +881,7 @@ const ProfitBoardPage = () => {
           cache_read_price: 0,
           cache_creation_price: 0,
         };
-      const factor = siteConfig.use_recharge_price
+      const factor = currentSharedSite.use_recharge_price
         ? clampNumber(model.model_price || 1)
         : 1;
       const baseInput = clampNumber(model.model_ratio) * 2 * factor;
@@ -894,7 +900,7 @@ const ProfitBoardPage = () => {
           : 0,
       };
     },
-    [localModelMap, siteConfig.group, siteConfig.use_recharge_price],
+    [localModelMap],
   );
   const batchSummaryOptions = useMemo(
     () => [
@@ -1328,11 +1334,13 @@ const ProfitBoardPage = () => {
   const generatedAtText = report?.meta?.generated_at
     ? timestamp2string(report.meta.generated_at)
     : t('尚未生成');
-  const sharedSiteModelCount = comboConfigs.some(
+  const sharedSiteModelCount = comboConfigs.filter(
     (item) => item.site_mode === 'shared_site_model',
-  )
-    ? siteConfig.model_names?.length || 0
-    : 0;
+  ).length;
+  const trendBucketCount = useMemo(
+    () => new Set((trendRows || []).map((item) => item.bucket)).size,
+    [trendRows],
+  );
   const sitePriceFactorNote =
     overviewReport?.meta?.site_price_factor_note ||
     report?.meta?.site_price_factor_note ||
@@ -1419,6 +1427,7 @@ const ProfitBoardPage = () => {
                 report={report}
                 chartContent={chartContent}
                 trendRowCount={trendRows.length}
+                trendBucketCount={trendBucketCount}
                 t={t}
               />
               <DetailTableCard

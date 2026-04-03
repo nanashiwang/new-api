@@ -137,11 +137,11 @@ const ProfitBoardHeader = ({
           </div>
           <div className='rounded-lg bg-semi-color-fill-0 px-3 py-2'>
             <Text type='tertiary' size='small'>
-              {t('共享本站模型')}
+              {t('共享定价组合')}
             </Text>
             <div className='mt-1.5 text-sm font-semibold'>
               {sharedSiteModelCount > 0
-                ? `${sharedSiteModelCount} ${t('个模型')}`
+                ? `${sharedSiteModelCount} ${t('个组合')}`
                 : t('未启用')}
             </div>
           </div>
@@ -171,7 +171,7 @@ const ProfitBoardHeader = ({
                     size='small'
                   >
                     {selectedAccount.status === 'needs_baseline'
-                      ? t('等待首次同步')
+                      ? t('余额已同步')
                       : selectedAccount.status}
                   </Tag>
                 ) : (

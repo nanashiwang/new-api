@@ -40,7 +40,7 @@ func setupProfitBoardTestDB(t *testing.T) *gorm.DB {
 		initCol()
 	})
 
-	if err := db.AutoMigrate(&Channel{}, &Log{}, &Ability{}, &Model{}, &Vendor{}, &ProfitBoardConfig{}, &ProfitBoardRemoteSnapshot{}); err != nil {
+	if err := db.AutoMigrate(&Channel{}, &Log{}, &Ability{}, &Model{}, &Vendor{}, &ProfitBoardConfig{}, &ProfitBoardUpstreamAccount{}, &ProfitBoardRemoteSnapshot{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db
@@ -571,6 +571,155 @@ func TestSaveProfitBoardConfigMasksRemoteObserverToken(t *testing.T) {
 	}
 	if loadedObserver.AccessTokenMasked == "" {
 		t.Fatalf("expected masked token after reload")
+	}
+}
+
+func TestGetProfitBoardConfigMigratesGlobalSharedSiteIntoComboConfig(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	record := ProfitBoardConfig{
+		SelectionType:      ProfitBoardScopeChannel,
+		SelectionSignature: "channel:1",
+		SelectionValues:    `[{"id":"batch-1","name":"批次 1","scope_type":"channel","channel_ids":[1]}]`,
+		UpstreamConfig:     `{}`,
+		SiteConfig:         `{"legacy_site":{"pricing_mode":"manual"},"shared_site":{"model_names":["gpt-4.1"],"group":"vip","use_recharge_price":true},"combo_configs":[{"combo_id":"batch-1","site_mode":"shared_site_model"}]}`,
+		CreatedAt:          1,
+		UpdatedAt:          1,
+	}
+	if err := db.Create(&record).Error; err != nil {
+		t.Fatalf("create config: %v", err)
+	}
+
+	config, _, err := GetProfitBoardConfig([]ProfitBoardBatch{{
+		Id:         "batch-1",
+		Name:       "批次 1",
+		ScopeType:  ProfitBoardScopeChannel,
+		ChannelIDs: []int{1},
+	}}, ProfitBoardSelection{})
+	if err != nil {
+		t.Fatalf("GetProfitBoardConfig: %v", err)
+	}
+	if len(config.ComboConfigs) != 1 {
+		t.Fatalf("unexpected combo configs: %+v", config.ComboConfigs)
+	}
+	shared := config.ComboConfigs[0].SharedSite
+	if len(shared.ModelNames) != 1 || shared.ModelNames[0] != "gpt-4.1" {
+		t.Fatalf("unexpected combo shared models: %+v", shared)
+	}
+	if shared.Group != "vip" || !shared.UseRechargePrice {
+		t.Fatalf("unexpected combo shared config: %+v", shared)
+	}
+}
+
+func TestSaveProfitBoardConfigKeepsComboSharedSiteIndependent(t *testing.T) {
+	setupProfitBoardTestDB(t)
+
+	payload := ProfitBoardConfigPayload{
+		Batches: []ProfitBoardBatch{
+			{
+				Id:         "batch-a",
+				Name:       "组合 A",
+				ScopeType:  ProfitBoardScopeChannel,
+				ChannelIDs: []int{1},
+			},
+			{
+				Id:         "batch-b",
+				Name:       "组合 B",
+				ScopeType:  ProfitBoardScopeChannel,
+				ChannelIDs: []int{2},
+			},
+		},
+		Upstream: ProfitBoardTokenPricingConfig{
+			CostSource: ProfitBoardCostSourceManualOnly,
+		},
+		Site: ProfitBoardTokenPricingConfig{
+			PricingMode: ProfitBoardSitePricingManual,
+		},
+		ComboConfigs: []ProfitBoardComboPricingConfig{
+			{
+				ComboId:  "batch-a",
+				SiteMode: ProfitBoardComboSiteModeSharedSite,
+				SharedSite: ProfitBoardSharedSitePricingConfig{
+					ModelNames:       []string{"gpt-4.1"},
+					Group:            "vip",
+					UseRechargePrice: true,
+				},
+			},
+			{
+				ComboId:  "batch-b",
+				SiteMode: ProfitBoardComboSiteModeSharedSite,
+				SharedSite: ProfitBoardSharedSitePricingConfig{
+					ModelNames: []string{"gpt-4o-mini"},
+					Group:      "default",
+				},
+			},
+		},
+	}
+
+	saved, _, err := SaveProfitBoardConfig(payload)
+	if err != nil {
+		t.Fatalf("SaveProfitBoardConfig: %v", err)
+	}
+	if len(saved.ComboConfigs) != 2 {
+		t.Fatalf("unexpected saved combo configs: %+v", saved.ComboConfigs)
+	}
+
+	comboMap := map[string]ProfitBoardSharedSitePricingConfig{}
+	for _, combo := range saved.ComboConfigs {
+		comboMap[combo.ComboId] = combo.SharedSite
+	}
+	if comboMap["batch-a"].Group != "vip" || !comboMap["batch-a"].UseRechargePrice {
+		t.Fatalf("unexpected batch-a shared site: %+v", comboMap["batch-a"])
+	}
+	if comboMap["batch-b"].Group != "default" || comboMap["batch-b"].UseRechargePrice {
+		t.Fatalf("unexpected batch-b shared site: %+v", comboMap["batch-b"])
+	}
+	if strings.Join(comboMap["batch-a"].ModelNames, ",") == strings.Join(comboMap["batch-b"].ModelNames, ",") {
+		t.Fatalf("combo shared site configs should stay independent: %+v", comboMap)
+	}
+}
+
+func TestBuildProfitBoardUpstreamAccountStateUsesWalletSnapshotKey(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	originQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 1000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originQuotaPerUnit
+	})
+
+	account := ProfitBoardUpstreamAccount{
+		Name:                 "主账户",
+		AccountType:          ProfitBoardUpstreamAccountTypeNewAPI,
+		BaseURL:              "https://remote.example.com",
+		UserID:               42,
+		AccessTokenEncrypted: "masked",
+		Enabled:              true,
+		CreatedAt:            1,
+		UpdatedAt:            1,
+	}
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+
+	config := account.remoteObserverConfig()
+	signature := profitBoardUpstreamAccountSnapshotSignature(account.Id)
+	now := common.GetTimestamp()
+	seedProfitBoardRemoteSnapshot(t, signature, profitBoardUpstreamAccountSnapshotComboID, config, now-120, 800, 120, nil)
+	seedProfitBoardRemoteSnapshot(t, signature, profitBoardUpstreamAccountSnapshotComboID, config, now-60, 800, 200, nil)
+
+	options, err := GetProfitBoardUpstreamAccountOptions()
+	if err != nil {
+		t.Fatalf("GetProfitBoardUpstreamAccountOptions: %v", err)
+	}
+	if len(options) != 1 {
+		t.Fatalf("unexpected account options: %+v", options)
+	}
+	if options[0].Status != profitBoardRemoteObserverStatusReady || !options[0].BaselineReady {
+		t.Fatalf("unexpected option status: %+v", options[0])
+	}
+	if options[0].WalletQuotaUSD != 0.8 || options[0].WalletUsedQuotaUSD != 0.2 {
+		t.Fatalf("unexpected wallet amounts: %+v", options[0])
 	}
 }
 

@@ -36,7 +36,7 @@ const statusColorMap = {
 
 const statusLabelMap = (t) => ({
   ready: t('正常'),
-  needs_baseline: t('等待首次同步'),
+  needs_baseline: t('余额已同步'),
   failed: t('同步失败'),
   not_configured: t('未配置'),
   disabled: t('未启用'),
@@ -643,6 +643,12 @@ const UpstreamWalletCard = ({
                     </div>
                   </div>
                 </div>
+
+                {selectedAccount.status === 'needs_baseline' ? (
+                  <div className='mt-3 rounded-md border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-sm text-semi-color-text-1'>
+                    {t('当前已经拿到钱包余额和累计已用额度；本期消耗要等下一次同步后，才能根据两次结果的差值计算出来。')}
+                  </div>
+                ) : null}
 
                 {selectedAccount.error_message ? (
                   <div className='mt-3 flex items-start gap-2 rounded-md border border-red-500/20 bg-red-500/5 px-3 py-2 text-sm'>
