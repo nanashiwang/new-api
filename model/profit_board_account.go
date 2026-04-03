@@ -11,6 +11,14 @@ import (
 	"gorm.io/gorm"
 )
 
+// Sentinel errors for i18n translation (upstream account)
+var (
+	ErrProfitBoardAccountTypeUnsupported = errors.New("profit_board:account_type_unsupported")
+	ErrProfitBoardAccountNameEmpty       = errors.New("profit_board:account_name_empty")
+	ErrProfitBoardAccountInvalid         = errors.New("profit_board:account_invalid")
+	ErrProfitBoardAccountTokenEmpty      = errors.New("profit_board:account_token_empty")
+)
+
 const profitBoardUpstreamAccountSnapshotComboID = "wallet"
 
 type ProfitBoardUpstreamAccount struct {
@@ -102,10 +110,10 @@ func normalizeProfitBoardUpstreamAccount(account ProfitBoardUpstreamAccount) Pro
 func validateProfitBoardUpstreamAccount(account ProfitBoardUpstreamAccount, requireSecret bool) error {
 	account = normalizeProfitBoardUpstreamAccount(account)
 	if account.AccountType != ProfitBoardUpstreamAccountTypeNewAPI {
-		return errors.New("当前仅支持 new-api 上游账户")
+		return ErrProfitBoardAccountTypeUnsupported
 	}
 	if account.Name == "" {
-		return errors.New("上游账户名称不能为空")
+		return ErrProfitBoardAccountNameEmpty
 	}
 	config := ProfitBoardRemoteObserverConfig{
 		Enabled:              true,
@@ -195,7 +203,7 @@ func statefulProfitBoardUpstreamToken(account ProfitBoardUpstreamAccount) string
 
 func getProfitBoardUpstreamAccountByID(id int) (*ProfitBoardUpstreamAccount, error) {
 	if id <= 0 {
-		return nil, errors.New("无效的上游账户")
+		return nil, ErrProfitBoardAccountInvalid
 	}
 	account := &ProfitBoardUpstreamAccount{}
 	if err := DB.First(account, "id = ?", id).Error; err != nil {
@@ -285,7 +293,7 @@ func SaveProfitBoardUpstreamAccount(account ProfitBoardUpstreamAccount) (*Profit
 	case existing.AccessTokenEncrypted != "":
 		account.AccessTokenEncrypted = existing.AccessTokenEncrypted
 	default:
-		return nil, errors.New("上游 access token 不能为空")
+		return nil, ErrProfitBoardAccountTokenEmpty
 	}
 	account.AccessToken = ""
 	if account.Id == 0 {

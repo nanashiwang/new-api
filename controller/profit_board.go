@@ -1,14 +1,74 @@
 package controller
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 
 	"github.com/gin-gonic/gin"
 )
+
+// profitBoardErrorMap maps sentinel errors from the model layer to i18n message keys.
+var profitBoardErrorMap = map[error]string{
+	// profit_board.go
+	model.ErrProfitBoardNoChannel:                i18n.MsgProfitBoardNoChannel,
+	model.ErrProfitBoardNoTag:                    i18n.MsgProfitBoardNoTag,
+	model.ErrProfitBoardInvalidScopeType:         i18n.MsgProfitBoardInvalidScopeType,
+	model.ErrProfitBoardRuleMustSpecifyModel:     i18n.MsgProfitBoardRuleMustSpecifyModel,
+	model.ErrProfitBoardRuleOnlyOneDefault:       i18n.MsgProfitBoardRuleOnlyOneDefault,
+	model.ErrProfitBoardRuleNonNegative:          i18n.MsgProfitBoardRuleNonNegative,
+	model.ErrProfitBoardComboMissingId:           i18n.MsgProfitBoardComboMissingId,
+	model.ErrProfitBoardComboDuplicate:           i18n.MsgProfitBoardComboDuplicate,
+	model.ErrProfitBoardInvalidSitePricingMode:   i18n.MsgProfitBoardInvalidSitePricingMode,
+	model.ErrProfitBoardComboSiteNonNegative:     i18n.MsgProfitBoardComboSiteNonNegative,
+	model.ErrProfitBoardComboUpstreamNonNegative: i18n.MsgProfitBoardComboUpstreamNonNegative,
+	model.ErrProfitBoardNoBatch:                  i18n.MsgProfitBoardNoBatch,
+	model.ErrProfitBoardBatchDuplicate:           i18n.MsgProfitBoardBatchDuplicate,
+	model.ErrProfitBoardPriceNonNegative:         i18n.MsgProfitBoardPriceNonNegative,
+	model.ErrProfitBoardInvalidCostSource:        i18n.MsgProfitBoardInvalidCostSource,
+	model.ErrProfitBoardInvalidUpstreamMode:      i18n.MsgProfitBoardInvalidUpstreamMode,
+	model.ErrProfitBoardWalletRequireAccount:     i18n.MsgProfitBoardWalletRequireAccount,
+	model.ErrProfitBoardInvalidSiteSource:        i18n.MsgProfitBoardInvalidSiteSource,
+	model.ErrProfitBoardEndBeforeStart:           i18n.MsgProfitBoardEndBeforeStart,
+	model.ErrProfitBoardCustomGranularityMin:     i18n.MsgProfitBoardCustomGranularityMin,
+	model.ErrProfitBoardCustomGranularityMax:     i18n.MsgProfitBoardCustomGranularityMax,
+	model.ErrProfitBoardInvalidGranularity:       i18n.MsgProfitBoardInvalidGranularity,
+	model.ErrProfitBoardChannelNotExist:          i18n.MsgProfitBoardChannelNotExist,
+	model.ErrProfitBoardTagNoChannel:             i18n.MsgProfitBoardTagNoChannel,
+	model.ErrProfitBoardChannelDuplicateBatch:    i18n.MsgProfitBoardChannelDuplicateBatch,
+
+	// profit_board_remote.go
+	model.ErrProfitBoardRemoteMissingURL:   i18n.MsgProfitBoardRemoteMissingURL,
+	model.ErrProfitBoardRemoteMissingUID:   i18n.MsgProfitBoardRemoteMissingUID,
+	model.ErrProfitBoardRemoteMissingToken: i18n.MsgProfitBoardRemoteMissingToken,
+	model.ErrProfitBoardRemoteTokenEmpty:   i18n.MsgProfitBoardRemoteTokenEmpty,
+	model.ErrProfitBoardRemoteNotNewAPI:    i18n.MsgProfitBoardRemoteNotNewAPI,
+	model.ErrProfitBoardRemoteURLInvalid:   i18n.MsgProfitBoardRemoteURLInvalid,
+	model.ErrProfitBoardRemoteRequestFail:  i18n.MsgProfitBoardRemoteRequestFail,
+
+	// profit_board_account.go
+	model.ErrProfitBoardAccountTypeUnsupported: i18n.MsgProfitBoardAccountTypeUnsupported,
+	model.ErrProfitBoardAccountNameEmpty:       i18n.MsgProfitBoardAccountNameEmpty,
+	model.ErrProfitBoardAccountInvalid:         i18n.MsgProfitBoardAccountInvalid,
+	model.ErrProfitBoardAccountTokenEmpty:      i18n.MsgProfitBoardAccountTokenEmpty,
+}
+
+// profitBoardApiError translates a sentinel error from the model layer into an
+// i18n-aware API error response. If the error does not match any known sentinel,
+// it falls back to returning the raw error message.
+func profitBoardApiError(c *gin.Context, err error) {
+	for sentinel, msgKey := range profitBoardErrorMap {
+		if errors.Is(err, sentinel) {
+			common.ApiErrorI18n(c, msgKey)
+			return
+		}
+	}
+	common.ApiError(c, err)
+}
 
 func parseProfitBoardIntList(raw string) []int {
 	items := strings.Split(strings.TrimSpace(raw), ",")
@@ -42,7 +102,7 @@ func parseProfitBoardStringList(raw string) []string {
 func GetProfitBoardOptions(c *gin.Context) {
 	options, err := model.GetProfitBoardOptions()
 	if err != nil {
-		common.ApiError(c, err)
+		profitBoardApiError(c, err)
 		return
 	}
 	common.ApiSuccess(c, options)
@@ -52,7 +112,7 @@ func GetProfitBoardConfig(c *gin.Context) {
 	batches := make([]model.ProfitBoardBatch, 0)
 	if raw := strings.TrimSpace(c.Query("batches")); raw != "" {
 		if err := common.UnmarshalJsonStr(raw, &batches); err != nil {
-			common.ApiErrorMsg(c, "批次参数格式错误")
+			common.ApiErrorI18n(c, i18n.MsgProfitBoardBatchFormatError)
 			return
 		}
 	}
@@ -63,7 +123,30 @@ func GetProfitBoardConfig(c *gin.Context) {
 	}
 	config, signature, err := model.GetProfitBoardConfig(batches, selection)
 	if err != nil {
-		common.ApiError(c, err)
+		profitBoardApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{
+		"signature": signature,
+		"config":    config,
+	})
+}
+
+func LookupProfitBoardConfig(c *gin.Context) {
+	var req struct {
+		Batches   []model.ProfitBoardBatch   `json:"batches"`
+		Selection model.ProfitBoardSelection `json:"selection"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiErrorI18n(c, i18n.MsgProfitBoardInvalidParams)
+		return
+	}
+	if req.Selection.ScopeType == "" {
+		req.Selection.ScopeType = model.ProfitBoardScopeChannel
+	}
+	config, signature, err := model.GetProfitBoardConfig(req.Batches, req.Selection)
+	if err != nil {
+		profitBoardApiError(c, err)
 		return
 	}
 	common.ApiSuccess(c, gin.H{
@@ -75,12 +158,12 @@ func GetProfitBoardConfig(c *gin.Context) {
 func SaveProfitBoardConfig(c *gin.Context) {
 	payload := model.ProfitBoardConfigPayload{}
 	if err := c.ShouldBindJSON(&payload); err != nil {
-		common.ApiErrorMsg(c, "参数错误")
+		common.ApiErrorI18n(c, i18n.MsgProfitBoardInvalidParams)
 		return
 	}
 	config, signature, err := model.SaveProfitBoardConfig(payload)
 	if err != nil {
-		common.ApiError(c, err)
+		profitBoardApiError(c, err)
 		return
 	}
 	common.ApiSuccess(c, gin.H{
@@ -92,12 +175,12 @@ func SaveProfitBoardConfig(c *gin.Context) {
 func GetProfitBoardOverview(c *gin.Context) {
 	payload := model.ProfitBoardConfigPayload{}
 	if err := c.ShouldBindJSON(&payload); err != nil {
-		common.ApiErrorMsg(c, "参数错误")
+		common.ApiErrorI18n(c, i18n.MsgProfitBoardInvalidParams)
 		return
 	}
 	report, err := model.GenerateProfitBoardOverview(payload)
 	if err != nil {
-		common.ApiError(c, err)
+		profitBoardApiError(c, err)
 		return
 	}
 	common.ApiSuccess(c, report)
@@ -106,12 +189,12 @@ func GetProfitBoardOverview(c *gin.Context) {
 func SyncProfitBoardRemote(c *gin.Context) {
 	payload := model.ProfitBoardConfigPayload{}
 	if err := c.ShouldBindJSON(&payload); err != nil {
-		common.ApiErrorMsg(c, "参数错误")
+		common.ApiErrorI18n(c, i18n.MsgProfitBoardInvalidParams)
 		return
 	}
 	states, err := model.SyncProfitBoardRemoteObservers(payload, true)
 	if err != nil {
-		common.ApiError(c, err)
+		profitBoardApiError(c, err)
 		return
 	}
 	common.ApiSuccess(c, gin.H{
@@ -122,7 +205,7 @@ func SyncProfitBoardRemote(c *gin.Context) {
 func GetProfitBoardUpstreamAccounts(c *gin.Context) {
 	accounts, err := model.GetProfitBoardUpstreamAccountOptions()
 	if err != nil {
-		common.ApiError(c, err)
+		profitBoardApiError(c, err)
 		return
 	}
 	common.ApiSuccess(c, accounts)
@@ -131,20 +214,20 @@ func GetProfitBoardUpstreamAccounts(c *gin.Context) {
 func SaveProfitBoardUpstreamAccount(c *gin.Context) {
 	account := model.ProfitBoardUpstreamAccount{}
 	if err := c.ShouldBindJSON(&account); err != nil {
-		common.ApiErrorMsg(c, "参数错误")
+		common.ApiErrorI18n(c, i18n.MsgProfitBoardInvalidParams)
 		return
 	}
 	if rawID := strings.TrimSpace(c.Param("id")); rawID != "" {
 		id, err := strconv.Atoi(rawID)
 		if err != nil || id <= 0 {
-			common.ApiErrorMsg(c, "无效的上游账户")
+			common.ApiErrorI18n(c, i18n.MsgProfitBoardInvalidUpstreamAccount)
 			return
 		}
 		account.Id = id
 	}
 	saved, err := model.SaveProfitBoardUpstreamAccount(account)
 	if err != nil {
-		common.ApiError(c, err)
+		profitBoardApiError(c, err)
 		return
 	}
 	common.ApiSuccess(c, saved)
@@ -153,11 +236,11 @@ func SaveProfitBoardUpstreamAccount(c *gin.Context) {
 func DeleteProfitBoardUpstreamAccount(c *gin.Context) {
 	id, err := strconv.Atoi(strings.TrimSpace(c.Param("id")))
 	if err != nil || id <= 0 {
-		common.ApiErrorMsg(c, "无效的上游账户")
+		common.ApiErrorI18n(c, i18n.MsgProfitBoardInvalidUpstreamAccount)
 		return
 	}
 	if err := model.DeleteProfitBoardUpstreamAccount(id); err != nil {
-		common.ApiError(c, err)
+		profitBoardApiError(c, err)
 		return
 	}
 	common.ApiSuccess(c, gin.H{"deleted": true})
@@ -166,12 +249,12 @@ func DeleteProfitBoardUpstreamAccount(c *gin.Context) {
 func SyncProfitBoardUpstreamAccount(c *gin.Context) {
 	id, err := strconv.Atoi(strings.TrimSpace(c.Param("id")))
 	if err != nil || id <= 0 {
-		common.ApiErrorMsg(c, "无效的上游账户")
+		common.ApiErrorI18n(c, i18n.MsgProfitBoardInvalidUpstreamAccount)
 		return
 	}
 	account, syncErr := model.SyncProfitBoardUpstreamAccount(id, true)
 	if syncErr != nil {
-		common.ApiError(c, syncErr)
+		profitBoardApiError(c, syncErr)
 		return
 	}
 	common.ApiSuccess(c, account)
@@ -180,7 +263,7 @@ func SyncProfitBoardUpstreamAccount(c *gin.Context) {
 func SyncAllProfitBoardUpstreamAccounts(c *gin.Context) {
 	accounts, err := model.SyncAllProfitBoardUpstreamAccounts(true)
 	if err != nil {
-		common.ApiError(c, err)
+		profitBoardApiError(c, err)
 		return
 	}
 	common.ApiSuccess(c, accounts)
@@ -189,7 +272,7 @@ func SyncAllProfitBoardUpstreamAccounts(c *gin.Context) {
 func GetProfitBoardUpstreamAccountTrend(c *gin.Context) {
 	id, err := strconv.Atoi(strings.TrimSpace(c.Param("id")))
 	if err != nil || id <= 0 {
-		common.ApiErrorMsg(c, "无效的上游账户")
+		common.ApiErrorI18n(c, i18n.MsgProfitBoardInvalidUpstreamAccount)
 		return
 	}
 	startTimestamp, _ := strconv.ParseInt(strings.TrimSpace(c.Query("start_timestamp")), 10, 64)
@@ -203,7 +286,7 @@ func GetProfitBoardUpstreamAccountTrend(c *gin.Context) {
 		customIntervalMinutes,
 	)
 	if trendErr != nil {
-		common.ApiError(c, trendErr)
+		profitBoardApiError(c, trendErr)
 		return
 	}
 	common.ApiSuccess(c, trend)
@@ -212,12 +295,12 @@ func GetProfitBoardUpstreamAccountTrend(c *gin.Context) {
 func QueryProfitBoard(c *gin.Context) {
 	query := model.ProfitBoardQuery{}
 	if err := c.ShouldBindJSON(&query); err != nil {
-		common.ApiErrorMsg(c, "参数错误")
+		common.ApiErrorI18n(c, i18n.MsgProfitBoardInvalidParams)
 		return
 	}
 	report, err := model.GenerateProfitBoardReport(query)
 	if err != nil {
-		common.ApiError(c, err)
+		profitBoardApiError(c, err)
 		return
 	}
 	common.ApiSuccess(c, report)
@@ -226,12 +309,12 @@ func QueryProfitBoard(c *gin.Context) {
 func QueryProfitBoardDetails(c *gin.Context) {
 	query := model.ProfitBoardDetailQuery{}
 	if err := c.ShouldBindJSON(&query); err != nil {
-		common.ApiErrorMsg(c, "参数错误")
+		common.ApiErrorI18n(c, i18n.MsgProfitBoardInvalidParams)
 		return
 	}
 	page, err := model.QueryProfitBoardDetails(query)
 	if err != nil {
-		common.ApiError(c, err)
+		profitBoardApiError(c, err)
 		return
 	}
 	common.ApiSuccess(c, page)
@@ -240,12 +323,12 @@ func QueryProfitBoardDetails(c *gin.Context) {
 func GetProfitBoardActivity(c *gin.Context) {
 	query := model.ProfitBoardQuery{}
 	if err := c.ShouldBindJSON(&query); err != nil {
-		common.ApiErrorMsg(c, "参数错误")
+		common.ApiErrorI18n(c, i18n.MsgProfitBoardInvalidParams)
 		return
 	}
 	activity, err := model.GetProfitBoardActivity(query)
 	if err != nil {
-		common.ApiError(c, err)
+		profitBoardApiError(c, err)
 		return
 	}
 	common.ApiSuccess(c, activity)

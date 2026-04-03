@@ -3,10 +3,7 @@ import {
   Button,
   Card,
   Empty,
-  Input,
-  InputNumber,
   Space,
-  Switch,
   Tag,
   Tooltip,
   Typography,
@@ -14,16 +11,14 @@ import {
 import { VChart } from '@visactor/react-vchart';
 import {
   AlertCircle,
-  KeyRound,
   Pencil,
   Plus,
   RefreshCw,
-  Save,
-  Trash2,
   Wallet,
 } from 'lucide-react';
 import { timestamp2string } from '../../../helpers';
 import { createAccountUsageTrendSpec, getWalletStatusMeta } from '../utils';
+import AccountEditSideSheet from './AccountEditSideSheet';
 
 const { Text, Title } = Typography;
 
@@ -50,13 +45,16 @@ const UpstreamWalletCard = ({
   syncAccount,
   syncAllAccounts,
   deleteAccount,
-  resetAccountDraft,
   savingAccount,
   syncingAccountId,
   syncingAllAccounts,
   deletingAccountId,
   formatMoney,
   status,
+  openEditSideSheet,
+  openCreateSideSheet,
+  sideSheetVisible,
+  closeSideSheet,
   t,
 }) => {
   const enabledAccounts = useMemo(
@@ -122,7 +120,7 @@ const UpstreamWalletCard = ({
             theme='solid'
             type='primary'
             icon={<Plus size={14} />}
-            onClick={resetAccountDraft}
+            onClick={openCreateSideSheet}
           >
             {t('新建账户')}
           </Button>
@@ -207,34 +205,12 @@ const UpstreamWalletCard = ({
                       </div>
                     </div>
 
-                    <div className='mt-3 grid gap-2 sm:grid-cols-2'>
-                      <InfoMetric
-                        label={t('当前余额')}
-                        value={formatMoney(item.wallet_balance_usd, status)}
-                        emphasis='text-emerald-600 dark:text-emerald-400'
-                      />
-                      <InfoMetric
-                        label={t('近 7 天已用')}
-                        value={formatMoney(item.period_used_usd, status)}
-                        emphasis='text-rose-600 dark:text-rose-400'
-                      />
-                      <InfoMetric
-                        label={t('历史累计已用')}
-                        value={formatMoney(item.wallet_used_total_usd, status)}
-                        emphasis='text-amber-600 dark:text-amber-400'
-                      />
-                      <InfoMetric
-                        label={t('上次同步')}
-                        value={
-                          item.last_synced_at
-                            ? timestamp2string(item.last_synced_at)
-                            : '-'
-                        }
-                      />
+                    <div className='mt-2 text-sm font-semibold text-emerald-600 dark:text-emerald-400'>
+                      {formatMoney(item.wallet_balance_usd, status)}
                     </div>
 
                     {item.low_balance_threshold_usd > 0 ? (
-                      <div className='mt-2 text-xs text-semi-color-text-2'>
+                      <div className='mt-1 text-xs text-semi-color-text-2'>
                         {t('提醒线')}:{' '}
                         {formatMoney(item.low_balance_threshold_usd, status)}
                       </div>
@@ -283,6 +259,13 @@ const UpstreamWalletCard = ({
                           onClick={() => syncAccount(selectedAccount.id)}
                         >
                           {t('刷新')}
+                        </Button>
+                        <Button
+                          type='tertiary'
+                          icon={<Pencil size={14} />}
+                          onClick={() => openEditSideSheet(selectedAccount.id)}
+                        >
+                          {t('编辑')}
                         </Button>
                       </Space>
                     </div>
@@ -418,164 +401,24 @@ const UpstreamWalletCard = ({
                   <Empty image={null} description={t('选择一个账户查看详情')} />
                 </div>
               )}
-
-              <div className='rounded-xl border border-semi-color-border bg-semi-color-fill-0 p-4'>
-                <div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
-                  <Text strong>
-                    {accountDraft.id ? t('编辑账户') : t('新建账户')}
-                  </Text>
-                  <Space wrap>
-                    {accountDraft.id ? (
-                      <Button
-                        type='danger'
-                        theme='light'
-                        icon={<Trash2 size={14} />}
-                        loading={deletingAccountId === accountDraft.id}
-                        onClick={() => deleteAccount(accountDraft.id)}
-                      >
-                        {t('删除')}
-                      </Button>
-                    ) : null}
-                    <Button
-                      theme='solid'
-                      type='primary'
-                      icon={<Save size={14} />}
-                      loading={savingAccount}
-                      onClick={saveAccount}
-                    >
-                      {accountDraft.id ? t('保存账户') : t('创建账户')}
-                    </Button>
-                  </Space>
-                </div>
-
-                <div className='grid gap-3 lg:grid-cols-2'>
-                  <div>
-                    <Text type='tertiary' size='small' className='mb-1 block'>
-                      {t('名称')}
-                    </Text>
-                    <Input
-                      value={accountDraft.name}
-                      onChange={(value) =>
-                        setAccountDraft((prev) => ({ ...prev, name: value }))
-                      }
-                      placeholder={t('例如：上海主账户')}
-                      prefix={<Pencil size={14} />}
-                    />
-                  </div>
-                  <div className='flex items-end'>
-                    <div className='flex w-full items-center justify-between rounded-lg border border-semi-color-border bg-semi-color-bg-1 px-3 py-2'>
-                      <Text strong>{t('启用账户')}</Text>
-                      <Switch
-                        checked={accountDraft.enabled !== false}
-                        onChange={(checked) =>
-                          setAccountDraft((prev) => ({
-                            ...prev,
-                            enabled: checked,
-                          }))
-                        }
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <Text type='tertiary' size='small' className='mb-1 block'>
-                      URL
-                    </Text>
-                    <Input
-                      value={accountDraft.base_url}
-                      onChange={(value) =>
-                        setAccountDraft((prev) => ({
-                          ...prev,
-                          base_url: value,
-                        }))
-                      }
-                      placeholder='https://your-new-api.example.com'
-                    />
-                  </div>
-                  <div>
-                    <Text type='tertiary' size='small' className='mb-1 block'>
-                      {t('用户 ID')}
-                    </Text>
-                    <InputNumber
-                      min={0}
-                      value={accountDraft.user_id || 0}
-                      onChange={(value) =>
-                        setAccountDraft((prev) => ({
-                          ...prev,
-                          user_id: Number(value || 0),
-                        }))
-                      }
-                      style={{ width: '100%' }}
-                    />
-                  </div>
-
-                  <div>
-                    <Text type='tertiary' size='small' className='mb-1 block'>
-                      {t('密钥')}
-                    </Text>
-                    <Input
-                      value={accountDraft.access_token}
-                      onChange={(value) =>
-                        setAccountDraft((prev) => ({
-                          ...prev,
-                          access_token: value,
-                        }))
-                      }
-                      mode='password'
-                      prefix={<KeyRound size={14} />}
-                      placeholder={
-                        accountDraft.access_token_masked
-                          ? t('留空则保留当前密钥')
-                          : t('输入上游 access token')
-                      }
-                    />
-                    {accountDraft.access_token_masked ? (
-                      <Text type='tertiary' size='small' className='mt-1 block'>
-                        {t('当前密钥')}: {accountDraft.access_token_masked}
-                      </Text>
-                    ) : null}
-                  </div>
-                  <div>
-                    <Text type='tertiary' size='small' className='mb-1 block'>
-                      {t('低余额提醒线')}
-                    </Text>
-                    <InputNumber
-                      min={0}
-                      value={accountDraft.low_balance_threshold_usd || 0}
-                      onChange={(value) =>
-                        setAccountDraft((prev) => ({
-                          ...prev,
-                          low_balance_threshold_usd: Number(value || 0),
-                        }))
-                      }
-                      placeholder={t('不填则不提醒')}
-                      style={{ width: '100%' }}
-                    />
-                  </div>
-
-                  <div className='lg:col-span-2'>
-                    <Text type='tertiary' size='small' className='mb-1 block'>
-                      {t('备注')}
-                    </Text>
-                    <Input
-                      value={accountDraft.remark}
-                      onChange={(value) =>
-                        setAccountDraft((prev) => ({
-                          ...prev,
-                          remark: value,
-                        }))
-                      }
-                      placeholder={t('例如：主站、备用、包月账户')}
-                    />
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
         </div>
       ) : (
         <Empty image={null} description={t('点击右上角新建账户')} />
       )}
+
+      <AccountEditSideSheet
+        visible={sideSheetVisible}
+        onClose={closeSideSheet}
+        accountDraft={accountDraft}
+        setAccountDraft={setAccountDraft}
+        saveAccount={saveAccount}
+        deleteAccount={deleteAccount}
+        savingAccount={savingAccount}
+        deletingAccountId={deletingAccountId}
+        t={t}
+      />
     </Card>
   );
 };

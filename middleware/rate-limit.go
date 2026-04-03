@@ -228,3 +228,7 @@ func getRateLimitExpiration(duration int64) time.Duration {
 func SearchRateLimit() func(c *gin.Context) {
 	return userRateLimitFactory(common.SearchRateLimitNum, common.SearchRateLimitDuration, "SR")
 }
+
+func ProfitBoardQueryRateLimit() gin.HandlerFunc {
+	return rateLimitFactory(10, 60, "PB")
+}

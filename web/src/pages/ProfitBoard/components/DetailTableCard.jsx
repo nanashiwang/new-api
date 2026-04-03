@@ -12,7 +12,6 @@ import {
   ChevronDown,
   Columns3,
   ChevronRight,
-  ChevronDown as ExpandIcon,
 } from 'lucide-react';
 
 const { Text } = Typography;
@@ -159,7 +158,7 @@ const DetailTableCard = ({
               className='flex h-6 w-6 items-center justify-center rounded hover:bg-semi-color-fill-1'
             >
               {isExpanded ? (
-                <ExpandIcon size={14} />
+                <ChevronDown size={14} />
               ) : (
                 <ChevronRight size={14} />
               )}

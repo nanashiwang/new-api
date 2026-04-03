@@ -1,6 +1,16 @@
-import React from 'react';
-import { Card, Empty, Spin, Tag, Tooltip, Typography } from '@douyinfe/semi-ui';
-import { Info, TrendingUp, TrendingDown } from 'lucide-react';
+import React, { useState } from 'react';
+import {
+  Button,
+  Card,
+  Collapsible,
+  Empty,
+  Spin,
+  Table,
+  Tag,
+  Tooltip,
+  Typography,
+} from '@douyinfe/semi-ui';
+import { Info } from 'lucide-react';
 import { timestamp2string } from '../../../helpers';
 
 const { Text, Title } = Typography;
@@ -77,61 +87,6 @@ const DiagnosticMetric = ({ item, summaryMetricHelp }) => (
   </div>
 );
 
-const BatchSummaryCard = ({ item, formatMoney, status, t }) => (
-  <div className='rounded-xl border border-semi-color-border bg-semi-color-bg-1 p-4 transition-all hover:border-semi-color-primary-hover'>
-    <div className='flex items-center justify-between gap-2'>
-      <Text strong className='text-base'>
-        {item.batch_name}
-      </Text>
-      <Tag color='blue' size='small'>
-        {item.request_count} {t('次请求')}
-      </Tag>
-    </div>
-    <div className='mt-3 grid grid-cols-2 gap-x-4 gap-y-2'>
-      <div className='flex items-center justify-between'>
-        <Text type='tertiary' size='small'>
-          {t('本站配置收入')}
-        </Text>
-        <Text strong className='text-emerald-600 dark:text-emerald-400'>
-          {formatMoney(item.configured_site_revenue_usd, status)}
-        </Text>
-      </div>
-      <div className='flex items-center justify-between'>
-        <Text type='tertiary' size='small'>
-          {t('上游费用')}
-        </Text>
-        <Text strong className='text-amber-600 dark:text-amber-400'>
-          {formatMoney(item.upstream_cost_usd, status)}
-        </Text>
-      </div>
-      <div className='flex items-center justify-between'>
-        <Text type='tertiary' size='small'>
-          {t('上游实际消耗')}
-        </Text>
-        <Text strong className='text-rose-600 dark:text-rose-400'>
-          {formatMoney(item.remote_observed_cost_usd, status)}
-        </Text>
-      </div>
-      <div className='flex items-center justify-between'>
-        <Text type='tertiary' size='small'>
-          {t('配置利润')}
-        </Text>
-        <Text strong className='text-sky-600 dark:text-sky-400'>
-          {formatMoney(item.configured_profit_usd, status)}
-        </Text>
-      </div>
-      <div className='col-span-2 flex items-center justify-between border-t border-semi-color-border pt-2 mt-1'>
-        <Text type='tertiary' size='small'>
-          {t('实际利润')}
-        </Text>
-        <Text strong className='text-violet-600 dark:text-violet-400 text-base'>
-          {formatMoney(item.actual_profit_usd, status)}
-        </Text>
-      </div>
-    </div>
-  </div>
-);
-
 const OverviewPanel = ({
   overviewQuerying,
   overviewReport,
@@ -145,6 +100,68 @@ const OverviewPanel = ({
   remoteObserverStates,
   t,
 }) => {
+  const [moreOpen, setMoreOpen] = useState(false);
+  const coreCards = cumulativeSummaryCards.slice(0, 3);
+  const extraCards = cumulativeSummaryCards.slice(3);
+
+  const batchColumns = [
+    {
+      title: t('组合名称'),
+      dataIndex: 'batch_name',
+      key: 'batch_name',
+    },
+    {
+      title: t('请求数'),
+      dataIndex: 'request_count',
+      key: 'request_count',
+      render: (val) => (
+        <Tag color='blue' size='small'>
+          {val}
+        </Tag>
+      ),
+    },
+    {
+      title: t('本站收入'),
+      dataIndex: 'configured_site_revenue_usd',
+      key: 'configured_site_revenue_usd',
+      render: (val) => (
+        <span className='text-emerald-600 dark:text-emerald-400'>
+          {formatMoney(val, status)}
+        </span>
+      ),
+    },
+    {
+      title: t('上游费用'),
+      dataIndex: 'upstream_cost_usd',
+      key: 'upstream_cost_usd',
+      render: (val) => (
+        <span className='text-amber-600 dark:text-amber-400'>
+          {formatMoney(val, status)}
+        </span>
+      ),
+    },
+    {
+      title: t('配置利润'),
+      dataIndex: 'configured_profit_usd',
+      key: 'configured_profit_usd',
+      render: (val) => (
+        <span className='text-sky-600 dark:text-sky-400'>
+          {formatMoney(val, status)}
+        </span>
+      ),
+    },
+    {
+      title: t('实际利润'),
+      dataIndex: 'actual_profit_usd',
+      key: 'actual_profit_usd',
+      render: (val) => (
+        <span className='text-violet-600 dark:text-violet-400'>
+          {formatMoney(val, status)}
+        </span>
+      ),
+    },
+  ];
+
   return (
     <div className='space-y-4'>
       <Card
@@ -159,8 +176,8 @@ const OverviewPanel = ({
         <Spin spinning={overviewQuerying}>
           {overviewReport ? (
             <div className='space-y-5'>
-              <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5'>
-                {cumulativeSummaryCards.map((item) => (
+              <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-3'>
+                {coreCards.map((item) => (
                   <MetricCard
                     key={item.key}
                     item={item}
@@ -169,32 +186,60 @@ const OverviewPanel = ({
                   />
                 ))}
               </div>
-              <div className='border-t border-semi-color-border pt-4'>
-                <Text type='tertiary' size='small' className='mb-3 block'>
-                  {t('辅助指标')}
-                </Text>
-                <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'>
-                  {diagnosticSummaryCards.map((item) => (
-                    <DiagnosticMetric
-                      key={item.key}
-                      item={item}
-                      summaryMetricHelp={summaryMetricHelp}
-                    />
-                  ))}
+              <Button
+                type='tertiary'
+                size='small'
+                onClick={() => setMoreOpen(!moreOpen)}
+                className='mt-2'
+              >
+                {moreOpen ? t('收起') : t('更多指标')}
+              </Button>
+              <Collapsible
+                collapseHeight={0}
+                isOpen={moreOpen}
+                keepDOM
+              >
+                <div className='space-y-4 pt-1'>
+                  {extraCards.length > 0 && (
+                    <div className='grid gap-4 sm:grid-cols-2'>
+                      {extraCards.map((item) => (
+                        <MetricCard
+                          key={item.key}
+                          item={item}
+                          summaryMetricHelp={summaryMetricHelp}
+                          status={status}
+                        />
+                      ))}
+                    </div>
+                  )}
+                  <div className='border-t border-semi-color-border pt-4'>
+                    <Text type='tertiary' size='small' className='mb-3 block'>
+                      {t('辅助指标')}
+                    </Text>
+                    <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'>
+                      {diagnosticSummaryCards.map((item) => (
+                        <DiagnosticMetric
+                          key={item.key}
+                          item={item}
+                          summaryMetricHelp={summaryMetricHelp}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                  <div className='rounded-lg border border-semi-color-border bg-semi-color-bg-1 px-4 py-3'>
+                    <Text type='tertiary' size='small'>
+                      {t('最近一条命中日志')}
+                    </Text>
+                    <div className='mt-1 font-medium'>
+                      {overviewReport?.meta?.latest_log_created_at
+                        ? timestamp2string(
+                            overviewReport.meta.latest_log_created_at,
+                          )
+                        : '-'}
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <div className='rounded-lg border border-semi-color-border bg-semi-color-bg-1 px-4 py-3'>
-                <Text type='tertiary' size='small'>
-                  {t('最近一条命中日志')}
-                </Text>
-                <div className='mt-1 font-medium'>
-                  {overviewReport?.meta?.latest_log_created_at
-                    ? timestamp2string(
-                        overviewReport.meta.latest_log_created_at,
-                      )
-                    : '-'}
-                </div>
-              </div>
+              </Collapsible>
             </div>
           ) : (
             <Empty description={t('添加组合后可手动刷新累计总览')} />
@@ -212,17 +257,14 @@ const OverviewPanel = ({
           }
           className='rounded-xl'
         >
-          <div className='grid gap-4 sm:grid-cols-2'>
-            {overviewReport.batch_summaries.map((item) => (
-              <BatchSummaryCard
-                key={item.batch_id}
-                item={item}
-                formatMoney={formatMoney}
-                status={status}
-                t={t}
-              />
-            ))}
-          </div>
+          <Table
+            columns={batchColumns}
+            dataSource={overviewReport.batch_summaries}
+            rowKey='batch_id'
+            pagination={false}
+            size='small'
+            scroll={{ x: 'max-content' }}
+          />
         </Card>
       ) : null}
     </div>

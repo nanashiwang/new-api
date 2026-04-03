@@ -411,6 +411,35 @@ type profitBoardPersistedSiteConfig struct {
 	ComboConfigs []ProfitBoardComboPricingConfig    `json:"combo_configs,omitempty"`
 }
 
+// Sentinel errors for i18n translation
+var (
+	ErrProfitBoardNoChannel                = errors.New("profit_board:no_channel")
+	ErrProfitBoardNoTag                    = errors.New("profit_board:no_tag")
+	ErrProfitBoardInvalidScopeType         = errors.New("profit_board:invalid_scope_type")
+	ErrProfitBoardRuleMustSpecifyModel     = errors.New("profit_board:rule_must_specify_model")
+	ErrProfitBoardRuleOnlyOneDefault       = errors.New("profit_board:rule_only_one_default")
+	ErrProfitBoardRuleNonNegative          = errors.New("profit_board:rule_non_negative")
+	ErrProfitBoardComboMissingId           = errors.New("profit_board:combo_missing_id")
+	ErrProfitBoardComboDuplicate           = errors.New("profit_board:combo_duplicate")
+	ErrProfitBoardInvalidSitePricingMode   = errors.New("profit_board:invalid_site_pricing_mode")
+	ErrProfitBoardComboSiteNonNegative     = errors.New("profit_board:combo_site_non_negative")
+	ErrProfitBoardComboUpstreamNonNegative = errors.New("profit_board:combo_upstream_non_negative")
+	ErrProfitBoardNoBatch                  = errors.New("profit_board:no_batch")
+	ErrProfitBoardBatchDuplicate           = errors.New("profit_board:batch_duplicate")
+	ErrProfitBoardPriceNonNegative         = errors.New("profit_board:price_non_negative")
+	ErrProfitBoardInvalidCostSource        = errors.New("profit_board:invalid_cost_source")
+	ErrProfitBoardInvalidUpstreamMode      = errors.New("profit_board:invalid_upstream_mode")
+	ErrProfitBoardWalletRequireAccount     = errors.New("profit_board:wallet_require_account")
+	ErrProfitBoardInvalidSiteSource        = errors.New("profit_board:invalid_site_source")
+	ErrProfitBoardEndBeforeStart           = errors.New("profit_board:end_before_start")
+	ErrProfitBoardCustomGranularityMin     = errors.New("profit_board:custom_granularity_min")
+	ErrProfitBoardCustomGranularityMax     = errors.New("profit_board:custom_granularity_max")
+	ErrProfitBoardInvalidGranularity       = errors.New("profit_board:invalid_granularity")
+	ErrProfitBoardChannelNotExist          = errors.New("profit_board:channel_not_exist")
+	ErrProfitBoardTagNoChannel             = errors.New("profit_board:tag_no_channel")
+	ErrProfitBoardChannelDuplicateBatch    = errors.New("profit_board:channel_duplicate_batch")
+)
+
 var (
 	profitBoardReportCacheOnce sync.Once
 	profitBoardReportCache     *cachex.HybridCache[ProfitBoardReport]
@@ -471,7 +500,7 @@ func normalizeProfitBoardSelection(selection ProfitBoardSelection) (ProfitBoardS
 		}
 		sort.Ints(ids)
 		if len(ids) == 0 {
-			return ProfitBoardSelection{}, "", errors.New("请至少选择一个渠道")
+			return ProfitBoardSelection{}, "", ErrProfitBoardNoChannel
 		}
 		parts := make([]string, 0, len(ids))
 		for _, id := range ids {
@@ -497,14 +526,14 @@ func normalizeProfitBoardSelection(selection ProfitBoardSelection) (ProfitBoardS
 		}
 		sort.Strings(tags)
 		if len(tags) == 0 {
-			return ProfitBoardSelection{}, "", errors.New("请至少选择一个标签")
+			return ProfitBoardSelection{}, "", ErrProfitBoardNoTag
 		}
 		return ProfitBoardSelection{
 			ScopeType: scopeType,
 			Tags:      tags,
 		}, scopeType + ":" + strings.Join(tags, "|"), nil
 	default:
-		return ProfitBoardSelection{}, "", errors.New("无效的收益看板选择类型")
+		return ProfitBoardSelection{}, "", ErrProfitBoardInvalidScopeType
 	}
 }
 
@@ -597,12 +626,12 @@ func validateProfitBoardModelPricingRules(rules []ProfitBoardModelPricingRule) e
 	defaultCount := 0
 	for _, rule := range rules {
 		if strings.TrimSpace(rule.ModelName) == "" && !rule.IsDefault {
-			return errors.New("手动价格规则必须指定模型，或者标记为默认规则")
+			return ErrProfitBoardRuleMustSpecifyModel
 		}
 		if rule.IsDefault {
 			defaultCount++
 			if defaultCount > 1 {
-				return errors.New("手动价格规则只允许存在一条默认规则")
+				return ErrProfitBoardRuleOnlyOneDefault
 			}
 		}
 		numbers := []float64{
@@ -613,7 +642,7 @@ func validateProfitBoardModelPricingRules(rules []ProfitBoardModelPricingRule) e
 		}
 		for _, num := range numbers {
 			if math.IsNaN(num) || math.IsInf(num, 0) || num < 0 {
-				return errors.New("手动价格规则必须是非负数字")
+				return ErrProfitBoardRuleNonNegative
 			}
 		}
 	}
@@ -718,16 +747,16 @@ func validateProfitBoardComboConfigs(comboConfigs []ProfitBoardComboPricingConfi
 	for _, config := range comboConfigs {
 		comboID := strings.TrimSpace(config.ComboId)
 		if comboID == "" {
-			return errors.New("组合价格配置缺少组合标识")
+			return ErrProfitBoardComboMissingId
 		}
 		if _, ok := seen[comboID]; ok {
-			return errors.New("组合价格配置重复，请刷新页面后重试")
+			return ErrProfitBoardComboDuplicate
 		}
 		seen[comboID] = struct{}{}
 		switch config.SiteMode {
 		case "", ProfitBoardComboSiteModeManual, ProfitBoardComboSiteModeSharedSite:
 		default:
-			return errors.New("无效的本站价格模式")
+			return ErrProfitBoardInvalidSitePricingMode
 		}
 		if err := validateProfitBoardModelPricingRules(config.SiteRules); err != nil {
 			return err
@@ -736,10 +765,10 @@ func validateProfitBoardComboConfigs(comboConfigs []ProfitBoardComboPricingConfi
 			return err
 		}
 		if math.IsNaN(config.SiteFixedTotalAmount) || math.IsInf(config.SiteFixedTotalAmount, 0) || config.SiteFixedTotalAmount < 0 {
-			return errors.New("组合固定本站收入必须是非负数字")
+			return ErrProfitBoardComboSiteNonNegative
 		}
 		if math.IsNaN(config.UpstreamFixedTotalAmount) || math.IsInf(config.UpstreamFixedTotalAmount, 0) || config.UpstreamFixedTotalAmount < 0 {
-			return errors.New("组合固定上游费用必须是非负数字")
+			return ErrProfitBoardComboUpstreamNonNegative
 		}
 		if err := validateProfitBoardRemoteObserverConfig(config.RemoteObserver); err != nil {
 			return err
@@ -790,7 +819,7 @@ func normalizeProfitBoardBatches(batches []ProfitBoardBatch, legacySelection Pro
 		sourceBatches = profitBoardLegacyBatches(legacySelection)
 	}
 	if len(sourceBatches) == 0 {
-		return nil, "", "", errors.New("请至少添加一个批次")
+		return nil, "", "", ErrProfitBoardNoBatch
 	}
 
 	normalized := make([]ProfitBoardBatch, 0, len(sourceBatches))
@@ -802,7 +831,7 @@ func normalizeProfitBoardBatches(batches []ProfitBoardBatch, legacySelection Pro
 			return nil, "", "", err
 		}
 		if _, ok := idExists[current.Id]; ok {
-			return nil, "", "", errors.New("批次标识重复，请删除后重新添加批次")
+			return nil, "", "", ErrProfitBoardBatchDuplicate
 		}
 		idExists[current.Id] = struct{}{}
 		normalized = append(normalized, current)
@@ -865,22 +894,22 @@ func validateProfitBoardPricingConfig(config ProfitBoardTokenPricingConfig, isSi
 	}
 	for _, num := range numbers {
 		if math.IsNaN(num) || math.IsInf(num, 0) || num < 0 {
-			return errors.New("价格配置必须是非负数字")
+			return ErrProfitBoardPriceNonNegative
 		}
 	}
 	switch config.CostSource {
 	case "", ProfitBoardCostSourceReturnedFirst, ProfitBoardCostSourceReturnedOnly, ProfitBoardCostSourceManualOnly:
 	default:
-		return errors.New("无效的上游费用来源配置")
+		return ErrProfitBoardInvalidCostSource
 	}
 	if !isSite {
 		switch config.UpstreamMode {
 		case "", ProfitBoardUpstreamModeManual, ProfitBoardUpstreamModeWallet:
 		default:
-			return errors.New("无效的上游成本模式")
+			return ErrProfitBoardInvalidUpstreamMode
 		}
 		if config.UpstreamMode == ProfitBoardUpstreamModeWallet && config.UpstreamAccountID <= 0 {
-			return errors.New("钱包扣减模式必须绑定上游账户")
+			return ErrProfitBoardWalletRequireAccount
 		}
 		return nil
 	}
@@ -888,7 +917,7 @@ func validateProfitBoardPricingConfig(config ProfitBoardTokenPricingConfig, isSi
 	case "", ProfitBoardSitePricingManual, ProfitBoardSitePricingSiteModel:
 		return nil
 	default:
-		return errors.New("无效的本站价格来源配置")
+		return ErrProfitBoardInvalidSiteSource
 	}
 }
 
@@ -1169,7 +1198,7 @@ func normalizeProfitBoardQuery(query ProfitBoardQuery) (ProfitBoardQuery, string
 		query.EndTimestamp = time.Now().Unix()
 	}
 	if query.EndTimestamp < query.StartTimestamp {
-		return ProfitBoardQuery{}, "", errors.New("结束时间不能早于开始时间")
+		return ProfitBoardQuery{}, "", ErrProfitBoardEndBeforeStart
 	}
 	switch strings.ToLower(strings.TrimSpace(query.Granularity)) {
 	case "", "auto":
@@ -1185,13 +1214,13 @@ func normalizeProfitBoardQuery(query ProfitBoardQuery) (ProfitBoardQuery, string
 	case "custom":
 		query.Granularity = "custom"
 		if query.CustomIntervalMinutes <= 0 {
-			return ProfitBoardQuery{}, "", errors.New("自定义时间粒度必须大于 0 分钟")
+			return ProfitBoardQuery{}, "", ErrProfitBoardCustomGranularityMin
 		}
 		if query.CustomIntervalMinutes > 43200 {
-			return ProfitBoardQuery{}, "", errors.New("自定义时间粒度不能超过 43200 分钟")
+			return ProfitBoardQuery{}, "", ErrProfitBoardCustomGranularityMax
 		}
 	default:
-		return ProfitBoardQuery{}, "", errors.New("无效的时间粒度")
+		return ProfitBoardQuery{}, "", ErrProfitBoardInvalidGranularity
 	}
 	if !query.IncludeDetails {
 		query.DetailLimit = 0
@@ -1224,7 +1253,7 @@ func resolveProfitBoardChannels(selection ProfitBoardSelection) ([]ProfitBoardCh
 			return nil, nil, err
 		}
 		if len(channels) == 0 {
-			return nil, nil, errors.New("所选渠道不存在")
+			return nil, nil, ErrProfitBoardChannelNotExist
 		}
 		ids := make([]int, 0, len(channels))
 		for _, channel := range channels {
@@ -1241,7 +1270,7 @@ func resolveProfitBoardChannels(selection ProfitBoardSelection) ([]ProfitBoardCh
 			return nil, nil, err
 		}
 		if len(channels) == 0 {
-			return nil, nil, errors.New("所选标签下没有渠道")
+			return nil, nil, ErrProfitBoardTagNoChannel
 		}
 		ids := make([]int, 0, len(channels))
 		exists := make(map[int]struct{}, len(channels))
@@ -1255,7 +1284,7 @@ func resolveProfitBoardChannels(selection ProfitBoardSelection) ([]ProfitBoardCh
 		sort.Ints(ids)
 		return channels, ids, nil
 	default:
-		return nil, nil, errors.New("无效的收益看板选择类型")
+		return nil, nil, ErrProfitBoardInvalidScopeType
 	}
 }
 
@@ -1304,7 +1333,7 @@ func resolveProfitBoardBatches(batches []ProfitBoardBatch) ([]ProfitBoardBatchIn
 			}
 			channelNames[channel.Id] = name
 			if owner, ok := channelOwners[channel.Id]; ok {
-				return nil, fmt.Errorf("%s 同时出现在批次“%s”和“%s”中，请调整批次避免重复统计", name, owner, current.Name)
+				return nil, fmt.Errorf("%w: %s -> %s, %s", ErrProfitBoardChannelDuplicateBatch, name, owner, current.Name)
 			}
 			channelOwners[channel.Id] = current.Name
 		}

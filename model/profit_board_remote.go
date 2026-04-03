@@ -20,6 +20,17 @@ import (
 	"gorm.io/gorm"
 )
 
+// Sentinel errors for i18n translation (remote observer)
+var (
+	ErrProfitBoardRemoteMissingURL   = errors.New("profit_board:remote_missing_url")
+	ErrProfitBoardRemoteMissingUID   = errors.New("profit_board:remote_missing_uid")
+	ErrProfitBoardRemoteMissingToken = errors.New("profit_board:remote_missing_token")
+	ErrProfitBoardRemoteTokenEmpty   = errors.New("profit_board:remote_token_empty")
+	ErrProfitBoardRemoteNotNewAPI    = errors.New("profit_board:remote_not_newapi")
+	ErrProfitBoardRemoteURLInvalid   = errors.New("profit_board:remote_url_invalid")
+	ErrProfitBoardRemoteRequestFail  = errors.New("profit_board:remote_request_fail")
+)
+
 const (
 	profitBoardRemoteObserverStatusDisabled      = "disabled"
 	profitBoardRemoteObserverStatusNotConfigured = "not_configured"
@@ -131,13 +142,13 @@ func validateProfitBoardRemoteObserverConfig(config ProfitBoardRemoteObserverCon
 		return nil
 	}
 	if config.BaseURL == "" {
-		return errors.New("远端额度观测已启用，但缺少远端地址")
+		return ErrProfitBoardRemoteMissingURL
 	}
 	if config.UserID <= 0 {
-		return errors.New("远端额度观测已启用，但缺少远端用户 ID")
+		return ErrProfitBoardRemoteMissingUID
 	}
 	if strings.TrimSpace(config.AccessToken) == "" && strings.TrimSpace(config.AccessTokenEncrypted) == "" {
-		return errors.New("远端额度观测已启用，但缺少远端 access token")
+		return ErrProfitBoardRemoteMissingToken
 	}
 	fetchSetting := system_setting.GetFetchSetting()
 	if err := common.ValidateURLWithFetchSetting(
@@ -151,7 +162,7 @@ func validateProfitBoardRemoteObserverConfig(config ProfitBoardRemoteObserverCon
 		fetchSetting.AllowedPorts,
 		fetchSetting.ApplyIPFilterForDomain,
 	); err != nil {
-		return fmt.Errorf("远端额度地址不可用: %w", err)
+		return fmt.Errorf("%w: %v", ErrProfitBoardRemoteURLInvalid, err)
 	}
 	return nil
 }
@@ -433,7 +444,7 @@ func profitBoardRemoteRequest[T any](client *http.Client, remoteConfig ProfitBoa
 		token = strings.TrimSpace(decrypted)
 	}
 	if token == "" {
-		return errors.New("远端 access token 为空")
+		return ErrProfitBoardRemoteTokenEmpty
 	}
 	url := strings.TrimRight(remoteConfig.BaseURL, "/") + path
 	fetchSetting := system_setting.GetFetchSetting()
@@ -472,7 +483,7 @@ func profitBoardRemoteRequest[T any](client *http.Client, remoteConfig ProfitBoa
 		return err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("远端请求失败(%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return fmt.Errorf("%w (%d): %s", ErrProfitBoardRemoteRequestFail, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	envelope := profitBoardRemoteEnvelope[T]{}
 	if err := common.Unmarshal(body, &envelope); err != nil {
@@ -499,7 +510,7 @@ func fetchProfitBoardRemoteObserver(remoteConfig ProfitBoardRemoteObserverConfig
 		return nil, err
 	}
 	if strings.TrimSpace(statusData.QN) != "new-api" {
-		return nil, errors.New("远端不是受支持的 new-api 实例")
+		return nil, ErrProfitBoardRemoteNotNewAPI
 	}
 
 	selfData := profitBoardRemoteUserSelfData{}

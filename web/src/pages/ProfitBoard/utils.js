@@ -4,6 +4,16 @@ export const STORAGE_KEY = 'profit-board:state';
 export const REPORT_CACHE_KEY = 'profit-board:report';
 export const DETAIL_LIMIT = 600;
 
+export const createMetricOptions = (t) => [
+  { value: 'configured_profit_usd', label: t('配置利润') },
+  { value: 'actual_profit_usd', label: t('实际利润') },
+  { value: 'actual_site_revenue_usd', label: t('本站实际收入') },
+  { value: 'configured_site_revenue_usd', label: t('本站配置收入') },
+  { value: 'upstream_cost_usd', label: t('上游费用') },
+  { value: 'remote_observed_cost_usd', label: t('上游实际消耗') },
+];
+
+/** @deprecated Use createMetricOptions(t) instead */
 export const metricOptions = [
   { value: 'configured_profit_usd', label: '配置利润' },
   { value: 'actual_profit_usd', label: '实际利润' },
@@ -13,6 +23,17 @@ export const metricOptions = [
   { value: 'remote_observed_cost_usd', label: '上游实际消耗' },
 ];
 
+export const createSitePricingSourceLabelMap = (t) => ({
+  manual: t('手动价格'),
+  manual_rule: t('手动价格'),
+  manual_default: t('手动默认规则'),
+  manual_fallback: t('手动价格回退'),
+  site_model_standard: t('读取本站模型原价'),
+  site_model_recharge: t('读取本站模型充值价'),
+  site_model_missing: t('未命中本站模型'),
+});
+
+/** @deprecated Use createSitePricingSourceLabelMap(t) instead */
 export const sitePricingSourceLabelMap = {
   manual: '手动价格',
   manual_rule: '手动价格',
@@ -316,31 +337,32 @@ export const formatMoney = (value, status, digits = 3) => {
   return `${symbol}${(amount * rate).toFixed(digits)}`;
 };
 
-export const createPresetRanges = () => {
+export const createPresetRanges = (t) => {
   const now = dayjs();
+  const label = typeof t === 'function' ? t : (s) => s;
   return [
     {
-      label: '今天',
+      label: label('今天'),
       value: [now.startOf('day').toDate(), now.endOf('day').toDate()],
     },
     {
-      label: '最近 24 小时',
+      label: label('最近 24 小时'),
       value: [now.subtract(24, 'hour').toDate(), now.toDate()],
     },
     {
-      label: '近 7 天',
+      label: label('近 7 天'),
       value: [now.subtract(7, 'day').toDate(), now.toDate()],
     },
     {
-      label: '近 30 天',
+      label: label('近 30 天'),
       value: [now.subtract(30, 'day').toDate(), now.toDate()],
     },
     {
-      label: '本月',
+      label: label('本月'),
       value: [now.startOf('month').toDate(), now.endOf('month').toDate()],
     },
     {
-      label: '上月',
+      label: label('上月'),
       value: [
         now.subtract(1, 'month').startOf('month').toDate(),
         now.subtract(1, 'month').endOf('month').toDate(),
