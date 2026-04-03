@@ -22,7 +22,7 @@ const TimeRangePanel = ({
   report,
   t,
 }) => (
-  <div className='grid gap-4 xl:grid-cols-[1.15fr_0.85fr]'>
+  <div className='grid gap-3 xl:grid-cols-2'>
     <Card bordered={false} title={t('时间分析范围')}>
       <div className='space-y-4'>
         <div className='flex flex-wrap gap-2'>

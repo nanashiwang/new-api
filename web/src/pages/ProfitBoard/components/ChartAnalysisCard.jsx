@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import {
+  Banner,
   Button,
   Card,
   Collapse,
@@ -48,6 +49,7 @@ const ChartAnalysisCard = ({
   setChartTab,
   report,
   chartContent,
+  trendRowCount,
   t,
 }) => {
   const [filterExpanded, setFilterExpanded] = useState(false);
@@ -281,9 +283,23 @@ const ChartAnalysisCard = ({
         <Tabs.TabPane tab={t('模型')} itemKey='model' />
       </Tabs>
 
-      <div className='min-h-[360px]'>
+      <div className='min-h-[300px]'>
         {report ? (
-          chartContent[chartTab]
+          <>
+            {chartTab === 'trend' &&
+              trendRowCount > 0 &&
+              trendRowCount < 5 && (
+                <Banner
+                  type='info'
+                  description={t(
+                    '数据点较少，建议扩大时间范围或使用更细粒度',
+                  )}
+                  closeIcon={null}
+                  className='mb-3'
+                />
+              )}
+            {chartContent[chartTab]}
+          </>
         ) : (
           <Empty description={t('设置时间范围后刷新即可查看时间分析')} />
         )}

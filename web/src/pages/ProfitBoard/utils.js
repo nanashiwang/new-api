@@ -458,40 +458,57 @@ export const combineBreakdownMetrics = (rows, viewBatchId, metrics) => {
     .slice(0, 24);
 };
 
-export const createTrendSpec = (rows, metricLabel, status, t) => ({
-  type: 'line',
-  background: 'transparent',
-  data: [{ id: 'trend', values: rows }],
-  xField: 'bucket',
-  yField: 'value',
-  seriesField: rows.some((item) => item.series) ? 'series' : undefined,
-  legends: { visible: rows.some((item) => item.series) },
-  point: { visible: true, style: { size: 5 } },
-  line: { style: { curveType: 'monotone', lineWidth: 2 } },
-  axes: [
-    {
-      orient: 'bottom',
-      type: 'band',
-      label: { visible: true, style: { angle: -18 } },
+export const createTrendSpec = (rows, metricLabel, status, t) => {
+  const isSparse = rows.length <= 3;
+  const hasSeries = rows.some((item) => item.series);
+  return {
+    type: 'line',
+    background: 'transparent',
+    data: [{ id: 'trend', values: rows }],
+    xField: 'bucket',
+    yField: 'value',
+    seriesField: hasSeries ? 'series' : undefined,
+    legends: { visible: hasSeries },
+    point: {
+      visible: true,
+      style: { size: isSparse ? 10 : 5 },
     },
-    { orient: 'left', nice: true },
-  ],
-  title: { visible: true, text: t('收益趋势'), subtext: metricLabel },
-  tooltip: {
-    mark: {
-      content: [
-        { key: t('时间桶'), value: (datum) => datum.bucket },
-        ...(rows.some((item) => item.series)
-          ? [{ key: t('组合'), value: (datum) => datum.series }]
-          : []),
-        {
-          key: metricLabel,
-          value: (datum) => formatMoney(datum.value, status),
-        },
-      ],
+    line: {
+      style: { curveType: 'monotone', lineWidth: isSparse ? 3 : 2 },
     },
-  },
-});
+    label: isSparse
+      ? {
+          visible: true,
+          position: 'top',
+          formatter: (datum) => formatMoney(datum.value, status),
+          style: { fontSize: 12 },
+        }
+      : { visible: false },
+    axes: [
+      {
+        orient: 'bottom',
+        type: 'band',
+        label: { visible: true, style: { angle: -18 } },
+      },
+      { orient: 'left', nice: true },
+    ],
+    title: { visible: true, text: t('收益趋势'), subtext: metricLabel },
+    tooltip: {
+      mark: {
+        content: [
+          { key: t('时间桶'), value: (datum) => datum.bucket },
+          ...(hasSeries
+            ? [{ key: t('组合'), value: (datum) => datum.series }]
+            : []),
+          {
+            key: metricLabel,
+            value: (datum) => formatMoney(datum.value, status),
+          },
+        ],
+      },
+    },
+  };
+};
 
 export const createBarSpec = (title, rows, metricLabel, status, t) => ({
   type: 'bar',

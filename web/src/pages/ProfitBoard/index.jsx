@@ -32,7 +32,7 @@ import { BadgeDollarSign, BarChart3, CircleDollarSign } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { StatusContext } from '../../context/Status';
 import { useActualTheme } from '../../context/Theme';
-import { API, showError, showSuccess, timestamp2string } from '../../helpers';
+import { API, showError, showInfo, showSuccess, timestamp2string } from '../../helpers';
 import { useIsMobile } from '@/hooks/common/useIsMobile';
 import ChartAnalysisCard from './components/ChartAnalysisCard';
 import ComboManagerCard from './components/ComboManagerCard';
@@ -654,7 +654,19 @@ const ProfitBoardPage = () => {
           `/api/profit_board/upstream_accounts/${accountId}/sync`,
         );
         if (!res.data.success) return showError(res.data.message);
-        showSuccess(t('上游钱包已同步'));
+        const syncedStatus = res.data.data?.status;
+        if (syncedStatus === 'failed') {
+          showError(
+            t('同步失败') +
+              (res.data.data?.error_message
+                ? `：${res.data.data.error_message}`
+                : ''),
+          );
+        } else if (syncedStatus === 'needs_baseline') {
+          showInfo(t('已同步，等待首次数据采集'));
+        } else {
+          showSuccess(t('上游钱包已同步'));
+        }
         await loadOptions();
         if (
           Number(upstreamConfig.upstream_account_id || 0) === Number(accountId)
@@ -1328,7 +1340,7 @@ const ProfitBoardPage = () => {
 
   return (
     <Spin spinning={loading}>
-      <div className='mt-[60px] space-y-4 px-2 pb-6'>
+      <div className='mt-[60px] space-y-3 px-2 pb-6'>
         <ProfitBoardHeader
           querying={querying}
           overviewQuerying={overviewQuerying}
@@ -1358,7 +1370,7 @@ const ProfitBoardPage = () => {
             }
             itemKey='analysis'
           >
-            <div className='mt-4 space-y-4'>
+            <div className='mt-3 space-y-3'>
               <OverviewPanel
                 overviewQuerying={overviewQuerying}
                 overviewReport={overviewReport}
@@ -1406,6 +1418,7 @@ const ProfitBoardPage = () => {
                 setChartTab={setChartTab}
                 report={report}
                 chartContent={chartContent}
+                trendRowCount={trendRows.length}
                 t={t}
               />
               <DetailTableCard
@@ -1436,7 +1449,7 @@ const ProfitBoardPage = () => {
             }
             itemKey='config'
           >
-            <div className='mt-4 space-y-4'>
+            <div className='mt-3 space-y-3'>
               <ComboManagerCard
                 draft={draft}
                 setDraft={setDraft}
@@ -1486,7 +1499,7 @@ const ProfitBoardPage = () => {
             }
             itemKey='wallet'
           >
-            <div className='mt-4 space-y-4'>
+            <div className='mt-3 space-y-3'>
               <UpstreamWalletCard
                 accounts={options.upstream_accounts || []}
                 accountDraft={accountDraft}

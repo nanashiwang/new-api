@@ -30,7 +30,7 @@ const MetricCard = ({ item, summaryMetricHelp, status }) => {
       bodyStyle={{ padding: 0 }}
       className='overflow-hidden rounded-xl border border-semi-color-border'
     >
-      <div className='p-5'>
+      <div className='p-4'>
         <div className='flex items-start justify-between'>
           <div className='flex-1'>
             <Tooltip content={summaryMetricHelp[item.key] || item.title}>

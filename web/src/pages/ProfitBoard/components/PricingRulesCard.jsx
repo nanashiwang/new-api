@@ -140,10 +140,22 @@ const PricingRulesCard = ({
                     </Tag>
                   </div>
                   <div className='grid gap-2 md:grid-cols-2'>
-                    <InputNumber disabled value={preview?.input_price || 0} suffix='USD / 1M 输入' />
-                    <InputNumber disabled value={preview?.output_price || 0} suffix='USD / 1M 输出' />
-                    <InputNumber disabled value={preview?.cache_read_price || 0} suffix='USD / 1M 缓存读' />
-                    <InputNumber disabled value={preview?.cache_creation_price || 0} suffix='USD / 1M 缓存写' />
+                    <div className='flex items-center justify-between rounded-md bg-semi-color-fill-0 px-3 py-1.5'>
+                      <Text type='tertiary' size='small'>{t('输入')}</Text>
+                      <Text strong size='small'>{preview?.input_price?.toFixed(4) || '0'} USD/1M</Text>
+                    </div>
+                    <div className='flex items-center justify-between rounded-md bg-semi-color-fill-0 px-3 py-1.5'>
+                      <Text type='tertiary' size='small'>{t('输出')}</Text>
+                      <Text strong size='small'>{preview?.output_price?.toFixed(4) || '0'} USD/1M</Text>
+                    </div>
+                    <div className='flex items-center justify-between rounded-md bg-semi-color-fill-0 px-3 py-1.5'>
+                      <Text type='tertiary' size='small'>{t('缓存读')}</Text>
+                      <Text strong size='small'>{preview?.cache_read_price?.toFixed(4) || '0'} USD/1M</Text>
+                    </div>
+                    <div className='flex items-center justify-between rounded-md bg-semi-color-fill-0 px-3 py-1.5'>
+                      <Text type='tertiary' size='small'>{t('缓存写')}</Text>
+                      <Text strong size='small'>{preview?.cache_creation_price?.toFixed(4) || '0'} USD/1M</Text>
+                    </div>
                   </div>
                 </div>
               );
@@ -198,7 +210,9 @@ const PricingRulesCard = ({
                       site_fixed_total_amount: clampNumber(value),
                     })
                   }
-                  suffix='USD 固定总收入'
+                  suffix='USD'
+                  addonAfter={t('固定总收入')}
+                  style={{ width: 220 }}
                 />
               </Space>
             </div>
@@ -233,7 +247,9 @@ const PricingRulesCard = ({
                         upstream_fixed_total_amount: clampNumber(value),
                       })
                     }
-                    suffix='USD 固定总成本'
+                    suffix='USD'
+                    addonAfter={t('固定总成本')}
+                    style={{ width: 220 }}
                   />
                 </div>
                 <PricingRuleList
