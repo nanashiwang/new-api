@@ -66,7 +66,7 @@ const ExpandableRow = ({
       <Text type='tertiary' size='small'>
         {t('本站实际收入')}
       </Text>
-      <div className='mt-1 font-medium text-emerald-600'>
+      <div className='mt-1 font-medium text-emerald-600 dark:text-emerald-400'>
         {formatMoney(record.actual_site_revenue_usd, status)}
       </div>
     </div>
@@ -74,7 +74,7 @@ const ExpandableRow = ({
       <Text type='tertiary' size='small'>
         {t('上游费用')}
       </Text>
-      <div className='mt-1 font-medium text-amber-600'>
+      <div className='mt-1 font-medium text-amber-600 dark:text-amber-400'>
         {record.upstream_cost_known
           ? formatMoney(record.upstream_cost_usd, status)
           : '-'}
@@ -84,7 +84,7 @@ const ExpandableRow = ({
       <Text type='tertiary' size='small'>
         {t('实际利润')}
       </Text>
-      <div className='mt-1 font-medium text-violet-600'>
+      <div className='mt-1 font-medium text-violet-600 dark:text-violet-400'>
         {record.upstream_cost_known
           ? formatMoney(record.actual_profit_usd, status)
           : '-'}
@@ -235,11 +235,6 @@ const DetailTableCard = ({
         </Dropdown>
       }
     >
-      <Text type='tertiary' size='small' className='mb-3 block'>
-        {t(
-          '点击行首展开查看详情。固定总金额只参与当前时间范围的汇总和图表，不会摊到单条请求明细。',
-        )}
-      </Text>
       <Table
         columns={columnsWithExpand}
         dataSource={detailRows}

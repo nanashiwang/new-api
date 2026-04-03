@@ -7,11 +7,11 @@ const { Text, Title } = Typography;
 
 const MetricCard = ({ item, summaryMetricHelp, status }) => {
   const iconColorMap = {
-    configured_site_revenue_usd: 'text-emerald-500',
-    upstream_cost_usd: 'text-amber-500',
-    remote_observed_cost_usd: 'text-rose-500',
-    configured_profit_usd: 'text-sky-500',
-    actual_profit_usd: 'text-violet-500',
+    configured_site_revenue_usd: 'text-emerald-600 dark:text-emerald-400',
+    upstream_cost_usd: 'text-amber-600 dark:text-amber-400',
+    remote_observed_cost_usd: 'text-rose-600 dark:text-rose-400',
+    configured_profit_usd: 'text-sky-600 dark:text-sky-400',
+    actual_profit_usd: 'text-violet-600 dark:text-violet-400',
   };
   const bgColorMap = {
     configured_site_revenue_usd: 'bg-emerald-500/10',
@@ -20,7 +20,7 @@ const MetricCard = ({ item, summaryMetricHelp, status }) => {
     configured_profit_usd: 'bg-sky-500/10',
     actual_profit_usd: 'bg-violet-500/10',
   };
-  const iconColor = iconColorMap[item.key] || 'text-blue-500';
+  const iconColor = iconColorMap[item.key] || 'text-blue-600 dark:text-blue-400';
   const bgColor = bgColorMap[item.key] || 'bg-blue-500/10';
 
   return (
@@ -28,39 +28,33 @@ const MetricCard = ({ item, summaryMetricHelp, status }) => {
       key={item.key}
       bordered={false}
       bodyStyle={{ padding: 0 }}
-      className='relative overflow-hidden rounded-xl border border-semi-color-border'
+      className='overflow-hidden rounded-xl border border-semi-color-border'
     >
       <div className='p-5'>
-        <div
-          className='absolute -right-4 -top-4 h-24 w-24 rounded-full opacity-60 dark:opacity-30'
-          style={{ background: 'var(--semi-color-fill-1)' }}
-        />
-        <div className='relative'>
-          <div className='flex items-start justify-between'>
-            <div className='flex-1'>
-              <Tooltip content={summaryMetricHelp[item.key] || item.title}>
-                <div className='inline-flex cursor-help items-center gap-1.5'>
-                  <Text type='tertiary' size='small'>
-                    {item.title}
-                  </Text>
-                  <Info size={13} className='text-semi-color-text-3' />
-                </div>
-              </Tooltip>
-              <div className='mt-3 flex items-baseline gap-2'>
-                <Title
-                  heading={2}
-                  style={{ margin: 0, fontWeight: 600 }}
-                  className={iconColor}
-                >
-                  {item.value}
-                </Title>
+        <div className='flex items-start justify-between'>
+          <div className='flex-1'>
+            <Tooltip content={summaryMetricHelp[item.key] || item.title}>
+              <div className='inline-flex cursor-help items-center gap-1.5'>
+                <Text type='tertiary' size='small'>
+                  {item.title}
+                </Text>
+                <Info size={13} className='text-semi-color-text-3' />
               </div>
+            </Tooltip>
+            <div className='mt-3 flex items-baseline gap-2'>
+              <Title
+                heading={2}
+                style={{ margin: 0, fontWeight: 600 }}
+                className={iconColor}
+              >
+                {item.value}
+              </Title>
             </div>
-            <div
-              className={`flex h-12 w-12 items-center justify-center rounded-xl ${bgColor}`}
-            >
-              <span className={iconColor}>{item.icon}</span>
-            </div>
+          </div>
+          <div
+            className={`flex h-12 w-12 items-center justify-center rounded-xl ${bgColor}`}
+          >
+            <span className={iconColor}>{item.icon}</span>
           </div>
         </div>
       </div>
@@ -97,7 +91,7 @@ const BatchSummaryCard = ({ item, formatMoney, status, t }) => (
         <Text type='tertiary' size='small'>
           {t('本站配置收入')}
         </Text>
-        <Text strong className='text-emerald-600'>
+        <Text strong className='text-emerald-600 dark:text-emerald-400'>
           {formatMoney(item.configured_site_revenue_usd, status)}
         </Text>
       </div>
@@ -105,7 +99,7 @@ const BatchSummaryCard = ({ item, formatMoney, status, t }) => (
         <Text type='tertiary' size='small'>
           {t('上游费用')}
         </Text>
-        <Text strong className='text-amber-600'>
+        <Text strong className='text-amber-600 dark:text-amber-400'>
           {formatMoney(item.upstream_cost_usd, status)}
         </Text>
       </div>
@@ -113,7 +107,7 @@ const BatchSummaryCard = ({ item, formatMoney, status, t }) => (
         <Text type='tertiary' size='small'>
           {t('远端观测消耗')}
         </Text>
-        <Text strong className='text-rose-600'>
+        <Text strong className='text-rose-600 dark:text-rose-400'>
           {formatMoney(item.remote_observed_cost_usd, status)}
         </Text>
       </div>
@@ -121,7 +115,7 @@ const BatchSummaryCard = ({ item, formatMoney, status, t }) => (
         <Text type='tertiary' size='small'>
           {t('配置利润')}
         </Text>
-        <Text strong className='text-sky-600'>
+        <Text strong className='text-sky-600 dark:text-sky-400'>
           {formatMoney(item.configured_profit_usd, status)}
         </Text>
       </div>
@@ -129,7 +123,7 @@ const BatchSummaryCard = ({ item, formatMoney, status, t }) => (
         <Text type='tertiary' size='small'>
           {t('实际利润')}
         </Text>
-        <Text strong className='text-violet-600 text-base'>
+        <Text strong className='text-violet-600 dark:text-violet-400 text-base'>
           {formatMoney(item.actual_profit_usd, status)}
         </Text>
       </div>
@@ -188,26 +182,16 @@ const OverviewPanel = ({
                   ))}
                 </div>
               </div>
-              <div className='grid gap-3 sm:grid-cols-2'>
-                <div className='rounded-lg border border-semi-color-border bg-semi-color-bg-1 px-4 py-3'>
-                  <Text type='tertiary' size='small'>
-                    {t('累计统计范围')}
-                  </Text>
-                  <div className='mt-1 font-medium'>
-                    {t('已添加组合的全部历史消费日志')}
-                  </div>
-                </div>
-                <div className='rounded-lg border border-semi-color-border bg-semi-color-bg-1 px-4 py-3'>
-                  <Text type='tertiary' size='small'>
-                    {t('最近一条命中日志')}
-                  </Text>
-                  <div className='mt-1 font-medium'>
-                    {overviewReport?.meta?.latest_log_created_at
-                      ? timestamp2string(
-                          overviewReport.meta.latest_log_created_at,
-                        )
-                      : '-'}
-                  </div>
+              <div className='rounded-lg border border-semi-color-border bg-semi-color-bg-1 px-4 py-3'>
+                <Text type='tertiary' size='small'>
+                  {t('最近一条命中日志')}
+                </Text>
+                <div className='mt-1 font-medium'>
+                  {overviewReport?.meta?.latest_log_created_at
+                    ? timestamp2string(
+                        overviewReport.meta.latest_log_created_at,
+                      )
+                    : '-'}
                 </div>
               </div>
             </div>

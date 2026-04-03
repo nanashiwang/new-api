@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  Banner,
   Card,
   Empty,
   InputNumber,
@@ -36,14 +35,9 @@ const PricingRulesCard = ({
 }) => (
   <Card bordered={false} title={t('收益口径与价格规则')}>
     <div className='space-y-5'>
-      <div className='rounded-[28px] border border-semi-color-border bg-[linear-gradient(135deg,#fefce8_0%,#f8fafc_100%)] p-5'>
-        <div className='mb-4 flex flex-wrap items-start justify-between gap-3'>
-          <div>
-            <Text strong>{t('上游成本口径')}</Text>
-            <Text type='tertiary' className='mt-1 block'>
-              {t('整张收益看板只选一种上游成本模式，避免一部分看手动价格、一部分看钱包扣减。')}
-            </Text>
-          </div>
+      <div className='rounded-xl border border-semi-color-border bg-semi-color-fill-0 p-5'>
+        <div className='mb-4 flex flex-wrap items-center justify-between gap-3'>
+          <Text strong>{t('上游成本口径')}</Text>
           <Select
             value={upstreamConfig.upstream_mode || 'manual_rules'}
             onChange={(value) =>
@@ -67,47 +61,29 @@ const PricingRulesCard = ({
         </div>
 
         {upstreamConfig.upstream_mode === 'wallet_observer' ? (
-          <div className='grid gap-3 lg:grid-cols-[minmax(0,1fr)_260px]'>
-            <Select
-              value={upstreamConfig.upstream_account_id || 0}
-              onChange={(value) =>
-                setUpstreamConfig((prev) => ({
-                  ...prev,
-                  upstream_account_id: Number(value || 0),
-                }))
-              }
-              optionList={(options.upstream_accounts || [])
-                .filter((item) => item.enabled !== false)
-                .map((item) => ({
-                  label: `${item.name} · ${item.base_url}`,
-                  value: item.id,
-                }))}
-              placeholder={t('选择一个已维护的上游账户')}
-              emptyContent={t('还没有上游账户，请先去“上游账户”页签创建')}
-            />
-            <Banner
-              type='info'
-              closeIcon={null}
-              description={t('钱包模式会按所选上游账户的余额变化计算成本，并统一回灌到收益分析。')}
-            />
-          </div>
-        ) : (
-          <Banner
-            type='info'
-            closeIcon={null}
-            description={t('固定模型成本模式下，每个组合维护自己的上游模型单价；如果模型不在本站列表里，再手动补录。')}
+          <Select
+            value={upstreamConfig.upstream_account_id || 0}
+            onChange={(value) =>
+              setUpstreamConfig((prev) => ({
+                ...prev,
+                upstream_account_id: Number(value || 0),
+              }))
+            }
+            optionList={(options.upstream_accounts || [])
+              .filter((item) => item.enabled !== false)
+              .map((item) => ({
+                label: `${item.name} · ${item.base_url}`,
+                value: item.id,
+              }))}
+            placeholder={t('选择一个已维护的上游账户')}
+            emptyContent={t('还没有上游账户，请先去”上游账户”页签创建')}
           />
-        )}
+        ) : null}
       </div>
 
-      <div className='rounded-[28px] border border-semi-color-border bg-semi-color-fill-0 p-5'>
-        <div className='mb-3 flex items-center justify-between gap-3'>
-          <div>
-            <Text strong>{t('共享本站模型价格')}</Text>
-            <Text type='tertiary' className='mt-1 block'>
-              {t('这里直接取本站全部可见模型，不再只依赖那套偏窄的 local_models。')}
-            </Text>
-          </div>
+      <div className='rounded-xl border border-semi-color-border bg-semi-color-fill-0 p-5'>
+        <div className='mb-3'>
+          <Text strong>{t('共享本站模型价格')}</Text>
         </div>
         <div className='grid gap-3 lg:grid-cols-[1.4fr_220px_220px]'>
           <Select
@@ -135,7 +111,7 @@ const PricingRulesCard = ({
               })),
             ]}
           />
-          <div className='flex items-center justify-between rounded-xl border border-semi-color-border bg-white px-3 py-2'>
+          <div className='flex items-center justify-between rounded-xl border border-semi-color-border bg-semi-color-bg-1 px-3 py-2'>
             <Text>{t('按充值价')}</Text>
             <Switch
               checked={siteConfig.use_recharge_price}
@@ -155,7 +131,7 @@ const PricingRulesCard = ({
               return (
                 <div
                   key={modelName}
-                  className='rounded-xl border border-semi-color-border bg-white p-3'
+                  className='rounded-xl border border-semi-color-border bg-semi-color-bg-1 p-3'
                 >
                   <div className='mb-2 flex items-center justify-between gap-2'>
                     <Text strong>{modelName}</Text>
@@ -185,7 +161,7 @@ const PricingRulesCard = ({
         return (
           <div
             key={batch.id}
-            className='rounded-[28px] border border-semi-color-border bg-white p-5'
+            className='rounded-xl border border-semi-color-border bg-semi-color-bg-1 p-5'
           >
             <div className='mb-4 flex flex-wrap items-center justify-between gap-3'>
               <div className='flex flex-wrap items-center gap-2'>
@@ -228,14 +204,9 @@ const PricingRulesCard = ({
             </div>
 
             <div className='grid gap-4 xl:grid-cols-2'>
-              <div className='rounded-2xl border border-semi-color-border bg-semi-color-fill-0 p-4'>
+              <div className='rounded-lg border border-semi-color-border bg-semi-color-fill-0 p-4'>
                 <div className='mb-3'>
                   <Text strong>{t('本站规则')}</Text>
-                  <Text type='tertiary' className='mt-1 block'>
-                    {comboConfig.site_mode === 'shared_site_model'
-                      ? t('这个组合优先用上面的共享本站模型价格；没命中时再回落到这里的手动规则。')
-                      : t('这个组合的本站收入完全按这里的手动规则计算。')}
-                  </Text>
                 </div>
                 <PricingRuleList
                   comboId={batch.id}
@@ -251,16 +222,9 @@ const PricingRulesCard = ({
                 />
               </div>
 
-              <div className='rounded-2xl border border-semi-color-border bg-semi-color-fill-0 p-4'>
+              <div className='rounded-lg border border-semi-color-border bg-semi-color-fill-0 p-4'>
                 <div className='mb-3 flex flex-wrap items-center justify-between gap-3'>
-                  <div>
-                    <Text strong>{t('上游手动规则')}</Text>
-                    <Text type='tertiary' className='mt-1 block'>
-                      {upstreamConfig.upstream_mode === 'wallet_observer'
-                        ? t('钱包模式启用后，这里的规则仅作为备用配置保留，不参与当前统计。')
-                        : t('固定模型成本模式下，这里的规则就是当前组合的上游成本。')}
-                    </Text>
-                  </div>
+                  <Text strong>{t('上游手动规则')}</Text>
                   <InputNumber
                     min={0}
                     value={comboConfig.upstream_fixed_total_amount || 0}

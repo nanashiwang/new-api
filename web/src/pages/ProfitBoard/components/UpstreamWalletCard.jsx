@@ -116,10 +116,10 @@ const UpstreamWalletCard = ({
                       enabled: item.enabled !== false,
                     });
                   }}
-                  className={`w-full rounded-2xl border p-4 text-left transition ${
+                  className={`w-full rounded-xl border p-4 text-left transition ${
                     editingAccountId === item.id
-                      ? 'border-[#0f766e] bg-[#ecfeff]'
-                      : 'border-semi-color-border bg-semi-color-fill-0 hover:border-[#5eead4]'
+                      ? 'border-semi-color-primary bg-semi-color-primary-light-default'
+                      : 'border-semi-color-border bg-semi-color-fill-0 hover:border-semi-color-primary-hover'
                   }`}
                 >
                   <div className='mb-3 flex items-start justify-between gap-3'>
@@ -171,14 +171,11 @@ const UpstreamWalletCard = ({
         </div>
 
         <div className='space-y-4'>
-          <div className='rounded-[28px] border border-semi-color-border bg-[linear-gradient(135deg,#ecfeff_0%,#f8fafc_100%)] p-5'>
+          <div className='rounded-xl border border-semi-color-border bg-semi-color-fill-0 p-5'>
             <div className='mb-4 flex flex-wrap items-center justify-between gap-3'>
               <div>
                 <Text strong>
                   {accountDraft.id ? t('编辑上游账户') : t('新建上游账户')}
-                </Text>
-                <Text type='tertiary' className='mt-1 block'>
-                  {t('统一维护 URL、用户 ID 和密钥，收益看板里直接选择，不再每个组合重复填写。')}
                 </Text>
               </div>
               <Space wrap>
@@ -224,14 +221,10 @@ const UpstreamWalletCard = ({
                 }
                 placeholder={t('例如：newapi 上海主账户')}
                 prefix={<Pencil size={14} />}
+                addonBefore={t('名称')}
               />
-              <div className='flex items-center justify-between rounded-2xl border border-semi-color-border bg-white px-4 py-3'>
-                <div>
-                  <Text strong>{t('启用账户')}</Text>
-                  <Text type='tertiary' className='mt-1 block'>
-                    {t('禁用后仍保留账户资料，但不会参与选择和同步。')}
-                  </Text>
-                </div>
+              <div className='flex items-center justify-between rounded-xl border border-semi-color-border bg-semi-color-bg-1 px-4 py-3'>
+                <Text strong>{t('启用账户')}</Text>
                 <Switch
                   checked={accountDraft.enabled !== false}
                   onChange={(checked) =>
@@ -245,6 +238,7 @@ const UpstreamWalletCard = ({
                   setAccountDraft((prev) => ({ ...prev, base_url: value }))
                 }
                 placeholder='https://your-new-api.example.com'
+                addonBefore='URL'
               />
               <InputNumber
                 min={0}
@@ -257,6 +251,7 @@ const UpstreamWalletCard = ({
                 }
                 placeholder={t('远端用户 ID')}
                 style={{ width: '100%' }}
+                addonBefore={t('用户 ID')}
               />
               <Input
                 value={accountDraft.access_token}
@@ -270,6 +265,7 @@ const UpstreamWalletCard = ({
                     ? t('留空则保留当前密钥')
                     : t('输入上游 access token')
                 }
+                addonBefore={t('密钥')}
               />
               <Input
                 value={accountDraft.remark}
@@ -277,6 +273,7 @@ const UpstreamWalletCard = ({
                   setAccountDraft((prev) => ({ ...prev, remark: value }))
                 }
                 placeholder={t('备注，例如：主站、备用、包月账户')}
+                addonBefore={t('备注')}
               />
             </div>
 
@@ -288,7 +285,7 @@ const UpstreamWalletCard = ({
           </div>
 
           {selectedAccount ? (
-            <div className='rounded-[28px] border border-semi-color-border bg-white p-5'>
+            <div className='rounded-xl border border-semi-color-border bg-semi-color-bg-1 p-5'>
               <div className='mb-4 flex flex-wrap items-center justify-between gap-3'>
                 <div>
                   <Title heading={5} style={{ margin: 0 }}>
@@ -311,7 +308,7 @@ const UpstreamWalletCard = ({
               </div>
 
               <div className='grid gap-3 md:grid-cols-3'>
-                <div className='rounded-2xl bg-[#f8fafc] px-4 py-3'>
+                <div className='rounded-lg bg-semi-color-fill-0 px-4 py-3'>
                   <Text type='tertiary' size='small'>
                     {t('钱包总额')}
                   </Text>
@@ -319,7 +316,7 @@ const UpstreamWalletCard = ({
                     {formatMoney(selectedAccount.wallet_quota_usd, status)}
                   </Title>
                 </div>
-                <div className='rounded-2xl bg-[#f8fafc] px-4 py-3'>
+                <div className='rounded-lg bg-semi-color-fill-0 px-4 py-3'>
                   <Text type='tertiary' size='small'>
                     {t('累计已用')}
                   </Text>
@@ -327,7 +324,7 @@ const UpstreamWalletCard = ({
                     {formatMoney(selectedAccount.wallet_used_quota_usd, status)}
                   </Title>
                 </div>
-                <div className='rounded-2xl bg-[#f8fafc] px-4 py-3'>
+                <div className='rounded-lg bg-semi-color-fill-0 px-4 py-3'>
                   <Text type='tertiary' size='small'>
                     {t('本期观测扣减')}
                   </Text>
@@ -339,7 +336,7 @@ const UpstreamWalletCard = ({
 
               {(selectedAccount.subscription_total_quota_usd > 0 ||
                 selectedAccount.subscription_used_quota_usd > 0) && (
-                <div className='mt-4 rounded-2xl border border-semi-color-border bg-[#f8fafc] p-4'>
+                <div className='mt-4 rounded-2xl border border-semi-color-border bg-semi-color-fill-0 p-4'>
                   <div className='mb-2 text-sm font-semibold'>
                     {t('订阅额度')}
                   </div>

@@ -152,11 +152,7 @@ const ComboManagerCard = ({
           description={batchValidationError}
           closeIcon={null}
         />
-      ) : (
-        <Text type='tertiary'>
-          {t('这里决定你长期盯哪些渠道；顶部累计总览会一直按这些组合统计。')}
-        </Text>
-      )}
+      ) : null}
     </div>
   </Card>
 );

@@ -10,7 +10,7 @@ import {
 } from '@douyinfe/semi-ui';
 import { RefreshCw, Save, Wallet } from 'lucide-react';
 
-const { Paragraph, Text, Title } = Typography;
+const { Text, Title } = Typography;
 
 const ProfitBoardHeader = ({
   querying,
@@ -34,12 +34,9 @@ const ProfitBoardHeader = ({
   <>
     <div className='flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between'>
       <div>
-        <Title heading={4} style={{ marginBottom: 4 }}>
+        <Title heading={4} style={{ marginBottom: 0 }}>
           {t('收益看板')}
         </Title>
-        <Paragraph type='tertiary' style={{ margin: 0 }}>
-          {t('先维护组合、站点收入规则和上游账户，再按统一口径看收入、成本、利润。')}
-        </Paragraph>
       </div>
       <Space wrap>
         <Button

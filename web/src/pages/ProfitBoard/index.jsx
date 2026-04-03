@@ -1079,7 +1079,7 @@ const ProfitBoardPage = () => {
         title: t('本站配置收入'),
         dataIndex: 'configured_site_revenue_usd',
         render: (value) => (
-          <span className='font-medium text-emerald-600'>
+          <span className='font-medium text-emerald-600 dark:text-emerald-400'>
             {formatMoney(value, statusState?.status)}
           </span>
         ),
@@ -1090,7 +1090,7 @@ const ProfitBoardPage = () => {
         dataIndex: 'configured_profit_usd',
         render: (value, row) =>
           row.upstream_cost_known && row.site_pricing_known ? (
-            <span className='font-medium text-sky-600'>
+            <span className='font-medium text-sky-600 dark:text-sky-400'>
               {formatMoney(value, statusState?.status)}
             </span>
           ) : (
@@ -1103,7 +1103,7 @@ const ProfitBoardPage = () => {
         dataIndex: 'upstream_cost_usd',
         render: (value, row) =>
           row.upstream_cost_known ? (
-            <span className='font-medium text-amber-600'>
+            <span className='font-medium text-amber-600 dark:text-amber-400'>
               {formatMoney(value, statusState?.status)}
             </span>
           ) : (
@@ -1126,7 +1126,7 @@ const ProfitBoardPage = () => {
         dataIndex: 'actual_profit_usd',
         render: (value, row) =>
           row.upstream_cost_known ? (
-            <span className='font-medium text-violet-600'>
+            <span className='font-medium text-violet-600 dark:text-violet-400'>
               {formatMoney(value, statusState?.status)}
             </span>
           ) : (
@@ -1179,7 +1179,7 @@ const ProfitBoardPage = () => {
                 overviewReport.summary.configured_site_revenue_usd,
                 statusState?.status,
               ),
-              icon: <CircleDollarSign size={18} className='text-emerald-500' />,
+              icon: <CircleDollarSign size={18} className='text-emerald-600 dark:text-emerald-400' />,
             },
             {
               key: 'upstream_cost_usd',
@@ -1188,7 +1188,7 @@ const ProfitBoardPage = () => {
                 overviewReport.summary.upstream_cost_usd,
                 statusState?.status,
               ),
-              icon: <BadgeDollarSign size={18} className='text-amber-500' />,
+              icon: <BadgeDollarSign size={18} className='text-amber-600 dark:text-amber-400' />,
             },
             {
               key: 'remote_observed_cost_usd',
@@ -1197,7 +1197,7 @@ const ProfitBoardPage = () => {
                 overviewReport.summary.remote_observed_cost_usd,
                 statusState?.status,
               ),
-              icon: <BadgeDollarSign size={18} className='text-rose-500' />,
+              icon: <BadgeDollarSign size={18} className='text-rose-600 dark:text-rose-400' />,
             },
             {
               key: 'configured_profit_usd',
@@ -1206,7 +1206,7 @@ const ProfitBoardPage = () => {
                 overviewReport.summary.configured_profit_usd,
                 statusState?.status,
               ),
-              icon: <BarChart3 size={18} className='text-sky-500' />,
+              icon: <BarChart3 size={18} className='text-sky-600 dark:text-sky-400' />,
             },
             {
               key: 'actual_profit_usd',
@@ -1215,7 +1215,7 @@ const ProfitBoardPage = () => {
                 overviewReport.summary.actual_profit_usd,
                 statusState?.status,
               ),
-              icon: <BarChart3 size={18} className='text-violet-500' />,
+              icon: <BarChart3 size={18} className='text-violet-600 dark:text-violet-400' />,
             },
           ],
     [overviewReport?.summary, statusState?.status, t],

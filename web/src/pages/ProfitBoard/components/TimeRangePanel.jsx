@@ -59,11 +59,7 @@ const TimeRangePanel = ({
             description={validationErrors[0]}
             closeIcon={null}
           />
-        ) : (
-          <Text type='tertiary'>
-            {t('这里的时间只影响图表和对账明细，不影响上面的累计总览。')}
-          </Text>
-        )}
+        ) : null}
       </div>
     </Card>
 
@@ -88,9 +84,6 @@ const TimeRangePanel = ({
               : '-'}
           </div>
         </div>
-        <Text type='tertiary'>
-          {t('自动更新只会在时间范围接近现在且页面可见时工作。')}
-        </Text>
       </div>
     </Card>
   </div>
