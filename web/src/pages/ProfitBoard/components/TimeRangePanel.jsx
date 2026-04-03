@@ -22,8 +22,8 @@ const TimeRangePanel = ({
   report,
   t,
 }) => (
-  <div className='grid gap-3 xl:grid-cols-2'>
-    <Card bordered={false} title={t('时间分析范围')}>
+  <Card bordered={false} className='rounded-xl' title={t('时间范围与刷新状态')}>
+    <div className='grid gap-4 xl:grid-cols-[1.6fr_1fr]'>
       <div className='space-y-4'>
         <div className='flex flex-wrap gap-2'>
           {datePresets.map((item) => (
@@ -61,20 +61,21 @@ const TimeRangePanel = ({
           />
         ) : null}
       </div>
-    </Card>
 
-    <Card bordered={false} title={t('时间分析状态')}>
       <div className='space-y-3'>
-        <div className='flex flex-wrap gap-2'>
-          {statusSummary.length > 0 ? (
-            statusSummary.map((item) => (
-              <Tag key={item.key} color={item.color}>
-                {item.text}
-              </Tag>
-            ))
-          ) : (
-            <Tag color='grey'>{t('等待时间分析结果')}</Tag>
-          )}
+        <div className='rounded-lg bg-semi-color-fill-0 px-4 py-3'>
+          <Text type='tertiary'>{t('分析状态')}</Text>
+          <div className='mt-2 flex flex-wrap gap-2'>
+            {statusSummary.length > 0 ? (
+              statusSummary.map((item) => (
+                <Tag key={item.key} color={item.color}>
+                  {item.text}
+                </Tag>
+              ))
+            ) : (
+              <Tag color='grey'>{t('等待时间分析结果')}</Tag>
+            )}
+          </div>
         </div>
         <div className='rounded-lg bg-semi-color-fill-0 px-4 py-3'>
           <Text type='tertiary'>{t('时间分析上次更新时间')}</Text>
@@ -85,8 +86,8 @@ const TimeRangePanel = ({
           </div>
         </div>
       </div>
-    </Card>
-  </div>
+    </div>
+  </Card>
 );
 
 export default TimeRangePanel;

@@ -689,15 +689,20 @@ func TestBuildProfitBoardUpstreamAccountStateUsesWalletSnapshotKey(t *testing.T)
 	})
 
 	account := ProfitBoardUpstreamAccount{
-		Name:                 "主账户",
-		AccountType:          ProfitBoardUpstreamAccountTypeNewAPI,
-		BaseURL:              "https://remote.example.com",
-		UserID:               42,
-		AccessTokenEncrypted: "masked",
-		Enabled:              true,
-		CreatedAt:            1,
-		UpdatedAt:            1,
+		Name:                   "主账户",
+		AccountType:            ProfitBoardUpstreamAccountTypeNewAPI,
+		BaseURL:                "https://remote.example.com",
+		UserID:                 42,
+		Enabled:                true,
+		LowBalanceThresholdUSD: 0.9,
+		CreatedAt:              1,
+		UpdatedAt:              1,
 	}
+	encryptedToken, err := encryptProfitBoardRemoteSecret("remote-token")
+	if err != nil {
+		t.Fatalf("encrypt token: %v", err)
+	}
+	account.AccessTokenEncrypted = encryptedToken
 	if err := db.Create(&account).Error; err != nil {
 		t.Fatalf("create account: %v", err)
 	}
@@ -718,8 +723,67 @@ func TestBuildProfitBoardUpstreamAccountStateUsesWalletSnapshotKey(t *testing.T)
 	if options[0].Status != profitBoardRemoteObserverStatusReady || !options[0].BaselineReady {
 		t.Fatalf("unexpected option status: %+v", options[0])
 	}
-	if options[0].WalletQuotaUSD != 0.8 || options[0].WalletUsedQuotaUSD != 0.2 {
+	if options[0].WalletBalanceUSD != 0.8 || options[0].WalletQuotaUSD != 0.8 {
+		t.Fatalf("unexpected wallet balance: %+v", options[0])
+	}
+	if options[0].WalletUsedTotalUSD != 0.2 || options[0].WalletUsedQuotaUSD != 0.2 {
 		t.Fatalf("unexpected wallet amounts: %+v", options[0])
+	}
+	if !options[0].LowBalanceAlert || options[0].LowBalanceThresholdUSD != 0.9 {
+		t.Fatalf("unexpected low balance state: %+v", options[0])
+	}
+}
+
+func TestGetProfitBoardUpstreamAccountTrendUsesPeriodUsedUSD(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	originQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 1000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originQuotaPerUnit
+	})
+
+	account := ProfitBoardUpstreamAccount{
+		Name:                   "趋势账户",
+		AccountType:            ProfitBoardUpstreamAccountTypeNewAPI,
+		BaseURL:                "https://remote.example.com",
+		UserID:                 7,
+		Enabled:                true,
+		LowBalanceThresholdUSD: 0.75,
+		CreatedAt:              1,
+		UpdatedAt:              1,
+	}
+	encryptedToken, err := encryptProfitBoardRemoteSecret("remote-trend-token")
+	if err != nil {
+		t.Fatalf("encrypt token: %v", err)
+	}
+	account.AccessTokenEncrypted = encryptedToken
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+
+	config := account.remoteObserverConfig()
+	signature := profitBoardUpstreamAccountSnapshotSignature(account.Id)
+	now := time.Now().Unix()
+	seedProfitBoardRemoteSnapshot(t, signature, profitBoardUpstreamAccountSnapshotComboID, config, now-2*24*60*60, 900, 100, nil)
+	seedProfitBoardRemoteSnapshot(t, signature, profitBoardUpstreamAccountSnapshotComboID, config, now-24*60*60, 850, 150, nil)
+	seedProfitBoardRemoteSnapshot(t, signature, profitBoardUpstreamAccountSnapshotComboID, config, now, 700, 300, nil)
+
+	trend, err := GetProfitBoardUpstreamAccountTrend(account.Id, now-3*24*60*60, now+1, "day", 0)
+	if err != nil {
+		t.Fatalf("GetProfitBoardUpstreamAccountTrend: %v", err)
+	}
+	if len(trend.Points) != 2 {
+		t.Fatalf("unexpected trend points: %+v", trend.Points)
+	}
+	if trend.Points[0].PeriodUsedUSD != 0.05 || trend.Points[1].PeriodUsedUSD != 0.15 {
+		t.Fatalf("unexpected trend values: %+v", trend.Points)
+	}
+	if trend.Account.WalletBalanceUSD != 0.7 || trend.Account.PeriodUsedUSD != 0.2 {
+		t.Fatalf("unexpected account summary: %+v", trend.Account)
+	}
+	if !trend.Account.LowBalanceAlert {
+		t.Fatalf("expected low balance alert: %+v", trend.Account)
 	}
 }
 

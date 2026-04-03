@@ -712,6 +712,7 @@ func buildProfitBoardRemoteObserverState(selectionSignature string, batch Profit
 		Enabled:         config.Enabled,
 		Configured:      profitBoardRemoteObserverConfigured(config),
 		Status:          profitBoardRemoteObserverStatusDisabled,
+		PeriodUsedUSD:   roundProfitBoardAmount(observedCostUSD),
 		ObservedCostUSD: roundProfitBoardAmount(observedCostUSD),
 	}
 	switch {
@@ -733,8 +734,10 @@ func buildProfitBoardRemoteObserverState(selectionSignature string, batch Profit
 		state.LastSuccessAt = latestSuccess.SyncedAt
 		state.RemoteQuotaPerUnit = latestSuccess.RemoteQuotaPerUnit
 		state.QuotaPerUnitMismatch = latestSuccess.RemoteQuotaPerUnit > 0 && latestSuccess.RemoteQuotaPerUnit != common.QuotaPerUnit
-		state.WalletQuotaUSD = profitBoardQuotaToUSD(latestSuccess.WalletQuota)
-		state.WalletUsedQuotaUSD = profitBoardQuotaToUSD(latestSuccess.WalletUsedQuota)
+		state.WalletBalanceUSD = profitBoardQuotaToUSD(latestSuccess.WalletQuota)
+		state.WalletQuotaUSD = state.WalletBalanceUSD
+		state.WalletUsedTotalUSD = profitBoardQuotaToUSD(latestSuccess.WalletUsedQuota)
+		state.WalletUsedQuotaUSD = state.WalletUsedTotalUSD
 		subTotal, subUsed := summarizeProfitBoardRemoteSubscriptions(parseProfitBoardRemoteSubscriptions(latestSuccess.SubscriptionStates))
 		state.SubscriptionTotalQuotaUSD = profitBoardQuotaToUSD(subTotal)
 		state.SubscriptionUsedQuotaUSD = profitBoardQuotaToUSD(subUsed)

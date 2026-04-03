@@ -5,13 +5,13 @@ import {
   Empty,
   Input,
   InputNumber,
-  Progress,
   Space,
   Switch,
   Tag,
   Tooltip,
   Typography,
 } from '@douyinfe/semi-ui';
+import { VChart } from '@visactor/react-vchart';
 import {
   AlertCircle,
   KeyRound,
@@ -23,401 +23,431 @@ import {
   Wallet,
 } from 'lucide-react';
 import { timestamp2string } from '../../../helpers';
+import { createAccountUsageTrendSpec, getWalletStatusMeta } from '../utils';
 
 const { Text, Title } = Typography;
 
-const statusColorMap = {
-  ready: 'green',
-  needs_baseline: 'orange',
-  failed: 'red',
-  not_configured: 'grey',
-  disabled: 'grey',
-};
-
-const statusLabelMap = (t) => ({
-  ready: t('正常'),
-  needs_baseline: t('余额已同步'),
-  failed: t('同步失败'),
-  not_configured: t('未配置'),
-  disabled: t('未启用'),
-});
-
-const balanceLevel = (balance, total) => {
-  if (total <= 0) return 'unknown';
-  const ratio = balance / total;
-  if (ratio <= 0.15) return 'critical';
-  if (ratio <= 0.3) return 'low';
-  return 'healthy';
-};
-
-const balanceLevelColor = (level) => ({
-  critical: 'red',
-  low: 'orange',
-  healthy: 'green',
-  unknown: 'grey',
-})[level] || 'grey';
-
-const balanceLevelBorder = (level) => ({
-  critical: 'border-red-500/40',
-  low: 'border-orange-500/30',
-  healthy: 'border-semi-color-border',
-  unknown: 'border-semi-color-border',
-})[level] || 'border-semi-color-border';
-
-const balanceLevelBg = (level) => ({
-  critical: 'bg-red-500/5',
-  low: 'bg-orange-500/5',
-  healthy: '',
-  unknown: '',
-})[level] || '';
-
-const usageColor = (percent) => {
-  if (percent >= 85) return 'var(--semi-color-danger)';
-  if (percent >= 60) return 'var(--semi-color-warning)';
-  return 'var(--semi-color-success)';
-};
+const InfoMetric = ({ label, value, emphasis }) => (
+  <div className='rounded-lg border border-semi-color-border bg-semi-color-fill-0 px-3 py-2.5'>
+    <Text type='tertiary' size='small'>
+      {label}
+    </Text>
+    <div className={`mt-1 text-sm font-semibold ${emphasis || ''}`}>
+      {value}
+    </div>
+  </div>
+);
 
 const UpstreamWalletCard = ({
   accounts,
+  accountTrend,
+  accountTrendLoading,
   accountDraft,
   setAccountDraft,
   editingAccountId,
   setEditingAccountId,
   saveAccount,
   syncAccount,
+  syncAllAccounts,
   deleteAccount,
   resetAccountDraft,
   savingAccount,
   syncingAccountId,
+  syncingAllAccounts,
   deletingAccountId,
   formatMoney,
   status,
   t,
 }) => {
-  const labels = statusLabelMap(t);
-
   const enabledAccounts = useMemo(
-    () => accounts.filter((a) => a.enabled !== false),
+    () => accounts.filter((item) => item.enabled !== false),
     [accounts],
   );
+  const selectedAccount =
+    accounts.find((item) => item.id === editingAccountId) || null;
 
-  const walletSummary = useMemo(() => {
-    let totalQuota = 0;
+  const summary = useMemo(() => {
+    let totalBalance = 0;
     let totalUsed = 0;
-    enabledAccounts.forEach((a) => {
-      totalQuota += a.wallet_quota_usd || 0;
-      totalUsed += a.wallet_used_quota_usd || 0;
+    let totalPeriod = 0;
+    let latestSyncedAt = 0;
+    enabledAccounts.forEach((item) => {
+      totalBalance += Number(item.wallet_balance_usd || 0);
+      totalUsed += Number(item.wallet_used_total_usd || 0);
+      totalPeriod += Number(item.period_used_usd || 0);
+      latestSyncedAt = Math.max(
+        latestSyncedAt,
+        Number(item.last_synced_at || 0),
+      );
     });
     return {
-      totalQuota,
+      totalBalance,
       totalUsed,
-      totalBalance: totalQuota - totalUsed,
+      totalPeriod,
+      latestSyncedAt,
       count: enabledAccounts.length,
     };
   }, [enabledAccounts]);
 
-  const selectedAccount =
-    accounts.find((item) => item.id === editingAccountId) || null;
+  const trendSpec = useMemo(() => {
+    const rows = accountTrend?.points || [];
+    if (!rows.length) return null;
+    return createAccountUsageTrendSpec(rows, status, t);
+  }, [accountTrend?.points, status, t]);
 
   return (
-    <div className='space-y-3'>
-      {/* 钱包总览仪表盘 */}
-      {enabledAccounts.length > 0 && (
-        <Card
-          bordered={false}
-          bodyStyle={{ padding: '16px' }}
-          title={
-            <div className='flex items-center gap-2'>
-              <Wallet size={16} />
-              <span>{t('钱包总览')}</span>
-              <Tag color='blue' size='small'>
-                {enabledAccounts.length} {t('个账户')}
-              </Tag>
-            </div>
-          }
-        >
-          {/* 汇总数字 */}
-          <div className='mb-4 grid gap-3 sm:grid-cols-3'>
-            <div className='rounded-lg bg-semi-color-fill-0 px-4 py-3'>
-              <Text type='tertiary' size='small'>
-                {t('总余额')}
-              </Text>
-              <div
-                className={`mt-1 text-xl font-bold ${
-                  balanceLevel(walletSummary.totalBalance, walletSummary.totalQuota) === 'critical'
-                    ? 'text-red-500'
-                    : balanceLevel(walletSummary.totalBalance, walletSummary.totalQuota) === 'low'
-                      ? 'text-orange-500'
-                      : 'text-emerald-600 dark:text-emerald-400'
-                }`}
-              >
-                {formatMoney(walletSummary.totalBalance, status)}
-              </div>
-            </div>
-            <div className='rounded-lg bg-semi-color-fill-0 px-4 py-3'>
-              <Text type='tertiary' size='small'>
-                {t('总额度')}
-              </Text>
-              <div className='mt-1 text-xl font-bold'>
-                {formatMoney(walletSummary.totalQuota, status)}
-              </div>
-            </div>
-            <div className='rounded-lg bg-semi-color-fill-0 px-4 py-3'>
-              <Text type='tertiary' size='small'>
-                {t('总已用')}
-              </Text>
-              <div className='mt-1 text-xl font-bold text-amber-600 dark:text-amber-400'>
-                {formatMoney(walletSummary.totalUsed, status)}
-              </div>
-            </div>
+    <Card
+      bordered={false}
+      className='rounded-xl'
+      title={
+        <div className='flex items-center gap-2'>
+          <Wallet size={16} />
+          <span>{t('上游账户')}</span>
+        </div>
+      }
+      headerExtraContent={
+        <Space wrap>
+          <Tag color='blue' size='small'>
+            {summary.count} {t('个账户')}
+          </Tag>
+          <Button
+            type='tertiary'
+            icon={<RefreshCw size={14} />}
+            loading={syncingAllAccounts}
+            onClick={syncAllAccounts}
+          >
+            {t('全部同步')}
+          </Button>
+          <Button
+            theme='solid'
+            type='primary'
+            icon={<Plus size={14} />}
+            onClick={resetAccountDraft}
+          >
+            {t('新建账户')}
+          </Button>
+        </Space>
+      }
+    >
+      {accounts.length > 0 ? (
+        <div className='space-y-4'>
+          <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4'>
+            <InfoMetric
+              label={t('当前余额')}
+              value={formatMoney(summary.totalBalance, status)}
+              emphasis='text-emerald-600 dark:text-emerald-400'
+            />
+            <InfoMetric
+              label={t('历史累计已用')}
+              value={formatMoney(summary.totalUsed, status)}
+              emphasis='text-amber-600 dark:text-amber-400'
+            />
+            <InfoMetric
+              label={t('近 7 天已用')}
+              value={formatMoney(summary.totalPeriod, status)}
+              emphasis='text-rose-600 dark:text-rose-400'
+            />
+            <InfoMetric
+              label={t('最近同步')}
+              value={
+                summary.latestSyncedAt
+                  ? timestamp2string(summary.latestSyncedAt)
+                  : '-'
+              }
+            />
           </div>
 
-          {/* 各账户余额一览 */}
-          <div className='space-y-1.5'>
-            {enabledAccounts.map((account) => {
-              const walletTotal = account.wallet_quota_usd || 0;
-              const walletUsed = account.wallet_used_quota_usd || 0;
-              const balance = walletTotal - walletUsed;
-              const percent =
-                walletTotal > 0
-                  ? Math.min(Math.round((walletUsed / walletTotal) * 100), 100)
-                  : 0;
-              const level = balanceLevel(balance, walletTotal);
-
-              return (
-                <div
-                  key={account.id}
-                  className={`flex items-center gap-3 rounded-lg border px-3 py-2 ${balanceLevelBorder(level)} ${balanceLevelBg(level)}`}
-                >
-                  <div className='min-w-0 flex-1'>
-                    <div className='flex items-center gap-2'>
-                      <Text strong size='small' className='truncate'>
-                        {account.name}
-                      </Text>
-                      {level === 'critical' && (
-                        <Tooltip content={t('余额不足，请及时充值')}>
-                          <AlertCircle
-                            size={14}
-                            className='shrink-0 text-red-500'
-                          />
-                        </Tooltip>
-                      )}
-                      {level === 'low' && (
-                        <Tooltip content={t('余额偏低，建议充值')}>
-                          <AlertCircle
-                            size={14}
-                            className='shrink-0 text-orange-500'
-                          />
-                        </Tooltip>
-                      )}
-                    </div>
-                  </div>
-                  <div className='w-28 shrink-0'>
-                    <Progress
-                      percent={percent}
-                      stroke={usageColor(percent)}
-                      showInfo
-                      size='small'
-                      format={() => `${percent}%`}
-                    />
-                  </div>
-                  <div className='w-24 shrink-0 text-right'>
-                    <Text
-                      strong
-                      className={
-                        level === 'critical'
-                          ? 'text-red-500'
-                          : level === 'low'
-                            ? 'text-orange-500'
-                            : 'text-emerald-600 dark:text-emerald-400'
-                      }
-                    >
-                      {formatMoney(balance, status)}
-                    </Text>
-                  </div>
-                  <Tag
-                    color={statusColorMap[account.status] || 'grey'}
-                    size='small'
-                  >
-                    {labels[account.status] || account.status || t('未同步')}
-                  </Tag>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-      )}
-
-      {/* 账户管理 */}
-      <Card
-        bordered={false}
-        title={
-          <div className='flex items-center justify-between gap-3'>
-            <div className='flex items-center gap-2'>
-              <Wallet size={16} />
-              <span>{t('上游账户管理')}</span>
-            </div>
-            <Button
-              theme='solid'
-              type='primary'
-              icon={<Plus size={14} />}
-              size='small'
-              onClick={resetAccountDraft}
-            >
-              {t('新建账户')}
-            </Button>
-          </div>
-        }
-      >
-        <div className='grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]'>
-          {/* 左侧账户列表 */}
-          <div className='space-y-2'>
-            {accounts.length > 0 ? (
-              accounts.map((item) => {
-                const walletTotal = item.wallet_quota_usd || 0;
-                const walletUsed = item.wallet_used_quota_usd || 0;
-                const balance = walletTotal - walletUsed;
-                const percent =
-                  walletTotal > 0
-                    ? Math.min(
-                        Math.round((walletUsed / walletTotal) * 100),
-                        100,
-                      )
-                    : 0;
-                const level = balanceLevel(balance, walletTotal);
+          <div className='grid gap-4 xl:grid-cols-[340px_minmax(0,1fr)]'>
+            <div className='space-y-3'>
+              {accounts.map((item) => {
+                const statusMeta = getWalletStatusMeta(item.status, t);
                 const isSelected = editingAccountId === item.id;
-
                 return (
                   <button
                     key={item.id}
                     type='button'
-                    onClick={() => {
-                      setEditingAccountId(item.id);
-                      setAccountDraft({
-                        id: item.id,
-                        name: item.name || '',
-                        remark: item.remark || '',
-                        account_type: item.account_type || 'newapi',
-                        base_url: item.base_url || '',
-                        user_id: item.user_id || 0,
-                        access_token: '',
-                        access_token_masked: item.access_token_masked || '',
-                        enabled: item.enabled !== false,
-                      });
-                    }}
-                    className={`w-full rounded-lg border p-3 text-left transition ${
+                    onClick={() => setEditingAccountId(item.id)}
+                    className={`w-full rounded-xl border p-3 text-left transition ${
                       isSelected
                         ? 'border-semi-color-primary bg-semi-color-primary-light-default'
-                        : `${balanceLevelBorder(level)} bg-semi-color-fill-0 hover:border-semi-color-primary-hover`
+                        : 'border-semi-color-border bg-semi-color-bg-1 hover:border-semi-color-primary-hover'
                     }`}
                   >
-                    <div className='mb-2 flex items-start justify-between gap-2'>
+                    <div className='flex items-start justify-between gap-2'>
                       <div className='min-w-0'>
-                        <div className='truncate text-sm font-semibold'>
-                          {item.name}
+                        <div className='flex items-center gap-2'>
+                          <Text strong className='truncate'>
+                            {item.name}
+                          </Text>
+                          {item.low_balance_alert ? (
+                            <Tooltip content={t('当前余额已经低于提醒线')}>
+                              <AlertCircle size={14} className='text-red-500' />
+                            </Tooltip>
+                          ) : null}
                         </div>
-                        <div className='truncate text-xs text-semi-color-text-2'>
-                          {item.base_url}
-                        </div>
+                        <Tooltip content={item.base_url || '-'}>
+                          <div className='mt-1 truncate text-xs text-semi-color-text-2'>
+                            {item.base_url || '-'}
+                          </div>
+                        </Tooltip>
                       </div>
-                      <Tag
-                        color={statusColorMap[item.status] || 'grey'}
-                        size='small'
+                      <div
+                        className='flex items-center gap-2'
+                        onClick={(event) => event.stopPropagation()}
                       >
-                        {labels[item.status] || item.status || t('未同步')}
-                      </Tag>
+                        <Tag color={statusMeta.color} size='small'>
+                          {statusMeta.label}
+                        </Tag>
+                        <Button
+                          type='tertiary'
+                          icon={<RefreshCw size={14} />}
+                          loading={syncingAccountId === item.id}
+                          onClick={() => syncAccount(item.id)}
+                        />
+                      </div>
                     </div>
-                    <div className='mb-1.5 flex items-center justify-between text-xs'>
-                      <span className='text-semi-color-text-2'>
-                        {t('余额')}
-                      </span>
-                      <span
-                        className={`text-sm font-bold ${
-                          level === 'critical'
-                            ? 'text-red-500'
-                            : level === 'low'
-                              ? 'text-orange-500'
-                              : 'text-emerald-600 dark:text-emerald-400'
-                        }`}
-                      >
-                        {formatMoney(balance, status)}
-                      </span>
+
+                    <div className='mt-3 grid gap-2 sm:grid-cols-2'>
+                      <InfoMetric
+                        label={t('当前余额')}
+                        value={formatMoney(item.wallet_balance_usd, status)}
+                        emphasis='text-emerald-600 dark:text-emerald-400'
+                      />
+                      <InfoMetric
+                        label={t('近 7 天已用')}
+                        value={formatMoney(item.period_used_usd, status)}
+                        emphasis='text-rose-600 dark:text-rose-400'
+                      />
+                      <InfoMetric
+                        label={t('历史累计已用')}
+                        value={formatMoney(item.wallet_used_total_usd, status)}
+                        emphasis='text-amber-600 dark:text-amber-400'
+                      />
+                      <InfoMetric
+                        label={t('上次同步')}
+                        value={
+                          item.last_synced_at
+                            ? timestamp2string(item.last_synced_at)
+                            : '-'
+                        }
+                      />
                     </div>
-                    <div className='flex items-center justify-between text-xs text-semi-color-text-2'>
-                      <span>{t('本期消耗')}</span>
-                      <span className='font-semibold text-semi-color-text-0'>
-                        {formatMoney(item.observed_cost_usd, status)}
-                      </span>
-                    </div>
-                    {walletTotal > 0 && (
-                      <div className='mt-2'>
-                        <Progress
-                          percent={percent}
-                          stroke={usageColor(percent)}
-                          showInfo
+
+                    {item.low_balance_threshold_usd > 0 ? (
+                      <div className='mt-2 text-xs text-semi-color-text-2'>
+                        {t('提醒线')}:{' '}
+                        {formatMoney(item.low_balance_threshold_usd, status)}
+                      </div>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className='space-y-3'>
+              {selectedAccount ? (
+                <>
+                  <div className='rounded-xl border border-semi-color-border bg-semi-color-bg-1 p-4'>
+                    <div className='flex flex-wrap items-start justify-between gap-3'>
+                      <div className='min-w-0'>
+                        <Title heading={6} style={{ margin: 0 }}>
+                          {selectedAccount.name}
+                        </Title>
+                        <Text type='tertiary' size='small'>
+                          {selectedAccount.remark || selectedAccount.base_url}
+                        </Text>
+                      </div>
+                      <Space wrap>
+                        <Tag
+                          color={
+                            getWalletStatusMeta(selectedAccount.status, t).color
+                          }
                           size='small'
-                          format={() => `${percent}%`}
+                        >
+                          {getWalletStatusMeta(selectedAccount.status, t).label}
+                        </Tag>
+                        {selectedAccount.low_balance_alert ? (
+                          <Tag color='red' size='small'>
+                            {t('余额偏低')}
+                          </Tag>
+                        ) : null}
+                        {selectedAccount.quota_per_unit_mismatch ? (
+                          <Tag color='orange' size='small'>
+                            {t('额度倍率不同')}
+                          </Tag>
+                        ) : null}
+                        <Button
+                          type='tertiary'
+                          icon={<RefreshCw size={14} />}
+                          loading={syncingAccountId === selectedAccount.id}
+                          onClick={() => syncAccount(selectedAccount.id)}
+                        >
+                          {t('刷新')}
+                        </Button>
+                      </Space>
+                    </div>
+
+                    <div className='mt-4 grid gap-3 sm:grid-cols-3'>
+                      <InfoMetric
+                        label={t('当前余额')}
+                        value={formatMoney(
+                          selectedAccount.wallet_balance_usd,
+                          status,
+                        )}
+                        emphasis='text-emerald-600 dark:text-emerald-400'
+                      />
+                      <InfoMetric
+                        label={t('历史累计已用')}
+                        value={formatMoney(
+                          selectedAccount.wallet_used_total_usd,
+                          status,
+                        )}
+                        emphasis='text-amber-600 dark:text-amber-400'
+                      />
+                      <InfoMetric
+                        label={t('近 7 天已用')}
+                        value={formatMoney(
+                          selectedAccount.period_used_usd,
+                          status,
+                        )}
+                        emphasis='text-rose-600 dark:text-rose-400'
+                      />
+                    </div>
+
+                    <div className='mt-3 grid gap-3 sm:grid-cols-2'>
+                      <InfoMetric
+                        label={t('最近同步')}
+                        value={
+                          selectedAccount.last_synced_at
+                            ? timestamp2string(selectedAccount.last_synced_at)
+                            : '-'
+                        }
+                      />
+                      <InfoMetric
+                        label={t('最近成功')}
+                        value={
+                          selectedAccount.last_success_at
+                            ? timestamp2string(selectedAccount.last_success_at)
+                            : '-'
+                        }
+                      />
+                    </div>
+
+                    {(selectedAccount.subscription_total_quota_usd > 0 ||
+                      selectedAccount.subscription_used_quota_usd > 0 ||
+                      selectedAccount.low_balance_threshold_usd > 0) && (
+                      <div className='mt-3 grid gap-3 sm:grid-cols-3'>
+                        <InfoMetric
+                          label={t('订阅总额')}
+                          value={
+                            selectedAccount.subscription_total_quota_usd > 0
+                              ? formatMoney(
+                                  selectedAccount.subscription_total_quota_usd,
+                                  status,
+                                )
+                              : t('不限额或未知')
+                          }
+                        />
+                        <InfoMetric
+                          label={t('订阅已用')}
+                          value={formatMoney(
+                            selectedAccount.subscription_used_quota_usd,
+                            status,
+                          )}
+                        />
+                        <InfoMetric
+                          label={t('低余额提醒线')}
+                          value={
+                            selectedAccount.low_balance_threshold_usd > 0
+                              ? formatMoney(
+                                  selectedAccount.low_balance_threshold_usd,
+                                  status,
+                                )
+                              : t('未设置')
+                          }
                         />
                       </div>
                     )}
-                  </button>
-                );
-              })
-            ) : (
-              <Empty
-                image={null}
-                description={t('还没有上游账户，先新建一个 new-api 账户')}
-              />
-            )}
-          </div>
 
-          {/* 右侧编辑区 */}
-          <div className='space-y-3'>
-            {/* 编辑表单 */}
-            <div className='rounded-lg border border-semi-color-border bg-semi-color-fill-0 p-4'>
-              <div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
-                <Text strong>
-                  {accountDraft.id ? t('编辑上游账户') : t('新建上游账户')}
-                </Text>
-                <Space>
-                  {accountDraft.id ? (
-                    <Button
-                      type='danger'
-                      theme='light'
-                      icon={<Trash2 size={14} />}
-                      size='small'
-                      loading={deletingAccountId === accountDraft.id}
-                      onClick={() => deleteAccount(accountDraft.id)}
-                    >
-                      {t('删除')}
-                    </Button>
-                  ) : null}
-                  {accountDraft.id ? (
-                    <Button
-                      theme='light'
-                      type='warning'
-                      icon={<RefreshCw size={14} />}
-                      size='small'
-                      loading={syncingAccountId === accountDraft.id}
-                      onClick={() => syncAccount(accountDraft.id)}
-                    >
-                      {t('同步钱包')}
-                    </Button>
-                  ) : null}
-                  <Button
-                    theme='solid'
-                    type='primary'
-                    icon={<Save size={14} />}
-                    size='small'
-                    loading={savingAccount}
-                    onClick={saveAccount}
-                  >
-                    {accountDraft.id ? t('保存账户') : t('创建账户')}
-                  </Button>
-                </Space>
-              </div>
+                    {selectedAccount.status === 'needs_baseline' ? (
+                      <div className='mt-3 rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-sm text-semi-color-text-1'>
+                        {t(
+                          '首次同步只会拿到当前余额和历史累计已用，下一次同步后才会开始统计近 7 天已用。',
+                        )}
+                      </div>
+                    ) : null}
 
-              <div className='space-y-3'>
+                    {selectedAccount.error_message ? (
+                      <div className='mt-3 flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-sm'>
+                        <AlertCircle
+                          size={14}
+                          className='mt-0.5 shrink-0 text-red-500'
+                        />
+                        <span>{selectedAccount.error_message}</span>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className='rounded-xl border border-semi-color-border bg-semi-color-bg-1 p-4'>
+                    <div className='mb-3 flex items-center justify-between gap-2'>
+                      <Text strong>{t('近 7 天已用趋势')}</Text>
+                      <Text type='tertiary' size='small'>
+                        {t('按同步快照增量统计')}
+                      </Text>
+                    </div>
+                    {trendSpec ? (
+                      <VChart
+                        forceInit
+                        spec={trendSpec}
+                        style={{ width: '100%', height: 260 }}
+                      />
+                    ) : accountTrendLoading ? (
+                      <div className='py-12 text-center text-sm text-semi-color-text-2'>
+                        {t('正在加载趋势')}
+                      </div>
+                    ) : (
+                      <Empty
+                        image={null}
+                        description={t('至少同步两次后，才会出现已用趋势')}
+                      />
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div className='rounded-xl border border-dashed border-semi-color-border bg-semi-color-bg-1 p-8'>
+                  <Empty image={null} description={t('选择一个账户查看详情')} />
+                </div>
+              )}
+
+              <div className='rounded-xl border border-semi-color-border bg-semi-color-fill-0 p-4'>
+                <div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
+                  <Text strong>
+                    {accountDraft.id ? t('编辑账户') : t('新建账户')}
+                  </Text>
+                  <Space wrap>
+                    {accountDraft.id ? (
+                      <Button
+                        type='danger'
+                        theme='light'
+                        icon={<Trash2 size={14} />}
+                        loading={deletingAccountId === accountDraft.id}
+                        onClick={() => deleteAccount(accountDraft.id)}
+                      >
+                        {t('删除')}
+                      </Button>
+                    ) : null}
+                    <Button
+                      theme='solid'
+                      type='primary'
+                      icon={<Save size={14} />}
+                      loading={savingAccount}
+                      onClick={saveAccount}
+                    >
+                      {accountDraft.id ? t('保存账户') : t('创建账户')}
+                    </Button>
+                  </Space>
+                </div>
+
                 <div className='grid gap-3 lg:grid-cols-2'>
                   <div>
                     <Text type='tertiary' size='small' className='mb-1 block'>
@@ -428,7 +458,7 @@ const UpstreamWalletCard = ({
                       onChange={(value) =>
                         setAccountDraft((prev) => ({ ...prev, name: value }))
                       }
-                      placeholder={t('例如：newapi 上海主账户')}
+                      placeholder={t('例如：上海主账户')}
                       prefix={<Pencil size={14} />}
                     />
                   </div>
@@ -446,8 +476,7 @@ const UpstreamWalletCard = ({
                       />
                     </div>
                   </div>
-                </div>
-                <div className='grid gap-3 lg:grid-cols-2'>
+
                   <div>
                     <Text type='tertiary' size='small' className='mb-1 block'>
                       URL
@@ -476,12 +505,10 @@ const UpstreamWalletCard = ({
                           user_id: Number(value || 0),
                         }))
                       }
-                      placeholder={t('远端用户 ID')}
                       style={{ width: '100%' }}
                     />
                   </div>
-                </div>
-                <div className='grid gap-3 lg:grid-cols-2'>
+
                   <div>
                     <Text type='tertiary' size='small' className='mb-1 block'>
                       {t('密钥')}
@@ -504,11 +531,29 @@ const UpstreamWalletCard = ({
                     />
                     {accountDraft.access_token_masked ? (
                       <Text type='tertiary' size='small' className='mt-1 block'>
-                        {t('当前密钥：')} {accountDraft.access_token_masked}
+                        {t('当前密钥')}: {accountDraft.access_token_masked}
                       </Text>
                     ) : null}
                   </div>
                   <div>
+                    <Text type='tertiary' size='small' className='mb-1 block'>
+                      {t('低余额提醒线')}
+                    </Text>
+                    <InputNumber
+                      min={0}
+                      value={accountDraft.low_balance_threshold_usd || 0}
+                      onChange={(value) =>
+                        setAccountDraft((prev) => ({
+                          ...prev,
+                          low_balance_threshold_usd: Number(value || 0),
+                        }))
+                      }
+                      placeholder={t('不填则不提醒')}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+
+                  <div className='lg:col-span-2'>
                     <Text type='tertiary' size='small' className='mb-1 block'>
                       {t('备注')}
                     </Text>
@@ -520,151 +565,18 @@ const UpstreamWalletCard = ({
                           remark: value,
                         }))
                       }
-                      placeholder={t('备注，例如：主站、备用、包月账户')}
+                      placeholder={t('例如：主站、备用、包月账户')}
                     />
                   </div>
                 </div>
               </div>
             </div>
-
-            {/* 选中账户的钱包详情 */}
-            {selectedAccount ? (
-              <div className='rounded-lg border border-semi-color-border bg-semi-color-bg-1 p-4'>
-                <div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
-                  <div>
-                    <Title heading={6} style={{ margin: 0 }}>
-                      {selectedAccount.name}
-                    </Title>
-                    <Text type='tertiary' size='small'>
-                      {selectedAccount.remark || selectedAccount.base_url}
-                    </Text>
-                  </div>
-                  <Space>
-                    <Tag
-                      color={statusColorMap[selectedAccount.status] || 'grey'}
-                      size='small'
-                    >
-                      {labels[selectedAccount.status] ||
-                        selectedAccount.status ||
-                        t('未同步')}
-                    </Tag>
-                    {selectedAccount.quota_per_unit_mismatch ? (
-                      <Tag color='orange' size='small'>
-                        {t('额度倍率不同')}
-                      </Tag>
-                    ) : null}
-                  </Space>
-                </div>
-
-                <div className='grid gap-2 sm:grid-cols-3'>
-                  <div className='rounded-md bg-semi-color-fill-0 px-3 py-2'>
-                    <Text type='tertiary' size='small'>
-                      {t('钱包总额')}
-                    </Text>
-                    <div className='mt-1 text-lg font-bold'>
-                      {formatMoney(selectedAccount.wallet_quota_usd, status)}
-                    </div>
-                  </div>
-                  <div className='rounded-md bg-semi-color-fill-0 px-3 py-2'>
-                    <Text type='tertiary' size='small'>
-                      {t('累计已用')}
-                    </Text>
-                    <div className='mt-1 text-lg font-bold text-amber-600 dark:text-amber-400'>
-                      {formatMoney(
-                        selectedAccount.wallet_used_quota_usd,
-                        status,
-                      )}
-                    </div>
-                  </div>
-                  <div className='rounded-md bg-semi-color-fill-0 px-3 py-2'>
-                    <Text type='tertiary' size='small'>
-                      {t('本期消耗')}
-                    </Text>
-                    <div className='mt-1 text-lg font-bold text-rose-600 dark:text-rose-400'>
-                      {formatMoney(selectedAccount.observed_cost_usd, status)}
-                    </div>
-                  </div>
-                </div>
-
-                {(selectedAccount.subscription_total_quota_usd > 0 ||
-                  selectedAccount.subscription_used_quota_usd > 0) && (
-                  <div className='mt-3 rounded-lg border border-semi-color-border bg-semi-color-fill-0 p-3'>
-                    <div className='mb-1.5 text-sm font-semibold'>
-                      {t('订阅额度')}
-                    </div>
-                    <div className='grid gap-2 sm:grid-cols-2'>
-                      <div>
-                        <Text type='tertiary' size='small'>
-                          {t('总额')}
-                        </Text>
-                        <div className='mt-0.5 font-semibold'>
-                          {selectedAccount.subscription_total_quota_usd > 0
-                            ? formatMoney(
-                                selectedAccount.subscription_total_quota_usd,
-                                status,
-                              )
-                            : t('不限额或未知')}
-                        </div>
-                      </div>
-                      <div>
-                        <Text type='tertiary' size='small'>
-                          {t('已用')}
-                        </Text>
-                        <div className='mt-0.5 font-semibold'>
-                          {formatMoney(
-                            selectedAccount.subscription_used_quota_usd,
-                            status,
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <div className='mt-3 grid gap-2 sm:grid-cols-2'>
-                  <div className='rounded-md bg-semi-color-fill-0 px-3 py-2'>
-                    <Text type='tertiary' size='small'>
-                      {t('最近同步')}
-                    </Text>
-                    <div className='mt-0.5 text-sm font-medium'>
-                      {selectedAccount.last_synced_at
-                        ? timestamp2string(selectedAccount.last_synced_at)
-                        : '-'}
-                    </div>
-                  </div>
-                  <div className='rounded-md bg-semi-color-fill-0 px-3 py-2'>
-                    <Text type='tertiary' size='small'>
-                      {t('最近成功')}
-                    </Text>
-                    <div className='mt-0.5 text-sm font-medium'>
-                      {selectedAccount.last_success_at
-                        ? timestamp2string(selectedAccount.last_success_at)
-                        : '-'}
-                    </div>
-                  </div>
-                </div>
-
-                {selectedAccount.status === 'needs_baseline' ? (
-                  <div className='mt-3 rounded-md border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-sm text-semi-color-text-1'>
-                    {t('当前已经拿到钱包余额和累计已用额度；本期消耗要等下一次同步后，才能根据两次结果的差值计算出来。')}
-                  </div>
-                ) : null}
-
-                {selectedAccount.error_message ? (
-                  <div className='mt-3 flex items-start gap-2 rounded-md border border-red-500/20 bg-red-500/5 px-3 py-2 text-sm'>
-                    <AlertCircle
-                      size={14}
-                      className='mt-0.5 shrink-0 text-red-500'
-                    />
-                    <span>{selectedAccount.error_message}</span>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
           </div>
         </div>
-      </Card>
-    </div>
+      ) : (
+        <Empty image={null} description={t('点击右上角新建账户')} />
+      )}
+    </Card>
   );
 };
 

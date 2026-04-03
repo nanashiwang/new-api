@@ -137,14 +137,35 @@ type ProfitBoardRemoteObserverState struct {
 	ErrorMessage              string  `json:"error_message,omitempty"`
 	LastSyncedAt              int64   `json:"last_synced_at"`
 	LastSuccessAt             int64   `json:"last_success_at"`
+	PeriodUsedUSD             float64 `json:"period_used_usd"`
 	ObservedCostUSD           float64 `json:"observed_cost_usd"`
+	WalletBalanceUSD          float64 `json:"wallet_balance_usd"`
 	WalletQuotaUSD            float64 `json:"wallet_quota_usd"`
+	WalletUsedTotalUSD        float64 `json:"wallet_used_total_usd"`
 	WalletUsedQuotaUSD        float64 `json:"wallet_used_quota_usd"`
 	SubscriptionTotalQuotaUSD float64 `json:"subscription_total_quota_usd"`
 	SubscriptionUsedQuotaUSD  float64 `json:"subscription_used_quota_usd"`
 	RemoteQuotaPerUnit        float64 `json:"remote_quota_per_unit"`
 	QuotaPerUnitMismatch      bool    `json:"quota_per_unit_mismatch"`
+	LowBalanceThresholdUSD    float64 `json:"low_balance_threshold_usd,omitempty"`
+	LowBalanceAlert           bool    `json:"low_balance_alert,omitempty"`
 	BaselineReady             bool    `json:"baseline_ready"`
+}
+
+type ProfitBoardUpstreamAccountTrendPoint struct {
+	Bucket          string  `json:"bucket"`
+	BucketTimestamp int64   `json:"bucket_timestamp"`
+	PeriodUsedUSD   float64 `json:"period_used_usd"`
+}
+
+type ProfitBoardUpstreamAccountTrend struct {
+	Account               ProfitBoardUpstreamAccountOption       `json:"account"`
+	Points                []ProfitBoardUpstreamAccountTrendPoint `json:"points"`
+	StartTimestamp        int64                                  `json:"start_timestamp"`
+	EndTimestamp          int64                                  `json:"end_timestamp"`
+	Granularity           string                                 `json:"granularity"`
+	CustomIntervalMinutes int                                    `json:"custom_interval_minutes"`
+	Warnings              []string                               `json:"warnings,omitempty"`
 }
 
 type ProfitBoardConfigPayload struct {

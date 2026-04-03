@@ -14,18 +14,19 @@ import (
 const profitBoardUpstreamAccountSnapshotComboID = "wallet"
 
 type ProfitBoardUpstreamAccount struct {
-	Id                   int    `json:"id"`
-	Name                 string `json:"name" gorm:"type:varchar(128);not null"`
-	Remark               string `json:"remark,omitempty" gorm:"type:text"`
-	AccountType          string `json:"account_type" gorm:"type:varchar(24);index;not null"`
-	BaseURL              string `json:"base_url" gorm:"type:varchar(255);not null"`
-	UserID               int    `json:"user_id" gorm:"index;not null"`
-	AccessToken          string `json:"access_token,omitempty" gorm:"-"`
-	AccessTokenMasked    string `json:"access_token_masked,omitempty" gorm:"-"`
-	AccessTokenEncrypted string `json:"-" gorm:"type:text;not null"`
-	Enabled              bool   `json:"enabled" gorm:"default:true"`
-	CreatedAt            int64  `json:"created_at" gorm:"bigint;index"`
-	UpdatedAt            int64  `json:"updated_at" gorm:"bigint;index"`
+	Id                     int     `json:"id"`
+	Name                   string  `json:"name" gorm:"type:varchar(128);not null"`
+	Remark                 string  `json:"remark,omitempty" gorm:"type:text"`
+	AccountType            string  `json:"account_type" gorm:"type:varchar(24);index;not null"`
+	BaseURL                string  `json:"base_url" gorm:"type:varchar(255);not null"`
+	UserID                 int     `json:"user_id" gorm:"index;not null"`
+	AccessToken            string  `json:"access_token,omitempty" gorm:"-"`
+	AccessTokenMasked      string  `json:"access_token_masked,omitempty" gorm:"-"`
+	AccessTokenEncrypted   string  `json:"-" gorm:"type:text;not null"`
+	Enabled                bool    `json:"enabled" gorm:"default:true"`
+	LowBalanceThresholdUSD float64 `json:"low_balance_threshold_usd" gorm:"type:decimal(18,6);default:0"`
+	CreatedAt              int64   `json:"created_at" gorm:"bigint;index"`
+	UpdatedAt              int64   `json:"updated_at" gorm:"bigint;index"`
 }
 
 type ProfitBoardUpstreamAccountOption struct {
@@ -41,19 +42,25 @@ type ProfitBoardUpstreamAccountOption struct {
 	ErrorMessage              string  `json:"error_message,omitempty"`
 	LastSyncedAt              int64   `json:"last_synced_at"`
 	LastSuccessAt             int64   `json:"last_success_at"`
+	WalletBalanceUSD          float64 `json:"wallet_balance_usd"`
 	WalletQuotaUSD            float64 `json:"wallet_quota_usd"`
+	WalletUsedTotalUSD        float64 `json:"wallet_used_total_usd"`
 	WalletUsedQuotaUSD        float64 `json:"wallet_used_quota_usd"`
+	PeriodUsedUSD             float64 `json:"period_used_usd"`
 	SubscriptionTotalQuotaUSD float64 `json:"subscription_total_quota_usd"`
 	SubscriptionUsedQuotaUSD  float64 `json:"subscription_used_quota_usd"`
 	ObservedCostUSD           float64 `json:"observed_cost_usd"`
 	RemoteQuotaPerUnit        float64 `json:"remote_quota_per_unit"`
 	QuotaPerUnitMismatch      bool    `json:"quota_per_unit_mismatch"`
+	LowBalanceThresholdUSD    float64 `json:"low_balance_threshold_usd"`
+	LowBalanceAlert           bool    `json:"low_balance_alert"`
 	BaselineReady             bool    `json:"baseline_ready"`
 }
 
 type profitBoardUpstreamAccountObservedAggregate struct {
 	TotalCostUSD  float64
 	BucketCostUSD map[int64]float64
+	BucketLabels  map[int64]string
 	State         ProfitBoardUpstreamAccountOption
 	Warnings      []string
 }
@@ -85,6 +92,9 @@ func normalizeProfitBoardUpstreamAccount(account ProfitBoardUpstreamAccount) Pro
 	account.AccessToken = strings.TrimSpace(account.AccessToken)
 	if account.UserID < 0 {
 		account.UserID = 0
+	}
+	if account.LowBalanceThresholdUSD < 0 {
+		account.LowBalanceThresholdUSD = 0
 	}
 	return account
 }
@@ -138,6 +148,8 @@ func buildProfitBoardUpstreamAccountOption(
 	account ProfitBoardUpstreamAccount,
 	state ProfitBoardRemoteObserverState,
 ) ProfitBoardUpstreamAccountOption {
+	threshold := roundProfitBoardAmount(account.LowBalanceThresholdUSD)
+	lowBalanceAlert := threshold > 0 && state.WalletBalanceUSD <= threshold
 	return ProfitBoardUpstreamAccountOption{
 		Id:                        account.Id,
 		Name:                      account.Name,
@@ -151,13 +163,18 @@ func buildProfitBoardUpstreamAccountOption(
 		ErrorMessage:              state.ErrorMessage,
 		LastSyncedAt:              state.LastSyncedAt,
 		LastSuccessAt:             state.LastSuccessAt,
-		WalletQuotaUSD:            state.WalletQuotaUSD,
-		WalletUsedQuotaUSD:        state.WalletUsedQuotaUSD,
+		WalletBalanceUSD:          state.WalletBalanceUSD,
+		WalletQuotaUSD:            state.WalletBalanceUSD,
+		WalletUsedTotalUSD:        state.WalletUsedTotalUSD,
+		WalletUsedQuotaUSD:        state.WalletUsedTotalUSD,
+		PeriodUsedUSD:             state.PeriodUsedUSD,
 		SubscriptionTotalQuotaUSD: state.SubscriptionTotalQuotaUSD,
 		SubscriptionUsedQuotaUSD:  state.SubscriptionUsedQuotaUSD,
-		ObservedCostUSD:           state.ObservedCostUSD,
+		ObservedCostUSD:           state.PeriodUsedUSD,
 		RemoteQuotaPerUnit:        state.RemoteQuotaPerUnit,
 		QuotaPerUnitMismatch:      state.QuotaPerUnitMismatch,
+		LowBalanceThresholdUSD:    threshold,
+		LowBalanceAlert:           lowBalanceAlert,
 		BaselineReady:             state.BaselineReady,
 	}
 }
@@ -216,19 +233,30 @@ func GetProfitBoardUpstreamAccountOptions() ([]ProfitBoardUpstreamAccountOption,
 		return nil, err
 	}
 	options := make([]ProfitBoardUpstreamAccountOption, 0, len(accounts))
+	now := common.GetTimestamp()
 	for _, account := range accounts {
+		if account.Enabled {
+			aggregate, aggregateErr := collectProfitBoardUpstreamAccountObservedAggregate(
+				account.Id,
+				now-7*24*60*60,
+				now,
+				"day",
+				0,
+				false,
+			)
+			if aggregateErr != nil {
+				return nil, aggregateErr
+			}
+			options = append(options, aggregate.State)
+			continue
+		}
 		state, stateErr := buildProfitBoardUpstreamAccountState(account, 0)
 		if stateErr != nil {
 			return nil, stateErr
 		}
 		options = append(options, buildProfitBoardUpstreamAccountOption(account, state))
 	}
-	sort.Slice(options, func(i, j int) bool {
-		if options[i].Enabled != options[j].Enabled {
-			return options[i].Enabled
-		}
-		return options[i].Name < options[j].Name
-	})
+	sortProfitBoardUpstreamAccountOptions(options)
 	return options, nil
 }
 
@@ -272,6 +300,7 @@ func SaveProfitBoardUpstreamAccount(account ProfitBoardUpstreamAccount) (*Profit
 		existing.UserID = account.UserID
 		existing.AccessTokenEncrypted = account.AccessTokenEncrypted
 		existing.Enabled = account.Enabled
+		existing.LowBalanceThresholdUSD = account.LowBalanceThresholdUSD
 		if err := DB.Save(&existing).Error; err != nil {
 			return nil, err
 		}
@@ -309,9 +338,53 @@ func SyncProfitBoardUpstreamAccount(id int, force bool) (*ProfitBoardUpstreamAcc
 	if err != nil {
 		return nil, err
 	}
-	state := buildProfitBoardRemoteObserverState(signature, batch, config, latestAny, latestSuccess, 0)
+	now := common.GetTimestamp()
+	aggregate, aggregateErr := collectProfitBoardUpstreamAccountObservedAggregate(
+		id,
+		now-7*24*60*60,
+		now,
+		"day",
+		0,
+		false,
+	)
+	if aggregateErr != nil {
+		return nil, aggregateErr
+	}
+	state := buildProfitBoardRemoteObserverState(
+		signature,
+		batch,
+		config,
+		latestAny,
+		latestSuccess,
+		aggregate.TotalCostUSD,
+	)
 	option := buildProfitBoardUpstreamAccountOption(*account, state)
 	return &option, nil
+}
+
+func SyncAllProfitBoardUpstreamAccounts(force bool) ([]ProfitBoardUpstreamAccountOption, error) {
+	accounts, err := listProfitBoardUpstreamAccounts()
+	if err != nil {
+		return nil, err
+	}
+	options := make([]ProfitBoardUpstreamAccountOption, 0, len(accounts))
+	for _, account := range accounts {
+		if account.Enabled {
+			option, syncErr := SyncProfitBoardUpstreamAccount(account.Id, force)
+			if syncErr != nil {
+				return nil, syncErr
+			}
+			options = append(options, *option)
+			continue
+		}
+		state, stateErr := buildProfitBoardUpstreamAccountState(account, 0)
+		if stateErr != nil {
+			return nil, stateErr
+		}
+		options = append(options, buildProfitBoardUpstreamAccountOption(account, state))
+	}
+	sortProfitBoardUpstreamAccountOptions(options)
+	return options, nil
 }
 
 func collectProfitBoardUpstreamAccountObservedAggregate(accountID int, startTimestamp int64, endTimestamp int64, granularity string, customIntervalMinutes int, forceSync bool) (*profitBoardUpstreamAccountObservedAggregate, error) {
@@ -328,12 +401,16 @@ func collectProfitBoardUpstreamAccountObservedAggregate(accountID int, startTime
 		return nil, err
 	}
 	configHash := profitBoardRemoteObserverConfigHash(config)
+	if configHash == "" && latestSuccess != nil {
+		configHash = latestSuccess.ConfigHash
+	}
 	snapshots, err := listProfitBoardRemoteSuccessSnapshots(signature, profitBoardUpstreamAccountSnapshotComboID, configHash, startTimestamp, endTimestamp)
 	if err != nil {
 		return nil, err
 	}
 	aggregate := &profitBoardUpstreamAccountObservedAggregate{
 		BucketCostUSD: make(map[int64]float64),
+		BucketLabels:  make(map[int64]string),
 		Warnings:      make([]string, 0),
 	}
 	totalCostQuota := int64(0)
@@ -347,8 +424,9 @@ func collectProfitBoardUpstreamAccountObservedAggregate(accountID int, startTime
 				continue
 			}
 			totalCostQuota += deltaQuota
-			bucketTimestamp, _ := buildProfitBoardBucket(snapshots[index].SyncedAt, granularity, customIntervalMinutes)
+			bucketTimestamp, bucketLabel := buildProfitBoardBucket(snapshots[index].SyncedAt, granularity, customIntervalMinutes)
 			aggregate.BucketCostUSD[bucketTimestamp] += float64(deltaQuota) / common.QuotaPerUnit
+			aggregate.BucketLabels[bucketTimestamp] = bucketLabel
 		}
 	}
 	aggregate.TotalCostUSD = roundProfitBoardAmount(float64(totalCostQuota) / common.QuotaPerUnit)
@@ -362,6 +440,102 @@ func collectProfitBoardUpstreamAccountObservedAggregate(accountID int, startTime
 	}
 	aggregate.Warnings = uniqueProfitBoardWarnings(aggregate.Warnings)
 	return aggregate, nil
+}
+
+func GetProfitBoardUpstreamAccountTrend(id int, startTimestamp int64, endTimestamp int64, granularity string, customIntervalMinutes int) (*ProfitBoardUpstreamAccountTrend, error) {
+	now := common.GetTimestamp()
+	if endTimestamp <= 0 {
+		endTimestamp = now
+	}
+	if startTimestamp <= 0 || startTimestamp >= endTimestamp {
+		startTimestamp = endTimestamp - 7*24*60*60
+	}
+	if strings.TrimSpace(granularity) == "" {
+		granularity = "day"
+	}
+	if customIntervalMinutes <= 0 {
+		customIntervalMinutes = 15
+	}
+	account, err := getProfitBoardUpstreamAccountByID(id)
+	if err != nil {
+		return nil, err
+	}
+	config := account.remoteObserverConfig()
+	signature := profitBoardUpstreamAccountSnapshotSignature(account.Id)
+	configHash := profitBoardRemoteObserverConfigHash(config)
+	if configHash == "" {
+		latestSuccess, latestErr := getLatestProfitBoardRemoteSuccessSnapshot(signature, profitBoardUpstreamAccountSnapshotComboID, "")
+		if latestErr != nil {
+			return nil, latestErr
+		}
+		if latestSuccess != nil {
+			configHash = latestSuccess.ConfigHash
+		}
+	}
+	snapshots, err := listProfitBoardRemoteSuccessSnapshots(signature, profitBoardUpstreamAccountSnapshotComboID, configHash, startTimestamp, endTimestamp)
+	if err != nil {
+		return nil, err
+	}
+	if len(snapshots) < 2 {
+		snapshots, err = listProfitBoardRemoteSuccessSnapshots(signature, profitBoardUpstreamAccountSnapshotComboID, configHash, 0, endTimestamp)
+		if err != nil {
+			return nil, err
+		}
+	}
+	bucketCostUSD := make(map[int64]float64)
+	bucketLabels := make(map[int64]string)
+	warnings := make([]string, 0)
+	totalCostUSD := 0.0
+	if len(snapshots) >= 2 {
+		for index := 1; index < len(snapshots); index++ {
+			deltaQuota, deltaWarnings := profitBoardRemoteSnapshotDelta(snapshots[index-1], snapshots[index])
+			for _, warning := range deltaWarnings {
+				warnings = append(warnings, fmt.Sprintf("%s：%s", account.Name, warning))
+			}
+			if deltaQuota <= 0 {
+				continue
+			}
+			periodUsedUSD := float64(deltaQuota) / common.QuotaPerUnit
+			totalCostUSD += periodUsedUSD
+			bucketTimestamp, bucketLabel := buildProfitBoardBucket(snapshots[index].SyncedAt, granularity, customIntervalMinutes)
+			bucketCostUSD[bucketTimestamp] += periodUsedUSD
+			bucketLabels[bucketTimestamp] = bucketLabel
+		}
+	}
+	state, err := buildProfitBoardUpstreamAccountState(*account, roundProfitBoardAmount(totalCostUSD))
+	if err != nil {
+		return nil, err
+	}
+	option := buildProfitBoardUpstreamAccountOption(*account, state)
+	points := make([]ProfitBoardUpstreamAccountTrendPoint, 0, len(bucketCostUSD))
+	for bucketTimestamp, periodUsedUSD := range bucketCostUSD {
+		points = append(points, ProfitBoardUpstreamAccountTrendPoint{
+			Bucket:          bucketLabels[bucketTimestamp],
+			BucketTimestamp: bucketTimestamp,
+			PeriodUsedUSD:   roundProfitBoardAmount(periodUsedUSD),
+		})
+	}
+	sort.Slice(points, func(i, j int) bool {
+		return points[i].BucketTimestamp < points[j].BucketTimestamp
+	})
+	return &ProfitBoardUpstreamAccountTrend{
+		Account:               option,
+		Points:                points,
+		StartTimestamp:        startTimestamp,
+		EndTimestamp:          endTimestamp,
+		Granularity:           granularity,
+		CustomIntervalMinutes: customIntervalMinutes,
+		Warnings:              uniqueProfitBoardWarnings(warnings),
+	}, nil
+}
+
+func sortProfitBoardUpstreamAccountOptions(options []ProfitBoardUpstreamAccountOption) {
+	sort.Slice(options, func(i, j int) bool {
+		if options[i].Enabled != options[j].Enabled {
+			return options[i].Enabled
+		}
+		return options[i].Name < options[j].Name
+	})
 }
 
 func findOrCreateProfitBoardUpstreamAccountByRemoteConfig(config ProfitBoardRemoteObserverConfig) (*ProfitBoardUpstreamAccount, error) {

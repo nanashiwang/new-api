@@ -177,6 +177,38 @@ func SyncProfitBoardUpstreamAccount(c *gin.Context) {
 	common.ApiSuccess(c, account)
 }
 
+func SyncAllProfitBoardUpstreamAccounts(c *gin.Context) {
+	accounts, err := model.SyncAllProfitBoardUpstreamAccounts(true)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, accounts)
+}
+
+func GetProfitBoardUpstreamAccountTrend(c *gin.Context) {
+	id, err := strconv.Atoi(strings.TrimSpace(c.Param("id")))
+	if err != nil || id <= 0 {
+		common.ApiErrorMsg(c, "无效的上游账户")
+		return
+	}
+	startTimestamp, _ := strconv.ParseInt(strings.TrimSpace(c.Query("start_timestamp")), 10, 64)
+	endTimestamp, _ := strconv.ParseInt(strings.TrimSpace(c.Query("end_timestamp")), 10, 64)
+	customIntervalMinutes, _ := strconv.Atoi(strings.TrimSpace(c.Query("custom_interval_minutes")))
+	trend, trendErr := model.GetProfitBoardUpstreamAccountTrend(
+		id,
+		startTimestamp,
+		endTimestamp,
+		c.DefaultQuery("granularity", "day"),
+		customIntervalMinutes,
+	)
+	if trendErr != nil {
+		common.ApiError(c, trendErr)
+		return
+	}
+	common.ApiSuccess(c, trend)
+}
+
 func QueryProfitBoard(c *gin.Context) {
 	query := model.ProfitBoardQuery{}
 	if err := c.ShouldBindJSON(&query); err != nil {

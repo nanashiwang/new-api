@@ -77,7 +77,9 @@ const PricingRulesCard = ({
           <div className='space-y-1'>
             <Text strong>{t('全局上游成本来源')}</Text>
             <Text type='tertiary' size='small'>
-              {t('上游钱包属于全局成本来源；本站价格、固定总额和手动规则在下方按组合分别设置。')}
+              {t(
+                '上游钱包属于全局成本来源；本站价格、固定总额和手动规则在下方按组合分别设置。',
+              )}
             </Text>
           </div>
           <div className='grid w-full gap-3 xl:max-w-[680px] xl:grid-cols-[220px_minmax(0,1fr)]'>
@@ -128,7 +130,7 @@ const PricingRulesCard = ({
                     value: item.id,
                   }))}
                 placeholder={t('选择一个已维护的上游账户')}
-                emptyContent={t('还没有上游账户，请先去“上游账户”页签创建')}
+                emptyContent={t('先去“上游账户”页签创建账户')}
                 style={{ width: '100%' }}
               />
             </div>
@@ -155,7 +157,8 @@ const PricingRulesCard = ({
                 upstreamConfig,
               );
             const sharedSite = comboConfig.shared_site || {};
-            const usingSharedSite = comboConfig.site_mode === 'shared_site_model';
+            const usingSharedSite =
+              comboConfig.site_mode === 'shared_site_model';
 
             return (
               <Collapse.Panel
@@ -165,13 +168,12 @@ const PricingRulesCard = ({
                   <div className='flex w-full flex-wrap items-center gap-2 pr-3'>
                     <Text strong>{batch.name}</Text>
                     <Tag color={usingSharedSite ? 'blue' : 'grey'}>
-                      {usingSharedSite
-                        ? t('本站模型价格')
-                        : t('手动本站价格')}
+                      {usingSharedSite ? t('本站模型价格') : t('手动本站价格')}
                     </Tag>
                     <Tag color='cyan'>{sharedSummaryText(comboConfig, t)}</Tag>
                     <Tag color='orange'>
-                      {t('本站固定总额')} {comboConfig.site_fixed_total_amount || 0}
+                      {t('本站固定总额')}{' '}
+                      {comboConfig.site_fixed_total_amount || 0}
                       {' USD'}
                     </Tag>
                     <Tag color='amber'>
@@ -189,11 +191,17 @@ const PricingRulesCard = ({
                         <div className='space-y-1'>
                           <Text strong>{t('本站收入规则')}</Text>
                           <Text type='tertiary' size='small'>
-                            {t('每个组合独立决定是手动定价，还是读取本站模型价格。')}
+                            {t(
+                              '每个组合独立决定是手动定价，还是读取本站模型价格。',
+                            )}
                           </Text>
                         </div>
                         <div className='w-full md:w-[240px]'>
-                          <Text type='tertiary' size='small' className='mb-1.5 block'>
+                          <Text
+                            type='tertiary'
+                            size='small'
+                            className='mb-1.5 block'
+                          >
                             {t('本站价格来源')}
                           </Text>
                           <Select
@@ -236,7 +244,13 @@ const PricingRulesCard = ({
                                 : t('手动本站价格')}
                             </Tag>
                             {usingSharedSite ? (
-                              <Tag color={sharedSite.use_recharge_price ? 'green' : 'cyan'}>
+                              <Tag
+                                color={
+                                  sharedSite.use_recharge_price
+                                    ? 'green'
+                                    : 'cyan'
+                                }
+                              >
                                 {sharedSite.use_recharge_price
                                   ? t('按充值价')
                                   : t('按原价')}
@@ -255,7 +269,11 @@ const PricingRulesCard = ({
                         <div className='mt-4 space-y-4 rounded-2xl border border-blue-500/20 bg-blue-500/5 p-4'>
                           <div className='grid gap-3 xl:grid-cols-[minmax(0,1.4fr)_220px_180px]'>
                             <div>
-                              <Text type='tertiary' size='small' className='mb-1.5 block'>
+                              <Text
+                                type='tertiary'
+                                size='small'
+                                className='mb-1.5 block'
+                              >
                                 {t('本站模型')}
                               </Text>
                               <Select
@@ -278,7 +296,11 @@ const PricingRulesCard = ({
                               />
                             </div>
                             <div>
-                              <Text type='tertiary' size='small' className='mb-1.5 block'>
+                              <Text
+                                type='tertiary'
+                                size='small'
+                                className='mb-1.5 block'
+                              >
                                 {t('分组倍率')}
                               </Text>
                               <Select
@@ -302,7 +324,11 @@ const PricingRulesCard = ({
                               />
                             </div>
                             <div className='rounded-xl border border-semi-color-border bg-semi-color-bg-1 px-3 py-2'>
-                              <Text type='tertiary' size='small' className='block'>
+                              <Text
+                                type='tertiary'
+                                size='small'
+                                className='block'
+                              >
                                 {t('价格口径')}
                               </Text>
                               <div className='mt-2 flex items-center justify-between gap-3'>
@@ -324,53 +350,59 @@ const PricingRulesCard = ({
 
                           {(sharedSite.model_names || []).length > 0 ? (
                             <div className='grid gap-3 xl:grid-cols-2'>
-                              {(sharedSite.model_names || []).map((modelName) => {
-                                const preview = resolveSharedSitePreview(
-                                  sharedSite,
-                                  modelName,
-                                );
-                                return (
-                                  <div
-                                    key={`${batch.id}-${modelName}`}
-                                    className='rounded-xl border border-semi-color-border bg-semi-color-bg-1 p-3'
-                                  >
-                                    <div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
-                                      <Text strong>{modelName}</Text>
-                                      <Tag color={preview ? 'blue' : 'grey'}>
-                                        {preview ? t('已命中本站价格') : t('未命中')}
-                                      </Tag>
+                              {(sharedSite.model_names || []).map(
+                                (modelName) => {
+                                  const preview = resolveSharedSitePreview(
+                                    sharedSite,
+                                    modelName,
+                                  );
+                                  return (
+                                    <div
+                                      key={`${batch.id}-${modelName}`}
+                                      className='rounded-xl border border-semi-color-border bg-semi-color-bg-1 p-3'
+                                    >
+                                      <div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
+                                        <Text strong>{modelName}</Text>
+                                        <Tag color={preview ? 'blue' : 'grey'}>
+                                          {preview
+                                            ? t('已命中本站价格')
+                                            : t('未命中')}
+                                        </Tag>
+                                      </div>
+                                      <div className='grid gap-2 md:grid-cols-2'>
+                                        <PricePreviewBlock
+                                          title={t('输入')}
+                                          value={`${preview?.input_price?.toFixed(4) || '0'} USD/1M`}
+                                          tone='text-semi-color-text-0'
+                                        />
+                                        <PricePreviewBlock
+                                          title={t('输出')}
+                                          value={`${preview?.output_price?.toFixed(4) || '0'} USD/1M`}
+                                          tone='text-semi-color-text-0'
+                                        />
+                                        <PricePreviewBlock
+                                          title={t('缓存读')}
+                                          value={`${preview?.cache_read_price?.toFixed(4) || '0'} USD/1M`}
+                                          tone='text-semi-color-text-0'
+                                        />
+                                        <PricePreviewBlock
+                                          title={t('缓存写')}
+                                          value={`${preview?.cache_creation_price?.toFixed(4) || '0'} USD/1M`}
+                                          tone='text-semi-color-text-0'
+                                        />
+                                      </div>
                                     </div>
-                                    <div className='grid gap-2 md:grid-cols-2'>
-                                      <PricePreviewBlock
-                                        title={t('输入')}
-                                        value={`${preview?.input_price?.toFixed(4) || '0'} USD/1M`}
-                                        tone='text-semi-color-text-0'
-                                      />
-                                      <PricePreviewBlock
-                                        title={t('输出')}
-                                        value={`${preview?.output_price?.toFixed(4) || '0'} USD/1M`}
-                                        tone='text-semi-color-text-0'
-                                      />
-                                      <PricePreviewBlock
-                                        title={t('缓存读')}
-                                        value={`${preview?.cache_read_price?.toFixed(4) || '0'} USD/1M`}
-                                        tone='text-semi-color-text-0'
-                                      />
-                                      <PricePreviewBlock
-                                        title={t('缓存写')}
-                                        value={`${preview?.cache_creation_price?.toFixed(4) || '0'} USD/1M`}
-                                        tone='text-semi-color-text-0'
-                                      />
-                                    </div>
-                                  </div>
-                                );
-                              })}
+                                  );
+                                },
+                              )}
                             </div>
                           ) : (
                             <Banner
                               type='warning'
                               closeIcon={null}
-                              description={t('这个组合已启用本站模型价格，但还没有选择模型。')}
+                              description={t(
+                                '这个组合已启用本站模型价格，但还没有选择模型。',
+                              )}
                             />
                           )}
                         </div>
@@ -381,7 +413,9 @@ const PricingRulesCard = ({
                           comboId={batch.id}
                           field='site_rules'
                           title={t('本站手动规则')}
-                          description={t('当这个组合使用手动定价，或本站模型价格未命中时，使用这里的规则。')}
+                          description={t(
+                            '当这个组合使用手动定价，或本站模型价格未命中时，使用这里的规则。',
+                          )}
                           rules={comboConfig.site_rules}
                           modelNameOptions={modelNameOptions}
                           localModelMap={localModelMap}
@@ -398,7 +432,9 @@ const PricingRulesCard = ({
                       <div className='mb-4 space-y-1'>
                         <Text strong>{t('上游成本规则')}</Text>
                         <Text type='tertiary' size='small'>
-                          {t('这里控制这个组合的手动上游成本和固定总成本；全局钱包模式会覆盖为钱包观测成本。')}
+                          {t(
+                            '这里控制这个组合的手动上游成本和固定总成本；全局钱包模式会覆盖为钱包观测成本。',
+                          )}
                         </Text>
                       </div>
 
@@ -420,7 +456,8 @@ const PricingRulesCard = ({
                           </Text>
                           <div className='mt-2 flex flex-wrap gap-2'>
                             <Tag color='amber'>
-                              {upstreamConfig.upstream_mode === 'wallet_observer'
+                              {upstreamConfig.upstream_mode ===
+                              'wallet_observer'
                                 ? t('全局钱包扣减')
                                 : t('手动上游成本')}
                             </Tag>
@@ -440,7 +477,9 @@ const PricingRulesCard = ({
                           comboId={batch.id}
                           field='upstream_rules'
                           title={t('上游手动规则')}
-                          description={t('当没有使用全局钱包扣减时，这些规则决定这个组合的上游成本。')}
+                          description={t(
+                            '当没有使用全局钱包扣减时，这些规则决定这个组合的上游成本。',
+                          )}
                           rules={comboConfig.upstream_rules}
                           modelNameOptions={modelNameOptions}
                           localModelMap={localModelMap}

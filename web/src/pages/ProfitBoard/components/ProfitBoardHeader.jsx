@@ -17,6 +17,7 @@ import {
   Save,
   Wallet,
 } from 'lucide-react';
+import { getWalletStatusMeta } from '../utils';
 
 const { Text, Title } = Typography;
 
@@ -90,15 +91,11 @@ const ProfitBoardHeader = ({
 
       <Card bordered={false} bodyStyle={{ padding: '12px 16px' }}>
         <div
-          className={`grid gap-2 ${
-            walletModeEnabled
-              ? 'lg:grid-cols-[1.2fr_1fr_1fr_1fr_1fr]'
-              : 'lg:grid-cols-[1.4fr_1fr_1fr_1fr]'
-          }`}
+          className={`grid gap-3 ${walletModeEnabled ? 'xl:grid-cols-4' : 'xl:grid-cols-3'}`}
         >
           <div className='rounded-lg bg-semi-color-fill-0 px-3 py-2'>
             <Text type='tertiary' size='small'>
-              {t('状态')}
+              {t('当前状态')}
             </Text>
             <div className='mt-1.5 flex flex-wrap gap-1.5'>
               {statusSummary.length > 0 ? (
@@ -121,7 +118,7 @@ const ProfitBoardHeader = ({
           </div>
           <div className='rounded-lg bg-semi-color-fill-0 px-3 py-2'>
             <Text type='tertiary' size='small'>
-              {t('上次时间分析')}
+              {t('最近刷新')}
             </Text>
             <div className='mt-1.5 text-sm font-semibold'>
               {generatedAtText}
@@ -131,18 +128,18 @@ const ProfitBoardHeader = ({
             <Text type='tertiary' size='small'>
               {t('问题摘要')}
             </Text>
-            <div className='mt-1.5 text-sm font-semibold'>
-              {warningSummary}
-            </div>
+            <div className='mt-1.5 text-sm font-semibold'>{warningSummary}</div>
           </div>
           <div className='rounded-lg bg-semi-color-fill-0 px-3 py-2'>
             <Text type='tertiary' size='small'>
-              {t('共享定价组合')}
+              {t('配置概况')}
             </Text>
             <div className='mt-1.5 text-sm font-semibold'>
               {sharedSiteModelCount > 0
-                ? `${sharedSiteModelCount} ${t('个组合')}`
-                : t('未启用')}
+                ? t('共享定价已绑定 {{count}} 个组合', {
+                    count: sharedSiteModelCount,
+                  })
+                : t('当前未启用共享定价')}
             </div>
           </div>
           {walletModeEnabled ? (
@@ -159,20 +156,10 @@ const ProfitBoardHeader = ({
               <div className='mt-1 flex flex-wrap gap-1.5'>
                 {selectedAccount?.status ? (
                   <Tag
-                    color={
-                      {
-                        ready: 'green',
-                        needs_baseline: 'orange',
-                        failed: 'red',
-                        disabled: 'grey',
-                        not_configured: 'grey',
-                      }[selectedAccount.status] || 'grey'
-                    }
+                    color={getWalletStatusMeta(selectedAccount.status, t).color}
                     size='small'
                   >
-                    {selectedAccount.status === 'needs_baseline'
-                      ? t('余额已同步')
-                      : selectedAccount.status}
+                    {getWalletStatusMeta(selectedAccount.status, t).label}
                   </Tag>
                 ) : (
                   <Tag color='orange' size='small'>
@@ -196,19 +183,14 @@ const ProfitBoardHeader = ({
               ) : (
                 <ChevronRight size={14} className='text-semi-color-warning' />
               )}
-              <AlertTriangle
-                size={14}
-                className='text-semi-color-warning'
-              />
+              <AlertTriangle size={14} className='text-semi-color-warning' />
               <span className='text-semi-color-text-1'>
                 {combinedWarnings.length > 0
                   ? t('{{count}} 个问题需要关注', {
                       count: combinedWarnings.length,
                     })
                   : ''}
-                {combinedWarnings.length > 0 && sitePriceFactorNote
-                  ? '，'
-                  : ''}
+                {combinedWarnings.length > 0 && sitePriceFactorNote ? '，' : ''}
                 {sitePriceFactorNote ? t('有价格提示信息') : ''}
               </span>
               <span className='ml-auto text-xs text-semi-color-text-3'>

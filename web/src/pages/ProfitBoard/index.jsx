@@ -97,7 +97,10 @@ const ProfitBoardPage = () => {
   const [saving, setSaving] = useState(false);
   const [savingAccount, setSavingAccount] = useState(false);
   const [syncingAccountId, setSyncingAccountId] = useState(0);
+  const [syncingAllAccounts, setSyncingAllAccounts] = useState(false);
   const [deletingAccountId, setDeletingAccountId] = useState(0);
+  const [accountTrendLoading, setAccountTrendLoading] = useState(false);
+  const [accountTrend, setAccountTrend] = useState(null);
   const [activityChecking, setActivityChecking] = useState(false);
   const [options, setOptions] = useState({
     channels: [],
@@ -257,14 +260,20 @@ const ProfitBoardPage = () => {
       Math.abs(Date.now() - new Date(dateRange[1]).getTime()) <= 15 * 60 * 1000,
     [dateRange],
   );
-  const walletModeEnabled =
-    upstreamConfig.upstream_mode === 'wallet_observer';
+  const walletModeEnabled = upstreamConfig.upstream_mode === 'wallet_observer';
   const selectedAccount = useMemo(
     () =>
       (options.upstream_accounts || []).find(
         (item) => item.id === Number(upstreamConfig.upstream_account_id || 0),
       ) || null,
     [options.upstream_accounts, upstreamConfig.upstream_account_id],
+  );
+  const editingAccount = useMemo(
+    () =>
+      (options.upstream_accounts || []).find(
+        (item) => item.id === Number(editingAccountId || 0),
+      ) || null,
+    [editingAccountId, options.upstream_accounts],
   );
 
   const duplicateBatchError = useMemo(() => {
@@ -477,6 +486,35 @@ const ProfitBoardPage = () => {
     );
   }, [configLookupKey, t]);
 
+  const loadAccountTrend = useCallback(async (accountId) => {
+    if (!accountId) {
+      setAccountTrend(null);
+      return;
+    }
+    setAccountTrend(null);
+    setAccountTrendLoading(true);
+    try {
+      const end = Math.floor(Date.now() / 1000);
+      const start = end - 7 * 24 * 60 * 60;
+      const res = await API.get(
+        `/api/profit_board/upstream_accounts/${accountId}/trend`,
+        {
+          params: {
+            start_timestamp: start,
+            end_timestamp: end,
+            granularity: 'day',
+          },
+        },
+      );
+      if (!res.data.success) return showError(res.data.message);
+      setAccountTrend(res.data.data || null);
+    } catch (error) {
+      showError(error);
+    } finally {
+      setAccountTrendLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const bootstrap = async () => {
       setLoading(true);
@@ -494,6 +532,47 @@ const ProfitBoardPage = () => {
   useEffect(() => {
     if (batchPayload.length) loadConfig().catch(showError);
   }, [batchPayload.length, configLookupKey, loadConfig]);
+
+  useEffect(() => {
+    const accounts = options.upstream_accounts || [];
+    if (!accounts.length) {
+      if (editingAccountId) setEditingAccountId(0);
+      setAccountTrend(null);
+      return;
+    }
+    const current = accounts.find(
+      (item) => item.id === Number(editingAccountId || 0),
+    );
+    if (current) return;
+    const nextAccount =
+      accounts.find((item) => item.enabled !== false) || accounts[0];
+    setEditingAccountId(nextAccount?.id || 0);
+  }, [editingAccountId, options.upstream_accounts]);
+
+  useEffect(() => {
+    if (!editingAccountId) {
+      setAccountTrend(null);
+      return;
+    }
+    loadAccountTrend(editingAccountId);
+  }, [editingAccountId, loadAccountTrend]);
+
+  useEffect(() => {
+    if (!editingAccount) return;
+    if (Number(accountDraft.id || 0) === Number(editingAccount.id || 0)) return;
+    setAccountDraft({
+      id: editingAccount.id,
+      name: editingAccount.name || '',
+      remark: editingAccount.remark || '',
+      account_type: editingAccount.account_type || 'newapi',
+      base_url: editingAccount.base_url || '',
+      user_id: editingAccount.user_id || 0,
+      access_token: '',
+      access_token_masked: editingAccount.access_token_masked || '',
+      low_balance_threshold_usd: editingAccount.low_balance_threshold_usd || 0,
+      enabled: editingAccount.enabled !== false,
+    });
+  }, [accountDraft.id, editingAccount]);
 
   const runOverviewQuery = useCallback(async () => {
     if (validationErrors.length > 0) return;
@@ -632,15 +711,19 @@ const ProfitBoardPage = () => {
         : '/api/profit_board/upstream_accounts';
       const res = await API[method](url, accountDraft);
       if (!res.data.success) return showError(res.data.message);
-      showSuccess(
-        accountDraft.id ? t('上游账户已更新') : t('上游账户已创建'),
-      );
+      showSuccess(accountDraft.id ? t('上游账户已更新') : t('上游账户已创建'));
       await loadOptions();
+      if (accountDraft.id) {
+        setEditingAccountId(accountDraft.id);
+        await loadAccountTrend(accountDraft.id);
+      }
       if (!accountDraft.id && res.data.data?.id) {
         setUpstreamConfig((prev) => ({
           ...prev,
           upstream_account_id: res.data.data.id,
         }));
+        setEditingAccountId(res.data.data.id);
+        await loadAccountTrend(res.data.data.id);
       }
       resetAccountDraft();
     } catch (error) {
@@ -648,7 +731,7 @@ const ProfitBoardPage = () => {
     } finally {
       setSavingAccount(false);
     }
-  }, [accountDraft, loadOptions, resetAccountDraft, t]);
+  }, [accountDraft, loadAccountTrend, loadOptions, resetAccountDraft, t]);
 
   const syncAccount = useCallback(
     async (accountId) => {
@@ -668,11 +751,12 @@ const ProfitBoardPage = () => {
                 : ''),
           );
         } else if (syncedStatus === 'needs_baseline') {
-          showSuccess(t('余额已同步；本期消耗会在下次同步后开始统计'));
+          showSuccess(t('首次同步完成，下次开始统计近 7 天已用'));
         } else {
-          showSuccess(t('上游钱包已同步'));
+          showSuccess(t('账户数据已刷新'));
         }
         await loadOptions();
+        await loadAccountTrend(accountId);
         if (
           Number(upstreamConfig.upstream_account_id || 0) === Number(accountId)
         ) {
@@ -684,8 +768,43 @@ const ProfitBoardPage = () => {
         setSyncingAccountId(0);
       }
     },
-    [loadOptions, runFullRefresh, t, upstreamConfig.upstream_account_id],
+    [
+      loadAccountTrend,
+      loadOptions,
+      runFullRefresh,
+      t,
+      upstreamConfig.upstream_account_id,
+    ],
   );
+
+  const syncAllAccounts = useCallback(async () => {
+    setSyncingAllAccounts(true);
+    try {
+      const res = await API.post(
+        '/api/profit_board/upstream_accounts/sync_all',
+      );
+      if (!res.data.success) return showError(res.data.message);
+      showSuccess(t('全部账户已刷新'));
+      await loadOptions();
+      if (editingAccountId) {
+        await loadAccountTrend(editingAccountId);
+      }
+      if (Number(upstreamConfig.upstream_account_id || 0) > 0) {
+        await runFullRefresh();
+      }
+    } catch (error) {
+      showError(error);
+    } finally {
+      setSyncingAllAccounts(false);
+    }
+  }, [
+    editingAccountId,
+    loadAccountTrend,
+    loadOptions,
+    runFullRefresh,
+    t,
+    upstreamConfig.upstream_account_id,
+  ]);
 
   const deleteAccount = useCallback(
     async (accountId) => {
@@ -1180,7 +1299,7 @@ const ProfitBoardPage = () => {
     () => ({
       request_count: t('当前口径内命中的消费日志数量。'),
       remote_observed_cost_usd: t(
-        '来自远端 new-api 实例的钱包已用额度 + 订阅已用额度增量，金额按本站额度口径换算。',
+        '来自上游账户钱包和订阅已用额度的增量，按本站额度口径换算。',
       ),
     }),
     [t],
@@ -1197,7 +1316,12 @@ const ProfitBoardPage = () => {
                 overviewReport.summary.configured_site_revenue_usd,
                 statusState?.status,
               ),
-              icon: <CircleDollarSign size={18} className='text-emerald-600 dark:text-emerald-400' />,
+              icon: (
+                <CircleDollarSign
+                  size={18}
+                  className='text-emerald-600 dark:text-emerald-400'
+                />
+              ),
             },
             {
               key: 'upstream_cost_usd',
@@ -1206,16 +1330,26 @@ const ProfitBoardPage = () => {
                 overviewReport.summary.upstream_cost_usd,
                 statusState?.status,
               ),
-              icon: <BadgeDollarSign size={18} className='text-amber-600 dark:text-amber-400' />,
+              icon: (
+                <BadgeDollarSign
+                  size={18}
+                  className='text-amber-600 dark:text-amber-400'
+                />
+              ),
             },
             {
               key: 'remote_observed_cost_usd',
-              title: t('远端观测消耗'),
+              title: t('上游实际消耗'),
               value: formatMoney(
                 overviewReport.summary.remote_observed_cost_usd,
                 statusState?.status,
               ),
-              icon: <BadgeDollarSign size={18} className='text-rose-600 dark:text-rose-400' />,
+              icon: (
+                <BadgeDollarSign
+                  size={18}
+                  className='text-rose-600 dark:text-rose-400'
+                />
+              ),
             },
             {
               key: 'configured_profit_usd',
@@ -1224,7 +1358,12 @@ const ProfitBoardPage = () => {
                 overviewReport.summary.configured_profit_usd,
                 statusState?.status,
               ),
-              icon: <BarChart3 size={18} className='text-sky-600 dark:text-sky-400' />,
+              icon: (
+                <BarChart3
+                  size={18}
+                  className='text-sky-600 dark:text-sky-400'
+                />
+              ),
             },
             {
               key: 'actual_profit_usd',
@@ -1233,7 +1372,12 @@ const ProfitBoardPage = () => {
                 overviewReport.summary.actual_profit_usd,
                 statusState?.status,
               ),
-              icon: <BarChart3 size={18} className='text-violet-600 dark:text-violet-400' />,
+              icon: (
+                <BarChart3
+                  size={18}
+                  className='text-violet-600 dark:text-violet-400'
+                />
+              ),
             },
           ],
     [overviewReport?.summary, statusState?.status, t],
@@ -1311,8 +1455,8 @@ const ProfitBoardPage = () => {
     [overviewReport?.warnings, report?.warnings, validationErrors],
   );
   const warningSummary = combinedWarnings.length
-    ? t('{{count}} 个需要关注的问题', { count: combinedWarnings.length })
-    : t('当前没有需要处理的收益口径提示');
+    ? t('{{count}} 个问题待处理', { count: combinedWarnings.length })
+    : t('当前没有收益口径问题');
   const detailFilterText = useMemo(
     () =>
       !detailFilter?.value
@@ -1511,16 +1655,20 @@ const ProfitBoardPage = () => {
             <div className='mt-3 space-y-3'>
               <UpstreamWalletCard
                 accounts={options.upstream_accounts || []}
+                accountTrend={accountTrend}
+                accountTrendLoading={accountTrendLoading}
                 accountDraft={accountDraft}
                 setAccountDraft={setAccountDraft}
                 editingAccountId={editingAccountId}
                 setEditingAccountId={setEditingAccountId}
                 saveAccount={saveAccount}
                 syncAccount={syncAccount}
+                syncAllAccounts={syncAllAccounts}
                 deleteAccount={deleteAccount}
                 resetAccountDraft={resetAccountDraft}
                 savingAccount={savingAccount}
                 syncingAccountId={syncingAccountId}
+                syncingAllAccounts={syncingAllAccounts}
                 deletingAccountId={deletingAccountId}
                 formatMoney={formatMoney}
                 status={statusState?.status}

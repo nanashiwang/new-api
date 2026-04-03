@@ -10,7 +10,7 @@ export const metricOptions = [
   { value: 'actual_site_revenue_usd', label: '本站实际收入' },
   { value: 'configured_site_revenue_usd', label: '本站配置收入' },
   { value: 'upstream_cost_usd', label: '上游费用' },
-  { value: 'remote_observed_cost_usd', label: '远端观测消耗' },
+  { value: 'remote_observed_cost_usd', label: '上游实际消耗' },
 ];
 
 export const sitePricingSourceLabelMap = {
@@ -140,8 +140,18 @@ export const createDefaultUpstreamAccountDraft = () => ({
   user_id: 0,
   access_token: '',
   access_token_masked: '',
+  low_balance_threshold_usd: 0,
   enabled: true,
 });
+
+export const getWalletStatusMeta = (status, t) =>
+  ({
+    ready: { color: 'green', label: t('运行中') },
+    needs_baseline: { color: 'orange', label: t('待同步') },
+    failed: { color: 'red', label: t('异常') },
+    not_configured: { color: 'grey', label: t('已停用') },
+    disabled: { color: 'grey', label: t('已停用') },
+  })[status] || { color: 'grey', label: t('待同步') };
 
 export const createDefaultState = () => {
   const end = new Date();
@@ -559,6 +569,48 @@ export const createBarSpec = (title, rows, metricLabel, status, t) => ({
         {
           key: metricLabel,
           value: (datum) => formatMoney(datum.value, status),
+        },
+      ],
+    },
+  },
+});
+
+export const createAccountUsageTrendSpec = (rows, status, t) => ({
+  type: 'line',
+  background: 'transparent',
+  height: 240,
+  padding: { top: 24, right: 18, bottom: 36, left: 48 },
+  data: [{ id: 'wallet-trend', values: rows }],
+  xField: 'bucket',
+  yField: 'period_used_usd',
+  point: { visible: true, style: { size: rows.length <= 4 ? 7 : 5 } },
+  line: { style: { curveType: 'monotone', lineWidth: 2.5 } },
+  axes: [
+    {
+      orient: 'bottom',
+      type: 'band',
+      label: { visible: true, style: { angle: rows.length > 5 ? -18 : 0 } },
+    },
+    {
+      orient: 'left',
+      nice: true,
+      label: {
+        formatter: (value) => formatMoney(value, status, 2),
+      },
+    },
+  ],
+  title: {
+    visible: true,
+    text: t('近 7 天已用趋势'),
+    subtext: t('按同步快照增量统计'),
+  },
+  tooltip: {
+    mark: {
+      content: [
+        { key: t('时间'), value: (datum) => datum.bucket },
+        {
+          key: t('近 7 天已用'),
+          value: (datum) => formatMoney(datum.period_used_usd, status, 3),
         },
       ],
     },

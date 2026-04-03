@@ -20,7 +20,8 @@ const MetricCard = ({ item, summaryMetricHelp, status }) => {
     configured_profit_usd: 'bg-sky-500/10',
     actual_profit_usd: 'bg-violet-500/10',
   };
-  const iconColor = iconColorMap[item.key] || 'text-blue-600 dark:text-blue-400';
+  const iconColor =
+    iconColorMap[item.key] || 'text-blue-600 dark:text-blue-400';
   const bgColor = bgColorMap[item.key] || 'bg-blue-500/10';
 
   return (
@@ -105,7 +106,7 @@ const BatchSummaryCard = ({ item, formatMoney, status, t }) => (
       </div>
       <div className='flex items-center justify-between'>
         <Text type='tertiary' size='small'>
-          {t('远端观测消耗')}
+          {t('上游实际消耗')}
         </Text>
         <Text strong className='text-rose-600 dark:text-rose-400'>
           {formatMoney(item.remote_observed_cost_usd, status)}
@@ -170,9 +171,9 @@ const OverviewPanel = ({
               </div>
               <div className='border-t border-semi-color-border pt-4'>
                 <Text type='tertiary' size='small' className='mb-3 block'>
-                  {t('诊断指标')}
+                  {t('辅助指标')}
                 </Text>
-                <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5'>
+                <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'>
                   {diagnosticSummaryCards.map((item) => (
                     <DiagnosticMetric
                       key={item.key}
