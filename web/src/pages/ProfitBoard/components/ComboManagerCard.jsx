@@ -31,121 +31,145 @@ const ComboManagerCard = ({
   batchValidationError,
   t,
 }) => (
-  <Card bordered={false} title={t('关注组合')}>
+  <Card bordered={false} title={t('渠道组合')}>
     <div className='space-y-4'>
-      <div className='grid gap-3 md:grid-cols-[150px_1fr]'>
-        <Radio.Group
-          type='button'
-          value={draft.scope_type}
-          onChange={(event) =>
-            setDraft((prev) => ({
-              ...prev,
-              scope_type: event.target.value,
-              channel_ids: [],
-              tags: [],
-            }))
-          }
-        >
-          <Radio value='channel'>{t('渠道')}</Radio>
-          <Radio value='tag'>{t('标签聚合渠道')}</Radio>
-        </Radio.Group>
-        <Input
-          value={draft.name}
-          onChange={(value) => setDraft((prev) => ({ ...prev, name: value }))}
-          placeholder={t('组合名称，例如：OpenAI 主力组合')}
-        />
-      </div>
-      <Select
-        multiple
-        filter
-        maxTagCount={isMobile ? 2 : 4}
-        optionList={
-          draft.scope_type === 'channel'
-            ? channelOptions
-            : (options.tags || []).map((item) => ({ label: item, value: item }))
-        }
-        value={
-          draft.scope_type === 'channel'
-            ? draft.channel_ids || []
-            : draft.tags || []
-        }
-        onChange={(value) =>
-          draft.scope_type === 'channel'
-            ? setDraft((prev) => ({ ...prev, channel_ids: value || [] }))
-            : setDraft((prev) => ({ ...prev, tags: value || [] }))
-        }
-        placeholder={
-          draft.scope_type === 'channel'
-            ? t('选择一个或多个渠道')
-            : t('选择一个或多个标签')
-        }
-        style={{ width: '100%' }}
-      />
-      <div className='flex flex-wrap items-center gap-2'>
-        <Button icon={<Plus size={16} />} onClick={addOrUpdateBatch}>
-          {editingBatchId ? t('保存修改') : t('添加组合')}
-        </Button>
-        {editingBatchId ? (
-          <Button type='tertiary' onClick={resetDraft}>
-            {t('取消编辑')}
-          </Button>
-        ) : null}
-      </div>
-      <div className='rounded-xl border border-semi-color-border bg-semi-color-fill-0/60 p-3'>
-        <div className='mb-2 flex items-center gap-2'>
-          <Layers3 size={15} />
-          <Text strong>{t('当前长期关注的组合')}</Text>
-        </div>
-        {batches.length > 0 ? (
-          <div className='space-y-2'>
-            {batches.map((batch) => (
-              <div
-                key={batch.id}
-                className='flex flex-col gap-2 rounded-lg border border-semi-color-border bg-semi-color-bg-2 p-3 lg:flex-row lg:items-center lg:justify-between'
-              >
-                <div>
-                  <Space wrap>
-                    <Text strong>{batch.name}</Text>
-                    <Tag
-                      color={batch.scope_type === 'channel' ? 'blue' : 'cyan'}
-                    >
-                      {batch.scope_type === 'channel'
-                        ? t('渠道')
-                        : t('标签聚合渠道')}
-                    </Tag>
-                  </Space>
-                  <Text type='tertiary' className='mt-1 block'>
-                    {batchDigest(batch)}
-                  </Text>
-                </div>
-                <Space>
-                  <Button
-                    icon={<Pencil size={14} />}
-                    size='small'
-                    type='tertiary'
-                    onClick={() => editBatch(batch)}
-                  >
-                    {t('编辑')}
-                  </Button>
-                  <Button
-                    icon={<Trash2 size={14} />}
-                    size='small'
-                    type='danger'
-                    onClick={() => removeBatch(batch.id)}
-                  >
-                    {t('删除')}
-                  </Button>
-                </Space>
-              </div>
-            ))}
+      {/* 创建/编辑区域 */}
+      <div className='rounded-xl border border-dashed border-semi-color-border bg-semi-color-fill-0 p-4'>
+        <Text type='tertiary' size='small' className='mb-3 block'>
+          {editingBatchId ? t('编辑组合') : t('新建组合')}
+        </Text>
+        <div className='flex flex-col gap-3'>
+          <div className='flex flex-wrap items-center gap-3'>
+            <Radio.Group
+              type='button'
+              value={draft.scope_type}
+              onChange={(event) =>
+                setDraft((prev) => ({
+                  ...prev,
+                  scope_type: event.target.value,
+                  channel_ids: [],
+                  tags: [],
+                }))
+              }
+              size='small'
+            >
+              <Radio value='channel'>{t('按渠道')}</Radio>
+              <Radio value='tag'>{t('按标签')}</Radio>
+            </Radio.Group>
+            <Input
+              value={draft.name}
+              onChange={(value) =>
+                setDraft((prev) => ({ ...prev, name: value }))
+              }
+              placeholder={t('组合名称，例如：OpenAI 主力')}
+              size='small'
+              style={{ flex: 1, minWidth: 160 }}
+            />
           </div>
-        ) : (
-          <Empty
-            image={null}
-            description={t('还没有组合，先添加一组渠道或标签')}
+          <Select
+            multiple
+            filter
+            maxTagCount={isMobile ? 2 : 4}
+            optionList={
+              draft.scope_type === 'channel'
+                ? channelOptions
+                : (options.tags || []).map((item) => ({
+                    label: item,
+                    value: item,
+                  }))
+            }
+            value={
+              draft.scope_type === 'channel'
+                ? draft.channel_ids || []
+                : draft.tags || []
+            }
+            onChange={(value) =>
+              draft.scope_type === 'channel'
+                ? setDraft((prev) => ({ ...prev, channel_ids: value || [] }))
+                : setDraft((prev) => ({ ...prev, tags: value || [] }))
+            }
+            placeholder={
+              draft.scope_type === 'channel'
+                ? t('选择渠道')
+                : t('选择标签')
+            }
+            size='small'
+            style={{ width: '100%' }}
           />
-        )}
+          <div className='flex items-center gap-2'>
+            <Button
+              icon={<Plus size={14} />}
+              size='small'
+              onClick={addOrUpdateBatch}
+            >
+              {editingBatchId ? t('保存') : t('添加')}
+            </Button>
+            {editingBatchId ? (
+              <Button type='tertiary' size='small' onClick={resetDraft}>
+                {t('取消')}
+              </Button>
+            ) : null}
+          </div>
+        </div>
       </div>
+
+      {/* 已有组合列表 */}
+      {batches.length > 0 ? (
+        <div className='space-y-2'>
+          <div className='flex items-center gap-2 px-1'>
+            <Layers3 size={14} className='text-semi-color-text-2' />
+            <Text type='tertiary' size='small'>
+              {t('已添加 {{count}} 个组合', { count: batches.length })}
+            </Text>
+          </div>
+          {batches.map((batch) => (
+            <div
+              key={batch.id}
+              className='flex items-center justify-between rounded-lg border border-semi-color-border bg-semi-color-bg-2 px-3 py-2.5'
+            >
+              <div className='min-w-0 flex-1'>
+                <div className='flex items-center gap-2'>
+                  <Text strong className='truncate text-sm'>
+                    {batch.name}
+                  </Text>
+                  <Tag
+                    color={batch.scope_type === 'channel' ? 'blue' : 'cyan'}
+                    size='small'
+                  >
+                    {batch.scope_type === 'channel'
+                      ? t('渠道')
+                      : t('标签')}
+                  </Tag>
+                </div>
+                <Text type='tertiary' size='small' className='mt-0.5 block truncate'>
+                  {batchDigest(batch)}
+                </Text>
+              </div>
+              <Space className='shrink-0'>
+                <Button
+                  icon={<Pencil size={13} />}
+                  size='small'
+                  type='tertiary'
+                  onClick={() => editBatch(batch)}
+                />
+                <Button
+                  icon={<Trash2 size={13} />}
+                  size='small'
+                  type='danger'
+                  theme='borderless'
+                  onClick={() => removeBatch(batch.id)}
+                />
+              </Space>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <Empty
+          image={null}
+          description={t('还没有组合，在上方添加')}
+        />
+      )}
+
       {batchValidationError ? (
         <Banner
           type='danger'

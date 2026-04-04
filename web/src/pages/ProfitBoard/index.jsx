@@ -24,7 +24,7 @@ import React, {
   useMemo,
   useState,
 } from 'react';
-import { Empty, Spin, Tabs, Tag, Typography } from '@douyinfe/semi-ui';
+import { Empty, Spin, Tabs } from '@douyinfe/semi-ui';
 import { VChart } from '@visactor/react-vchart';
 import { initVChartSemiTheme } from '@visactor/vchart-semi-theme';
 import { BadgeDollarSign, BarChart3, CircleDollarSign } from 'lucide-react';
@@ -35,12 +35,10 @@ import { showError, timestamp2string } from '../../helpers';
 import { useIsMobile } from '@/hooks/common/useIsMobile';
 import ChartAnalysisCard from './components/ChartAnalysisCard';
 import ComboManagerCard from './components/ComboManagerCard';
-import DetailTableCard from './components/DetailTableCard';
 import OverviewPanel from './components/OverviewPanel';
 import PricingRulesCard from './components/PricingRulesCard';
 import ProfitBoardHeader from './components/ProfitBoardHeader';
 import UpstreamWalletCard from './components/UpstreamWalletCard';
-import TimeRangePanel from './components/TimeRangePanel';
 import { useProfitBoardBatches } from './hooks/useProfitBoardBatches';
 import { useProfitBoardConfig } from './hooks/useProfitBoardConfig';
 import { useProfitBoardPersist } from './hooks/useProfitBoardPersist';
@@ -56,13 +54,11 @@ import {
   createDefaultPricingRule,
   createMetricOptions,
   createPresetRanges,
-  createSitePricingSourceLabelMap,
   createTrendSpec,
   formatMoney,
   formatRatio,
 } from './utils';
 
-const { Text } = Typography;
 initVChartSemiTheme();
 
 const ProfitBoardPage = () => {
@@ -365,10 +361,6 @@ const ProfitBoardPage = () => {
   ]);
 
   const metricOpts = useMemo(() => createMetricOptions(t), [t]);
-  const sitePricingLabels = useMemo(
-    () => createSitePricingSourceLabelMap(t),
-    [t],
-  );
   const batchSummaryOptions = useMemo(
     () => [
       { label: t('全部组合'), value: 'all' },
@@ -594,11 +586,6 @@ const ProfitBoardPage = () => {
     [overviewReport?.warnings, report?.warnings, validationErrors],
   );
 
-  const detailFilterText = useMemo(() => {
-    if (!detailFilter?.value) return '';
-    const typeLabels = { trend: t('时间桶'), channel: t('渠道'), model: t('模型') };
-    return `${typeLabels[detailFilter.type] || t('筛选')}：${detailFilter.value}`;
-  }, [detailFilter, t]);
 
   const batchDigest = useCallback(
     (batch) =>
@@ -612,19 +599,6 @@ const ProfitBoardPage = () => {
   const trendBucketCount = useMemo(() => new Set((trendRows || []).map((r) => r.bucket)).size, [trendRows]);
   const sitePriceFactorNote = overviewReport?.meta?.site_price_factor_note || report?.meta?.site_price_factor_note || '';
 
-  const detailColumns = useMemo(() => [
-    { title: t('时间'), dataIndex: 'created_at', render: (v) => timestamp2string(v), width: 160 },
-    { title: t('组合'), dataIndex: 'batch_name', width: 120 },
-    { title: t('渠道'), dataIndex: 'channel_name', render: (v, r) => v || `#${r.channel_id}`, width: 140 },
-    { title: t('模型'), dataIndex: 'model_name', width: 160 },
-    { title: t('本站配置收入'), dataIndex: 'configured_site_revenue_usd', render: (v) => <span className='font-medium text-emerald-600 dark:text-emerald-400'>{formatMoney(v, statusState?.status)}</span>, width: 130 },
-    { title: t('配置利润'), dataIndex: 'configured_profit_usd', render: (v, r) => r.upstream_cost_known && r.site_pricing_known ? <span className='font-medium text-sky-600 dark:text-sky-400'>{formatMoney(v, statusState?.status)}</span> : <Text type='tertiary'>-</Text>, width: 110 },
-    { title: t('上游费用'), dataIndex: 'upstream_cost_usd', render: (v, r) => r.upstream_cost_known ? <span className='font-medium text-amber-600 dark:text-amber-400'>{formatMoney(v, statusState?.status)}</span> : <Text type='tertiary'>-</Text>, width: 110 },
-    { title: t('本站实际收入'), dataIndex: 'actual_site_revenue_usd', render: (v) => <span className='font-medium'>{formatMoney(v, statusState?.status)}</span>, width: 130 },
-    { title: t('实际利润'), dataIndex: 'actual_profit_usd', render: (v, r) => r.upstream_cost_known ? <span className='font-medium text-violet-600 dark:text-violet-400'>{formatMoney(v, statusState?.status)}</span> : <Text type='tertiary'>-</Text>, width: 110 },
-    { title: t('配置与实际差值'), dataIndex: 'configured_actual_delta_usd', render: (v) => <span className='font-medium'>{formatMoney(v, statusState?.status)}</span>, width: 140 },
-    { title: t('本站配置来源'), dataIndex: 'site_pricing_source', render: (v, r) => <Tag color={r.site_pricing_known ? 'blue' : 'grey'} size='small'>{sitePricingLabels[v] || v || t('未知')}</Tag>, width: 130 },
-  ], [sitePricingLabels, statusState?.status, t]);
 
   return (
     <Spin spinning={loading}>
@@ -641,10 +615,8 @@ const ProfitBoardPage = () => {
         <Tabs type='line' size='large' className='profit-board-tabs'>
           <Tabs.TabPane tab={<span className='flex items-center gap-1.5'><BarChart3 size={16} />{t('收益分析')}</span>} itemKey='analysis'>
             <div className='mt-3 space-y-3'>
-              <OverviewPanel overviewQuerying={overviewQuerying} overviewReport={overviewReport} report={report} reportMatchesCurrentFilters={reportMatchesCurrentFilters} cumulativeSummaryCards={cumulativeSummaryCards} diagnosticSummaryCards={diagnosticSummaryCards} summaryMetricHelp={summaryMetricHelp} formatMoney={formatMoney} status={statusState?.status} t={t} />
-              <TimeRangePanel datePresets={createPresetRanges(t)} dateRange={dateRange} setDateRange={setDateRange} validationErrors={validationErrors} t={t} />
+              <OverviewPanel overviewQuerying={overviewQuerying} overviewReport={overviewReport} report={report} reportMatchesCurrentFilters={reportMatchesCurrentFilters} cumulativeSummaryCards={cumulativeSummaryCards} diagnosticSummaryCards={diagnosticSummaryCards} summaryMetricHelp={summaryMetricHelp} formatMoney={formatMoney} status={statusState?.status} datePresets={createPresetRanges(t)} dateRange={dateRange} setDateRange={setDateRange} validationErrors={validationErrors} t={t} />
               <ChartAnalysisCard analysisMode={analysisMode} setAnalysisMode={setAnalysisMode} metricKey={metricKey} setMetricKey={setMetricKey} metricOptions={metricOpts} viewBatchId={viewBatchId} setViewBatchId={setViewBatchId} batchSummaryOptions={batchSummaryOptions} granularity={granularity} setGranularity={setGranularity} customIntervalMinutes={customIntervalMinutes} setCustomIntervalMinutes={setCustomIntervalMinutes} detailFilter={detailFilter} clearDetailFilter={() => { setDetailFilter(null); setDetailPage(1); }} runQuery={runQuery} querying={querying} chartTab={chartTab} setChartTab={setChartTab} report={report} chartContent={chartContent} trendRowCount={trendRows.length} trendBucketCount={trendBucketCount} t={t} />
-              <DetailTableCard detailFilterText={detailFilterText} detailRows={detailRows} detailTotal={detailTotal} detailPage={detailPage} detailPageSize={detailPageSize} setDetailPage={setDetailPage} setDetailPageSize={setDetailPageSize} detailColumns={detailColumns} detailLoading={detailLoading} report={report} isMobile={isMobile} formatMoney={formatMoney} status={statusState?.status} sitePricingSourceLabelMap={sitePricingLabels} t={t} />
             </div>
           </Tabs.TabPane>
           <Tabs.TabPane tab={<span className='flex items-center gap-1.5'><CircleDollarSign size={16} />{t('配置管理')}</span>} itemKey='config'>
@@ -655,7 +627,7 @@ const ProfitBoardPage = () => {
           </Tabs.TabPane>
           <Tabs.TabPane tab={<span className='flex items-center gap-1.5'><BadgeDollarSign size={16} />{t('上游账户')}</span>} itemKey='wallet'>
             <div className='mt-3 space-y-3'>
-              <UpstreamWalletCard accounts={accountsHook.accounts} accountTrend={accountsHook.accountTrend} accountTrendLoading={accountsHook.accountTrendLoading} accountDraft={accountsHook.accountDraft} setAccountDraft={accountsHook.setAccountDraft} editingAccountId={accountsHook.editingAccountId} setEditingAccountId={accountsHook.setEditingAccountId} saveAccount={accountsHook.saveAccount} syncAccount={accountsHook.syncAccount} syncAllAccounts={accountsHook.syncAllAccounts} deleteAccount={accountsHook.deleteAccount} resetAccountDraft={accountsHook.resetAccountDraft} savingAccount={accountsHook.savingAccount} syncingAccountId={accountsHook.syncingAccountId} syncingAllAccounts={accountsHook.syncingAllAccounts} deletingAccountId={accountsHook.deletingAccountId} sideSheetVisible={accountsHook.sideSheetVisible} openCreateSideSheet={accountsHook.openCreateSideSheet} openEditSideSheet={accountsHook.openEditSideSheet} closeSideSheet={accountsHook.closeSideSheet} formatMoney={formatMoney} status={statusState?.status} t={t} />
+              <UpstreamWalletCard accounts={accountsHook.accounts} accountDraft={accountsHook.accountDraft} setAccountDraft={accountsHook.setAccountDraft} editingAccountId={accountsHook.editingAccountId} setEditingAccountId={accountsHook.setEditingAccountId} saveAccount={accountsHook.saveAccount} syncAccount={accountsHook.syncAccount} syncAllAccounts={accountsHook.syncAllAccounts} deleteAccount={accountsHook.deleteAccount} savingAccount={accountsHook.savingAccount} syncingAccountId={accountsHook.syncingAccountId} syncingAllAccounts={accountsHook.syncingAllAccounts} deletingAccountId={accountsHook.deletingAccountId} sideSheetVisible={accountsHook.sideSheetVisible} openCreateSideSheet={accountsHook.openCreateSideSheet} openEditSideSheet={accountsHook.openEditSideSheet} closeSideSheet={accountsHook.closeSideSheet} formatMoney={formatMoney} status={statusState?.status} t={t} />
             </div>
           </Tabs.TabPane>
         </Tabs>

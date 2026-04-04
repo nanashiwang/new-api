@@ -192,6 +192,34 @@ export const getWalletStatusMeta = (status, t) =>
     disabled: { color: 'grey', label: t('已停用') },
   })[status] || { color: 'grey', label: t('待同步') };
 
+/**
+ * 计算账户余额健康等级
+ * @returns {{ level: 'healthy'|'warning'|'critical', color: string, label: function }}
+ */
+export const getBalanceHealthLevel = (account, t) => {
+  const balance = Number(account?.wallet_balance_usd || 0);
+  const threshold = Number(account?.low_balance_threshold_usd || 0);
+
+  if (threshold > 0) {
+    if (balance <= threshold) {
+      return { level: 'critical', color: 'red', bgColor: 'bg-red-500/10', textColor: 'text-red-600 dark:text-red-400', label: t('余额偏低') };
+    }
+    if (balance <= threshold * 3) {
+      return { level: 'warning', color: 'orange', bgColor: 'bg-amber-500/10', textColor: 'text-amber-600 dark:text-amber-400', label: t('注意') };
+    }
+    return { level: 'healthy', color: 'green', bgColor: 'bg-emerald-500/10', textColor: 'text-emerald-600 dark:text-emerald-400', label: t('充足') };
+  }
+
+  // 未设提醒线时的默认判断
+  if (balance < 10) {
+    return { level: 'critical', color: 'red', bgColor: 'bg-red-500/10', textColor: 'text-red-600 dark:text-red-400', label: t('余额偏低') };
+  }
+  if (balance < 50) {
+    return { level: 'warning', color: 'orange', bgColor: 'bg-amber-500/10', textColor: 'text-amber-600 dark:text-amber-400', label: t('注意') };
+  }
+  return { level: 'healthy', color: 'green', bgColor: 'bg-emerald-500/10', textColor: 'text-emerald-600 dark:text-emerald-400', label: t('充足') };
+};
+
 export const createDefaultState = () => {
   const end = new Date();
   const start = dayjs(end).subtract(7, 'day').toDate();

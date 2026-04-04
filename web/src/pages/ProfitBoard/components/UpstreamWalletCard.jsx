@@ -26,7 +26,6 @@ import {
   Tooltip,
   Typography,
 } from '@douyinfe/semi-ui';
-import { VChart } from '@visactor/react-vchart';
 import {
   AlertCircle,
   Pencil,
@@ -35,7 +34,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import { timestamp2string } from '../../../helpers';
-import { createAccountUsageTrendSpec, getWalletStatusMeta } from '../utils';
+import { getBalanceHealthLevel, getWalletStatusMeta } from '../utils';
 import AccountEditSideSheet from './AccountEditSideSheet';
 
 const { Text, Title } = Typography;
@@ -53,8 +52,6 @@ const InfoMetric = ({ label, value, emphasis }) => (
 
 const UpstreamWalletCard = ({
   accounts,
-  accountTrend,
-  accountTrendLoading,
   accountDraft,
   setAccountDraft,
   editingAccountId,
@@ -85,31 +82,29 @@ const UpstreamWalletCard = ({
   const summary = useMemo(() => {
     let totalBalance = 0;
     let totalUsed = 0;
-    let totalPeriod = 0;
     let latestSyncedAt = 0;
+    let criticalCount = 0;
+    let warningCount = 0;
     enabledAccounts.forEach((item) => {
       totalBalance += Number(item.wallet_balance_usd || 0);
       totalUsed += Number(item.wallet_used_total_usd || 0);
-      totalPeriod += Number(item.period_used_usd || 0);
       latestSyncedAt = Math.max(
         latestSyncedAt,
         Number(item.last_synced_at || 0),
       );
+      const health = getBalanceHealthLevel(item, t);
+      if (health.level === 'critical') criticalCount++;
+      else if (health.level === 'warning') warningCount++;
     });
     return {
       totalBalance,
       totalUsed,
-      totalPeriod,
       latestSyncedAt,
       count: enabledAccounts.length,
+      criticalCount,
+      warningCount,
     };
-  }, [enabledAccounts]);
-
-  const trendSpec = useMemo(() => {
-    const rows = accountTrend?.points || [];
-    if (!rows.length) return null;
-    return createAccountUsageTrendSpec(rows, status, t);
-  }, [accountTrend?.points, status, t]);
+  }, [enabledAccounts, t]);
 
   return (
     <Card
@@ -131,6 +126,7 @@ const UpstreamWalletCard = ({
             icon={<RefreshCw size={14} />}
             loading={syncingAllAccounts}
             onClick={syncAllAccounts}
+            size='small'
           >
             {t('全部同步')}
           </Button>
@@ -139,14 +135,16 @@ const UpstreamWalletCard = ({
             type='primary'
             icon={<Plus size={14} />}
             onClick={openCreateSideSheet}
+            size='small'
           >
-            {t('新建账户')}
+            {t('新建')}
           </Button>
         </Space>
       }
     >
       {accounts.length > 0 ? (
         <div className='space-y-4'>
+          {/* 汇总指标 */}
           <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4'>
             <InfoMetric
               label={t('当前余额')}
@@ -159,11 +157,6 @@ const UpstreamWalletCard = ({
               emphasis='text-amber-600 dark:text-amber-400'
             />
             <InfoMetric
-              label={t('近 7 天已用')}
-              value={formatMoney(summary.totalPeriod, status)}
-              emphasis='text-rose-600 dark:text-rose-400'
-            />
-            <InfoMetric
               label={t('最近同步')}
               value={
                 summary.latestSyncedAt
@@ -171,12 +164,43 @@ const UpstreamWalletCard = ({
                   : '-'
               }
             />
+            {/* 余额健康汇总 */}
+            <div
+              className={`rounded-lg border px-3 py-2.5 ${
+                summary.criticalCount > 0
+                  ? 'border-red-500/30 bg-red-500/5'
+                  : summary.warningCount > 0
+                    ? 'border-amber-500/30 bg-amber-500/5'
+                    : 'border-emerald-500/30 bg-emerald-500/5'
+              }`}
+            >
+              <Text type='tertiary' size='small'>
+                {t('余额状态')}
+              </Text>
+              <div className='mt-1 text-sm font-semibold'>
+                {summary.criticalCount > 0 ? (
+                  <span className='text-red-600 dark:text-red-400'>
+                    {t('{{count}} 个偏低', { count: summary.criticalCount })}
+                  </span>
+                ) : summary.warningCount > 0 ? (
+                  <span className='text-amber-600 dark:text-amber-400'>
+                    {t('{{count}} 个需注意', { count: summary.warningCount })}
+                  </span>
+                ) : (
+                  <span className='text-emerald-600 dark:text-emerald-400'>
+                    {t('全部正常')}
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
 
+          {/* 账户列表 + 详情 */}
           <div className='grid gap-4 xl:grid-cols-[340px_minmax(0,1fr)]'>
-            <div className='space-y-3'>
+            <div className='space-y-2'>
               {accounts.map((item) => {
                 const statusMeta = getWalletStatusMeta(item.status, t);
+                const health = getBalanceHealthLevel(item, t);
                 const isSelected = editingAccountId === item.id;
                 return (
                   <button
@@ -195,11 +219,18 @@ const UpstreamWalletCard = ({
                           <Text strong className='truncate'>
                             {item.name}
                           </Text>
-                          {item.low_balance_alert ? (
-                            <Tooltip content={t('当前余额已经低于提醒线')}>
-                              <AlertCircle size={14} className='text-red-500' />
-                            </Tooltip>
-                          ) : null}
+                          {/* 余额健康色点 */}
+                          <Tooltip content={health.label}>
+                            <div
+                              className={`h-2.5 w-2.5 rounded-full ${
+                                health.level === 'critical'
+                                  ? 'bg-red-500'
+                                  : health.level === 'warning'
+                                    ? 'bg-amber-500'
+                                    : 'bg-emerald-500'
+                              }`}
+                            />
+                          </Tooltip>
                         </div>
                         <Tooltip content={item.base_url || '-'}>
                           <div className='mt-1 truncate text-xs text-semi-color-text-2'>
@@ -219,20 +250,19 @@ const UpstreamWalletCard = ({
                           icon={<RefreshCw size={14} />}
                           loading={syncingAccountId === item.id}
                           onClick={() => syncAccount(item.id)}
+                          size='small'
                         />
                       </div>
                     </div>
 
-                    <div className='mt-2 text-sm font-semibold text-emerald-600 dark:text-emerald-400'>
-                      {formatMoney(item.wallet_balance_usd, status)}
+                    <div className='mt-2 flex items-baseline gap-2'>
+                      <span className={`text-sm font-semibold ${health.textColor}`}>
+                        {formatMoney(item.wallet_balance_usd, status)}
+                      </span>
+                      <Text type='tertiary' size='small'>
+                        {health.label}
+                      </Text>
                     </div>
-
-                    {item.low_balance_threshold_usd > 0 ? (
-                      <div className='mt-1 text-xs text-semi-color-text-2'>
-                        {t('提醒线')}:{' '}
-                        {formatMoney(item.low_balance_threshold_usd, status)}
-                      </div>
-                    ) : null}
                   </button>
                 );
               })}
@@ -260,43 +290,60 @@ const UpstreamWalletCard = ({
                         >
                           {getWalletStatusMeta(selectedAccount.status, t).label}
                         </Tag>
-                        {selectedAccount.low_balance_alert ? (
-                          <Tag color='red' size='small'>
-                            {t('余额偏低')}
-                          </Tag>
-                        ) : null}
-                        {selectedAccount.quota_per_unit_mismatch ? (
-                          <Tag color='orange' size='small'>
-                            {t('额度倍率不同')}
-                          </Tag>
-                        ) : null}
                         <Button
                           type='tertiary'
                           icon={<RefreshCw size={14} />}
                           loading={syncingAccountId === selectedAccount.id}
                           onClick={() => syncAccount(selectedAccount.id)}
+                          size='small'
                         >
-                          {t('刷新')}
+                          {t('同步')}
                         </Button>
                         <Button
                           type='tertiary'
                           icon={<Pencil size={14} />}
                           onClick={() => openEditSideSheet(selectedAccount.id)}
+                          size='small'
                         >
                           {t('编辑')}
                         </Button>
                       </Space>
                     </div>
 
-                    <div className='mt-4 grid gap-3 sm:grid-cols-3'>
-                      <InfoMetric
-                        label={t('当前余额')}
-                        value={formatMoney(
-                          selectedAccount.wallet_balance_usd,
-                          status,
-                        )}
-                        emphasis='text-emerald-600 dark:text-emerald-400'
-                      />
+                    {/* 关键指标：余额 + 累计已用 */}
+                    <div className='mt-4 grid gap-3 sm:grid-cols-2'>
+                      {(() => {
+                        const health = getBalanceHealthLevel(selectedAccount, t);
+                        return (
+                          <div
+                            className={`rounded-lg border px-3 py-2.5 ${
+                              health.level === 'critical'
+                                ? 'border-red-500/30 bg-red-500/5'
+                                : health.level === 'warning'
+                                  ? 'border-amber-500/30 bg-amber-500/5'
+                                  : 'border-emerald-500/30 bg-emerald-500/5'
+                            }`}
+                          >
+                            <Text type='tertiary' size='small'>
+                              {t('当前余额')}
+                            </Text>
+                            <div
+                              className={`mt-1 text-lg font-bold ${health.textColor}`}
+                            >
+                              {formatMoney(
+                                selectedAccount.wallet_balance_usd,
+                                status,
+                              )}
+                            </div>
+                            <Text
+                              size='small'
+                              className={`mt-0.5 block ${health.textColor}`}
+                            >
+                              {health.label}
+                            </Text>
+                          </div>
+                        );
+                      })()}
                       <InfoMetric
                         label={t('历史累计已用')}
                         value={formatMoney(
@@ -304,14 +351,6 @@ const UpstreamWalletCard = ({
                           status,
                         )}
                         emphasis='text-amber-600 dark:text-amber-400'
-                      />
-                      <InfoMetric
-                        label={t('近 7 天已用')}
-                        value={formatMoney(
-                          selectedAccount.period_used_usd,
-                          status,
-                        )}
-                        emphasis='text-rose-600 dark:text-rose-400'
                       />
                     </div>
 
@@ -373,7 +412,7 @@ const UpstreamWalletCard = ({
                     {selectedAccount.status === 'needs_baseline' ? (
                       <div className='mt-3 rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-sm text-semi-color-text-1'>
                         {t(
-                          '首次同步只会拿到当前余额和历史累计已用，下一次同步后才会开始统计近 7 天已用。',
+                          '首次同步只会拿到当前余额和历史累计已用，下一次同步后数据更完整。',
                         )}
                       </div>
                     ) : null}
@@ -387,31 +426,6 @@ const UpstreamWalletCard = ({
                         <span>{selectedAccount.error_message}</span>
                       </div>
                     ) : null}
-                  </div>
-
-                  <div className='rounded-xl border border-semi-color-border bg-semi-color-bg-1 p-4'>
-                    <div className='mb-3 flex items-center justify-between gap-2'>
-                      <Text strong>{t('近 7 天已用趋势')}</Text>
-                      <Text type='tertiary' size='small'>
-                        {t('按同步快照增量统计')}
-                      </Text>
-                    </div>
-                    {trendSpec ? (
-                      <VChart
-                        forceInit
-                        spec={trendSpec}
-                        style={{ width: '100%', height: 260 }}
-                      />
-                    ) : accountTrendLoading ? (
-                      <div className='py-12 text-center text-sm text-semi-color-text-2'>
-                        {t('正在加载趋势')}
-                      </div>
-                    ) : (
-                      <Empty
-                        image={null}
-                        description={t('至少同步两次后，才会出现已用趋势')}
-                      />
-                    )}
                   </div>
                 </>
               ) : (

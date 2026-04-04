@@ -14,6 +14,7 @@ const PriceInput = ({ label, value, onChange, clampNumber }) => (
       value={value}
       onChange={(nextValue) => onChange(clampNumber(nextValue))}
       suffix='USD/1M'
+      size='small'
       style={{ width: '100%' }}
     />
   </div>
@@ -34,8 +35,8 @@ const PricingRuleList = ({
   t,
 }) => (
   <div className='space-y-3'>
-    <div className='space-y-1'>
-      <Text strong>{title}</Text>
+    <div className='space-y-0.5'>
+      <Text strong size='small'>{title}</Text>
       {description ? (
         <Text type='tertiary' size='small' className='block'>
           {description}
@@ -46,13 +47,10 @@ const PricingRuleList = ({
     {(rules || []).map((rule, index) => (
       <div
         key={`${comboId}-${field}-${index}`}
-        className='rounded-2xl border border-semi-color-border bg-semi-color-fill-0 p-3'
+        className='rounded-xl border border-semi-color-border bg-semi-color-fill-0 p-3'
       >
-        <div className='grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto_auto]'>
-          <div>
-            <Text type='tertiary' size='small' className='mb-1 block'>
-              {field === 'site_rules' ? t('模型') : t('上游模型')}
-            </Text>
+        <div className='flex flex-wrap items-center gap-2'>
+          <div className='min-w-[180px] flex-1'>
             <Select
               allowCreate
               filter
@@ -67,45 +65,30 @@ const PricingRuleList = ({
                 })
               }
               optionList={[
-                { label: t('默认规则'), value: '__default__' },
+                { label: t('默认（兜底）'), value: '__default__' },
                 ...modelNameOptions,
               ]}
-              placeholder={
-                field === 'site_rules'
-                  ? t('选择本站模型或输入自定义')
-                  : t('选择或输入上游模型名')
-              }
+              placeholder={t('选择或输入模型名')}
+              size='small'
               style={{ width: '100%' }}
             />
           </div>
-          <Button
-            type={rule.is_default ? 'primary' : 'tertiary'}
-            theme={rule.is_default ? 'solid' : 'borderless'}
-            onClick={() =>
-              onUpdate(comboId, field, index, {
-                is_default: !rule.is_default,
-                model_name: rule.is_default ? rule.model_name : '',
-              })
-            }
-          >
-            {rule.is_default ? t('默认规则') : t('设为默认')}
-          </Button>
+          {rule.is_default && (
+            <Tag color='blue' size='small'>{t('默认')}</Tag>
+          )}
+          {rule.is_custom && (
+            <Tag color='orange' size='small'>{t('自定义')}</Tag>
+          )}
           <Button
             type='danger'
-            theme='light'
-            icon={<Trash2 size={14} />}
+            theme='borderless'
+            icon={<Trash2 size={13} />}
+            size='small'
             onClick={() => onRemove(comboId, field, index)}
-          >
-            {t('删除')}
-          </Button>
+          />
         </div>
 
-        <div className='mt-3 flex flex-wrap gap-2'>
-          {rule.is_default ? <Tag color='blue'>{t('默认兜底')}</Tag> : null}
-          {rule.is_custom ? <Tag color='orange'>{t('自定义模型名')}</Tag> : null}
-        </div>
-
-        <div className='mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
+        <div className='mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4'>
           <PriceInput
             label={t('输入')}
             value={rule.input_price}
@@ -146,10 +129,11 @@ const PricingRuleList = ({
 
     <Button
       type='tertiary'
+      size='small'
       icon={<Plus size={14} />}
       onClick={() => onAdd(comboId, field)}
     >
-      {field === 'site_rules' ? t('新增本站模型规则') : t('新增上游模型规则')}
+      {t('添加规则')}
     </Button>
   </div>
 );

@@ -18,9 +18,11 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import React, { useState } from 'react';
 import {
+  Banner,
   Button,
   Card,
   Collapsible,
+  DatePicker,
   Empty,
   Spin,
   Table,
@@ -28,7 +30,7 @@ import {
   Tooltip,
   Typography,
 } from '@douyinfe/semi-ui';
-import { Info } from 'lucide-react';
+import { ChevronDown, ChevronRight, Info } from 'lucide-react';
 import { timestamp2string } from '../../../helpers';
 
 const { Text, Title } = Typography;
@@ -115,7 +117,10 @@ const OverviewPanel = ({
   summaryMetricHelp,
   formatMoney,
   status,
-  remoteObserverStates,
+  datePresets,
+  dateRange,
+  setDateRange,
+  validationErrors,
   t,
 }) => {
   const [moreOpen, setMoreOpen] = useState(false);
@@ -139,7 +144,7 @@ const OverviewPanel = ({
       ),
     },
     {
-      title: t('本站收入'),
+      title: t('收入'),
       dataIndex: 'configured_site_revenue_usd',
       key: 'configured_site_revenue_usd',
       render: (val) => (
@@ -159,7 +164,7 @@ const OverviewPanel = ({
       ),
     },
     {
-      title: t('配置利润'),
+      title: t('利润'),
       dataIndex: 'configured_profit_usd',
       key: 'configured_profit_usd',
       render: (val) => (
@@ -184,16 +189,54 @@ const OverviewPanel = ({
     <div className='space-y-4'>
       <Card
         bordered={false}
+        className='rounded-xl'
         title={
           <Text strong className='text-base'>
-            {t('累计总览')}
+            {t('数据总览')}
           </Text>
         }
-        className='rounded-xl'
       >
+        {/* 时间范围选择 - 内联在总览头部 */}
+        <div className='mb-5 rounded-lg border border-semi-color-border bg-semi-color-fill-0 p-3'>
+          <div className='mb-2'>
+            <Text type='tertiary' size='small'>
+              {t('时间范围')}
+            </Text>
+          </div>
+          <div className='flex flex-col gap-3 lg:flex-row lg:items-center'>
+            <div className='flex flex-wrap gap-1.5'>
+              {datePresets.map((item) => (
+                <Button
+                  key={item.label}
+                  type='tertiary'
+                  size='small'
+                  onClick={() => setDateRange(item.value)}
+                >
+                  {t(item.label)}
+                </Button>
+              ))}
+            </div>
+            <DatePicker
+              type='dateTimeRange'
+              value={dateRange}
+              onChange={(value) => setDateRange(value)}
+              style={{ minWidth: 340 }}
+              className='flex-1'
+            />
+          </div>
+          {validationErrors.length > 0 && (
+            <Banner
+              type='danger'
+              description={validationErrors[0]}
+              closeIcon={null}
+              className='mt-2'
+            />
+          )}
+        </div>
+
         <Spin spinning={overviewQuerying}>
           {overviewReport ? (
-            <div className='space-y-5'>
+            <div className='space-y-4'>
               <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-3'>
                 {coreCards.map((item) => (
                   <MetricCard
@@ -204,19 +247,21 @@ const OverviewPanel = ({
                   />
                 ))}
               </div>
-              <Button
-                type='tertiary'
-                size='small'
-                onClick={() => setMoreOpen(!moreOpen)}
-                className='mt-2'
-              >
-                {moreOpen ? t('收起') : t('更多指标')}
-              </Button>
-              <Collapsible
-                collapseHeight={0}
-                isOpen={moreOpen}
-                keepDOM
-              >
+              {(extraCards.length > 0 || diagnosticSummaryCards.length > 0) && (
+                <button
+                  type='button'
+                  onClick={() => setMoreOpen(!moreOpen)}
+                  className='flex items-center gap-1.5 text-sm text-semi-color-primary hover:opacity-80'
+                >
+                  {moreOpen ? (
+                    <ChevronDown size={14} />
+                  ) : (
+                    <ChevronRight size={14} />
+                  )}
+                  {moreOpen ? t('收起') : t('查看更多')}
+                </button>
+              )}
+              <Collapsible collapseHeight={0} isOpen={moreOpen} keepDOM>
                 <div className='space-y-4 pt-1'>
                   {extraCards.length > 0 && (
                     <div className='grid gap-4 sm:grid-cols-2'>
@@ -260,7 +305,7 @@ const OverviewPanel = ({
               </Collapsible>
             </div>
           ) : (
-            <Empty description={t('添加组合后可手动刷新累计总览')} />
+            <Empty description={t('添加组合后可手动刷新数据')} />
           )}
         </Spin>
       </Card>
@@ -270,7 +315,7 @@ const OverviewPanel = ({
           bordered={false}
           title={
             <Text strong className='text-base'>
-              {t('组合累计收益')}
+              {t('各组合收益')}
             </Text>
           }
           className='rounded-xl'
