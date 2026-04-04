@@ -17,7 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useCallback, useContext, useEffect, useMemo } from 'react';
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import { Empty, Spin, Tabs, Tag, Typography } from '@douyinfe/semi-ui';
 import { VChart } from '@visactor/react-vchart';
 import { initVChartSemiTheme } from '@visactor/vchart-semi-theme';
@@ -47,6 +53,7 @@ import {
   combineTimeseriesMetrics,
   createBarSpec,
   createDefaultComboPricingConfig,
+  createDefaultPricingRule,
   createMetricOptions,
   createPresetRanges,
   createSitePricingSourceLabelMap,
@@ -67,18 +74,15 @@ const ProfitBoardPage = () => {
   const { restoredState, cachedBundle, persistState, persistReportCache } =
     useProfitBoardPersist();
 
-  const batchesHook = useProfitBoardBatches({
-    restoredState,
-    channelMap: null,
-    tagChannelMap: null,
-    siteConfig: restoredState.siteConfig || {},
-    upstreamConfig: restoredState.upstreamConfig || {},
-  });
+  const batchesHook = useProfitBoardBatches({ restoredState });
+  const [comboConfigs, setComboConfigs] = useState(
+    restoredState.comboConfigs || [],
+  );
 
   const configHook = useProfitBoardConfig({
     batchPayload: batchesHook.batchPayload,
-    comboConfigs: batchesHook.comboConfigs,
-    setComboConfigs: batchesHook.setComboConfigs,
+    comboConfigs,
+    setComboConfigs,
     restoredState,
   });
 
@@ -87,17 +91,11 @@ const ProfitBoardPage = () => {
     draft,
     setDraft,
     editingBatchId,
-    comboConfigs,
     batchPayload,
     addOrUpdateBatch,
     editBatch,
     resetDraft,
     removeBatch,
-    updateComboConfig,
-    addComboRule,
-    updateComboRule,
-    removeComboRule,
-    duplicateBatchError,
   } = batchesHook;
 
   const {
@@ -111,6 +109,7 @@ const ProfitBoardPage = () => {
     setUpstreamConfig,
     channelOptions,
     channelMap,
+    tagChannelMap,
     localModelMap,
     modelNameOptions,
     configPayload,
@@ -122,6 +121,107 @@ const ProfitBoardPage = () => {
     saveConfig,
     resolveSharedSitePreview,
   } = configHook;
+
+  useEffect(() => {
+    setComboConfigs((prev) =>
+      batches.map((batch) => {
+        const existing = (prev || []).find((item) => item.combo_id === batch.id);
+        const fallback = createDefaultComboPricingConfig(
+          batch.id,
+          siteConfig,
+          siteConfig,
+          upstreamConfig,
+        );
+        return {
+          ...fallback,
+          ...(existing || {}),
+          combo_id: batch.id,
+          shared_site: {
+            ...fallback.shared_site,
+            ...(existing?.shared_site || {}),
+          },
+          remote_observer: {
+            ...fallback.remote_observer,
+            ...(existing?.remote_observer || {}),
+          },
+          site_rules: (existing?.site_rules || fallback.site_rules || []).map(
+            (rule) => createDefaultPricingRule(rule),
+          ),
+          upstream_rules: (
+            existing?.upstream_rules ||
+            fallback.upstream_rules ||
+            []
+          ).map((rule) => createDefaultPricingRule(rule)),
+        };
+      }),
+    );
+  }, [batches, siteConfig, upstreamConfig]);
+
+  const updateComboConfig = useCallback(
+    (comboId, updater) =>
+      setComboConfigs((prev) =>
+        prev.map((item) =>
+          item.combo_id === comboId
+            ? {
+                ...item,
+                ...(typeof updater === 'function' ? updater(item) : updater),
+              }
+            : item,
+        ),
+      ),
+    [],
+  );
+
+  const addComboRule = useCallback(
+    (comboId, field, initialRule = {}) =>
+      updateComboConfig(comboId, (current) => ({
+        [field]: [
+          ...(current[field] || []),
+          createDefaultPricingRule(initialRule),
+        ],
+      })),
+    [updateComboConfig],
+  );
+
+  const updateComboRule = useCallback(
+    (comboId, field, index, patch) =>
+      updateComboConfig(comboId, (current) => ({
+        [field]: (current[field] || []).map((item, itemIndex) =>
+          itemIndex === index ? { ...item, ...patch } : item,
+        ),
+      })),
+    [updateComboConfig],
+  );
+
+  const removeComboRule = useCallback(
+    (comboId, field, index) =>
+      updateComboConfig(comboId, (current) => ({
+        [field]: (current[field] || []).filter(
+          (_, itemIndex) => itemIndex !== index,
+        ),
+      })),
+    [updateComboConfig],
+  );
+
+  const duplicateBatchError = useMemo(() => {
+    const ownerMap = new Map();
+    for (const batch of batches) {
+      const channelIds =
+        batch.scope_type === 'tag'
+          ? (batch.tags || []).flatMap((tag) => tagChannelMap.get(tag) || [])
+          : batch.channel_ids || [];
+      for (const channelId of Array.from(new Set(channelIds))) {
+        const owner = ownerMap.get(channelId);
+        if (owner && owner !== batch.name) {
+          const channelName =
+            channelMap.get(String(channelId))?.name || `#${channelId}`;
+          return `${channelName} 同时出现在组合"${owner}"和"${batch.name}"中，请拆开后再统计`;
+        }
+        ownerMap.set(channelId, batch.name);
+      }
+    }
+    return '';
+  }, [batches, channelMap, tagChannelMap]);
 
   const validationErrors = useMemo(() => {
     const errors = [];
@@ -141,7 +241,14 @@ const ProfitBoardPage = () => {
     )
       errors.push(t('钱包扣减模式必须绑定一个上游账户'));
     return errors;
-  }, [batches.length, comboConfigs, duplicateBatchError, upstreamConfig, t]);
+  }, [
+    batches.length,
+    comboConfigs,
+    duplicateBatchError,
+    upstreamConfig.upstream_account_id,
+    upstreamConfig.upstream_mode,
+    t,
+  ]);
 
   const queryHook = useProfitBoardQuery({
     restoredState,

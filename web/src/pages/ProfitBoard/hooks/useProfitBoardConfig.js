@@ -1,5 +1,22 @@
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
 import { useCallback, useMemo, useState } from 'react';
-import { useTranslation } from 'react-i18next';
 import { API, showError, showSuccess } from '../../../helpers';
 import {
   clampNumber,
@@ -14,7 +31,6 @@ export const useProfitBoardConfig = ({
   setComboConfigs,
   restoredState,
 }) => {
-  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [options, setOptions] = useState({
@@ -106,8 +122,7 @@ export const useProfitBoardConfig = ({
 
   const loadOptions = useCallback(async () => {
     const res = await API.get('/api/profit_board/options');
-    if (!res.data.success)
-      throw new Error(res.data.message || t('加载选项失败'));
+    if (!res.data.success) throw new Error(res.data.message || '加载选项失败');
     setOptions(
       res.data.data || {
         channels: [],
@@ -118,15 +133,14 @@ export const useProfitBoardConfig = ({
         upstream_accounts: [],
       },
     );
-  }, [t]);
+  }, []);
 
   const loadConfig = useCallback(async () => {
     if (!configLookupKey || configLookupKey === '[]') return;
     const res = await API.post('/api/profit_board/config/lookup', {
       batches: batchPayload,
     });
-    if (!res.data.success)
-      throw new Error(res.data.message || t('加载配置失败'));
+    if (!res.data.success) throw new Error(res.data.message || '加载配置失败');
     const config = res.data.data?.config;
     if (!config) return;
     setSiteConfig((prev) => ({
@@ -152,7 +166,7 @@ export const useProfitBoardConfig = ({
         ),
       })),
     );
-  }, [batchPayload, configLookupKey, setComboConfigs, t]);
+  }, [batchPayload, configLookupKey, setComboConfigs]);
 
   const saveConfig = useCallback(
     async (validationErrors) => {
@@ -189,14 +203,14 @@ export const useProfitBoardConfig = ({
             })),
           );
         }
-        showSuccess(t('收益看板配置已保存'));
+        showSuccess('收益看板配置已保存');
       } catch (error) {
         showError(error);
       } finally {
         setSaving(false);
       }
     },
-    [configPayload, setComboConfigs, t],
+    [configPayload, setComboConfigs],
   );
 
   const resolveSharedSitePreview = useCallback(

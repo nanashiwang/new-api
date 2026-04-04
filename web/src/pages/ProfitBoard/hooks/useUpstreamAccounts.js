@@ -1,5 +1,22 @@
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useTranslation } from 'react-i18next';
 import { API, showError, showSuccess } from '../../../helpers';
 import { createDefaultUpstreamAccountDraft } from '../utils';
 
@@ -10,7 +27,6 @@ export const useUpstreamAccounts = ({
   setUpstreamConfig,
   runFullRefresh,
 }) => {
-  const { t } = useTranslation();
   const [accountDraft, setAccountDraft] = useState(
     createDefaultUpstreamAccountDraft(),
   );
@@ -151,7 +167,7 @@ export const useUpstreamAccounts = ({
         : '/api/profit_board/upstream_accounts';
       const res = await API[method](url, accountDraft);
       if (!res.data.success) return showError(res.data.message);
-      showSuccess(accountDraft.id ? t('上游账户已更新') : t('上游账户已创建'));
+      showSuccess(accountDraft.id ? '上游账户已更新' : '上游账户已创建');
       await loadOptions();
       if (accountDraft.id) {
         setEditingAccountId(accountDraft.id);
@@ -178,7 +194,6 @@ export const useUpstreamAccounts = ({
     loadOptions,
     resetAccountDraft,
     setUpstreamConfig,
-    t,
   ]);
 
   const syncAccount = useCallback(
@@ -193,15 +208,15 @@ export const useUpstreamAccounts = ({
         const syncedStatus = res.data.data?.status;
         if (syncedStatus === 'failed') {
           showError(
-            t('同步失败') +
+            '同步失败' +
               (res.data.data?.error_message
                 ? `：${res.data.data.error_message}`
                 : ''),
           );
         } else if (syncedStatus === 'needs_baseline') {
-          showSuccess(t('首次同步完成，下次开始统计近 7 天已用'));
+          showSuccess('首次同步完成，下次开始统计近 7 天已用');
         } else {
-          showSuccess(t('账户数据已刷新'));
+          showSuccess('账户数据已刷新');
         }
         await loadOptions();
         await loadAccountTrend(accountId);
@@ -220,7 +235,6 @@ export const useUpstreamAccounts = ({
       loadAccountTrend,
       loadOptions,
       runFullRefresh,
-      t,
       upstreamConfig.upstream_account_id,
     ],
   );
@@ -232,7 +246,7 @@ export const useUpstreamAccounts = ({
         '/api/profit_board/upstream_accounts/sync_all',
       );
       if (!res.data.success) return showError(res.data.message);
-      showSuccess(t('全部账户已刷新'));
+      showSuccess('全部账户已刷新');
       await loadOptions();
       if (editingAccountId) {
         await loadAccountTrend(editingAccountId);
@@ -250,7 +264,6 @@ export const useUpstreamAccounts = ({
     loadAccountTrend,
     loadOptions,
     runFullRefresh,
-    t,
     upstreamConfig.upstream_account_id,
   ]);
 
@@ -263,7 +276,7 @@ export const useUpstreamAccounts = ({
           `/api/profit_board/upstream_accounts/${accountId}`,
         );
         if (!res.data.success) return showError(res.data.message);
-        showSuccess(t('上游账户已删除'));
+        showSuccess('上游账户已删除');
         await loadOptions();
         if (
           Number(upstreamConfig.upstream_account_id || 0) === Number(accountId)
@@ -281,7 +294,12 @@ export const useUpstreamAccounts = ({
         setDeletingAccountId(0);
       }
     },
-    [loadOptions, resetAccountDraft, setUpstreamConfig, t, upstreamConfig.upstream_account_id],
+    [
+      loadOptions,
+      resetAccountDraft,
+      setUpstreamConfig,
+      upstreamConfig.upstream_account_id,
+    ],
   );
 
   return {
