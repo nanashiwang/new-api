@@ -111,6 +111,18 @@ type profitBoardRemoteAggregate struct {
 	Warnings     []string
 }
 
+func normalizeProfitBoardRemoteSubscriptionSnapshot(
+	subscription ProfitBoardRemoteSubscriptionSnapshot,
+) ProfitBoardRemoteSubscriptionSnapshot {
+	if subscription.SubscriptionID <= 0 && subscription.ID > 0 {
+		subscription.SubscriptionID = subscription.ID
+	}
+	if subscription.ID <= 0 && subscription.SubscriptionID > 0 {
+		subscription.ID = subscription.SubscriptionID
+	}
+	return subscription
+}
+
 func normalizeProfitBoardRemoteObserverConfig(config ProfitBoardRemoteObserverConfig) ProfitBoardRemoteObserverConfig {
 	config.BaseURL = strings.TrimRight(strings.TrimSpace(config.BaseURL), "/")
 	config.AccessToken = strings.TrimSpace(config.AccessToken)
@@ -525,10 +537,11 @@ func fetchProfitBoardRemoteObserver(remoteConfig ProfitBoardRemoteObserverConfig
 
 	subscriptions := make([]ProfitBoardRemoteSubscriptionSnapshot, 0, len(subData.Subscriptions))
 	for _, item := range subData.Subscriptions {
-		if item.Subscription.SubscriptionID <= 0 {
+		subscription := normalizeProfitBoardRemoteSubscriptionSnapshot(item.Subscription)
+		if subscription.SubscriptionID <= 0 {
 			continue
 		}
-		subscriptions = append(subscriptions, item.Subscription)
+		subscriptions = append(subscriptions, subscription)
 	}
 	sort.Slice(subscriptions, func(i, j int) bool {
 		if subscriptions[i].EndTime == subscriptions[j].EndTime {
@@ -578,6 +591,11 @@ func parseProfitBoardRemoteSubscriptions(raw string) []ProfitBoardRemoteSubscrip
 	subscriptions := make([]ProfitBoardRemoteSubscriptionSnapshot, 0)
 	if err := common.UnmarshalJsonStr(raw, &subscriptions); err != nil {
 		return []ProfitBoardRemoteSubscriptionSnapshot{}
+	}
+	for index := range subscriptions {
+		subscriptions[index] = normalizeProfitBoardRemoteSubscriptionSnapshot(
+			subscriptions[index],
+		)
 	}
 	return subscriptions
 }

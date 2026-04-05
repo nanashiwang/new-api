@@ -849,6 +849,17 @@ func TestGetProfitBoardUpstreamAccountTrendUsesPeriodUsedUSD(t *testing.T) {
 	}
 }
 
+func TestParseProfitBoardRemoteSubscriptionsSupportsIDField(t *testing.T) {
+	raw := `[{"id":302,"plan_id":13,"amount_total":60000000,"amount_used":0,"status":"active"}]`
+	subscriptions := parseProfitBoardRemoteSubscriptions(raw)
+	if len(subscriptions) != 1 {
+		t.Fatalf("unexpected subscriptions: %+v", subscriptions)
+	}
+	if subscriptions[0].SubscriptionID != 302 || subscriptions[0].ID != 302 {
+		t.Fatalf("unexpected normalized subscription id: %+v", subscriptions[0])
+	}
+}
+
 func TestCollectProfitBoardRemoteObserverAggregateUsesUsedQuotaDelta(t *testing.T) {
 	setupProfitBoardTestDB(t)
 

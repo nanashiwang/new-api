@@ -122,6 +122,7 @@ type ProfitBoardRemoteObserverConfig struct {
 }
 
 type ProfitBoardRemoteSubscriptionSnapshot struct {
+	ID             int    `json:"id,omitempty"`
 	SubscriptionID int    `json:"subscription_id"`
 	PlanID         int    `json:"plan_id"`
 	AmountTotal    int64  `json:"amount_total"`
