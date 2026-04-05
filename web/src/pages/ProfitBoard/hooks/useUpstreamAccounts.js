@@ -45,6 +45,7 @@ export const useUpstreamAccounts = ({
   const [accountTrendLoading, setAccountTrendLoading] = useState(false);
   const [accountTrend, setAccountTrend] = useState(null);
   const [sideSheetVisible, setSideSheetVisible] = useState(false);
+  const [detailSideSheetVisible, setDetailSideSheetVisible] = useState(false);
   const [accountDraftTouched, setAccountDraftTouched] = useState({});
   const [accountDraftSubmitted, setAccountDraftSubmitted] = useState(false);
   const [accountNameManuallyEdited, setAccountNameManuallyEdited] =
@@ -125,14 +126,14 @@ export const useUpstreamAccounts = ({
     }
   }, []);
 
-  // Load trend when editing account changes
+  // Load trend when detail side sheet opens or account changes
   useEffect(() => {
-    if (!editingAccountId) {
+    if (!detailSideSheetVisible || !editingAccountId) {
       setAccountTrend(null);
       return;
     }
     loadAccountTrend(editingAccountId);
-  }, [editingAccountId, loadAccountTrend]);
+  }, [detailSideSheetVisible, editingAccountId, loadAccountTrend]);
 
   const resetAccountDraftUiState = useCallback(() => {
     setAccountDraftTouched({});
@@ -214,7 +215,6 @@ export const useUpstreamAccounts = ({
   const accountDraftCanSave = accountDraftValidation.isValid;
 
   const resetAccountDraft = useCallback(() => {
-    setEditingAccountId(0);
     setAccountDraft(createDefaultUpstreamAccountDraft());
     resetAccountDraftUiState();
   }, [resetAccountDraftUiState]);
@@ -251,6 +251,19 @@ export const useUpstreamAccounts = ({
 
   const closeSideSheet = useCallback(() => {
     setSideSheetVisible(false);
+  }, []);
+
+  const openDetailSideSheet = useCallback(
+    (accountId) => {
+      if (!accountId) return;
+      setEditingAccountId(Number(accountId));
+      setDetailSideSheetVisible(true);
+    },
+    [],
+  );
+
+  const closeDetailSideSheet = useCallback(() => {
+    setDetailSideSheetVisible(false);
   }, []);
 
   const syncAccountInternal = useCallback(
@@ -410,6 +423,10 @@ export const useUpstreamAccounts = ({
             upstream_account_id: 0,
           }));
         }
+        if (Number(editingAccountId || 0) === Number(accountId)) {
+          setDetailSideSheetVisible(false);
+          setAccountTrend(null);
+        }
         setSideSheetVisible(false);
         resetAccountDraft();
       } catch (error) {
@@ -420,6 +437,7 @@ export const useUpstreamAccounts = ({
     },
     [
       loadOptions,
+      editingAccountId,
       resetAccountDraft,
       setUpstreamConfig,
       upstreamConfig.upstream_account_id,
@@ -446,6 +464,7 @@ export const useUpstreamAccounts = ({
     syncingAllAccounts,
     deletingAccountId,
     sideSheetVisible,
+    detailSideSheetVisible,
     saveAccount,
     syncAccount,
     syncAllAccounts,
@@ -455,5 +474,7 @@ export const useUpstreamAccounts = ({
     openCreateSideSheet,
     openEditSideSheet,
     closeSideSheet,
+    openDetailSideSheet,
+    closeDetailSideSheet,
   };
 };

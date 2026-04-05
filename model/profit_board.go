@@ -131,27 +131,46 @@ type ProfitBoardRemoteSubscriptionSnapshot struct {
 }
 
 type ProfitBoardRemoteObserverState struct {
-	BatchId                   string  `json:"batch_id"`
-	BatchName                 string  `json:"batch_name"`
-	Enabled                   bool    `json:"enabled"`
-	Configured                bool    `json:"configured"`
-	Status                    string  `json:"status"`
-	ErrorMessage              string  `json:"error_message,omitempty"`
-	LastSyncedAt              int64   `json:"last_synced_at"`
-	LastSuccessAt             int64   `json:"last_success_at"`
-	PeriodUsedUSD             float64 `json:"period_used_usd"`
-	ObservedCostUSD           float64 `json:"observed_cost_usd"`
-	WalletBalanceUSD          float64 `json:"wallet_balance_usd"`
-	WalletQuotaUSD            float64 `json:"wallet_quota_usd"`
-	WalletUsedTotalUSD        float64 `json:"wallet_used_total_usd"`
-	WalletUsedQuotaUSD        float64 `json:"wallet_used_quota_usd"`
-	SubscriptionTotalQuotaUSD float64 `json:"subscription_total_quota_usd"`
-	SubscriptionUsedQuotaUSD  float64 `json:"subscription_used_quota_usd"`
-	RemoteQuotaPerUnit        float64 `json:"remote_quota_per_unit"`
-	QuotaPerUnitMismatch      bool    `json:"quota_per_unit_mismatch"`
-	LowBalanceThresholdUSD    float64 `json:"low_balance_threshold_usd,omitempty"`
-	LowBalanceAlert           bool    `json:"low_balance_alert,omitempty"`
-	BaselineReady             bool    `json:"baseline_ready"`
+	BatchId                      string  `json:"batch_id"`
+	BatchName                    string  `json:"batch_name"`
+	Enabled                      bool    `json:"enabled"`
+	Configured                   bool    `json:"configured"`
+	Status                       string  `json:"status"`
+	ErrorMessage                 string  `json:"error_message,omitempty"`
+	LastSyncedAt                 int64   `json:"last_synced_at"`
+	LastSuccessAt                int64   `json:"last_success_at"`
+	PeriodUsedUSD                float64 `json:"period_used_usd"`
+	ObservedCostUSD              float64 `json:"observed_cost_usd"`
+	WalletBalanceUSD             float64 `json:"wallet_balance_usd"`
+	WalletQuotaUSD               float64 `json:"wallet_quota_usd"`
+	WalletUsedTotalUSD           float64 `json:"wallet_used_total_usd"`
+	WalletUsedQuotaUSD           float64 `json:"wallet_used_quota_usd"`
+	SubscriptionRemainingUSD     float64 `json:"subscription_remaining_quota_usd"`
+	SubscriptionTotalQuotaUSD    float64 `json:"subscription_total_quota_usd"`
+	SubscriptionUsedQuotaUSD     float64 `json:"subscription_used_quota_usd"`
+	SubscriptionCount            int     `json:"subscription_count"`
+	SubscriptionEarliestExpireAt int64   `json:"subscription_earliest_expire_at"`
+	HasSubscriptionData          bool    `json:"has_subscription_data"`
+	SubscriptionHasUnlimited     bool    `json:"subscription_has_unlimited"`
+	RemoteQuotaPerUnit           float64 `json:"remote_quota_per_unit"`
+	QuotaPerUnitMismatch         bool    `json:"quota_per_unit_mismatch"`
+	LowBalanceThresholdUSD       float64 `json:"low_balance_threshold_usd,omitempty"`
+	LowBalanceAlert              bool    `json:"low_balance_alert,omitempty"`
+	BaselineReady                bool    `json:"baseline_ready"`
+}
+
+type ProfitBoardUpstreamAccountSubscription struct {
+	SubscriptionID    int     `json:"subscription_id"`
+	PlanID            int     `json:"plan_id"`
+	TotalQuotaUSD     float64 `json:"total_quota_usd"`
+	UsedQuotaUSD      float64 `json:"used_quota_usd"`
+	RemainingQuotaUSD float64 `json:"remaining_quota_usd"`
+	HasUnlimited      bool    `json:"has_unlimited"`
+	LastResetTime     int64   `json:"last_reset_time"`
+	NextResetTime     int64   `json:"next_reset_time"`
+	StartTime         int64   `json:"start_time"`
+	EndTime           int64   `json:"end_time"`
+	Status            string  `json:"status,omitempty"`
 }
 
 type ProfitBoardUpstreamAccountTrendPoint struct {
@@ -161,13 +180,14 @@ type ProfitBoardUpstreamAccountTrendPoint struct {
 }
 
 type ProfitBoardUpstreamAccountTrend struct {
-	Account               ProfitBoardUpstreamAccountOption       `json:"account"`
-	Points                []ProfitBoardUpstreamAccountTrendPoint `json:"points"`
-	StartTimestamp        int64                                  `json:"start_timestamp"`
-	EndTimestamp          int64                                  `json:"end_timestamp"`
-	Granularity           string                                 `json:"granularity"`
-	CustomIntervalMinutes int                                    `json:"custom_interval_minutes"`
-	Warnings              []string                               `json:"warnings,omitempty"`
+	Account               ProfitBoardUpstreamAccountOption         `json:"account"`
+	Points                []ProfitBoardUpstreamAccountTrendPoint   `json:"points"`
+	Subscriptions         []ProfitBoardUpstreamAccountSubscription `json:"subscriptions,omitempty"`
+	StartTimestamp        int64                                    `json:"start_timestamp"`
+	EndTimestamp          int64                                    `json:"end_timestamp"`
+	Granularity           string                                   `json:"granularity"`
+	CustomIntervalMinutes int                                      `json:"custom_interval_minutes"`
+	Warnings              []string                                 `json:"warnings,omitempty"`
 }
 
 type ProfitBoardConfigPayload struct {

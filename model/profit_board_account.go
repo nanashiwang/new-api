@@ -38,31 +38,36 @@ type ProfitBoardUpstreamAccount struct {
 }
 
 type ProfitBoardUpstreamAccountOption struct {
-	Id                        int     `json:"id"`
-	Name                      string  `json:"name"`
-	Remark                    string  `json:"remark,omitempty"`
-	AccountType               string  `json:"account_type"`
-	BaseURL                   string  `json:"base_url"`
-	UserID                    int     `json:"user_id"`
-	Enabled                   bool    `json:"enabled"`
-	AccessTokenMasked         string  `json:"access_token_masked,omitempty"`
-	Status                    string  `json:"status,omitempty"`
-	ErrorMessage              string  `json:"error_message,omitempty"`
-	LastSyncedAt              int64   `json:"last_synced_at"`
-	LastSuccessAt             int64   `json:"last_success_at"`
-	WalletBalanceUSD          float64 `json:"wallet_balance_usd"`
-	WalletQuotaUSD            float64 `json:"wallet_quota_usd"`
-	WalletUsedTotalUSD        float64 `json:"wallet_used_total_usd"`
-	WalletUsedQuotaUSD        float64 `json:"wallet_used_quota_usd"`
-	PeriodUsedUSD             float64 `json:"period_used_usd"`
-	SubscriptionTotalQuotaUSD float64 `json:"subscription_total_quota_usd"`
-	SubscriptionUsedQuotaUSD  float64 `json:"subscription_used_quota_usd"`
-	ObservedCostUSD           float64 `json:"observed_cost_usd"`
-	RemoteQuotaPerUnit        float64 `json:"remote_quota_per_unit"`
-	QuotaPerUnitMismatch      bool    `json:"quota_per_unit_mismatch"`
-	LowBalanceThresholdUSD    float64 `json:"low_balance_threshold_usd"`
-	LowBalanceAlert           bool    `json:"low_balance_alert"`
-	BaselineReady             bool    `json:"baseline_ready"`
+	Id                           int     `json:"id"`
+	Name                         string  `json:"name"`
+	Remark                       string  `json:"remark,omitempty"`
+	AccountType                  string  `json:"account_type"`
+	BaseURL                      string  `json:"base_url"`
+	UserID                       int     `json:"user_id"`
+	Enabled                      bool    `json:"enabled"`
+	AccessTokenMasked            string  `json:"access_token_masked,omitempty"`
+	Status                       string  `json:"status,omitempty"`
+	ErrorMessage                 string  `json:"error_message,omitempty"`
+	LastSyncedAt                 int64   `json:"last_synced_at"`
+	LastSuccessAt                int64   `json:"last_success_at"`
+	WalletBalanceUSD             float64 `json:"wallet_balance_usd"`
+	WalletQuotaUSD               float64 `json:"wallet_quota_usd"`
+	WalletUsedTotalUSD           float64 `json:"wallet_used_total_usd"`
+	WalletUsedQuotaUSD           float64 `json:"wallet_used_quota_usd"`
+	PeriodUsedUSD                float64 `json:"period_used_usd"`
+	SubscriptionRemainingUSD     float64 `json:"subscription_remaining_quota_usd"`
+	SubscriptionTotalQuotaUSD    float64 `json:"subscription_total_quota_usd"`
+	SubscriptionUsedQuotaUSD     float64 `json:"subscription_used_quota_usd"`
+	SubscriptionCount            int     `json:"subscription_count"`
+	SubscriptionEarliestExpireAt int64   `json:"subscription_earliest_expire_at"`
+	HasSubscriptionData          bool    `json:"has_subscription_data"`
+	SubscriptionHasUnlimited     bool    `json:"subscription_has_unlimited"`
+	ObservedCostUSD              float64 `json:"observed_cost_usd"`
+	RemoteQuotaPerUnit           float64 `json:"remote_quota_per_unit"`
+	QuotaPerUnitMismatch         bool    `json:"quota_per_unit_mismatch"`
+	LowBalanceThresholdUSD       float64 `json:"low_balance_threshold_usd"`
+	LowBalanceAlert              bool    `json:"low_balance_alert"`
+	BaselineReady                bool    `json:"baseline_ready"`
 }
 
 type profitBoardUpstreamAccountObservedAggregate struct {
@@ -71,6 +76,81 @@ type profitBoardUpstreamAccountObservedAggregate struct {
 	BucketLabels  map[int64]string
 	State         ProfitBoardUpstreamAccountOption
 	Warnings      []string
+}
+
+type profitBoardUpstreamSubscriptionSummary struct {
+	RemainingUSD     float64
+	TotalUSD         float64
+	UsedUSD          float64
+	Count            int
+	EarliestExpireAt int64
+	HasData          bool
+	HasUnlimited     bool
+	Details          []ProfitBoardUpstreamAccountSubscription
+}
+
+func summarizeProfitBoardUpstreamSubscriptions(subscriptions []ProfitBoardRemoteSubscriptionSnapshot) profitBoardUpstreamSubscriptionSummary {
+	summary := profitBoardUpstreamSubscriptionSummary{
+		Details: make([]ProfitBoardUpstreamAccountSubscription, 0, len(subscriptions)),
+	}
+	if len(subscriptions) == 0 {
+		return summary
+	}
+	summary.HasData = true
+	summary.Count = len(subscriptions)
+	for _, item := range subscriptions {
+		usedUSD := profitBoardQuotaToUSD(item.AmountUsed)
+		totalUSD := 0.0
+		remainingUSD := 0.0
+		hasUnlimited := item.AmountTotal <= 0
+		if hasUnlimited {
+			summary.HasUnlimited = true
+		} else {
+			totalUSD = profitBoardQuotaToUSD(item.AmountTotal)
+			remainingQuota := item.AmountTotal - item.AmountUsed
+			if remainingQuota < 0 {
+				remainingQuota = 0
+			}
+			remainingUSD = profitBoardQuotaToUSD(remainingQuota)
+			summary.TotalUSD += totalUSD
+			summary.RemainingUSD += remainingUSD
+		}
+		summary.UsedUSD += usedUSD
+		if item.EndTime > 0 && (summary.EarliestExpireAt == 0 || item.EndTime < summary.EarliestExpireAt) {
+			summary.EarliestExpireAt = item.EndTime
+		}
+		summary.Details = append(summary.Details, ProfitBoardUpstreamAccountSubscription{
+			SubscriptionID:    item.SubscriptionID,
+			PlanID:            item.PlanID,
+			TotalQuotaUSD:     roundProfitBoardAmount(totalUSD),
+			UsedQuotaUSD:      roundProfitBoardAmount(usedUSD),
+			RemainingQuotaUSD: roundProfitBoardAmount(remainingUSD),
+			HasUnlimited:      hasUnlimited,
+			LastResetTime:     item.LastResetTime,
+			NextResetTime:     item.NextResetTime,
+			StartTime:         item.StartTime,
+			EndTime:           item.EndTime,
+			Status:            item.Status,
+		})
+	}
+	summary.TotalUSD = roundProfitBoardAmount(summary.TotalUSD)
+	summary.UsedUSD = roundProfitBoardAmount(summary.UsedUSD)
+	summary.RemainingUSD = roundProfitBoardAmount(summary.RemainingUSD)
+	sort.Slice(summary.Details, func(i, j int) bool {
+		left := summary.Details[i]
+		right := summary.Details[j]
+		if left.EndTime == 0 && right.EndTime != 0 {
+			return false
+		}
+		if left.EndTime != 0 && right.EndTime == 0 {
+			return true
+		}
+		if left.EndTime != right.EndTime {
+			return left.EndTime < right.EndTime
+		}
+		return left.SubscriptionID < right.SubscriptionID
+	})
+	return summary
 }
 
 func (a *ProfitBoardUpstreamAccount) BeforeCreate(tx *gorm.DB) error {
@@ -159,31 +239,36 @@ func buildProfitBoardUpstreamAccountOption(
 	threshold := roundProfitBoardAmount(account.LowBalanceThresholdUSD)
 	lowBalanceAlert := threshold > 0 && state.WalletBalanceUSD <= threshold
 	return ProfitBoardUpstreamAccountOption{
-		Id:                        account.Id,
-		Name:                      account.Name,
-		Remark:                    account.Remark,
-		AccountType:               account.AccountType,
-		BaseURL:                   account.BaseURL,
-		UserID:                    account.UserID,
-		Enabled:                   account.Enabled,
-		AccessTokenMasked:         maskProfitBoardRemoteSecret(statefulProfitBoardUpstreamToken(account)),
-		Status:                    state.Status,
-		ErrorMessage:              state.ErrorMessage,
-		LastSyncedAt:              state.LastSyncedAt,
-		LastSuccessAt:             state.LastSuccessAt,
-		WalletBalanceUSD:          state.WalletBalanceUSD,
-		WalletQuotaUSD:            state.WalletBalanceUSD,
-		WalletUsedTotalUSD:        state.WalletUsedTotalUSD,
-		WalletUsedQuotaUSD:        state.WalletUsedTotalUSD,
-		PeriodUsedUSD:             state.PeriodUsedUSD,
-		SubscriptionTotalQuotaUSD: state.SubscriptionTotalQuotaUSD,
-		SubscriptionUsedQuotaUSD:  state.SubscriptionUsedQuotaUSD,
-		ObservedCostUSD:           state.PeriodUsedUSD,
-		RemoteQuotaPerUnit:        state.RemoteQuotaPerUnit,
-		QuotaPerUnitMismatch:      state.QuotaPerUnitMismatch,
-		LowBalanceThresholdUSD:    threshold,
-		LowBalanceAlert:           lowBalanceAlert,
-		BaselineReady:             state.BaselineReady,
+		Id:                           account.Id,
+		Name:                         account.Name,
+		Remark:                       account.Remark,
+		AccountType:                  account.AccountType,
+		BaseURL:                      account.BaseURL,
+		UserID:                       account.UserID,
+		Enabled:                      account.Enabled,
+		AccessTokenMasked:            maskProfitBoardRemoteSecret(statefulProfitBoardUpstreamToken(account)),
+		Status:                       state.Status,
+		ErrorMessage:                 state.ErrorMessage,
+		LastSyncedAt:                 state.LastSyncedAt,
+		LastSuccessAt:                state.LastSuccessAt,
+		WalletBalanceUSD:             state.WalletBalanceUSD,
+		WalletQuotaUSD:               state.WalletBalanceUSD,
+		WalletUsedTotalUSD:           state.WalletUsedTotalUSD,
+		WalletUsedQuotaUSD:           state.WalletUsedTotalUSD,
+		PeriodUsedUSD:                state.PeriodUsedUSD,
+		SubscriptionRemainingUSD:     state.SubscriptionRemainingUSD,
+		SubscriptionTotalQuotaUSD:    state.SubscriptionTotalQuotaUSD,
+		SubscriptionUsedQuotaUSD:     state.SubscriptionUsedQuotaUSD,
+		SubscriptionCount:            state.SubscriptionCount,
+		SubscriptionEarliestExpireAt: state.SubscriptionEarliestExpireAt,
+		HasSubscriptionData:          state.HasSubscriptionData,
+		SubscriptionHasUnlimited:     state.SubscriptionHasUnlimited,
+		ObservedCostUSD:              state.PeriodUsedUSD,
+		RemoteQuotaPerUnit:           state.RemoteQuotaPerUnit,
+		QuotaPerUnitMismatch:         state.QuotaPerUnitMismatch,
+		LowBalanceThresholdUSD:       threshold,
+		LowBalanceAlert:              lowBalanceAlert,
+		BaselineReady:                state.BaselineReady,
 	}
 }
 
@@ -515,6 +600,12 @@ func GetProfitBoardUpstreamAccountTrend(id int, startTimestamp int64, endTimesta
 		return nil, err
 	}
 	option := buildProfitBoardUpstreamAccountOption(*account, state)
+	subscriptionSummary := summarizeProfitBoardUpstreamSubscriptions(nil)
+	if latestSuccess, latestErr := getLatestProfitBoardRemoteSuccessSnapshot(signature, profitBoardUpstreamAccountSnapshotComboID, configHash); latestErr != nil {
+		return nil, latestErr
+	} else if latestSuccess != nil {
+		subscriptionSummary = summarizeProfitBoardUpstreamSubscriptions(parseProfitBoardRemoteSubscriptions(latestSuccess.SubscriptionStates))
+	}
 	points := make([]ProfitBoardUpstreamAccountTrendPoint, 0, len(bucketCostUSD))
 	for bucketTimestamp, periodUsedUSD := range bucketCostUSD {
 		points = append(points, ProfitBoardUpstreamAccountTrendPoint{
@@ -529,6 +620,7 @@ func GetProfitBoardUpstreamAccountTrend(id int, startTimestamp int64, endTimesta
 	return &ProfitBoardUpstreamAccountTrend{
 		Account:               option,
 		Points:                points,
+		Subscriptions:         subscriptionSummary.Details,
 		StartTimestamp:        startTimestamp,
 		EndTimestamp:          endTimestamp,
 		Granularity:           granularity,

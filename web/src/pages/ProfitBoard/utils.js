@@ -393,81 +393,308 @@ export const getWalletStatusMeta = (status, t) =>
     disabled: { color: 'grey', label: t('已停用') },
   })[status] || { color: 'grey', label: t('待同步') };
 
-export const getBalanceHealthLevel = (account) => {
-  const balance = Number(account?.wallet_balance_usd || 0);
+const RESOURCE_RISK_TONES = {
+  critical: {
+    accentBorderColor: '#ef4444',
+    amountTone: 'text-red-600 dark:text-red-400',
+    badgeTone: 'bg-red-500/10 text-red-700 dark:bg-red-500/15 dark:text-red-300',
+    statusBarTone:
+      'border border-red-300 bg-red-500/12 text-red-700 dark:border-red-500/35 dark:bg-red-500/14 dark:text-red-200',
+    priority: 40,
+  },
+  warning: {
+    accentBorderColor: '#f59e0b',
+    amountTone: 'text-amber-600 dark:text-amber-400',
+    badgeTone:
+      'bg-amber-500/10 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200',
+    statusBarTone:
+      'border border-amber-300 bg-amber-500/12 text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/14 dark:text-amber-200',
+    priority: 20,
+  },
+  healthy: {
+    accentBorderColor: '#10b981',
+    amountTone: 'text-emerald-600 dark:text-emerald-400',
+    badgeTone:
+      'bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200',
+    statusBarTone: '',
+    priority: 0,
+  },
+  neutral: {
+    accentBorderColor: 'var(--semi-color-text-2)',
+    amountTone: 'text-semi-color-text-0',
+    badgeTone: 'bg-semi-color-fill-1 text-semi-color-text-1',
+    statusBarTone: '',
+    priority: -1,
+  },
+};
 
-  if (balance <= 10) {
+const getResourceRiskTone = (level = 'neutral') =>
+  RESOURCE_RISK_TONES[level] || RESOURCE_RISK_TONES.neutral;
+
+const getWalletRiskMeta = (account) => {
+  const balance = Number(account?.wallet_balance_usd || 0);
+  if (balance < 10) {
     return {
-      key: 'critical',
+      kind: 'wallet',
+      level: 'critical',
       label: '余额告急',
-      helper: '',
-      accentColor: 'border-l-red-500',
-      amountTone: 'text-red-600 dark:text-red-400',
-      badgeTone: 'bg-red-500/10 text-red-600 dark:text-red-400',
-      noticeTone:
-        'border border-red-200 bg-red-500/10 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200',
+      statusLabel: '告急',
+      statusText: '钱包余额告急',
     };
   }
   if (balance <= 50) {
     return {
-      key: 'warning',
+      kind: 'wallet',
+      level: 'warning',
       label: '余额偏低',
-      helper: '',
-      accentColor: 'border-l-amber-500',
-      amountTone: 'text-amber-600 dark:text-amber-400',
-      badgeTone: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
-      noticeTone:
-        'border border-amber-200 bg-amber-500/10 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200',
+      statusLabel: '偏低',
+      statusText: '钱包余额偏低',
     };
   }
   return {
-    key: 'healthy',
+    kind: 'wallet',
+    level: 'healthy',
     label: '余额正常',
-    helper: '',
-    accentColor: 'border-l-emerald-500',
-    amountTone: 'text-emerald-600 dark:text-emerald-400',
-    badgeTone: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+    statusLabel: '正常',
+    statusText: '',
   };
 };
 
-export const getAccountBalanceVisualMeta = (account, status, t) => {
+const getSubscriptionRiskMeta = (account) => {
+  if (!account?.has_subscription_data) {
+    return {
+      kind: 'subscription',
+      level: 'neutral',
+      label: '未获取到订阅数据',
+      statusLabel: '未知',
+      statusText: '',
+    };
+  }
+  const expireAt = Number(account?.subscription_earliest_expire_at || 0);
+  if (expireAt <= 0) {
+    return {
+      kind: 'subscription',
+      level: 'healthy',
+      label: '订阅正常',
+      statusLabel: '正常',
+      statusText: '',
+    };
+  }
+  const hoursLeft = dayjs.unix(expireAt).diff(dayjs(), 'hour', true);
+  if (hoursLeft <= 24) {
+    return {
+      kind: 'subscription',
+      level: 'critical',
+      label: '订阅即将到期',
+      statusLabel: '1天内到期',
+      statusText: '订阅即将到期',
+    };
+  }
+  if (hoursLeft <= 24 * 7) {
+    return {
+      kind: 'subscription',
+      level: 'warning',
+      label: '订阅临近到期',
+      statusLabel: '7天内到期',
+      statusText: '订阅临近到期',
+    };
+  }
+  return {
+    kind: 'subscription',
+    level: 'healthy',
+    label: '订阅正常',
+    statusLabel: '正常',
+    statusText: '',
+  };
+};
+
+const getRiskPriority = (risk) => {
+  const tone = getResourceRiskTone(risk?.level);
+  const kindBias = risk?.kind === 'subscription' ? 2 : 1;
+  return tone.priority + kindBias;
+};
+
+export const formatUpstreamExpiryDate = (timestamp, t) => {
+  const next = Number(timestamp || 0);
+  if (next <= 0) return t('无到期时间');
+  return dayjs.unix(next).format('YYYY-MM-DD');
+};
+
+export const formatUpstreamSubscriptionRemaining = (account, status, t) => {
+  if (!account?.has_subscription_data) return '--';
+  if (account?.subscription_has_unlimited) return t('不限额');
+  return formatMoney(account?.subscription_remaining_quota_usd, status);
+};
+
+export const buildAccountResourceMetrics = (account, status, t) => {
   const accountStatus = account?.status || '';
   const hasFailedSync = accountStatus === 'failed';
   const isDisabled =
     accountStatus === 'disabled' || accountStatus === 'not_configured';
 
   if (hasFailedSync) {
+    const neutralTone = getResourceRiskTone('neutral');
     return {
-      label: t('同步失败'),
-      helper: t('余额状态暂不可判断'),
-      accentColor: 'border-l-semi-color-text-2',
-      amountTone: 'text-semi-color-text-2',
-      badgeTone: 'bg-semi-color-fill-1 text-semi-color-text-2',
+      metrics: [
+        {
+          key: 'wallet',
+          title: t('钱包余额'),
+          value: '--',
+          valueTone: neutralTone.amountTone,
+          badgeTone: neutralTone.badgeTone,
+          statusLabel: t('同步失败'),
+          metaItems: [
+            {
+              label: t('钱包已用'),
+              value: formatMoney(account?.wallet_used_total_usd, status),
+            },
+          ],
+        },
+      ],
+      statusBar: null,
+      accentBorderColor: neutralTone.accentBorderColor,
     };
   }
 
   if (isDisabled) {
+    const neutralTone = getResourceRiskTone('neutral');
     return {
-      label: t('已停用'),
-      helper: '',
-      accentColor: 'border-l-semi-color-text-2',
-      amountTone: 'text-semi-color-text-2',
-      badgeTone: 'bg-semi-color-fill-1 text-semi-color-text-2',
+      metrics: [
+        {
+          key: 'wallet',
+          title: t('钱包余额'),
+          value: formatMoney(account?.wallet_balance_usd, status),
+          valueTone: neutralTone.amountTone,
+          badgeTone: neutralTone.badgeTone,
+          statusLabel: t('已停用'),
+          metaItems: [
+            {
+              label: t('钱包已用'),
+              value: formatMoney(account?.wallet_used_total_usd, status),
+            },
+          ],
+        },
+      ],
+      statusBar: null,
+      accentBorderColor: neutralTone.accentBorderColor,
     };
   }
 
-  const health = getBalanceHealthLevel(account, t);
+  const metrics = [];
+  const walletRisk = getWalletRiskMeta(account);
+  const walletTone = getResourceRiskTone(walletRisk.level);
+  metrics.push({
+    key: 'wallet',
+    kind: 'wallet',
+    risk: walletRisk,
+    title: t('钱包余额'),
+    value: formatMoney(account?.wallet_balance_usd, status),
+    valueTone: walletTone.amountTone,
+    badgeTone: walletTone.badgeTone,
+    statusLabel: t(walletRisk.statusLabel),
+    metaItems: [
+      {
+        label: t('钱包已用'),
+        value: formatMoney(account?.wallet_used_total_usd, status),
+      },
+    ],
+  });
+
+  if (account?.has_subscription_data) {
+    const subscriptionRisk = getSubscriptionRiskMeta(account);
+    const subscriptionTone = getResourceRiskTone(subscriptionRisk.level);
+    metrics.push({
+      key: 'subscription',
+      kind: 'subscription',
+      risk: subscriptionRisk,
+      title: t('订阅剩余'),
+      value: formatUpstreamSubscriptionRemaining(account, status, t),
+      valueTone: subscriptionTone.amountTone,
+      badgeTone: subscriptionTone.badgeTone,
+      statusLabel: t(subscriptionRisk.statusLabel),
+      metaItems: [
+        {
+          label: t('订阅已用'),
+          value: formatMoney(account?.subscription_used_quota_usd, status),
+        },
+        {
+          label: t('最早到期'),
+          value: formatUpstreamExpiryDate(
+            account?.subscription_earliest_expire_at,
+            t,
+          ),
+        },
+      ],
+    });
+  }
+
+  const riskCandidates = metrics
+    .map((item) => item.risk)
+    .filter((item) => item && (item.level === 'warning' || item.level === 'critical'))
+    .sort((left, right) => getRiskPriority(right) - getRiskPriority(left));
+
+  const sharedRisk = riskCandidates[0] || null;
+  const sharedRiskTone = getResourceRiskTone(sharedRisk?.level);
+  const walletBalanceText = formatMoney(account?.wallet_balance_usd, status);
+  const expiryDateText = formatUpstreamExpiryDate(
+    account?.subscription_earliest_expire_at,
+    t,
+  );
+  const topAccent = metrics
+    .map((item) => getResourceRiskTone(item.risk?.level))
+    .sort((left, right) => right.priority - left.priority)[0] ||
+    getResourceRiskTone('healthy');
+
+  let sharedRiskText = '';
+  if (sharedRisk?.kind === 'wallet') {
+    sharedRiskText =
+      sharedRisk.level === 'critical'
+        ? t('钱包余额告急，当前 {{value}}', { value: walletBalanceText })
+        : t('钱包余额偏低，当前 {{value}}', { value: walletBalanceText });
+  } else if (sharedRisk?.kind === 'subscription') {
+    sharedRiskText =
+      sharedRisk.level === 'critical'
+        ? t('订阅即将到期，最早 {{date}}', { date: expiryDateText })
+        : t('订阅临近到期，最早 {{date}}', { date: expiryDateText });
+  }
+
   return {
-    level: health.key,
-    label: t(health.label),
-    helper: t(health.helper),
-    accentColor: health.accentColor,
-    amountTone: health.amountTone,
-    badgeTone: health.badgeTone,
-    noticeTone: health.noticeTone || '',
-    showNotice: health.key === 'critical' || health.key === 'warning',
+    metrics,
+    statusBar: sharedRisk
+      ? {
+          text: sharedRiskText,
+          tone: sharedRiskTone.statusBarTone,
+        }
+      : null,
+    accentBorderColor: topAccent.accentBorderColor,
   };
 };
+
+export const getAccountBalanceVisualMeta = (account, status, t) => {
+  const { metrics, statusBar, accentBorderColor } = buildAccountResourceMetrics(
+    account,
+    status,
+    t,
+  );
+  const walletMetric = metrics.find((item) => item.key === 'wallet');
+  return {
+    level: walletMetric?.risk?.level || 'neutral',
+    label: walletMetric?.risk?.label ? t(walletMetric.risk.label) : '',
+    helper: '',
+    accentColor: accentBorderColor,
+    amountTone: walletMetric?.valueTone || 'text-semi-color-text-0',
+    badgeTone: walletMetric?.badgeTone || 'bg-semi-color-fill-1 text-semi-color-text-1',
+    noticeTone: statusBar?.tone || '',
+    showNotice: !!statusBar,
+  };
+};
+
+export const getAccountResourceSummaryTones = (account) => ({
+  wallet: getResourceRiskTone(getWalletRiskMeta(account).level).amountTone,
+  subscription: account?.has_subscription_data
+    ? getResourceRiskTone(getSubscriptionRiskMeta(account).level).amountTone
+    : 'text-semi-color-text-0',
+});
 
 export const createDefaultState = () => {
   const end = new Date();

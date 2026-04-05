@@ -749,9 +749,14 @@ func buildProfitBoardRemoteObserverState(selectionSignature string, batch Profit
 		state.WalletQuotaUSD = state.WalletBalanceUSD
 		state.WalletUsedTotalUSD = profitBoardQuotaToUSD(latestSuccess.WalletUsedQuota)
 		state.WalletUsedQuotaUSD = state.WalletUsedTotalUSD
-		subTotal, subUsed := summarizeProfitBoardRemoteSubscriptions(parseProfitBoardRemoteSubscriptions(latestSuccess.SubscriptionStates))
-		state.SubscriptionTotalQuotaUSD = profitBoardQuotaToUSD(subTotal)
-		state.SubscriptionUsedQuotaUSD = profitBoardQuotaToUSD(subUsed)
+		subSummary := summarizeProfitBoardUpstreamSubscriptions(parseProfitBoardRemoteSubscriptions(latestSuccess.SubscriptionStates))
+		state.SubscriptionRemainingUSD = subSummary.RemainingUSD
+		state.SubscriptionTotalQuotaUSD = subSummary.TotalUSD
+		state.SubscriptionUsedQuotaUSD = subSummary.UsedUSD
+		state.SubscriptionCount = subSummary.Count
+		state.SubscriptionEarliestExpireAt = subSummary.EarliestExpireAt
+		state.HasSubscriptionData = subSummary.HasData
+		state.SubscriptionHasUnlimited = subSummary.HasUnlimited
 		if count, err := countProfitBoardRemoteSuccessSnapshots(selectionSignature, batch.Id, latestSuccess.ConfigHash); err == nil && count >= 2 {
 			state.BaselineReady = true
 		}
