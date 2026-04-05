@@ -173,6 +173,7 @@ const ProfitBoardPage = () => {
     setUpstreamConfig,
     channelOptions,
     channelMap,
+    channelModelMap,
     tagChannelMap,
     localModelMap,
     modelNameOptions,
@@ -182,6 +183,8 @@ const ProfitBoardPage = () => {
     loadConfig,
     saveConfig,
     resolveSharedSitePreview,
+    getModelsByChannelIds,
+    getModelsByTags,
   } = configHook;
 
   const tagOptions = useMemo(
@@ -1301,8 +1304,12 @@ const ProfitBoardPage = () => {
     openCreateSideSheet: accountsHook.openCreateSideSheet,
     openEditSideSheet: accountsHook.openEditSideSheet,
     closeSideSheet: accountsHook.closeSideSheet,
+    editingAccount: accountsHook.editingAccount,
+    accountTrend: accountsHook.accountTrend,
+    accountTrendLoading: accountsHook.accountTrendLoading,
     formatMoney,
     status: statusState?.status,
+    isMobile,
     t,
   };
 
@@ -1322,6 +1329,8 @@ const ProfitBoardPage = () => {
     modelNameOptions,
     options,
     resolveSharedSitePreview,
+    getModelsByChannelIds,
+    getModelsByTags,
     isMobile,
     clampNumber,
     localModelMap,

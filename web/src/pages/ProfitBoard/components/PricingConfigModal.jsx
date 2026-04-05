@@ -16,19 +16,22 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import {
   Banner,
   Button,
+  Dropdown,
   Input,
   InputNumber,
-  Modal,
   Radio,
   Select,
+  SideSheet,
   Switch,
   Tag,
+  Tooltip,
   Typography,
 } from '@douyinfe/semi-ui';
+import { ChevronDown, Download } from 'lucide-react';
 import PricingRuleList from './PricingRuleList';
 
 const { Text, Title } = Typography;
@@ -40,7 +43,7 @@ const FieldLabel = ({ children }) => (
 );
 
 const SectionCard = ({ title, description, aside, children }) => (
-  <section className='space-y-4 rounded-2xl border border-semi-color-border bg-semi-color-bg-2 p-4 md:p-5'>
+  <section className='space-y-4 rounded-2xl border border-semi-color-border bg-semi-color-bg-2 p-4'>
     <div className='flex flex-wrap items-start justify-between gap-3'>
       <div className='space-y-1'>
         <Title heading={6} style={{ margin: 0 }}>
@@ -58,141 +61,22 @@ const SectionCard = ({ title, description, aside, children }) => (
   </section>
 );
 
-const SummaryBlock = ({ label, value }) => (
-  <div className='rounded-xl border border-semi-color-border bg-semi-color-fill-0 px-3 py-3'>
-    <Text type='tertiary' size='small'>
-      {label}
-    </Text>
-    <div className='mt-1 text-sm font-medium'>{value}</div>
-  </div>
-);
-
 const MoneyField = ({ label, value, onChange, helper, t }) => (
-  <div className='rounded-2xl border border-semi-color-border bg-semi-color-fill-0 p-4'>
+  <div className='rounded-xl border border-semi-color-border bg-semi-color-fill-0 p-3'>
     <FieldLabel>{label}</FieldLabel>
     <InputNumber
       min={0}
       value={value || 0}
       onChange={onChange}
       suffix='USD'
+      size='small'
       style={{ width: '100%' }}
     />
-    <Text type='tertiary' size='small' className='mt-2 block'>
+    <Text type='tertiary' size='small' className='mt-1.5 block'>
       {helper || t('按请求量分摊')}
     </Text>
   </div>
 );
-
-const PricePreviewBlock = ({ title, value }) => (
-  <div className='rounded-xl border border-semi-color-border bg-semi-color-bg-1 px-3 py-2.5'>
-    <Text type='tertiary' size='small'>
-      {title}
-    </Text>
-    <div className='mt-1 text-sm font-semibold tabular-nums'>{value}</div>
-  </div>
-);
-
-const SmartSuggestionPanel = ({
-  smartSuggestions,
-  selectedTemplateId,
-  setSelectedTemplateId,
-  onRegenerateName,
-  onApplyRecommendedModes,
-  onApplyRecommendedAccount,
-  onApplyTemplate,
-  t,
-}) => {
-  if (!smartSuggestions) return null;
-
-  const hasQuickAction =
-    smartSuggestions.canApplySuggestedName ||
-    smartSuggestions.shouldRecommendModes ||
-    smartSuggestions.shouldRecommendAccount ||
-    (smartSuggestions.copyTemplateOptions || []).length > 0;
-
-  if (!hasQuickAction) return null;
-
-  return (
-    <div className='rounded-2xl border border-dashed border-blue-500/30 bg-blue-500/[0.06] p-4'>
-      <div className='flex flex-wrap items-center gap-2'>
-        <Tag color='blue'>{t('智能建议')}</Tag>
-        {smartSuggestions.canApplySuggestedName ? (
-          <Button
-            size='small'
-            type='primary'
-            theme='borderless'
-            onClick={onRegenerateName}
-          >
-            {t('使用建议名称')}
-          </Button>
-        ) : null}
-        {smartSuggestions.shouldRecommendModes ? (
-          <Button
-            size='small'
-            type='primary'
-            theme='borderless'
-            onClick={onApplyRecommendedModes}
-          >
-            {t('沿用常用模式')}
-          </Button>
-        ) : null}
-        {smartSuggestions.shouldRecommendAccount ? (
-          <Button
-            size='small'
-            type='primary'
-            theme='borderless'
-            onClick={onApplyRecommendedAccount}
-          >
-            {t('套用推荐账户')}
-          </Button>
-        ) : null}
-      </div>
-
-      <div className='mt-3 space-y-2'>
-        {smartSuggestions.canApplySuggestedName ? (
-          <Text type='tertiary' size='small' className='block'>
-            {t('建议名称')}: {smartSuggestions.suggestedName}
-          </Text>
-        ) : null}
-        {smartSuggestions.shouldRecommendModes ? (
-          <Text type='tertiary' size='small' className='block'>
-            {t('常用模式')}: {smartSuggestions.recommendedModeLabel}
-          </Text>
-        ) : null}
-        {smartSuggestions.shouldRecommendAccount ? (
-          <Text type='tertiary' size='small' className='block'>
-            {t('推荐账户')}: {smartSuggestions.recommendedAccountName}
-          </Text>
-        ) : null}
-      </div>
-
-      {(smartSuggestions.copyTemplateOptions || []).length > 0 ? (
-        <div className='mt-3 flex flex-wrap items-end gap-3'>
-          <div className='min-w-[220px] flex-1'>
-            <FieldLabel>{t('复制已有组合的定价')}</FieldLabel>
-            <Select
-              value={selectedTemplateId}
-              onChange={(value) => setSelectedTemplateId(value || '')}
-              optionList={smartSuggestions.copyTemplateOptions}
-              placeholder={t('选择一个已有组合')}
-              style={{ width: '100%' }}
-              size='small'
-            />
-          </div>
-          <Button
-            size='small'
-            type='primary'
-            theme='light'
-            disabled={!selectedTemplateId}
-            onClick={() => onApplyTemplate(selectedTemplateId)}
-          >
-            {t('复制定价')}
-          </Button>
-        </div>
-      ) : null}
-    </div>
-  );
-};
 
 const PricingConfigModal = ({
   visible,
@@ -210,6 +94,8 @@ const PricingConfigModal = ({
   modelNameOptions,
   options,
   resolveSharedSitePreview,
+  getModelsByChannelIds,
+  getModelsByTags,
   isMobile,
   clampNumber,
   localModelMap,
@@ -218,14 +104,6 @@ const PricingConfigModal = ({
   onCancel,
   t,
 }) => {
-  const [selectedTemplateId, setSelectedTemplateId] = useState('');
-
-  useEffect(() => {
-    if (!visible) {
-      setSelectedTemplateId('');
-    }
-  }, [visible, comboConfig?.id]);
-
   const sharedSite = comboConfig?.shared_site || {};
   const availableAccounts = (options?.upstream_accounts || []).filter(
     (item) => item.enabled !== false,
@@ -284,28 +162,99 @@ const PricingConfigModal = ({
       ],
     }));
 
+  const handleImportFromScope = useCallback(() => {
+    const models =
+      comboConfig?.scope_type === 'tag'
+        ? getModelsByTags?.(comboConfig?.tags || []) || []
+        : getModelsByChannelIds?.(comboConfig?.channel_ids || []) || [];
+    if (!models.length) return;
+    setComboConfig((prev) => {
+      const existing = new Set(prev?.shared_site?.model_names || []);
+      models.forEach((m) => existing.add(m));
+      return {
+        ...prev,
+        shared_site: {
+          ...prev.shared_site,
+          model_names: Array.from(existing).sort(),
+        },
+      };
+    });
+  }, [comboConfig?.scope_type, comboConfig?.channel_ids, comboConfig?.tags, getModelsByChannelIds, getModelsByTags, setComboConfig]);
+
+  const scopeHasSelection =
+    comboConfig?.scope_type === 'channel'
+      ? (comboConfig?.channel_ids || []).length > 0
+      : (comboConfig?.tags || []).length > 0;
+
+  const hasSmartAction =
+    smartSuggestions &&
+    (smartSuggestions.canApplySuggestedName ||
+      smartSuggestions.shouldRecommendModes ||
+      smartSuggestions.shouldRecommendAccount ||
+      (smartSuggestions.copyTemplateOptions || []).length > 0);
+
+  const smartDropdownMenu = useMemo(() => {
+    if (!smartSuggestions) return null;
+    const items = [];
+    items.push({ node: 'item', name: 'rename', onClick: onRegenerateName, children: t('智能命名') });
+    if (smartSuggestions.shouldRecommendModes) {
+      items.push({ node: 'item', name: 'modes', onClick: onApplyRecommendedModes, children: t('沿用常用模式') });
+    }
+    if (smartSuggestions.shouldRecommendAccount) {
+      items.push({ node: 'item', name: 'account', onClick: onApplyRecommendedAccount, children: t('套用推荐账户') });
+    }
+    const templates = smartSuggestions.copyTemplateOptions || [];
+    if (templates.length > 0) {
+      items.push({ node: 'divider' });
+      templates.forEach((tpl) => {
+        items.push({
+          node: 'item',
+          name: `tpl-${tpl.value}`,
+          onClick: () => onApplyTemplate(tpl.value),
+          children: t('复制：') + tpl.label,
+        });
+      });
+    }
+    return <Dropdown.Menu>{items.map((item, i) =>
+      item.node === 'divider'
+        ? <Dropdown.Divider key={`d-${i}`} />
+        : <Dropdown.Item key={item.name} onClick={item.onClick}>{item.children}</Dropdown.Item>
+    )}</Dropdown.Menu>;
+  }, [smartSuggestions, onRegenerateName, onApplyRecommendedModes, onApplyRecommendedAccount, onApplyTemplate, t]);
+
+  const modelPreviewRows = useMemo(() => {
+    if (!sharedSite.model_names?.length) return [];
+    return (sharedSite.model_names || []).map((modelName) => {
+      const preview = resolveSharedSitePreview(sharedSite, modelName);
+      return { modelName, preview };
+    });
+  }, [sharedSite, resolveSharedSitePreview]);
+
+  const footer = (
+    <div className='flex items-center justify-end gap-2'>
+      <Button onClick={onCancel}>{t('取消')}</Button>
+      <Button theme='solid' type='primary' onClick={onOk}>
+        {isEditing ? t('保存组合') : t('创建组合')}
+      </Button>
+    </div>
+  );
+
   return (
-    <Modal
+    <SideSheet
       title={isEditing ? t('编辑组合') : t('新建组合')}
       visible={visible}
-      onOk={onOk}
       onCancel={onCancel}
-      centered
-      width={isMobile ? 360 : 980}
-      okText={isEditing ? t('保存组合') : t('创建组合')}
-      cancelText={t('取消')}
-      bodyStyle={{
-        paddingTop: 8,
-        maxHeight: '72vh',
-        overflowY: 'auto',
-      }}
+      placement='right'
+      width={isMobile ? '100%' : 700}
+      footer={footer}
+      bodyStyle={{ paddingTop: 8 }}
     >
       {comboConfig ? (
-        <div className='space-y-5'>
+        <div className='space-y-4'>
           <Banner
             type='info'
             closeIcon={null}
-            description={t('关闭弹窗后，仍需点击页面顶部“保存配置”才会提交到服务器')}
+            description={t('关闭弹窗后，仍需点击页面顶部"保存配置"才会提交到服务器')}
           />
 
           {validationError ? (
@@ -316,58 +265,45 @@ const PricingConfigModal = ({
             />
           ) : null}
 
-          <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-5'>
-            <SummaryBlock
-              label={t('组合名称')}
-              value={comboConfig.name?.trim() || t('未命名组合')}
-            />
-            <SummaryBlock
-              label={t('范围类型')}
-              value={
-                comboConfig.scope_type === 'channel' ? t('按渠道') : t('按标签')
-              }
-            />
-            <SummaryBlock
-              label={
-                comboConfig.scope_type === 'channel'
-                  ? t('已选渠道')
-                  : t('已选标签')
-              }
-              value={t('{{count}} 项', { count: selectedScopeCount })}
-            />
-            <SummaryBlock label={t('收入')} value={siteModeLabel} />
-            <SummaryBlock label={t('成本')} value={upstreamModeLabel} />
+          {/* 摘要行 */}
+          <div className='grid grid-cols-2 gap-2'>
+            <div className='rounded-lg border border-semi-color-border bg-semi-color-fill-0 px-2.5 py-1.5'>
+              <Text type='tertiary' size='small'>{t('范围')}</Text>
+              <div className='text-xs font-medium'>
+                {comboConfig.scope_type === 'channel' ? t('按渠道') : t('按标签')}
+                {' · '}
+                {t('{{count}} 项', { count: selectedScopeCount })}
+              </div>
+            </div>
+            <div className='rounded-lg border border-semi-color-border bg-semi-color-fill-0 px-2.5 py-1.5'>
+              <Text type='tertiary' size='small'>{t('收入 / 成本')}</Text>
+              <div className='text-xs font-medium'>
+                {siteModeLabel} / {upstreamModeLabel}
+              </div>
+            </div>
           </div>
 
+          {/* 基础信息 */}
           <SectionCard
             title={t('基础信息')}
             description={t('先定义组合范围，再决定后续收入和成本怎么计算')}
           >
-            <SmartSuggestionPanel
-              smartSuggestions={smartSuggestions}
-              selectedTemplateId={selectedTemplateId}
-              setSelectedTemplateId={setSelectedTemplateId}
-              onRegenerateName={onRegenerateName}
-              onApplyRecommendedModes={onApplyRecommendedModes}
-              onApplyRecommendedAccount={onApplyRecommendedAccount}
-              onApplyTemplate={onApplyTemplate}
-              t={t}
-            />
-
-            <div className='grid gap-4 lg:grid-cols-2'>
-              <div className='lg:col-span-2'>
+            <div className='space-y-3'>
+              {/* 组合名称 + 智能操作 Dropdown */}
+              <div>
                 <div className='mb-1.5 flex items-center justify-between gap-2'>
-                  <Text type='tertiary' size='small'>
-                    {t('组合名称')}
-                  </Text>
-                  <Button
-                    size='small'
-                    theme='borderless'
-                    type='primary'
-                    onClick={onRegenerateName}
-                  >
-                    {t('智能命名')}
-                  </Button>
+                  <Text type='tertiary' size='small'>{t('组合名称')}</Text>
+                  {hasSmartAction ? (
+                    <Dropdown render={smartDropdownMenu} position='bottomRight' trigger='click'>
+                      <Button size='small' theme='borderless' type='primary' icon={<ChevronDown size={14} />} iconPosition='right'>
+                        {t('快捷操作')}
+                      </Button>
+                    </Dropdown>
+                  ) : (
+                    <Button size='small' theme='borderless' type='primary' onClick={onRegenerateName}>
+                      {t('智能命名')}
+                    </Button>
+                  )}
                 </div>
                 <Input
                   value={comboConfig.name}
@@ -376,6 +312,7 @@ const PricingConfigModal = ({
                 />
               </div>
 
+              {/* 范围类型 + 选择 */}
               <div>
                 <FieldLabel>{t('范围类型')}</FieldLabel>
                 <Radio.Group
@@ -396,18 +333,7 @@ const PricingConfigModal = ({
                 </Radio.Group>
               </div>
 
-              <div className='rounded-xl border border-semi-color-border bg-semi-color-fill-0 px-4 py-3'>
-                <Text type='tertiary' size='small'>
-                  {comboConfig.scope_type === 'channel'
-                    ? t('当前已选渠道')
-                    : t('当前已选标签')}
-                </Text>
-                <div className='mt-1 text-sm font-semibold'>
-                  {t('{{count}} 项', { count: selectedScopeCount })}
-                </div>
-              </div>
-
-              <div className='lg:col-span-2'>
+              <div>
                 <FieldLabel>
                   {comboConfig.scope_type === 'channel'
                     ? t('选择渠道')
@@ -416,7 +342,7 @@ const PricingConfigModal = ({
                 <Select
                   multiple
                   filter
-                  maxTagCount={isMobile ? 2 : 4}
+                  maxTagCount={3}
                   optionList={scopeOptions}
                   value={
                     comboConfig.scope_type === 'channel'
@@ -445,9 +371,14 @@ const PricingConfigModal = ({
             </div>
           </SectionCard>
 
+          {/* 收入配置 */}
           <SectionCard
             title={t('收入配置')}
-            description={t('定义本站侧收入来源，固定金额会额外按请求量分摊')}
+            description={
+              comboConfig.site_mode === 'shared_site_model'
+                ? t('命中本站模型价格时直接读取本地模型价，手动规则只负责补充和兜底')
+                : t('完全按手动规则和固定金额计算本站收入')
+            }
             aside={
               <Radio.Group
                 type='button'
@@ -465,148 +396,158 @@ const PricingConfigModal = ({
               </Radio.Group>
             }
           >
-            <div className='grid gap-4 xl:grid-cols-2'>
-              <MoneyField
-                label={t('固定总收入')}
-                value={comboConfig.site_fixed_total_amount}
-                onChange={(value) =>
-                  setComboConfig((prev) => ({
-                    ...prev,
-                    site_fixed_total_amount: clampNumber(value),
-                  }))
-                }
-                helper={t('会额外计入组合收入，再按请求量均摊')}
-                t={t}
-              />
-              <div className='rounded-2xl border border-semi-color-border bg-semi-color-fill-0 p-4'>
-                <FieldLabel>{t('当前收入口径')}</FieldLabel>
-                <div className='text-sm font-semibold'>{siteModeLabel}</div>
-                <Text type='tertiary' size='small' className='mt-2 block'>
-                  {comboConfig.site_mode === 'shared_site_model'
-                    ? t('命中本站模型价格时直接读取本地模型价，手动规则只负责补充和兜底')
-                    : t('完全按手动规则和固定金额计算本站收入')}
-                </Text>
-              </div>
-            </div>
+            <MoneyField
+              label={t('固定总收入')}
+              value={comboConfig.site_fixed_total_amount}
+              onChange={(value) =>
+                setComboConfig((prev) => ({
+                  ...prev,
+                  site_fixed_total_amount: clampNumber(value),
+                }))
+              }
+              helper={t('会额外计入组合收入，再按请求量均摊')}
+              t={t}
+            />
 
             {comboConfig.site_mode === 'shared_site_model' ? (
-              <div className='space-y-4 rounded-2xl border border-blue-500/20 bg-blue-500/[0.05] p-4'>
-                <div className='grid gap-4 xl:grid-cols-2'>
+              <div className='space-y-3 rounded-2xl border border-blue-500/20 bg-blue-500/[0.05] p-3'>
+                {/* 模型选择 + 一键导入 */}
+                <div>
+                  <div className='mb-1.5 flex items-center justify-between gap-2'>
+                    <Text type='tertiary' size='small'>{t('模型')}</Text>
+                    <Tooltip
+                      content={!scopeHasSelection ? t('请先在上方选择范围') : t('从已选的渠道/标签导入全部模型')}
+                      position='top'
+                    >
+                      <Button
+                        size='small'
+                        theme='light'
+                        type='primary'
+                        icon={<Download size={13} />}
+                        disabled={!scopeHasSelection}
+                        onClick={handleImportFromScope}
+                      >
+                        {t('从已选范围导入')}
+                      </Button>
+                    </Tooltip>
+                  </div>
+                  <Select
+                    multiple
+                    filter
+                    maxTagCount={5}
+                    value={sharedSite.model_names || []}
+                    onChange={(value) =>
+                      setComboConfig((prev) => ({
+                        ...prev,
+                        shared_site: {
+                          ...prev.shared_site,
+                          model_names: value || [],
+                        },
+                      }))
+                    }
+                    optionList={modelNameOptions}
+                    placeholder={t('选择模型')}
+                    emptyContent={t('暂无可用模型')}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+
+                {/* 分组 + 按充值价 */}
+                <div className='grid grid-cols-2 gap-3'>
                   <div>
-                    <FieldLabel>{t('模型')}</FieldLabel>
+                    <FieldLabel>{t('分组')}</FieldLabel>
                     <Select
-                      multiple
-                      filter
-                      maxTagCount={isMobile ? 2 : 4}
-                      value={sharedSite.model_names || []}
+                      value={sharedSite.group || ''}
                       onChange={(value) =>
                         setComboConfig((prev) => ({
                           ...prev,
                           shared_site: {
                             ...prev.shared_site,
-                            model_names: value || [],
+                            group: value,
                           },
                         }))
                       }
-                      optionList={modelNameOptions}
-                      placeholder={t('选择模型')}
-                      emptyContent={t('暂无可用模型')}
+                      optionList={[
+                        { label: t('自动最低'), value: '' },
+                        ...((options?.groups || []).map((item) => ({
+                          label: item,
+                          value: item,
+                        })) || []),
+                      ]}
+                      size='small'
                       style={{ width: '100%' }}
                     />
                   </div>
-
-                  <div className='grid gap-4 sm:grid-cols-2'>
-                    <div>
-                      <FieldLabel>{t('分组')}</FieldLabel>
-                      <Select
-                        value={sharedSite.group || ''}
-                        onChange={(value) =>
+                  <div className='flex items-end'>
+                    <div className='flex w-full items-center justify-between rounded-xl border border-semi-color-border bg-semi-color-bg-1 px-3 py-2'>
+                      <div>
+                        <Text size='small' strong>{t('按充值价')}</Text>
+                      </div>
+                      <Switch
+                        checked={!!sharedSite.use_recharge_price}
+                        onChange={(checked) =>
                           setComboConfig((prev) => ({
                             ...prev,
                             shared_site: {
                               ...prev.shared_site,
-                              group: value,
+                              use_recharge_price: checked,
                             },
                           }))
                         }
-                        optionList={[
-                          { label: t('自动最低'), value: '' },
-                          ...((options?.groups || []).map((item) => ({
-                            label: item,
-                            value: item,
-                          })) || []),
-                        ]}
-                        style={{ width: '100%' }}
+                        size='small'
                       />
-                    </div>
-
-                    <div className='flex items-end'>
-                      <div className='flex w-full items-center justify-between rounded-xl border border-semi-color-border bg-semi-color-bg-1 px-3 py-2.5'>
-                        <div>
-                          <div className='text-sm font-medium'>
-                            {t('按充值价')}
-                          </div>
-                          <Text type='tertiary' size='small'>
-                            {t('开启后使用模型充值倍率')}
-                          </Text>
-                        </div>
-                        <Switch
-                          checked={!!sharedSite.use_recharge_price}
-                          onChange={(checked) =>
-                            setComboConfig((prev) => ({
-                              ...prev,
-                              shared_site: {
-                                ...prev.shared_site,
-                                use_recharge_price: checked,
-                              },
-                            }))
-                          }
-                          size='small'
-                        />
-                      </div>
                     </div>
                   </div>
                 </div>
 
-                {(sharedSite.model_names || []).length > 0 ? (
-                  <div className='grid gap-3 xl:grid-cols-2'>
-                    {(sharedSite.model_names || []).map((modelName) => {
-                      const preview = resolveSharedSitePreview(
-                        sharedSite,
-                        modelName,
-                      );
-                      return (
-                        <div
-                          key={`${comboConfig.id}-${modelName}`}
-                          className='rounded-2xl border border-semi-color-border bg-semi-color-bg-1 p-4'
-                        >
-                          <div className='mb-3 flex items-center justify-between gap-2'>
-                            <Text strong>{modelName}</Text>
-                            <Tag color={preview ? 'blue' : 'grey'}>
-                              {preview ? t('已匹配') : t('未匹配')}
-                            </Tag>
-                          </div>
-                          <div className='grid gap-2 sm:grid-cols-2 xl:grid-cols-4'>
-                            <PricePreviewBlock
-                              title={t('输入')}
-                              value={`${preview?.input_price?.toFixed(4) || '0'} USD/1M`}
-                            />
-                            <PricePreviewBlock
-                              title={t('输出')}
-                              value={`${preview?.output_price?.toFixed(4) || '0'} USD/1M`}
-                            />
-                            <PricePreviewBlock
-                              title={t('缓存读')}
-                              value={`${preview?.cache_read_price?.toFixed(4) || '0'} USD/1M`}
-                            />
-                            <PricePreviewBlock
-                              title={t('缓存写')}
-                              value={`${preview?.cache_creation_price?.toFixed(4) || '0'} USD/1M`}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
+                {/* 模型价格预览 - 紧凑表格 */}
+                {modelPreviewRows.length > 0 ? (
+                  <div className='space-y-1'>
+                    <Text strong size='small' className='block'>{t('价格预览')}</Text>
+                    <div className='rounded-xl border border-semi-color-border overflow-hidden'>
+                      <table className='w-full text-xs'>
+                        <thead>
+                          <tr className='bg-semi-color-fill-0'>
+                            <th className='px-2 py-1.5 text-left font-medium text-semi-color-text-2'>{t('模型')}</th>
+                            <th className='px-2 py-1.5 text-right font-medium text-semi-color-text-2'>{t('输入')}</th>
+                            <th className='px-2 py-1.5 text-right font-medium text-semi-color-text-2'>{t('输出')}</th>
+                            <th className='px-2 py-1.5 text-right font-medium text-semi-color-text-2'>{t('缓存读')}</th>
+                            <th className='px-2 py-1.5 text-right font-medium text-semi-color-text-2'>{t('缓存写')}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {modelPreviewRows.map(({ modelName, preview }) => (
+                            <tr
+                              key={`${comboConfig.id}-${modelName}`}
+                              className='border-t border-semi-color-border'
+                            >
+                              <td className='px-2 py-1.5'>
+                                <div className='flex items-center gap-1.5'>
+                                  <span className={`truncate max-w-[140px] ${preview ? '' : 'text-semi-color-text-2'}`}>
+                                    {modelName}
+                                  </span>
+                                  {!preview ? (
+                                    <Tag color='grey' size='small' className='shrink-0'>{t('未匹配')}</Tag>
+                                  ) : null}
+                                </div>
+                              </td>
+                              <td className='px-2 py-1.5 text-right tabular-nums'>
+                                {preview?.input_price?.toFixed(4) || '-'}
+                              </td>
+                              <td className='px-2 py-1.5 text-right tabular-nums'>
+                                {preview?.output_price?.toFixed(4) || '-'}
+                              </td>
+                              <td className='px-2 py-1.5 text-right tabular-nums'>
+                                {preview?.cache_read_price?.toFixed(4) || '-'}
+                              </td>
+                              <td className='px-2 py-1.5 text-right tabular-nums'>
+                                {preview?.cache_creation_price?.toFixed(4) || '-'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 ) : (
                   <Banner
@@ -642,9 +583,14 @@ const PricingConfigModal = ({
             />
           </SectionCard>
 
+          {/* 成本配置 */}
           <SectionCard
             title={t('成本配置')}
-            description={t('定义上游侧成本来源，固定金额会额外按请求量分摊')}
+            description={
+              comboConfig.upstream_mode === 'wallet_observer'
+                ? `${t('钱包余额变化')} · ${upstreamAccountLabel}`
+                : t('完全按手动成本规则计算上游费用')
+            }
             aside={
               <Radio.Group
                 type='button'
@@ -666,32 +612,21 @@ const PricingConfigModal = ({
               </Radio.Group>
             }
           >
-            <div className='grid gap-4 xl:grid-cols-2'>
-              <MoneyField
-                label={t('固定总成本')}
-                value={comboConfig.upstream_fixed_total_amount}
-                onChange={(value) =>
-                  setComboConfig((prev) => ({
-                    ...prev,
-                    upstream_fixed_total_amount: clampNumber(value),
-                  }))
-                }
-                helper={t('会额外计入组合成本，再按请求量均摊')}
-                t={t}
-              />
-              <div className='rounded-2xl border border-semi-color-border bg-semi-color-fill-0 p-4'>
-                <FieldLabel>{t('当前成本口径')}</FieldLabel>
-                <div className='text-sm font-semibold'>{upstreamModeLabel}</div>
-                <Text type='tertiary' size='small' className='mt-2 block'>
-                  {comboConfig.upstream_mode === 'wallet_observer'
-                    ? upstreamAccountLabel
-                    : t('完全按手动成本规则计算上游费用')}
-                </Text>
-              </div>
-            </div>
+            <MoneyField
+              label={t('固定总成本')}
+              value={comboConfig.upstream_fixed_total_amount}
+              onChange={(value) =>
+                setComboConfig((prev) => ({
+                  ...prev,
+                  upstream_fixed_total_amount: clampNumber(value),
+                }))
+              }
+              helper={t('会额外计入组合成本，再按请求量均摊')}
+              t={t}
+            />
 
             {comboConfig.upstream_mode === 'wallet_observer' ? (
-              <div className='rounded-2xl border border-semi-color-border bg-semi-color-fill-0 p-4'>
+              <div className='rounded-xl border border-semi-color-border bg-semi-color-fill-0 p-3'>
                 <FieldLabel>{t('上游账户')}</FieldLabel>
                 <Select
                   value={comboConfig.upstream_account_id || 0}
@@ -703,7 +638,7 @@ const PricingConfigModal = ({
                   }
                   optionList={accountOptions}
                   placeholder={t('选择钱包账户')}
-                  emptyContent={t('先去“上游账户”添加')}
+                  emptyContent={t('先去"上游账户"添加')}
                   style={{ width: '100%' }}
                 />
               </div>
@@ -732,7 +667,7 @@ const PricingConfigModal = ({
           <Text type='tertiary'>{t('未选择组合')}</Text>
         </div>
       )}
-    </Modal>
+    </SideSheet>
   );
 };
 

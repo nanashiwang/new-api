@@ -72,6 +72,44 @@ export const useProfitBoardConfig = ({
     return map;
   }, [options.channels]);
 
+  const channelModelMap = useMemo(() => {
+    const map = new Map();
+    (options.channels || []).forEach((item) => {
+      const models = (item.models || '')
+        .split(',')
+        .map((m) => m.trim())
+        .filter(Boolean);
+      if (models.length > 0) {
+        map.set(String(item.id), models);
+      }
+    });
+    return map;
+  }, [options.channels]);
+
+  const getModelsByChannelIds = useCallback(
+    (ids) => {
+      const set = new Set();
+      (ids || []).forEach((id) => {
+        const models = channelModelMap.get(String(id));
+        if (models) models.forEach((m) => set.add(m));
+      });
+      return Array.from(set).sort();
+    },
+    [channelModelMap],
+  );
+
+  const getModelsByTags = useCallback(
+    (tags) => {
+      const channelIds = new Set();
+      (tags || []).forEach((tag) => {
+        const ids = tagChannelMap.get(tag);
+        if (ids) ids.forEach((id) => channelIds.add(id));
+      });
+      return getModelsByChannelIds(Array.from(channelIds));
+    },
+    [tagChannelMap, getModelsByChannelIds],
+  );
+
   const localModelMap = useMemo(
     () =>
       new Map(
@@ -273,6 +311,7 @@ export const useProfitBoardConfig = ({
     setUpstreamConfig,
     channelOptions,
     channelMap,
+    channelModelMap,
     tagChannelMap,
     localModelMap,
     modelNameOptions,
@@ -284,5 +323,7 @@ export const useProfitBoardConfig = ({
     loadConfig,
     saveConfig,
     resolveSharedSitePreview,
+    getModelsByChannelIds,
+    getModelsByTags,
   };
 };

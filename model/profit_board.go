@@ -199,6 +199,7 @@ type ProfitBoardChannelOption struct {
 	Name   string `json:"name"`
 	Tag    string `json:"tag,omitempty"`
 	Status int    `json:"status,omitempty"`
+	Models string `json:"models,omitempty"`
 }
 
 type ProfitBoardLocalModelOption struct {
@@ -1118,7 +1119,7 @@ func GetProfitBoardOptions() (*ProfitBoardOptions, error) {
 
 	channels := make([]ProfitBoardChannelOption, 0)
 	if err := DB.Model(&Channel{}).
-		Select("id, name, tag, status").
+		Select("id, name, tag, status, models").
 		Order("priority desc, id desc").
 		Scan(&channels).Error; err != nil {
 		return nil, err

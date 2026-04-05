@@ -400,56 +400,29 @@ export const getBalanceHealthLevel = (account) => {
     return {
       key: 'critical',
       label: '余额紧张',
-      rangeLabel: '告警区 · < 10',
-      helper: '当前余额低于 10，建议尽快处理',
+      helper: '低于 $10，建议尽快充值',
+      accentColor: 'border-l-red-500',
       amountTone: 'text-red-600 dark:text-red-400',
-      helperTone: 'text-red-700/90 dark:text-red-200',
-      badgeTone:
-        'border-red-500/20 bg-red-500/10 text-red-600 dark:text-red-300',
-      rangeTone:
-        'border-red-500/15 bg-red-500/8 text-red-700 dark:text-red-200',
-      eyebrowTone:
-        'bg-red-500/10 text-red-700 dark:bg-red-500/15 dark:text-red-200',
-      dotTone: 'bg-red-500',
-      panelTone:
-        'border-red-500/25 bg-[linear-gradient(135deg,rgba(239,68,68,0.12),rgba(239,68,68,0.03))]',
+      badgeTone: 'bg-red-500/10 text-red-600 dark:text-red-400',
     };
   }
   if (balance <= 50) {
     return {
       key: 'warning',
       label: '余额偏低',
-      rangeLabel: '关注区 · 10 - 50',
-      helper: '当前余额低于 50，请关注',
+      helper: '低于 $50，请关注',
+      accentColor: 'border-l-amber-500',
       amountTone: 'text-amber-600 dark:text-amber-400',
-      helperTone: 'text-amber-700/90 dark:text-amber-200',
-      badgeTone:
-        'border-amber-500/20 bg-amber-500/10 text-amber-600 dark:text-amber-300',
-      rangeTone:
-        'border-amber-500/15 bg-amber-500/8 text-amber-700 dark:text-amber-200',
-      eyebrowTone:
-        'bg-amber-500/10 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200',
-      dotTone: 'bg-amber-500',
-      panelTone:
-        'border-amber-500/25 bg-[linear-gradient(135deg,rgba(245,158,11,0.12),rgba(245,158,11,0.03))]',
+      badgeTone: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
     };
   }
   return {
     key: 'healthy',
     label: '余额充足',
-    rangeLabel: '安全区 · > 50',
-    helper: '当前余额高于 50，可继续使用',
+    helper: '',
+    accentColor: 'border-l-emerald-500',
     amountTone: 'text-emerald-600 dark:text-emerald-400',
-    helperTone: 'text-emerald-700/90 dark:text-emerald-200',
-    badgeTone:
-      'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300',
-    rangeTone:
-      'border-emerald-500/15 bg-emerald-500/8 text-emerald-700 dark:text-emerald-200',
-    eyebrowTone:
-      'bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200',
-    dotTone: 'bg-emerald-500',
-    panelTone:
-      'border-emerald-500/25 bg-[linear-gradient(135deg,rgba(16,185,129,0.12),rgba(16,185,129,0.03))]',
+    badgeTone: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
   };
 };
 
@@ -461,53 +434,31 @@ export const getAccountBalanceVisualMeta = (account, status, t) => {
 
   if (hasFailedSync) {
     return {
-      label: account?.last_success_at ? t('最近有效余额') : t('当前余额'),
-      rangeLabel: t('状态未判定'),
-      helper: t('同步失败，余额状态暂不可判断'),
-      amountTone: 'text-semi-color-text-0',
-      helperTone: 'text-semi-color-text-1',
-      badgeTone:
-        'border-semi-color-border bg-semi-color-fill-0 text-semi-color-text-1',
-      rangeTone:
-        'border-semi-color-border bg-semi-color-fill-0 text-semi-color-text-1',
-      eyebrowTone:
-        'bg-semi-color-fill-0 text-semi-color-text-1',
-      dotTone: 'bg-semi-color-text-2',
-      panelTone: 'border-semi-color-border bg-semi-color-fill-0',
+      label: t('同步失败'),
+      helper: t('余额状态暂不可判断'),
+      accentColor: 'border-l-semi-color-text-2',
+      amountTone: 'text-semi-color-text-2',
+      badgeTone: 'bg-semi-color-fill-1 text-semi-color-text-2',
     };
   }
 
   if (isDisabled) {
     return {
-      label: t('余额状态暂停'),
-      rangeLabel: t('暂停判断'),
-      helper: t('账户已停用，暂不进行余额判断'),
-      amountTone: 'text-semi-color-text-0',
-      helperTone: 'text-semi-color-text-1',
-      badgeTone:
-        'border-semi-color-border bg-semi-color-fill-0 text-semi-color-text-1',
-      rangeTone:
-        'border-semi-color-border bg-semi-color-fill-0 text-semi-color-text-1',
-      eyebrowTone:
-        'bg-semi-color-fill-0 text-semi-color-text-1',
-      dotTone: 'bg-semi-color-text-2',
-      panelTone: 'border-semi-color-border bg-semi-color-fill-0',
+      label: t('已停用'),
+      helper: '',
+      accentColor: 'border-l-semi-color-text-2',
+      amountTone: 'text-semi-color-text-2',
+      badgeTone: 'bg-semi-color-fill-1 text-semi-color-text-2',
     };
   }
 
   const health = getBalanceHealthLevel(account, t);
-
   return {
     label: t(health.label),
-    rangeLabel: t(health.rangeLabel),
     helper: t(health.helper),
+    accentColor: health.accentColor,
     amountTone: health.amountTone,
-    helperTone: health.helperTone,
     badgeTone: health.badgeTone,
-    rangeTone: health.rangeTone,
-    eyebrowTone: health.eyebrowTone,
-    dotTone: health.dotTone,
-    panelTone: health.panelTone,
   };
 };
 

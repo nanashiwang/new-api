@@ -16,26 +16,278 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import React from 'react';
-import { Button, Card, Empty, Space, Tag, Typography } from '@douyinfe/semi-ui';
-import { AlertCircle, Pencil, Plus, RefreshCw, Wallet } from 'lucide-react';
+import React, { useMemo } from 'react';
+import {
+  Button,
+  Card,
+  Empty,
+  Space,
+  Spin,
+  Tag,
+  Typography,
+} from '@douyinfe/semi-ui';
+import {
+  AlertCircle,
+  Pencil,
+  Plus,
+  RefreshCw,
+  TrendingUp,
+  Wallet,
+} from 'lucide-react';
+import { CHART_CONFIG } from '../../../constants/dashboard.constants';
 import { timestamp2string } from '../../../helpers';
-import { getAccountBalanceVisualMeta, getWalletStatusMeta } from '../utils';
+import {
+  createAccountUsageTrendSpec,
+  getAccountBalanceVisualMeta,
+  getWalletStatusMeta,
+} from '../utils';
 import AccountEditSideSheet from './AccountEditSideSheet';
+import ResponsiveVChart from './ResponsiveVChart';
 
 const { Text, Title } = Typography;
 
-const InfoMetric = ({ label, value }) => (
-  <div className='rounded-2xl border border-semi-color-border bg-semi-color-fill-0 px-3 py-3'>
-    <Text type='tertiary' size='small'>
-      {label}
-    </Text>
-    <div className='mt-1 text-sm font-semibold tabular-nums'>{value}</div>
+/* ── 指标行 ─────────────────────────────────────────── */
+
+const MetricRow = ({ label, value, truncate }) => (
+  <div className='flex items-baseline justify-between gap-3'>
+    <span className='shrink-0 text-semi-color-text-2'>{label}</span>
+    <span
+      className={`font-medium text-semi-color-text-0 text-right${truncate ? ' truncate' : ''}`}
+    >
+      {value}
+    </span>
   </div>
 );
 
+/* ── 账户列表行 ─────────────────────────────────────── */
+
+const AccountListRow = ({
+  item,
+  isSelected,
+  balanceMeta,
+  balanceValue,
+  syncingAccountId,
+  syncAccount,
+  onSelect,
+}) => (
+  <div
+    role='button'
+    tabIndex={0}
+    onClick={() => onSelect(item.id)}
+    onKeyDown={(e) => {
+      if (e.key === 'Enter' || e.key === ' ') onSelect(item.id);
+    }}
+    className={`flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition-colors ${
+      isSelected
+        ? 'bg-semi-color-primary-light-default ring-1 ring-semi-color-primary'
+        : 'hover:bg-semi-color-fill-0'
+    }`}
+  >
+    {/* 状态圆点 */}
+    <span
+      className={`h-2.5 w-2.5 shrink-0 rounded-full ${balanceMeta.accentColor.replace('border-l-', 'bg-')}`}
+    />
+
+    {/* 名称 */}
+    <span className='min-w-0 flex-1 truncate text-sm font-medium text-semi-color-text-0'>
+      {item.name}
+    </span>
+
+    {/* 余额 */}
+    <span
+      className={`shrink-0 text-sm font-semibold tabular-nums ${balanceMeta.amountTone}`}
+    >
+      {balanceValue}
+    </span>
+
+    {/* 健康徽章 */}
+    <span
+      className={`hidden shrink-0 rounded-full px-2 py-0.5 text-xs font-medium sm:inline-flex ${balanceMeta.badgeTone}`}
+    >
+      {balanceMeta.label}
+    </span>
+
+    {/* 同步 */}
+    <Button
+      type='tertiary'
+      icon={<RefreshCw size={14} />}
+      loading={syncingAccountId === item.id}
+      onClick={(e) => {
+        e.stopPropagation();
+        syncAccount(item.id);
+      }}
+      size='small'
+      className='shrink-0'
+    />
+  </div>
+);
+
+/* ── 选中账户详情面板 ───────────────────────────────── */
+
+const AccountDetailSection = ({
+  account,
+  balanceMeta,
+  statusMeta,
+  balanceValue,
+  syncTime,
+  trendSpec,
+  accountTrendLoading,
+  hasTrendRows,
+  syncingAccountId,
+  syncAccount,
+  openEditSideSheet,
+  formatMoney,
+  status,
+  isMobile,
+  t,
+}) => (
+  <div
+    className={`mt-3 rounded-xl border border-semi-color-border bg-semi-color-bg-2 p-4 ${
+      isMobile ? '' : 'grid grid-cols-5 gap-6'
+    }`}
+  >
+    {/* 左侧：指标 */}
+    <div className={isMobile ? '' : 'col-span-2 space-y-4'}>
+      {/* 状态 + 健康 */}
+      <div className='flex items-center gap-2'>
+        <Tag color={statusMeta.color} size='small'>
+          {statusMeta.label}
+        </Tag>
+        <span
+          className={`rounded-full px-2 py-0.5 text-xs font-medium ${balanceMeta.badgeTone}`}
+        >
+          {balanceMeta.label}
+        </span>
+      </div>
+
+      {/* 余额大字 */}
+      <div>
+        <div className='flex items-baseline gap-2'>
+          <span
+            className={`text-3xl font-bold tabular-nums ${balanceMeta.amountTone}`}
+          >
+            {balanceValue}
+          </span>
+        </div>
+        {balanceMeta.helper && (
+          <Text type='tertiary' size='small' className='mt-1 block'>
+            {balanceMeta.helper}
+          </Text>
+        )}
+      </div>
+
+      {/* 描述列表 */}
+      <div className='space-y-2 text-sm'>
+        <MetricRow
+          label={t('累计消耗')}
+          value={formatMoney(account.wallet_used_total_usd, status)}
+        />
+        <MetricRow label={t('最后同步')} value={syncTime} />
+        {account.base_url && (
+          <MetricRow
+            label={t('来源')}
+            value={account.base_url.replace(/^https?:\/\//, '')}
+            truncate
+          />
+        )}
+        {(account.subscription_total_quota_usd > 0 ||
+          account.subscription_used_quota_usd > 0) && (
+          <>
+            <MetricRow
+              label={t('订阅总额')}
+              value={
+                account.subscription_total_quota_usd > 0
+                  ? formatMoney(account.subscription_total_quota_usd, status)
+                  : t('不限额')
+              }
+            />
+            <MetricRow
+              label={t('订阅已用')}
+              value={formatMoney(account.subscription_used_quota_usd, status)}
+            />
+          </>
+        )}
+      </div>
+
+      {/* 提示 */}
+      {account.status === 'needs_baseline' && (
+        <div className='rounded-lg bg-blue-500/5 px-3 py-1.5 text-xs text-semi-color-text-1'>
+          {t('首次同步后，下次开始统计近 7 天已用')}
+        </div>
+      )}
+      {account.error_message && (
+        <div className='flex items-start gap-1.5 rounded-lg bg-red-500/5 px-3 py-1.5 text-xs text-red-600 dark:text-red-300'>
+          <AlertCircle size={12} className='mt-0.5 shrink-0 text-red-500' />
+          <span>{account.error_message}</span>
+        </div>
+      )}
+
+      {/* 操作 */}
+      <div className='flex gap-2 pt-1'>
+        <Button
+          type='tertiary'
+          icon={<Pencil size={14} />}
+          onClick={() => openEditSideSheet(account.id)}
+          size='small'
+        >
+          {t('编辑')}
+        </Button>
+        <Button
+          type='tertiary'
+          icon={<RefreshCw size={14} />}
+          loading={syncingAccountId === account.id}
+          onClick={() => syncAccount(account.id)}
+          size='small'
+        >
+          {t('同步')}
+        </Button>
+      </div>
+    </div>
+
+    {/* 右侧：趋势图 */}
+    <div className={isMobile ? 'mt-4' : 'col-span-3'}>
+      <div className='mb-2 flex items-center gap-2'>
+        <TrendingUp size={14} className='text-semi-color-text-2' />
+        <span className='text-sm font-medium text-semi-color-text-1'>
+          {t('近 7 天已用趋势')}
+        </span>
+      </div>
+      <Spin spinning={accountTrendLoading}>
+        {hasTrendRows && trendSpec ? (
+          <ResponsiveVChart
+            chartKey={`account-trend-${account.id}`}
+            spec={trendSpec}
+            option={CHART_CONFIG}
+            minHeight={240}
+          />
+        ) : (
+          <div className='flex h-[240px] items-center justify-center'>
+            <Empty
+              image={null}
+              description={
+                accountTrendLoading
+                  ? t('加载中…')
+                  : account.status === 'needs_baseline'
+                    ? t('首次同步后才会有趋势数据')
+                    : t('暂无趋势数据')
+              }
+            />
+          </div>
+        )}
+      </Spin>
+    </div>
+  </div>
+);
+
+/* ── 主组件 ─────────────────────────────────────────── */
+
 const UpstreamWalletCard = ({
   accounts,
+  editingAccountId,
+  setEditingAccountId,
+  editingAccount,
+  accountTrend,
+  accountTrendLoading,
   accountDraft,
   updateAccountDraftField,
   normalizeAccountDraftBaseUrl,
@@ -51,223 +303,149 @@ const UpstreamWalletCard = ({
   syncingAccountId,
   syncingAllAccounts,
   deletingAccountId,
-  formatMoney,
-  status,
+  sideSheetVisible,
   openEditSideSheet,
   openCreateSideSheet,
-  sideSheetVisible,
   closeSideSheet,
+  formatMoney,
+  status,
+  isMobile,
   t,
-}) => (
-  <Card
-    bordered={false}
-    className='rounded-xl'
-    title={
-      <div className='flex items-center gap-2'>
-        <Wallet size={16} />
-        <span>{t('上游账户')}</span>
-      </div>
-    }
-    headerExtraContent={
-      <Space wrap>
-        <Button
-          type='tertiary'
-          icon={<RefreshCw size={14} />}
-          loading={syncingAllAccounts}
-          onClick={syncAllAccounts}
-          size='small'
-        >
-          {t('全部同步')}
-        </Button>
-        <Button
-          theme='solid'
-          type='primary'
-          icon={<Plus size={14} />}
-          onClick={openCreateSideSheet}
-          size='small'
-        >
-          {t('新建')}
-        </Button>
-      </Space>
-    }
-  >
-    {accounts.length > 0 ? (
-      <div className='grid gap-4 md:grid-cols-2 2xl:grid-cols-3'>
-        {accounts.map((item) => {
-          const statusMeta = getWalletStatusMeta(item.status, t);
-          const balanceMeta = getAccountBalanceVisualMeta(item, status, t);
-          const balanceTitle =
-            item.status === 'failed' && item.last_success_at
-              ? t('最近有效余额')
-              : t('当前余额');
-          const balanceValue =
-            item.status === 'failed' && !item.last_success_at
-              ? '--'
-              : formatMoney(item.wallet_balance_usd, status);
-          const subtitle = item.remark || item.base_url || '-';
-          const syncTime = item.last_synced_at
-            ? timestamp2string(item.last_synced_at)
-            : '-';
+}) => {
+  // 趋势数据：兼容数组或 { rows } 两种结构
+  const trendRows = useMemo(() => {
+    if (!accountTrend) return [];
+    return Array.isArray(accountTrend)
+      ? accountTrend
+      : accountTrend?.rows || [];
+  }, [accountTrend]);
 
-          return (
-            <div
-              key={item.id}
-              className='rounded-3xl border border-semi-color-border bg-semi-color-bg-1 p-5 shadow-sm transition-colors'
-            >
-              <div className='flex items-start justify-between gap-4'>
-                <div className='min-w-0 flex-1 space-y-2'>
-                  <div className='flex flex-wrap items-center gap-2'>
-                    <Title heading={5} style={{ margin: 0 }}>
-                      {item.name}
-                    </Title>
-                    <Tag color={statusMeta.color} size='small'>
-                      {statusMeta.label}
-                    </Tag>
-                  </div>
-                  <Text
-                    type='tertiary'
-                    size='small'
-                    className='block break-all leading-5'
-                  >
-                    {subtitle}
-                  </Text>
-                </div>
+  const trendSpec = useMemo(() => {
+    if (!trendRows.length) return null;
+    return createAccountUsageTrendSpec(trendRows, status, t);
+  }, [trendRows, status, t]);
 
-                <Space>
-                  <Button
-                    type='tertiary'
-                    icon={<RefreshCw size={14} />}
-                    loading={syncingAccountId === item.id}
-                    onClick={() => syncAccount(item.id)}
-                    size='small'
-                  />
-                  <Button
-                    type='tertiary'
-                    icon={<Pencil size={14} />}
-                    onClick={() => openEditSideSheet(item.id)}
-                    size='small'
-                  />
-                </Space>
-              </div>
+  // 选中账户的显示元数据
+  const selectedMeta = useMemo(() => {
+    if (!editingAccount) return null;
+    return {
+      statusMeta: getWalletStatusMeta(editingAccount.status, t),
+      balanceMeta: getAccountBalanceVisualMeta(editingAccount, status, t),
+      balanceValue:
+        editingAccount.status === 'failed' && !editingAccount.last_success_at
+          ? '--'
+          : formatMoney(editingAccount.wallet_balance_usd, status),
+      syncTime: editingAccount.last_synced_at
+        ? timestamp2string(editingAccount.last_synced_at)
+        : '-',
+    };
+  }, [editingAccount, formatMoney, status, t]);
 
-              <div
-                className={`mt-5 rounded-3xl border px-4 py-4 ${balanceMeta.panelTone}`}
-              >
-                <div className='flex items-start justify-between gap-3'>
-                  <div className='min-w-0 flex-1'>
-                    <span
-                      className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-medium ${balanceMeta.eyebrowTone}`}
-                    >
-                      <span
-                        className={`h-2 w-2 rounded-full ${balanceMeta.dotTone}`}
-                      />
-                      {balanceTitle}
-                    </span>
-                    <div
-                      className={`mt-3 text-4xl font-semibold tracking-tight tabular-nums ${balanceMeta.amountTone}`}
-                    >
-                      {balanceValue}
-                    </div>
-                    <div className='mt-3 flex flex-wrap gap-2'>
-                      <span
-                        className={`rounded-full border px-2.5 py-1 text-xs font-medium ${balanceMeta.badgeTone}`}
-                      >
-                        {balanceMeta.label}
-                      </span>
-                      <span
-                        className={`rounded-full border px-2.5 py-1 text-xs font-medium ${balanceMeta.rangeTone}`}
-                      >
-                        {balanceMeta.rangeLabel}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <Text
-                  size='small'
-                  className={`mt-4 block leading-5 ${balanceMeta.helperTone}`}
-                >
-                  {balanceMeta.helper}
-                </Text>
-              </div>
-
-              <div className='mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3'>
-                <InfoMetric
-                  label={t('累计消耗')}
-                  value={formatMoney(item.wallet_used_total_usd, status)}
+  return (
+    <Card
+      bordered={false}
+      className='rounded-xl'
+      title={
+        <div className='flex items-center gap-2'>
+          <Wallet size={16} />
+          <span>{t('上游账户')}</span>
+        </div>
+      }
+      headerExtraContent={
+        <Space wrap>
+          <Button
+            type='tertiary'
+            icon={<RefreshCw size={14} />}
+            loading={syncingAllAccounts}
+            onClick={syncAllAccounts}
+            size='small'
+          >
+            {t('全部同步')}
+          </Button>
+          <Button
+            theme='solid'
+            type='primary'
+            icon={<Plus size={14} />}
+            onClick={openCreateSideSheet}
+            size='small'
+          >
+            {t('新建')}
+          </Button>
+        </Space>
+      }
+    >
+      {accounts.length > 0 ? (
+        <>
+          {/* 列表区 */}
+          <div className='space-y-1'>
+            {accounts.map((item) => {
+              const balanceMeta = getAccountBalanceVisualMeta(
+                item,
+                status,
+                t,
+              );
+              const balanceValue =
+                item.status === 'failed' && !item.last_success_at
+                  ? '--'
+                  : formatMoney(item.wallet_balance_usd, status);
+              return (
+                <AccountListRow
+                  key={item.id}
+                  item={item}
+                  isSelected={editingAccountId === item.id}
+                  balanceMeta={balanceMeta}
+                  balanceValue={balanceValue}
+                  syncingAccountId={syncingAccountId}
+                  syncAccount={syncAccount}
+                  onSelect={setEditingAccountId}
                 />
-                <InfoMetric label={t('最近同步')} value={syncTime} />
-                <InfoMetric
-                  label={t('同步来源')}
-                  value={
-                    item.base_url
-                      ? item.base_url.replace(/^https?:\/\//, '')
-                      : '-'
-                  }
-                />
-              </div>
+              );
+            })}
+          </div>
 
-              {(item.subscription_total_quota_usd > 0 ||
-                item.subscription_used_quota_usd > 0) && (
-                <div className='mt-3 grid gap-3 sm:grid-cols-2'>
-                  <InfoMetric
-                    label={t('订阅总额')}
-                    value={
-                      item.subscription_total_quota_usd > 0
-                        ? formatMoney(item.subscription_total_quota_usd, status)
-                        : t('不限额或未知')
-                    }
-                  />
-                  <InfoMetric
-                    label={t('订阅已用')}
-                    value={formatMoney(
-                      item.subscription_used_quota_usd,
-                      status,
-                    )}
-                  />
-                </div>
-              )}
+          {/* 详情区 */}
+          {editingAccount && selectedMeta && (
+            <AccountDetailSection
+              account={editingAccount}
+              balanceMeta={selectedMeta.balanceMeta}
+              statusMeta={selectedMeta.statusMeta}
+              balanceValue={selectedMeta.balanceValue}
+              syncTime={selectedMeta.syncTime}
+              trendSpec={trendSpec}
+              accountTrendLoading={accountTrendLoading}
+              hasTrendRows={trendRows.length > 0}
+              syncingAccountId={syncingAccountId}
+              syncAccount={syncAccount}
+              openEditSideSheet={openEditSideSheet}
+              formatMoney={formatMoney}
+              status={status}
+              isMobile={isMobile}
+              t={t}
+            />
+          )}
+        </>
+      ) : (
+        <Empty image={null} description={t('点击右上角新建账户')} />
+      )}
 
-              {item.status === 'needs_baseline' ? (
-                <div className='mt-3 rounded-xl border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-sm text-semi-color-text-1'>
-                  {t('首次同步后，下次开始统计近 7 天已用')}
-                </div>
-              ) : null}
-
-              {item.error_message ? (
-                <div className='mt-3 flex items-start gap-2 rounded-2xl border border-red-500/20 bg-red-500/5 px-3 py-2.5 text-sm text-red-600 dark:text-red-300'>
-                  <AlertCircle
-                    size={14}
-                    className='mt-0.5 shrink-0 text-red-500'
-                  />
-                  <span>{item.error_message}</span>
-                </div>
-              ) : null}
-            </div>
-          );
-        })}
-      </div>
-    ) : (
-      <Empty image={null} description={t('点击右上角新建账户')} />
-    )}
-
-    <AccountEditSideSheet
-      visible={sideSheetVisible}
-      onClose={closeSideSheet}
-      accountDraft={accountDraft}
-      updateAccountDraftField={updateAccountDraftField}
-      normalizeAccountDraftBaseUrl={normalizeAccountDraftBaseUrl}
-      touchAccountDraftField={touchAccountDraftField}
-      accountDraftErrors={accountDraftErrors}
-      accountDraftCanSave={accountDraftCanSave}
-      accountDraftValidation={accountDraftValidation}
-      saveAccount={saveAccount}
-      deleteAccount={deleteAccount}
-      savingAccount={savingAccount}
-      deletingAccountId={deletingAccountId}
-      t={t}
-    />
-  </Card>
-);
+      <AccountEditSideSheet
+        visible={sideSheetVisible}
+        onClose={closeSideSheet}
+        accountDraft={accountDraft}
+        updateAccountDraftField={updateAccountDraftField}
+        normalizeAccountDraftBaseUrl={normalizeAccountDraftBaseUrl}
+        touchAccountDraftField={touchAccountDraftField}
+        accountDraftErrors={accountDraftErrors}
+        accountDraftCanSave={accountDraftCanSave}
+        accountDraftValidation={accountDraftValidation}
+        saveAccount={saveAccount}
+        deleteAccount={deleteAccount}
+        savingAccount={savingAccount}
+        deletingAccountId={deletingAccountId}
+        t={t}
+      />
+    </Card>
+  );
+};
 
 export default UpstreamWalletCard;

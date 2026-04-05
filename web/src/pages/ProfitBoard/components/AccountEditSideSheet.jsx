@@ -57,7 +57,7 @@ const SectionBlock = ({ title, subtitle, children }) => (
         </Text>
       ) : null}
     </div>
-    <div className='grid gap-4 lg:grid-cols-2'>{children}</div>
+    <div className='grid gap-4'>{children}</div>
   </div>
 );
 
@@ -141,7 +141,7 @@ const AccountEditSideSheet = ({
           title={t('连接信息')}
           subtitle={t('先填 URL、用户 ID 和 access token，系统会自动帮你规范输入')}
         >
-          <div className='lg:col-span-2'>
+          <div>
             <Text type='tertiary' size='small' className='mb-1 block'>
               {t('URL')}
             </Text>
@@ -243,11 +243,10 @@ const AccountEditSideSheet = ({
             />
           </div>
 
-          <div className='flex items-end'>
-            <div className='flex w-full items-center justify-between rounded-xl border border-semi-color-border bg-semi-color-fill-0 px-3 py-3'>
+          <div className='flex items-center justify-between rounded-xl border border-semi-color-border bg-semi-color-fill-0 px-3 py-2.5'>
               <div>
-                <Text strong>{t('启用账户')}</Text>
-                <Text type='tertiary' size='small' className='mt-1 block'>
+                <Text strong size='small'>{t('启用账户')}</Text>
+                <Text type='tertiary' size='small' className='ml-2'>
                   {t('关闭后会保留配置，但不再参与余额判断')}
                 </Text>
               </div>
@@ -256,11 +255,11 @@ const AccountEditSideSheet = ({
                 onChange={(checked) =>
                   updateAccountDraftField('enabled', checked)
                 }
+                size='small'
               />
             </div>
-          </div>
 
-          <div className='lg:col-span-2'>
+          <div>
             <Text type='tertiary' size='small' className='mb-1 block'>
               {t('备注')}
             </Text>
