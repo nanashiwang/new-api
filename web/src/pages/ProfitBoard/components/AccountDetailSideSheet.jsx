@@ -69,17 +69,11 @@ const SubscriptionRow = ({ item, formatMoney, t, status }) => {
         />
         <SummaryItem label={t('订阅总额')} value={totalValue} />
         <SummaryItem
-          label={t('最早到期')}
+          label={t('到期日期')}
           value={formatUpstreamExpiryDate(item.end_time, t)}
         />
       </div>
       <div className='mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-semi-color-text-2'>
-        <span>
-          {t('下次重置')}{' '}
-          <span className='font-medium text-semi-color-text-0'>
-            {formatUpstreamExpiryDate(item.next_reset_time, t)}
-          </span>
-        </span>
         <span>
           {t('开始时间')}{' '}
           <span className='font-medium text-semi-color-text-0'>
