@@ -177,6 +177,116 @@ export const createDefaultComboPricingConfig = (
   };
 };
 
+const pickMostCommonValue = (values, fallbackValue) => {
+  const stats = new Map();
+  values.forEach((value) => {
+    if (!value) return;
+    const current = stats.get(value) || { value, count: 0 };
+    current.count += 1;
+    stats.set(value, current);
+  });
+  if (!stats.size) return fallbackValue;
+  return Array.from(stats.values()).sort((left, right) => {
+    if (right.count !== left.count) return right.count - left.count;
+    return left.value.localeCompare(right.value);
+  })[0].value;
+};
+
+export const createSuggestedComboName = (
+  draft,
+  channelMap,
+  t,
+  fallbackName = '',
+) => {
+  if (!draft) return fallbackName;
+
+  const isTagScope = draft.scope_type === 'tag';
+  const rawLabels = isTagScope
+    ? draft.tags || []
+    : (draft.channel_ids || []).map(
+        (id) => channelMap.get(String(id))?.name || `#${id}`,
+      );
+  const labels = rawLabels.filter(Boolean);
+
+  if (!labels.length) {
+    return fallbackName || (isTagScope ? t('标签组合') : t('渠道组合'));
+  }
+
+  const preview = labels.slice(0, 2).join(' / ');
+  const suffix = `${labels.length} ${isTagScope ? t('标签') : t('渠道')}`;
+  return `${preview} · ${suffix}`;
+};
+
+export const isLikelyAutoComboName = (name, suggestedName = '') => {
+  const trimmedName = name?.trim() || '';
+  if (!trimmedName) return true;
+  if (suggestedName && trimmedName === suggestedName) return true;
+  return /^组合 \d+$/.test(trimmedName);
+};
+
+export const pickDominantComboModes = (
+  comboConfigs,
+  fallbackSiteMode = 'manual',
+  fallbackUpstreamMode = 'manual_rules',
+) => ({
+  site_mode: pickMostCommonValue(
+    (comboConfigs || []).map((item) => item.site_mode),
+    fallbackSiteMode,
+  ),
+  upstream_mode: pickMostCommonValue(
+    (comboConfigs || []).map((item) => item.upstream_mode),
+    fallbackUpstreamMode,
+  ),
+});
+
+export const pickRecommendedUpstreamAccountId = (
+  comboConfigs,
+  availableAccountIds,
+  excludeComboId = '',
+) => {
+  const stats = new Map();
+  (comboConfigs || []).forEach((item) => {
+    if (!item || item.combo_id === excludeComboId) return;
+    if (item.upstream_mode !== 'wallet_observer') return;
+    const accountId = Number(item.upstream_account_id || 0);
+    if (accountId <= 0 || !availableAccountIds.has(accountId)) return;
+    const current = stats.get(accountId) || { id: accountId, count: 0 };
+    current.count += 1;
+    stats.set(accountId, current);
+  });
+  if (!stats.size) return 0;
+  return Array.from(stats.values()).sort((left, right) => {
+    if (right.count !== left.count) return right.count - left.count;
+    return left.id - right.id;
+  })[0].id;
+};
+
+export const mergeComboDraftWithTemplate = (draft, templateConfig) => {
+  if (!draft || !templateConfig) return draft;
+
+  return {
+    ...draft,
+    site_mode: templateConfig.site_mode || draft.site_mode,
+    upstream_mode: templateConfig.upstream_mode || draft.upstream_mode,
+    upstream_account_id: Number(templateConfig.upstream_account_id || 0),
+    shared_site: createDefaultSharedSiteConfig({
+      ...(templateConfig.shared_site || {}),
+    }),
+    site_rules: (templateConfig.site_rules || []).map((rule) =>
+      createDefaultPricingRule(rule),
+    ),
+    upstream_rules: (templateConfig.upstream_rules || []).map((rule) =>
+      createDefaultPricingRule(rule),
+    ),
+    site_fixed_total_amount: clampNumber(
+      templateConfig.site_fixed_total_amount,
+    ),
+    upstream_fixed_total_amount: clampNumber(
+      templateConfig.upstream_fixed_total_amount,
+    ),
+  };
+};
+
 export const createDefaultDraft = () => ({
   id: '',
   name: '',
@@ -198,6 +308,82 @@ export const createDefaultUpstreamAccountDraft = () => ({
   enabled: true,
 });
 
+export const normalizeUpstreamAccountBaseUrl = (value) => {
+  let next = String(value || '').trim();
+  if (!next) return '';
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(next)) {
+    next = `https://${next}`;
+  }
+  return next.replace(/\/+$/, '');
+};
+
+export const getUpstreamAccountSuggestedName = (baseUrl) => {
+  const normalized = normalizeUpstreamAccountBaseUrl(baseUrl);
+  if (!normalized) return '';
+  try {
+    return new URL(normalized).host.replace(/^www\./i, '');
+  } catch (error) {
+    return normalized
+      .replace(/^[a-z][a-z0-9+.-]*:\/\//i, '')
+      .split('/')[0]
+      .replace(/^www\./i, '');
+  }
+};
+
+export const prepareUpstreamAccountDraftForSave = (
+  draft,
+  { allowSuggestedName = true } = {},
+) => {
+  const baseUrl = normalizeUpstreamAccountBaseUrl(draft?.base_url);
+  const suggestedName = getUpstreamAccountSuggestedName(baseUrl);
+  return {
+    ...draft,
+    name:
+      String(draft?.name || '').trim() ||
+      (allowSuggestedName ? suggestedName : ''),
+    remark: String(draft?.remark || '').trim(),
+    base_url: baseUrl,
+    access_token: String(draft?.access_token || '').trim(),
+    user_id: Number(draft?.user_id || 0),
+  };
+};
+
+export const getUpstreamAccountDraftValidation = (draft, options) => {
+  const prepared = prepareUpstreamAccountDraftForSave(draft, options);
+  const errors = {};
+  if (!prepared.name) {
+    errors.name = '请输入账户名称';
+  }
+  if (!prepared.base_url) {
+    errors.base_url = '请输入上游地址';
+  } else {
+    try {
+      const parsed = new URL(prepared.base_url);
+      if (!['http:', 'https:'].includes(parsed.protocol)) {
+        errors.base_url = '请输入有效的 URL';
+      }
+    } catch (error) {
+      errors.base_url = '请输入有效的 URL';
+    }
+  }
+  if (!Number.isInteger(prepared.user_id) || prepared.user_id <= 0) {
+    errors.user_id = '请输入有效的用户 ID';
+  }
+  if (
+    !prepared.access_token &&
+    !String(prepared?.access_token_masked || '').trim()
+  ) {
+    errors.access_token = '请输入 access token';
+  }
+  const firstError = Object.values(errors)[0] || '';
+  return {
+    prepared,
+    errors,
+    isValid: !firstError,
+    firstError,
+  };
+};
+
 export const getWalletStatusMeta = (status, t) =>
   ({
     ready: { color: 'green', label: t('运行中') },
@@ -207,44 +393,6 @@ export const getWalletStatusMeta = (status, t) =>
     disabled: { color: 'grey', label: t('已停用') },
   })[status] || { color: 'grey', label: t('待同步') };
 
-const createBalanceRulerSegments = (activeKey, muted = false) => {
-  const neutralSegment = 'bg-semi-color-fill-1 text-semi-color-text-2';
-  const activeRing = muted
-    ? 'ring-white/40 dark:ring-white/10 shadow-none'
-    : '';
-
-  const segments = [
-    {
-      key: 'critical',
-      label: '低于 10',
-      className: muted
-        ? neutralSegment
-        : 'bg-red-500/15 text-red-600 dark:text-red-300',
-    },
-    {
-      key: 'warning',
-      label: '10 - 50',
-      className: muted
-        ? neutralSegment
-        : 'bg-amber-500/15 text-amber-600 dark:text-amber-300',
-    },
-    {
-      key: 'healthy',
-      label: '50+',
-      className: muted
-        ? neutralSegment
-        : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300',
-    },
-  ];
-
-  return segments.map((segment) => ({
-    ...segment,
-    active: activeKey === segment.key,
-    ringClass:
-      activeKey === segment.key ? `ring-2 ring-inset ${activeRing}`.trim() : '',
-  }));
-};
-
 export const getBalanceHealthLevel = (account) => {
   const balance = Number(account?.wallet_balance_usd || 0);
 
@@ -252,37 +400,60 @@ export const getBalanceHealthLevel = (account) => {
     return {
       key: 'critical',
       label: '余额紧张',
+      rangeLabel: '告警区 · < 10',
       helper: '当前余额低于 10，建议尽快处理',
       amountTone: 'text-red-600 dark:text-red-400',
+      helperTone: 'text-red-700/90 dark:text-red-200',
       badgeTone:
         'border-red-500/20 bg-red-500/10 text-red-600 dark:text-red-300',
-      panelTone: 'border-red-500/20 bg-red-500/[0.07]',
+      rangeTone:
+        'border-red-500/15 bg-red-500/8 text-red-700 dark:text-red-200',
+      eyebrowTone:
+        'bg-red-500/10 text-red-700 dark:bg-red-500/15 dark:text-red-200',
+      dotTone: 'bg-red-500',
+      panelTone:
+        'border-red-500/25 bg-[linear-gradient(135deg,rgba(239,68,68,0.12),rgba(239,68,68,0.03))]',
     };
   }
   if (balance <= 50) {
     return {
       key: 'warning',
       label: '余额偏低',
+      rangeLabel: '关注区 · 10 - 50',
       helper: '当前余额低于 50，请关注',
       amountTone: 'text-amber-600 dark:text-amber-400',
+      helperTone: 'text-amber-700/90 dark:text-amber-200',
       badgeTone:
         'border-amber-500/20 bg-amber-500/10 text-amber-600 dark:text-amber-300',
-      panelTone: 'border-amber-500/20 bg-amber-500/[0.07]',
+      rangeTone:
+        'border-amber-500/15 bg-amber-500/8 text-amber-700 dark:text-amber-200',
+      eyebrowTone:
+        'bg-amber-500/10 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200',
+      dotTone: 'bg-amber-500',
+      panelTone:
+        'border-amber-500/25 bg-[linear-gradient(135deg,rgba(245,158,11,0.12),rgba(245,158,11,0.03))]',
     };
   }
   return {
     key: 'healthy',
     label: '余额充足',
+    rangeLabel: '安全区 · > 50',
     helper: '当前余额高于 50，可继续使用',
     amountTone: 'text-emerald-600 dark:text-emerald-400',
+    helperTone: 'text-emerald-700/90 dark:text-emerald-200',
     badgeTone:
       'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300',
-    panelTone: 'border-emerald-500/20 bg-emerald-500/[0.07]',
+    rangeTone:
+      'border-emerald-500/15 bg-emerald-500/8 text-emerald-700 dark:text-emerald-200',
+    eyebrowTone:
+      'bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200',
+    dotTone: 'bg-emerald-500',
+    panelTone:
+      'border-emerald-500/25 bg-[linear-gradient(135deg,rgba(16,185,129,0.12),rgba(16,185,129,0.03))]',
   };
 };
 
 export const getAccountBalanceVisualMeta = (account, status, t) => {
-  const balance = Number(account?.wallet_balance_usd || 0);
   const accountStatus = account?.status || '';
   const hasFailedSync = accountStatus === 'failed';
   const isDisabled =
@@ -291,26 +462,36 @@ export const getAccountBalanceVisualMeta = (account, status, t) => {
   if (hasFailedSync) {
     return {
       label: account?.last_success_at ? t('最近有效余额') : t('当前余额'),
+      rangeLabel: t('状态未判定'),
       helper: t('同步失败，余额状态暂不可判断'),
       amountTone: 'text-semi-color-text-0',
+      helperTone: 'text-semi-color-text-1',
       badgeTone:
         'border-semi-color-border bg-semi-color-fill-0 text-semi-color-text-1',
+      rangeTone:
+        'border-semi-color-border bg-semi-color-fill-0 text-semi-color-text-1',
+      eyebrowTone:
+        'bg-semi-color-fill-0 text-semi-color-text-1',
+      dotTone: 'bg-semi-color-text-2',
       panelTone: 'border-semi-color-border bg-semi-color-fill-0',
-      rulerSegments: createBalanceRulerSegments('', true),
-      showMarker: false,
     };
   }
 
   if (isDisabled) {
     return {
       label: t('余额状态暂停'),
+      rangeLabel: t('暂停判断'),
       helper: t('账户已停用，暂不进行余额判断'),
       amountTone: 'text-semi-color-text-0',
+      helperTone: 'text-semi-color-text-1',
       badgeTone:
         'border-semi-color-border bg-semi-color-fill-0 text-semi-color-text-1',
+      rangeTone:
+        'border-semi-color-border bg-semi-color-fill-0 text-semi-color-text-1',
+      eyebrowTone:
+        'bg-semi-color-fill-0 text-semi-color-text-1',
+      dotTone: 'bg-semi-color-text-2',
       panelTone: 'border-semi-color-border bg-semi-color-fill-0',
-      rulerSegments: createBalanceRulerSegments('', true),
-      showMarker: false,
     };
   }
 
@@ -318,12 +499,15 @@ export const getAccountBalanceVisualMeta = (account, status, t) => {
 
   return {
     label: t(health.label),
+    rangeLabel: t(health.rangeLabel),
     helper: t(health.helper),
     amountTone: health.amountTone,
+    helperTone: health.helperTone,
     badgeTone: health.badgeTone,
+    rangeTone: health.rangeTone,
+    eyebrowTone: health.eyebrowTone,
+    dotTone: health.dotTone,
     panelTone: health.panelTone,
-    rulerSegments: createBalanceRulerSegments(health.key),
-    showMarker: balance >= 0,
   };
 };
 

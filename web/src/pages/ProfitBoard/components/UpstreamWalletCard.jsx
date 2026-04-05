@@ -34,35 +34,15 @@ const InfoMetric = ({ label, value }) => (
   </div>
 );
 
-const BalanceRuler = ({ segments, showMarker }) => (
-  <div className='space-y-2'>
-    <div className='grid grid-cols-3 gap-2'>
-      {segments.map((segment) => (
-        <div key={segment.key} className='space-y-1.5'>
-          <div
-            className={`relative h-3 rounded-full transition-all ${segment.className} ${segment.ringClass}`}
-          >
-            {segment.active && showMarker ? (
-              <span className='absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current shadow-sm' />
-            ) : null}
-          </div>
-          <div
-            className={`text-center text-[11px] leading-none ${
-              segment.active ? 'font-semibold text-semi-color-text-0' : ''
-            }`}
-          >
-            {segment.label}
-          </div>
-        </div>
-      ))}
-    </div>
-  </div>
-);
-
 const UpstreamWalletCard = ({
   accounts,
   accountDraft,
-  setAccountDraft,
+  updateAccountDraftField,
+  normalizeAccountDraftBaseUrl,
+  touchAccountDraftField,
+  accountDraftErrors,
+  accountDraftCanSave,
+  accountDraftValidation,
   saveAccount,
   syncAccount,
   syncAllAccounts,
@@ -174,33 +154,38 @@ const UpstreamWalletCard = ({
                 className={`mt-5 rounded-3xl border px-4 py-4 ${balanceMeta.panelTone}`}
               >
                 <div className='flex items-start justify-between gap-3'>
-                  <div>
-                    <Text type='tertiary' size='small'>
+                  <div className='min-w-0 flex-1'>
+                    <span
+                      className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-medium ${balanceMeta.eyebrowTone}`}
+                    >
+                      <span
+                        className={`h-2 w-2 rounded-full ${balanceMeta.dotTone}`}
+                      />
                       {balanceTitle}
-                    </Text>
+                    </span>
                     <div
-                      className={`mt-2 text-3xl font-semibold tabular-nums ${balanceMeta.amountTone}`}
+                      className={`mt-3 text-4xl font-semibold tracking-tight tabular-nums ${balanceMeta.amountTone}`}
                     >
                       {balanceValue}
                     </div>
+                    <div className='mt-3 flex flex-wrap gap-2'>
+                      <span
+                        className={`rounded-full border px-2.5 py-1 text-xs font-medium ${balanceMeta.badgeTone}`}
+                      >
+                        {balanceMeta.label}
+                      </span>
+                      <span
+                        className={`rounded-full border px-2.5 py-1 text-xs font-medium ${balanceMeta.rangeTone}`}
+                      >
+                        {balanceMeta.rangeLabel}
+                      </span>
+                    </div>
                   </div>
-                  <span
-                    className={`rounded-full border px-2.5 py-1 text-xs font-medium ${balanceMeta.badgeTone}`}
-                  >
-                    {balanceMeta.label}
-                  </span>
-                </div>
-
-                <div className='mt-4'>
-                  <BalanceRuler
-                    segments={balanceMeta.rulerSegments}
-                    showMarker={balanceMeta.showMarker}
-                  />
                 </div>
 
                 <Text
                   size='small'
-                  className='mt-3 block leading-5 text-semi-color-text-1'
+                  className={`mt-4 block leading-5 ${balanceMeta.helperTone}`}
                 >
                   {balanceMeta.helper}
                 </Text>
@@ -270,11 +255,17 @@ const UpstreamWalletCard = ({
       visible={sideSheetVisible}
       onClose={closeSideSheet}
       accountDraft={accountDraft}
-      setAccountDraft={setAccountDraft}
+      updateAccountDraftField={updateAccountDraftField}
+      normalizeAccountDraftBaseUrl={normalizeAccountDraftBaseUrl}
+      touchAccountDraftField={touchAccountDraftField}
+      accountDraftErrors={accountDraftErrors}
+      accountDraftCanSave={accountDraftCanSave}
+      accountDraftValidation={accountDraftValidation}
       saveAccount={saveAccount}
       deleteAccount={deleteAccount}
       savingAccount={savingAccount}
       deletingAccountId={deletingAccountId}
+      t={t}
     />
   </Card>
 );

@@ -57,9 +57,13 @@ import {
   createDefaultPricingRule,
   createMetricOptions,
   createPresetRanges,
+  createSuggestedComboName,
   createTrendSpec,
   formatMoney,
-  formatRatio,
+  isLikelyAutoComboName,
+  mergeComboDraftWithTemplate,
+  pickDominantComboModes,
+  pickRecommendedUpstreamAccountId,
 } from './utils';
 
 initVChartSemiTheme({
@@ -76,7 +80,8 @@ const buildBatchOverlapError = (batches, channelMap, tagChannelMap) => {
     for (const channelId of Array.from(new Set(channelIds))) {
       const owner = ownerMap.get(channelId);
       if (owner && owner !== batch.name) {
-        const channelName = channelMap.get(String(channelId))?.name || `#${channelId}`;
+        const channelName =
+          channelMap.get(String(channelId))?.name || `#${channelId}`;
         return `${channelName} 同时出现在组合"${owner}"和"${batch.name}"中，请拆开后再统计`;
       }
       ownerMap.set(channelId, batch.name);
@@ -139,6 +144,7 @@ const ProfitBoardPage = () => {
     restoredState.comboConfigs || [],
   );
   const [editorDraft, setEditorDraft] = useState(null);
+  const [editorNameAuto, setEditorNameAuto] = useState(false);
   const [editingBatchId, setEditingBatchId] = useState('');
   const [editorVisible, setEditorVisible] = useState(false);
   const [editorValidationError, setEditorValidationError] = useState('');
@@ -197,17 +203,32 @@ const ProfitBoardPage = () => {
     [options.upstream_accounts],
   );
 
+  const availableAccounts = useMemo(
+    () =>
+      (options.upstream_accounts || []).filter(
+        (item) => item.enabled !== false,
+      ),
+    [options.upstream_accounts],
+  );
+
   const resolveComboConfig = useCallback(
     (batchId) =>
       comboConfigs.find((item) => item.combo_id === batchId) ||
-      createDefaultComboPricingConfig(batchId, siteConfig, siteConfig, upstreamConfig),
+      createDefaultComboPricingConfig(
+        batchId,
+        siteConfig,
+        siteConfig,
+        upstreamConfig,
+      ),
     [comboConfigs, siteConfig, upstreamConfig],
   );
 
   useEffect(() => {
     setComboConfigs((prev) =>
       batches.map((batch) => {
-        const existing = (prev || []).find((item) => item.combo_id === batch.id);
+        const existing = (prev || []).find(
+          (item) => item.combo_id === batch.id,
+        );
         const fallback = createDefaultComboPricingConfig(
           batch.id,
           siteConfig,
@@ -267,7 +288,13 @@ const ProfitBoardPage = () => {
       errors.push(t('钱包扣减模式必须绑定一个上游账户'));
     }
     return Array.from(new Set(errors));
-  }, [availableAccountIds, batches.length, comboConfigs, duplicateBatchError, t]);
+  }, [
+    availableAccountIds,
+    batches.length,
+    comboConfigs,
+    duplicateBatchError,
+    t,
+  ]);
 
   const queryReady = optionsReady && configReady && batchPayload.length > 0;
 
@@ -352,7 +379,8 @@ const ProfitBoardPage = () => {
         id: draft.id,
         name: draft.name?.trim() || t('未命名组合'),
         scope_type: draft.scope_type,
-        channel_ids: draft.scope_type === 'channel' ? draft.channel_ids || [] : [],
+        channel_ids:
+          draft.scope_type === 'channel' ? draft.channel_ids || [] : [],
         tags: draft.scope_type === 'tag' ? draft.tags || [] : [],
       };
       return buildBatchOverlapError(
@@ -506,7 +534,9 @@ const ProfitBoardPage = () => {
     const filtered =
       viewBatchId === 'all'
         ? report.timeseries || []
-        : (report.timeseries || []).filter((row) => row.batch_id === viewBatchId);
+        : (report.timeseries || []).filter(
+            (row) => row.batch_id === viewBatchId,
+          );
     return filtered.map((row) => ({
       bucket: row.bucket,
       value: Number(row[metricKey] || 0),
@@ -610,9 +640,7 @@ const ProfitBoardPage = () => {
     }
     return {
       emptyReason:
-        channelRows.length <= 1
-          ? t('当前数据按标签聚合后只有一个分组')
-          : '',
+        channelRows.length <= 1 ? t('当前数据按标签聚合后只有一个分组') : '',
       bucketCount: channelRows.length,
     };
   }, [
@@ -673,7 +701,11 @@ const ProfitBoardPage = () => {
         className='w-full overflow-hidden rounded-lg'
         style={{ height: chartHeight }}
       >
-        <VChart spec={{ ...spec, height: chartHeight }} option={CHART_CONFIG} onClick={onClick} />
+        <VChart
+          spec={{ ...spec, height: chartHeight }}
+          option={CHART_CONFIG}
+          onClick={onClick}
+        />
       </div>
     ),
     [chartHeight],
@@ -694,9 +726,7 @@ const ProfitBoardPage = () => {
         renderChart(
           `channel-${analysisMode}-${viewBatchId}-${metricKey}-${channelGroupMode}-${channelRows.length}`,
           channelSpec,
-          handleChartClick(
-            channelGroupMode === 'tag' ? 'tag' : 'channel',
-          ),
+          handleChartClick(channelGroupMode === 'tag' ? 'tag' : 'channel'),
         )
       ) : (
         <Empty
@@ -731,51 +761,91 @@ const ProfitBoardPage = () => {
     ],
   );
 
-  const summaryMetricHelp = useMemo(
-    () => ({
-      request_count: t('当前口径内命中的消费日志数量。'),
-      remote_observed_cost_usd: t('来自上游账户同步到的实际消耗。'),
-    }),
-    [t],
-  );
-  const cumulativeSummaryCards = useMemo(
+  const overviewSummaryCards = useMemo(
     () =>
       !overviewReport?.summary
         ? []
         : [
-            { key: 'configured_site_revenue_usd', title: t('本站配置收入'), value: formatMoney(overviewReport.summary.configured_site_revenue_usd, statusState?.status), icon: <CircleDollarSign size={18} className='text-emerald-600 dark:text-emerald-400' /> },
-            { key: 'upstream_cost_usd', title: t('上游费用'), value: formatMoney(overviewReport.summary.upstream_cost_usd, statusState?.status), icon: <BadgeDollarSign size={18} className='text-amber-600 dark:text-amber-400' /> },
-            { key: 'configured_profit_usd', title: t('配置利润'), value: formatMoney(overviewReport.summary.configured_profit_usd, statusState?.status), icon: <BarChart3 size={18} className='text-sky-600 dark:text-sky-400' /> },
-            { key: 'remote_observed_cost_usd', title: t('上游实际消耗'), value: formatMoney(overviewReport.summary.remote_observed_cost_usd, statusState?.status), icon: <BadgeDollarSign size={18} className='text-rose-600 dark:text-rose-400' /> },
-            { key: 'actual_profit_usd', title: t('实际利润'), value: formatMoney(overviewReport.summary.actual_profit_usd, statusState?.status), icon: <BarChart3 size={18} className='text-violet-600 dark:text-violet-400' /> },
+            {
+              key: 'configured_site_revenue_usd',
+              title: t('本站配置收入'),
+              value: formatMoney(
+                overviewReport.summary.configured_site_revenue_usd,
+                statusState?.status,
+              ),
+              icon: (
+                <CircleDollarSign
+                  size={18}
+                  className='text-emerald-600 dark:text-emerald-400'
+                />
+              ),
+            },
+            {
+              key: 'upstream_cost_usd',
+              title: t('上游费用'),
+              value: formatMoney(
+                overviewReport.summary.upstream_cost_usd,
+                statusState?.status,
+              ),
+              icon: (
+                <BadgeDollarSign
+                  size={18}
+                  className='text-amber-600 dark:text-amber-400'
+                />
+              ),
+            },
+            {
+              key: 'configured_profit_usd',
+              title: t('配置利润'),
+              value: formatMoney(
+                overviewReport.summary.configured_profit_usd,
+                statusState?.status,
+              ),
+              icon: (
+                <BarChart3
+                  size={18}
+                  className='text-sky-600 dark:text-sky-400'
+                />
+              ),
+            },
           ],
     [overviewReport?.summary, statusState?.status, t],
-  );
-  const diagnosticSummaryCards = useMemo(
-    () =>
-      !overviewReport?.summary
-        ? []
-        : [
-            { key: 'request_count', title: t('请求数'), value: overviewReport.summary.request_count },
-            { key: 'configured_profit_coverage_rate', title: t('配置利润覆盖率'), value: formatRatio(overviewReport.summary.configured_profit_coverage_rate) },
-            { key: 'returned_cost_count', title: t('上游返回费用'), value: overviewReport.summary.returned_cost_count },
-            { key: 'manual_cost_count', title: t('手动上游价格'), value: overviewReport.summary.manual_cost_count },
-            { key: 'missing_site_pricing_count', title: t('缺失本站价格'), value: overviewReport.summary.missing_site_pricing_count },
-          ],
-    [overviewReport?.summary, t],
   );
 
   const statusSummary = useMemo(() => {
     const items = [];
     if (autoRefreshing) {
-      items.push({ key: 'refreshing', color: 'cyan', text: t('收益分析刷新中') });
+      items.push({
+        key: 'refreshing',
+        color: 'cyan',
+        text: t('收益分析刷新中'),
+      });
     }
-    if (reportMatchesCurrentFilters) items.push({ key: 'fresh', color: 'blue', text: t('时间分析已同步') });
-    else if (report) items.push({ key: 'stale', color: 'grey', text: t('筛选已变化，等待刷新') });
-    if (overviewReport) items.push({ key: 'overview', color: 'green', text: t('累计总览已更新') });
-    if (activityChecking) items.push({ key: 'watch', color: 'cyan', text: t('低频检查中') });
+    if (reportMatchesCurrentFilters)
+      items.push({ key: 'fresh', color: 'blue', text: t('时间分析已同步') });
+    else if (report)
+      items.push({
+        key: 'stale',
+        color: 'grey',
+        text: t('筛选已变化，等待刷新'),
+      });
+    if (overviewReport)
+      items.push({
+        key: 'overview',
+        color: 'green',
+        text: t('累计总览已更新'),
+      });
+    if (activityChecking)
+      items.push({ key: 'watch', color: 'cyan', text: t('低频检查中') });
     return items;
-  }, [activityChecking, autoRefreshing, overviewReport, report, reportMatchesCurrentFilters, t]);
+  }, [
+    activityChecking,
+    autoRefreshing,
+    overviewReport,
+    report,
+    reportMatchesCurrentFilters,
+    t,
+  ]);
 
   const combinedWarnings = useMemo(
     () =>
@@ -799,7 +869,9 @@ const ProfitBoardPage = () => {
           : batch.tags || [];
       const total = labels.length;
       if (!total) {
-        return batch.scope_type === 'channel' ? t('未选择渠道') : t('未选择标签');
+        return batch.scope_type === 'channel'
+          ? t('未选择渠道')
+          : t('未选择标签');
       }
       const preview = labels.slice(0, 3).join('、');
       return total > 3 ? `${preview}，共 ${total} 项` : preview;
@@ -807,9 +879,108 @@ const ProfitBoardPage = () => {
     [channelMap, t],
   );
 
-  const generatedAtText = reportMatchesCurrentFilters && report?.meta?.generated_at
-    ? timestamp2string(report.meta.generated_at)
-    : t('尚未生成');
+  const getEditorSuggestedName = useCallback(
+    (draft) => {
+      const fallbackName = editingBatchId
+        ? draft?.name?.trim() || t('未命名组合')
+        : `组合 ${batches.length + 1}`;
+      return createSuggestedComboName(draft, channelMap, t, fallbackName);
+    },
+    [batches.length, channelMap, editingBatchId, t],
+  );
+
+  const setEditorDraftSmart = useCallback(
+    (updater) => {
+      setEditorDraft((prev) => {
+        const nextValue =
+          typeof updater === 'function' ? updater(prev) : updater;
+        if (!nextValue) return nextValue;
+
+        const nextDraft = { ...nextValue };
+        if (nextDraft.upstream_mode === 'wallet_observer') {
+          const accountId = Number(nextDraft.upstream_account_id || 0);
+          if (
+            (!accountId || !availableAccountIds.has(accountId)) &&
+            availableAccounts.length === 1
+          ) {
+            nextDraft.upstream_account_id = Number(availableAccounts[0].id);
+          }
+        } else {
+          nextDraft.upstream_account_id = 0;
+        }
+
+        if (editorNameAuto) {
+          nextDraft.name = getEditorSuggestedName(nextDraft);
+        }
+
+        return nextDraft;
+      });
+    },
+    [
+      availableAccountIds,
+      availableAccounts,
+      editorNameAuto,
+      getEditorSuggestedName,
+    ],
+  );
+
+  const handleEditorNameChange = useCallback((value) => {
+    setEditorNameAuto(false);
+    setEditorDraft((prev) => (prev ? { ...prev, name: value } : prev));
+  }, []);
+
+  const handleRegenerateEditorName = useCallback(() => {
+    setEditorNameAuto(true);
+    setEditorDraft((prev) =>
+      prev ? { ...prev, name: getEditorSuggestedName(prev) } : prev,
+    );
+  }, [getEditorSuggestedName]);
+
+  const dominantComboModes = useMemo(
+    () =>
+      pickDominantComboModes(
+        comboConfigs,
+        siteConfig?.pricing_mode === 'site_model'
+          ? 'shared_site_model'
+          : 'manual',
+        upstreamConfig?.upstream_mode || 'manual_rules',
+      ),
+    [comboConfigs, siteConfig?.pricing_mode, upstreamConfig?.upstream_mode],
+  );
+
+  const recommendedAccountId = useMemo(
+    () =>
+      pickRecommendedUpstreamAccountId(
+        comboConfigs,
+        availableAccountIds,
+        editingBatchId,
+      ),
+    [availableAccountIds, comboConfigs, editingBatchId],
+  );
+
+  const recommendedAccount = useMemo(
+    () =>
+      availableAccounts.find(
+        (item) => Number(item.id) === Number(recommendedAccountId || 0),
+      ) || null,
+    [availableAccounts, recommendedAccountId],
+  );
+
+  const copyTemplateOptions = useMemo(
+    () =>
+      batches
+        .filter((batch) => batch.id !== editingBatchId)
+        .map((batch) => ({
+          label: batch.name || t('未命名组合'),
+          value: batch.id,
+        })),
+    [batches, editingBatchId, t],
+  );
+
+  const generatedAtText =
+    reportMatchesCurrentFilters && report?.meta?.generated_at
+      ? timestamp2string(report.meta.generated_at)
+      : t('尚未生成');
   const trendBucketCount = useMemo(
     () => new Set((trendRows || []).map((row) => row.bucket)).size,
     [trendRows],
@@ -823,6 +994,7 @@ const ProfitBoardPage = () => {
     setEditorVisible(false);
     setEditingBatchId('');
     setEditorDraft(null);
+    setEditorNameAuto(false);
     setEditorValidationError('');
   }, []);
 
@@ -841,19 +1013,79 @@ const ProfitBoardPage = () => {
       siteConfig,
       upstreamConfig,
     );
+    const nextDraft = cloneComboDraft(defaultBatch, defaultComboConfig);
     setEditingBatchId('');
-    setEditorDraft(cloneComboDraft(defaultBatch, defaultComboConfig));
+    setEditorNameAuto(true);
+    setEditorDraft({
+      ...nextDraft,
+      name: createSuggestedComboName(
+        nextDraft,
+        channelMap,
+        t,
+        `组合 ${batches.length + 1}`,
+      ),
+    });
     setEditorVisible(true);
-  }, [batches.length, siteConfig, upstreamConfig]);
+  }, [batches.length, channelMap, siteConfig, t, upstreamConfig]);
 
   const openEditBatchModal = useCallback(
     (batch) => {
+      const nextDraft = cloneComboDraft(batch, resolveComboConfig(batch.id));
+      const suggestedName = createSuggestedComboName(
+        nextDraft,
+        channelMap,
+        t,
+        batch.name || t('未命名组合'),
+      );
       setEditingBatchId(batch.id);
-      setEditorDraft(cloneComboDraft(batch, resolveComboConfig(batch.id)));
+      setEditorNameAuto(isLikelyAutoComboName(batch.name, suggestedName));
+      setEditorDraft(nextDraft);
       setEditorVisible(true);
     },
-    [resolveComboConfig],
+    [channelMap, resolveComboConfig, t],
   );
+
+  const handleApplyRecommendedModes = useCallback(() => {
+    setEditorDraftSmart((prev) =>
+      prev
+        ? {
+            ...prev,
+            site_mode: dominantComboModes.site_mode,
+            upstream_mode: dominantComboModes.upstream_mode,
+          }
+        : prev,
+    );
+  }, [
+    dominantComboModes.site_mode,
+    dominantComboModes.upstream_mode,
+    setEditorDraftSmart,
+  ]);
+
+  const handleApplyTemplate = useCallback(
+    (templateBatchId) => {
+      const templateConfig = comboConfigs.find(
+        (item) => item.combo_id === templateBatchId,
+      );
+      if (!templateConfig) return;
+      setEditorDraftSmart((prev) =>
+        mergeComboDraftWithTemplate(prev, templateConfig),
+      );
+    },
+    [comboConfigs, setEditorDraftSmart],
+  );
+
+  const handleApplyRecommendedAccount = useCallback(() => {
+    if (!recommendedAccountId) return;
+    setEditorDraftSmart((prev) =>
+      prev
+        ? {
+            ...prev,
+            upstream_mode: 'wallet_observer',
+            upstream_account_id: Number(recommendedAccountId),
+          }
+        : prev,
+    );
+  }, [recommendedAccountId, setEditorDraftSmart]);
 
   const handleSaveEditor = useCallback(() => {
     const error = buildDraftValidationError(editorDraft);
@@ -864,10 +1096,14 @@ const ProfitBoardPage = () => {
     }
     const nextBatch = {
       id: editorDraft.id,
-      name: editorDraft.name?.trim() || `组合 ${batches.length + (editingBatchId ? 0 : 1)}`,
+      name:
+        editorDraft.name?.trim() ||
+        `组合 ${batches.length + (editingBatchId ? 0 : 1)}`,
       scope_type: editorDraft.scope_type,
       channel_ids:
-        editorDraft.scope_type === 'channel' ? editorDraft.channel_ids || [] : [],
+        editorDraft.scope_type === 'channel'
+          ? editorDraft.channel_ids || []
+          : [],
       tags: editorDraft.scope_type === 'tag' ? editorDraft.tags || [] : [],
     };
     const nextComboConfig = {
@@ -945,22 +1181,48 @@ const ProfitBoardPage = () => {
     }
   }, [saveConfig, validationErrors]);
 
+  const editorSmartSuggestions = useMemo(() => {
+    if (!editorDraft) return null;
+
+    const suggestedName = getEditorSuggestedName(editorDraft);
+    const currentAccountId = Number(editorDraft.upstream_account_id || 0);
+    const recommendedModeLabel = `${dominantComboModes.site_mode === 'shared_site_model' ? t('本站模型价格') : t('手动定价')} / ${dominantComboModes.upstream_mode === 'wallet_observer' ? t('钱包余额变化') : t('模型单价')}`;
+
+    return {
+      suggestedName,
+      canApplySuggestedName:
+        !!suggestedName &&
+        (!editorNameAuto || (editorDraft.name?.trim() || '') !== suggestedName),
+      copyTemplateOptions,
+      shouldRecommendModes:
+        editorDraft.site_mode !== dominantComboModes.site_mode ||
+        editorDraft.upstream_mode !== dominantComboModes.upstream_mode,
+      recommendedModeLabel,
+      recommendedAccountName: recommendedAccount?.name || '',
+      shouldRecommendAccount:
+        !!recommendedAccount &&
+        (editorDraft.upstream_mode !== 'wallet_observer' ||
+          currentAccountId !== Number(recommendedAccount.id)),
+    };
+  }, [
+    copyTemplateOptions,
+    dominantComboModes.site_mode,
+    dominantComboModes.upstream_mode,
+    editorDraft,
+    editorNameAuto,
+    getEditorSuggestedName,
+    recommendedAccount,
+    t,
+  ]);
+
   const overviewPanelProps = {
     overviewQuerying,
     autoRefreshing,
     queryReady,
     overviewReport,
-    report,
-    reportMatchesCurrentFilters,
-    cumulativeSummaryCards,
-    diagnosticSummaryCards,
-    summaryMetricHelp,
+    overviewSummaryCards,
     formatMoney,
     status: statusState?.status,
-    datePresets: createPresetRanges(t),
-    dateRange,
-    setDateRange,
-    validationErrors,
     t,
   };
 
@@ -977,6 +1239,9 @@ const ProfitBoardPage = () => {
     setGranularity,
     customIntervalMinutes,
     setCustomIntervalMinutes,
+    datePresets: createPresetRanges(t),
+    dateRange,
+    setDateRange,
     detailFilter,
     clearDetailFilter: () => {
       setDetailFilter(null);
@@ -994,6 +1259,7 @@ const ProfitBoardPage = () => {
     chartContent,
     trendBucketCount,
     tagAggregationHint: tagAggregationMeta.emptyReason,
+    validationErrors,
     t,
   };
 
@@ -1015,7 +1281,12 @@ const ProfitBoardPage = () => {
   const walletCardProps = {
     accounts: accountsHook.accounts,
     accountDraft: accountsHook.accountDraft,
-    setAccountDraft: accountsHook.setAccountDraft,
+    updateAccountDraftField: accountsHook.updateAccountDraftField,
+    normalizeAccountDraftBaseUrl: accountsHook.normalizeAccountDraftBaseUrl,
+    touchAccountDraftField: accountsHook.touchAccountDraftField,
+    accountDraftErrors: accountsHook.accountDraftErrors,
+    accountDraftCanSave: accountsHook.accountDraftCanSave,
+    accountDraftValidation: accountsHook.accountDraftValidation,
     editingAccountId: accountsHook.editingAccountId,
     setEditingAccountId: accountsHook.setEditingAccountId,
     saveAccount: accountsHook.saveAccount,
@@ -1039,7 +1310,13 @@ const ProfitBoardPage = () => {
     visible: editorVisible,
     isEditing: !!editingBatchId,
     comboConfig: editorDraft,
-    setComboConfig: setEditorDraft,
+    setComboConfig: setEditorDraftSmart,
+    onNameChange: handleEditorNameChange,
+    onRegenerateName: handleRegenerateEditorName,
+    onApplyRecommendedModes: handleApplyRecommendedModes,
+    onApplyTemplate: handleApplyTemplate,
+    onApplyRecommendedAccount: handleApplyRecommendedAccount,
+    smartSuggestions: editorSmartSuggestions,
     channelOptions,
     tagOptions,
     modelNameOptions,

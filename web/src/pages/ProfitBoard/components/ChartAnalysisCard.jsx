@@ -21,6 +21,7 @@ import {
   Banner,
   Button,
   Card,
+  DatePicker,
   Empty,
   InputNumber,
   Radio,
@@ -46,6 +47,9 @@ const ChartAnalysisCard = ({
   setGranularity,
   customIntervalMinutes,
   setCustomIntervalMinutes,
+  datePresets,
+  dateRange,
+  setDateRange,
   detailFilter,
   clearDetailFilter,
   runQuery,
@@ -60,6 +64,7 @@ const ChartAnalysisCard = ({
   chartContent,
   trendBucketCount,
   tagAggregationHint,
+  validationErrors,
   t,
 }) => {
   const clearAllFilters = () => {
@@ -77,9 +82,14 @@ const ChartAnalysisCard = ({
       className='rounded-xl'
       bodyStyle={{ paddingTop: 12 }}
       title={
-        <Text strong className='text-base'>
-          {t('图表分析')}
-        </Text>
+        <div className='flex flex-col gap-1 py-1'>
+          <Text strong className='text-base'>
+            {t('时间范围分析')}
+          </Text>
+          <Text type='tertiary' size='small'>
+            {t('分析时间范围只影响本区图表和明细')}
+          </Text>
+        </div>
       }
       headerExtraContent={
         <Space>
@@ -103,87 +113,125 @@ const ChartAnalysisCard = ({
         </Space>
       }
     >
-      {/* 筛选项 - 紧凑的行内布局 */}
-      <div className='flex flex-wrap items-end gap-3'>
-        <div className='min-w-[140px]'>
-          <Text type='tertiary' size='small' className='mb-1 block'>
-            {t('分析模式')}
-          </Text>
-          <Select
-            value={analysisMode}
-            onChange={setAnalysisMode}
-            optionList={[
-              { label: t('经营对比'), value: 'business_compare' },
-              { label: t('单指标分析'), value: 'single_metric' },
-            ]}
-            size='small'
-            style={{ width: 140 }}
-          />
-        </div>
-        {analysisMode === 'single_metric' && (
-          <div className='min-w-[140px]'>
-            <Text type='tertiary' size='small' className='mb-1 block'>
-              {t('指标')}
+      <div className='rounded-lg border border-semi-color-border bg-semi-color-fill-0 p-3'>
+        <div className='space-y-3'>
+          <div>
+            <Text type='tertiary' size='small' className='mb-2 block'>
+              {t('分析时间范围')}
             </Text>
-            <Select
-              value={metricKey}
-              onChange={setMetricKey}
-              optionList={metricOptions.map((item) => ({
-                label: t(item.label),
-                value: item.value,
-              }))}
-              size='small'
-              style={{ width: 140 }}
-            />
+            <div className='flex flex-col gap-3 xl:flex-row xl:items-center'>
+              <div className='flex flex-wrap gap-1.5'>
+                {datePresets.map((item) => (
+                  <Button
+                    key={item.label}
+                    type='tertiary'
+                    size='small'
+                    onClick={() => setDateRange(item.value)}
+                  >
+                    {t(item.label)}
+                  </Button>
+                ))}
+              </div>
+              <DatePicker
+                type='dateTimeRange'
+                value={dateRange}
+                onChange={(value) => setDateRange(value)}
+                style={{ width: '100%' }}
+                className='w-full xl:min-w-[340px] xl:flex-1'
+              />
+            </div>
           </div>
-        )}
-        <div className='min-w-[130px]'>
-          <Text type='tertiary' size='small' className='mb-1 block'>
-            {t('组合')}
-          </Text>
-          <Select
-            value={viewBatchId}
-            onChange={setViewBatchId}
-            optionList={batchSummaryOptions}
-            size='small'
-            style={{ width: 130 }}
-          />
-        </div>
-        <div className='min-w-[120px]'>
-          <Text type='tertiary' size='small' className='mb-1 block'>
-            {t('粒度')}
-          </Text>
-          <Select
-            value={granularity}
-            onChange={setGranularity}
-            optionList={[
-              { label: t('按小时'), value: 'hour' },
-              { label: t('按天'), value: 'day' },
-              { label: t('按周'), value: 'week' },
-              { label: t('按月'), value: 'month' },
-              { label: t('自定义'), value: 'custom' },
-            ]}
-            size='small'
-            style={{ width: 120 }}
-          />
-        </div>
-        {granularity === 'custom' && (
-          <div className='min-w-[120px]'>
-            <Text type='tertiary' size='small' className='mb-1 block'>
-              {t('间隔')}
-            </Text>
-            <InputNumber
-              min={1}
-              value={customIntervalMinutes}
-              onChange={(value) =>
-                setCustomIntervalMinutes(Math.max(Number(value || 1), 1))
-              }
-              suffix={t('分钟')}
-              size='small'
-              style={{ width: 120 }}
+
+          {validationErrors.length > 0 ? (
+            <Banner
+              type='danger'
+              description={validationErrors[0]}
+              closeIcon={null}
             />
+          ) : null}
+
+          <div className='flex flex-wrap items-end gap-3'>
+            <div className='min-w-[140px]'>
+              <Text type='tertiary' size='small' className='mb-1 block'>
+                {t('分析模式')}
+              </Text>
+              <Select
+                value={analysisMode}
+                onChange={setAnalysisMode}
+                optionList={[
+                  { label: t('经营对比'), value: 'business_compare' },
+                  { label: t('单指标分析'), value: 'single_metric' },
+                ]}
+                size='small'
+                style={{ width: 140 }}
+              />
+            </div>
+            {analysisMode === 'single_metric' && (
+              <div className='min-w-[140px]'>
+                <Text type='tertiary' size='small' className='mb-1 block'>
+                  {t('指标')}
+                </Text>
+                <Select
+                  value={metricKey}
+                  onChange={setMetricKey}
+                  optionList={metricOptions.map((item) => ({
+                    label: t(item.label),
+                    value: item.value,
+                  }))}
+                  size='small'
+                  style={{ width: 140 }}
+                />
+              </div>
+            )}
+            <div className='min-w-[130px]'>
+              <Text type='tertiary' size='small' className='mb-1 block'>
+                {t('组合')}
+              </Text>
+              <Select
+                value={viewBatchId}
+                onChange={setViewBatchId}
+                optionList={batchSummaryOptions}
+                size='small'
+                style={{ width: 130 }}
+              />
+            </div>
+            <div className='min-w-[120px]'>
+              <Text type='tertiary' size='small' className='mb-1 block'>
+                {t('粒度')}
+              </Text>
+              <Select
+                value={granularity}
+                onChange={setGranularity}
+                optionList={[
+                  { label: t('按小时'), value: 'hour' },
+                  { label: t('按天'), value: 'day' },
+                  { label: t('按周'), value: 'week' },
+                  { label: t('按月'), value: 'month' },
+                  { label: t('自定义'), value: 'custom' },
+                ]}
+                size='small'
+                style={{ width: 120 }}
+              />
+            </div>
+            {granularity === 'custom' && (
+              <div className='min-w-[120px]'>
+                <Text type='tertiary' size='small' className='mb-1 block'>
+                  {t('间隔')}
+                </Text>
+                <InputNumber
+                  min={1}
+                  value={customIntervalMinutes}
+                  onChange={(value) =>
+                    setCustomIntervalMinutes(Math.max(Number(value || 1), 1))
+                  }
+                  suffix={t('分钟')}
+                  size='small'
+                  style={{ width: 120 }}
+                />
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
 
       <Tabs

@@ -5,7 +5,7 @@ import { Plus, Trash2 } from 'lucide-react';
 const { Text } = Typography;
 
 const PriceInput = ({ label, value, onChange, clampNumber }) => (
-  <div>
+  <div className='rounded-xl border border-semi-color-border bg-semi-color-bg-1 p-3'>
     <Text type='tertiary' size='small' className='mb-1 block'>
       {label}
     </Text>
@@ -36,7 +36,9 @@ const PricingRuleList = ({
 }) => (
   <div className='space-y-3'>
     <div className='space-y-0.5'>
-      <Text strong size='small'>{title}</Text>
+      <Text strong size='small'>
+        {title}
+      </Text>
       {description ? (
         <Text type='tertiary' size='small' className='block'>
           {description}
@@ -47,10 +49,28 @@ const PricingRuleList = ({
     {(rules || []).map((rule, index) => (
       <div
         key={`${comboId}-${field}-${index}`}
-        className='rounded-xl border border-semi-color-border bg-semi-color-fill-0 p-3'
+        className='rounded-2xl border border-semi-color-border bg-semi-color-fill-0 p-4'
       >
-        <div className='flex flex-wrap items-center gap-2'>
-          <div className='min-w-[180px] flex-1'>
+        <div className='flex flex-wrap items-start justify-between gap-3'>
+          <div className='min-w-0 flex-1'>
+            <div className='mb-2 flex flex-wrap items-center gap-2'>
+              <Text strong size='small'>
+                {t('规则 {{index}}', { index: index + 1 })}
+              </Text>
+              {rule.is_default ? (
+                <Tag color='blue' size='small'>
+                  {t('默认')}
+                </Tag>
+              ) : null}
+              {rule.is_custom ? (
+                <Tag color='orange' size='small'>
+                  {t('自定义')}
+                </Tag>
+              ) : null}
+            </div>
+            <Text type='tertiary' size='small' className='mb-1.5 block'>
+              {t('模型')}
+            </Text>
             <Select
               allowCreate
               filter
@@ -73,22 +93,19 @@ const PricingRuleList = ({
               style={{ width: '100%' }}
             />
           </div>
-          {rule.is_default && (
-            <Tag color='blue' size='small'>{t('默认')}</Tag>
-          )}
-          {rule.is_custom && (
-            <Tag color='orange' size='small'>{t('自定义')}</Tag>
-          )}
+
           <Button
             type='danger'
             theme='borderless'
             icon={<Trash2 size={13} />}
             size='small'
             onClick={() => onRemove(comboId, field, index)}
-          />
+          >
+            {t('删除')}
+          </Button>
         </div>
 
-        <div className='mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4'>
+        <div className='mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
           <PriceInput
             label={t('输入')}
             value={rule.input_price}
@@ -128,7 +145,8 @@ const PricingRuleList = ({
     ))}
 
     <Button
-      type='tertiary'
+      type='primary'
+      theme='light'
       size='small'
       icon={<Plus size={14} />}
       onClick={() => onAdd(comboId, field)}
