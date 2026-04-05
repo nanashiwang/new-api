@@ -132,8 +132,15 @@ export const useUpstreamAccounts = ({
       setAccountTrend(null);
       return;
     }
+    const currentAccount = accounts.find(
+      (item) => item.id === Number(editingAccountId || 0),
+    );
+    if (currentAccount?.resource_display_mode === 'wallet') {
+      setAccountTrend(null);
+      return;
+    }
     loadAccountTrend(editingAccountId);
-  }, [detailSideSheetVisible, editingAccountId, loadAccountTrend]);
+  }, [accounts, detailSideSheetVisible, editingAccountId, loadAccountTrend]);
 
   const resetAccountDraftUiState = useCallback(() => {
     setAccountDraftTouched({});
@@ -238,6 +245,7 @@ export const useUpstreamAccounts = ({
         user_id: account.user_id || 0,
         access_token: '',
         access_token_masked: account.access_token_masked || '',
+        resource_display_mode: account.resource_display_mode || 'both',
         low_balance_threshold_usd: account.low_balance_threshold_usd || 0,
         enabled: account.enabled !== false,
       });

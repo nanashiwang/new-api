@@ -796,23 +796,6 @@ func profitBoardRemoteSnapshotDelta(prev ProfitBoardRemoteSnapshot, curr ProfitB
 	} else {
 		warnings = append(warnings, "远端钱包已用额度出现回退，当前时间段的钱包观测成本已按 0 处理")
 	}
-
-	prevSubs := make(map[int]ProfitBoardRemoteSubscriptionSnapshot)
-	for _, item := range parseProfitBoardRemoteSubscriptions(prev.SubscriptionStates) {
-		prevSubs[item.SubscriptionID] = item
-	}
-	for _, currentSub := range parseProfitBoardRemoteSubscriptions(curr.SubscriptionStates) {
-		previousSub, ok := prevSubs[currentSub.SubscriptionID]
-		if !ok {
-			continue
-		}
-		delta, anomaly := profitBoardRemoteSubscriptionDelta(previousSub, currentSub)
-		if anomaly {
-			warnings = append(warnings, fmt.Sprintf("远端订阅 #%d 已用额度出现异常回退，当前时间段的订阅观测成本已按 0 处理", currentSub.SubscriptionID))
-			continue
-		}
-		totalDelta += delta
-	}
 	return totalDelta, warnings
 }
 

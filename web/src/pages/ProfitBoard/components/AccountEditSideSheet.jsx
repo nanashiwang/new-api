@@ -22,6 +22,7 @@ import {
   Input,
   InputNumber,
   Modal,
+  Select,
   SideSheet,
   Switch,
   Typography,
@@ -80,6 +81,7 @@ const AccountEditSideSheet = ({
 }) => {
   const isEditing = !!accountDraft.id;
   const preparedDraft = accountDraftValidation?.prepared || accountDraft;
+  const displayMode = preparedDraft.resource_display_mode || 'both';
   const suggestedName = getUpstreamAccountSuggestedName(accountDraft.base_url);
   const showAutoNameHint =
     !isEditing &&
@@ -254,20 +256,41 @@ const AccountEditSideSheet = ({
           </div>
 
           <div className='flex items-center justify-between rounded-xl border border-semi-color-border bg-semi-color-fill-0 px-3 py-2.5'>
-              <div>
-                <Text strong size='small'>{t('启用账户')}</Text>
-                <Text type='tertiary' size='small' className='ml-2'>
-                  {t('关闭后会保留配置，但不再参与余额判断')}
-                </Text>
-              </div>
-              <Switch
-                checked={accountDraft.enabled !== false}
-                onChange={(checked) =>
-                  updateAccountDraftField('enabled', checked)
-                }
-                size='small'
-              />
+            <div>
+              <Text strong size='small'>{t('启用账户')}</Text>
+              <Text type='tertiary' size='small' className='ml-2'>
+                {t('关闭后会保留配置，但不再参与余额判断')}
+              </Text>
             </div>
+            <Switch
+              checked={accountDraft.enabled !== false}
+              onChange={(checked) =>
+                updateAccountDraftField('enabled', checked)
+              }
+              size='small'
+            />
+          </div>
+
+          <div>
+            <Text type='tertiary' size='small' className='mb-1 block'>
+              {t('卡片展示')}
+            </Text>
+            <Select
+              value={displayMode}
+              onChange={(value) =>
+                updateAccountDraftField('resource_display_mode', value)
+              }
+              optionList={[
+                { label: t('同时显示钱包和订阅'), value: 'both' },
+                { label: t('只显示钱包'), value: 'wallet' },
+                { label: t('只显示订阅'), value: 'subscription' },
+              ]}
+              style={{ width: '100%' }}
+            />
+            <FieldMessage
+              message={t('用来控制卡片和详情里展示的钱包/订阅信息')}
+            />
+          </div>
 
           <div>
             <Text type='tertiary' size='small' className='mb-1 block'>

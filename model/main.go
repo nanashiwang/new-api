@@ -309,6 +309,9 @@ func migrateDB() error {
 		if err := ensureSellableTokenOrderColumnsSQLite(); err != nil {
 			return err
 		}
+		if err := ensureProfitBoardUpstreamAccountColumnsSQLite(); err != nil {
+			return err
+		}
 	} else {
 		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
 			return err
@@ -396,6 +399,9 @@ func migrateDBFast() error {
 			return err
 		}
 		if err := ensureSellableTokenOrderColumnsSQLite(); err != nil {
+			return err
+		}
+		if err := ensureProfitBoardUpstreamAccountColumnsSQLite(); err != nil {
 			return err
 		}
 	} else {
@@ -634,6 +640,38 @@ func ensureRedemptionColumnsSQLite() error {
 	required := []sqliteColumnDef{
 		{Name: "benefit_type", DDL: "`benefit_type` varchar(32) NOT NULL DEFAULT 'quota'"},
 		{Name: "sellable_token_product_id", DDL: "`sellable_token_product_id` integer DEFAULT 0"},
+	}
+	for _, col := range required {
+		if _, ok := existing[col.Name]; ok {
+			continue
+		}
+		if err := DB.Exec("ALTER TABLE `" + tableName + "` ADD COLUMN " + col.DDL).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ensureProfitBoardUpstreamAccountColumnsSQLite() error {
+	if !common.UsingSQLite {
+		return nil
+	}
+	tableName := "profit_board_upstream_accounts"
+	if !DB.Migrator().HasTable(tableName) {
+		return nil
+	}
+	var cols []struct {
+		Name string `gorm:"column:name"`
+	}
+	if err := DB.Raw("PRAGMA table_info(`" + tableName + "`)").Scan(&cols).Error; err != nil {
+		return err
+	}
+	existing := make(map[string]struct{}, len(cols))
+	for _, c := range cols {
+		existing[c.Name] = struct{}{}
+	}
+	required := []sqliteColumnDef{
+		{Name: "resource_display_mode", DDL: "`resource_display_mode` varchar(24) DEFAULT 'both'"},
 	}
 	for _, col := range required {
 		if _, ok := existing[col.Name]; ok {

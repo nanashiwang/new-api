@@ -32,6 +32,7 @@ type ProfitBoardUpstreamAccount struct {
 	AccessTokenMasked      string  `json:"access_token_masked,omitempty" gorm:"-"`
 	AccessTokenEncrypted   string  `json:"-" gorm:"type:text;not null"`
 	Enabled                bool    `json:"enabled" gorm:"default:true"`
+	ResourceDisplayMode    string  `json:"resource_display_mode" gorm:"type:varchar(24);default:both"`
 	LowBalanceThresholdUSD float64 `json:"low_balance_threshold_usd" gorm:"type:decimal(18,6);default:0"`
 	CreatedAt              int64   `json:"created_at" gorm:"bigint;index"`
 	UpdatedAt              int64   `json:"updated_at" gorm:"bigint;index"`
@@ -45,6 +46,7 @@ type ProfitBoardUpstreamAccountOption struct {
 	BaseURL                      string  `json:"base_url"`
 	UserID                       int     `json:"user_id"`
 	Enabled                      bool    `json:"enabled"`
+	ResourceDisplayMode          string  `json:"resource_display_mode"`
 	AccessTokenMasked            string  `json:"access_token_masked,omitempty"`
 	Status                       string  `json:"status,omitempty"`
 	ErrorMessage                 string  `json:"error_message,omitempty"`
@@ -169,6 +171,17 @@ func (a *ProfitBoardUpstreamAccount) BeforeUpdate(tx *gorm.DB) error {
 	return nil
 }
 
+func normalizeProfitBoardUpstreamAccountResourceDisplayMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case ProfitBoardResourceDisplayWallet:
+		return ProfitBoardResourceDisplayWallet
+	case ProfitBoardResourceDisplaySubscription:
+		return ProfitBoardResourceDisplaySubscription
+	default:
+		return ProfitBoardResourceDisplayBoth
+	}
+}
+
 func normalizeProfitBoardUpstreamAccount(account ProfitBoardUpstreamAccount) ProfitBoardUpstreamAccount {
 	account.Name = strings.TrimSpace(account.Name)
 	account.Remark = strings.TrimSpace(account.Remark)
@@ -184,6 +197,7 @@ func normalizeProfitBoardUpstreamAccount(account ProfitBoardUpstreamAccount) Pro
 	if account.LowBalanceThresholdUSD < 0 {
 		account.LowBalanceThresholdUSD = 0
 	}
+	account.ResourceDisplayMode = normalizeProfitBoardUpstreamAccountResourceDisplayMode(account.ResourceDisplayMode)
 	return account
 }
 
@@ -236,6 +250,7 @@ func buildProfitBoardUpstreamAccountOption(
 	account ProfitBoardUpstreamAccount,
 	state ProfitBoardRemoteObserverState,
 ) ProfitBoardUpstreamAccountOption {
+	account = normalizeProfitBoardUpstreamAccount(account)
 	threshold := roundProfitBoardAmount(account.LowBalanceThresholdUSD)
 	lowBalanceAlert := threshold > 0 && state.WalletBalanceUSD <= threshold
 	return ProfitBoardUpstreamAccountOption{
@@ -246,6 +261,7 @@ func buildProfitBoardUpstreamAccountOption(
 		BaseURL:                      account.BaseURL,
 		UserID:                       account.UserID,
 		Enabled:                      account.Enabled,
+		ResourceDisplayMode:          account.ResourceDisplayMode,
 		AccessTokenMasked:            maskProfitBoardRemoteSecret(statefulProfitBoardUpstreamToken(account)),
 		Status:                       state.Status,
 		ErrorMessage:                 state.ErrorMessage,
@@ -393,6 +409,7 @@ func SaveProfitBoardUpstreamAccount(account ProfitBoardUpstreamAccount) (*Profit
 		existing.UserID = account.UserID
 		existing.AccessTokenEncrypted = account.AccessTokenEncrypted
 		existing.Enabled = account.Enabled
+		existing.ResourceDisplayMode = account.ResourceDisplayMode
 		existing.LowBalanceThresholdUSD = account.LowBalanceThresholdUSD
 		if err := DB.Save(&existing).Error; err != nil {
 			return nil, err

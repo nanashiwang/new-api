@@ -18,14 +18,13 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import React from 'react';
 import { Empty, SideSheet, Spin, Tag, Typography } from '@douyinfe/semi-ui';
-import { VChart } from '@visactor/react-vchart';
 import dayjs from 'dayjs';
 import {
-  createAccountUsageTrendSpec,
   formatUpstreamExpiryDate,
   formatUpstreamSubscriptionRemaining,
   getAccountResourceSummaryTones,
   getUpstreamAccountSuggestedName,
+  normalizeUpstreamAccountResourceDisplayMode,
 } from '../utils';
 
 const { Text, Title } = Typography;
@@ -107,10 +106,13 @@ const AccountDetailSideSheet = ({
   const subscriptions = accountTrend?.subscriptions || [];
   const summaryTones = getAccountResourceSummaryTones(account);
   const domainLabel = getUpstreamAccountSuggestedName(account?.base_url);
-  const chartSpec =
-    accountTrend?.points?.length > 0
-      ? createAccountUsageTrendSpec(accountTrend.points, status, t)
-      : null;
+  const resourceDisplayMode = normalizeUpstreamAccountResourceDisplayMode(
+    account?.resource_display_mode,
+  );
+  const showWallet =
+    resourceDisplayMode === 'both' || resourceDisplayMode === 'wallet';
+  const showSubscription =
+    resourceDisplayMode === 'both' || resourceDisplayMode === 'subscription';
 
   return (
     <SideSheet
@@ -137,71 +139,65 @@ const AccountDetailSideSheet = ({
                 ) : null}
               </div>
               <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
-                <SummaryItem
-                  label={t('钱包剩余')}
-                  value={formatMoney(account.wallet_balance_usd, status)}
-                  tone={summaryTones.wallet}
-                />
-                <SummaryItem
-                  label={t('钱包已用')}
-                  value={formatMoney(account.wallet_used_total_usd, status)}
-                />
-                <SummaryItem
-                  label={t('订阅剩余')}
-                  value={formatUpstreamSubscriptionRemaining(account, status, t)}
-                  tone={summaryTones.subscription}
-                />
-                <SummaryItem
-                  label={t('最早到期')}
-                  value={formatUpstreamExpiryDate(
-                    account.subscription_earliest_expire_at,
-                    t,
-                  )}
-                />
+                {showWallet ? (
+                  <SummaryItem
+                    label={t('钱包剩余')}
+                    value={formatMoney(account.wallet_balance_usd, status)}
+                    tone={summaryTones.wallet}
+                  />
+                ) : null}
+                {showWallet ? (
+                  <SummaryItem
+                    label={t('累计已用')}
+                    value={formatMoney(account.wallet_used_total_usd, status)}
+                  />
+                ) : null}
+                {showSubscription ? (
+                  <SummaryItem
+                    label={t('订阅剩余')}
+                    value={formatUpstreamSubscriptionRemaining(account, status, t)}
+                    tone={summaryTones.subscription}
+                  />
+                ) : null}
+                {showSubscription ? (
+                  <SummaryItem
+                    label={t('最早到期')}
+                    value={formatUpstreamExpiryDate(
+                      account.subscription_earliest_expire_at,
+                      t,
+                    )}
+                  />
+                ) : null}
               </div>
             </div>
 
-            <div className='rounded-2xl border border-semi-color-border bg-semi-color-bg-1 p-4'>
-              <div className='mb-3'>
-                <Title heading={6} style={{ margin: 0 }}>
-                  {t('近 7 天已用趋势')}
-                </Title>
-              </div>
-              {chartSpec ? (
-                <VChart spec={chartSpec} style={{ height: 260 }} />
-              ) : (
-                <Empty image={null} description={t('当前暂无趋势数据')} />
-              )}
-            </div>
-
-            <div className='rounded-2xl border border-semi-color-border bg-semi-color-bg-1 p-4'>
-              <div className='mb-3'>
-                <Title heading={6} style={{ margin: 0 }}>
-                  {t('订阅明细')}
-                </Title>
-                <Text type='tertiary' size='small' className='mt-1 block'>
-                  {t('按最早到期时间排序')}
-                </Text>
-              </div>
-              {subscriptions.length > 0 ? (
-                <div className='space-y-3'>
-                  {subscriptions.map((item) => (
-                    <SubscriptionRow
-                      key={item.subscription_id}
-                      item={item}
-                      formatMoney={formatMoney}
-                      status={status}
-                      t={t}
-                    />
-                  ))}
+            {showSubscription ? (
+              <div className='rounded-2xl border border-semi-color-border bg-semi-color-bg-1 p-4'>
+                <div className='mb-3'>
+                  <Title heading={6} style={{ margin: 0 }}>
+                    {t('订阅明细')}
+                  </Title>
+                  <Text type='tertiary' size='small' className='mt-1 block'>
+                    {t('按最早到期时间排序')}
+                  </Text>
                 </div>
-              ) : (
-                <Empty
-                  image={null}
-                  description={t('未获取到订阅数据')}
-                />
-              )}
-            </div>
+                {subscriptions.length > 0 ? (
+                  <div className='space-y-3'>
+                    {subscriptions.map((item) => (
+                      <SubscriptionRow
+                        key={item.subscription_id}
+                        item={item}
+                        formatMoney={formatMoney}
+                        status={status}
+                        t={t}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <Empty image={null} description={t('未获取到订阅数据')} />
+                )}
+              </div>
+            ) : null}
           </div>
         ) : (
           <Empty image={null} description={t('请选择一个账户')} />

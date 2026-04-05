@@ -782,6 +782,9 @@ func TestBuildProfitBoardUpstreamAccountStateUsesWalletSnapshotKey(t *testing.T)
 	if options[0].Status != profitBoardRemoteObserverStatusReady || !options[0].BaselineReady {
 		t.Fatalf("unexpected option status: %+v", options[0])
 	}
+	if options[0].ResourceDisplayMode != ProfitBoardResourceDisplayBoth {
+		t.Fatalf("unexpected resource display mode: %+v", options[0])
+	}
 	if options[0].WalletBalanceUSD != 0.8 || options[0].WalletQuotaUSD != 0.8 {
 		t.Fatalf("unexpected wallet balance: %+v", options[0])
 	}
@@ -904,13 +907,13 @@ func TestCollectProfitBoardRemoteObserverAggregateUsesUsedQuotaDelta(t *testing.
 		t.Fatalf("collectProfitBoardRemoteObserverAggregate: %v", err)
 	}
 
-	if aggregate.TotalCostUSD != 0.13 {
+	if aggregate.TotalCostUSD != 0.08 {
 		t.Fatalf("unexpected remote observed cost: %v", aggregate.TotalCostUSD)
 	}
-	if aggregate.BatchCostUSD["batch-1"] != 0.13 {
+	if aggregate.BatchCostUSD["batch-1"] != 0.08 {
 		t.Fatalf("unexpected batch remote observed cost: %+v", aggregate.BatchCostUSD)
 	}
-	if len(aggregate.Timeseries) != 1 || aggregate.Timeseries[0].RemoteObservedCostUSD != 0.13 {
+	if len(aggregate.Timeseries) != 1 || aggregate.Timeseries[0].RemoteObservedCostUSD != 0.08 {
 		t.Fatalf("unexpected remote timeseries: %+v", aggregate.Timeseries)
 	}
 	if len(aggregate.States) != 1 || aggregate.States[0].Status != profitBoardRemoteObserverStatusReady || !aggregate.States[0].BaselineReady {
@@ -987,10 +990,10 @@ func TestProfitBoardReportAndOverviewIncludeRemoteObservedCost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateProfitBoardOverview: %v", err)
 	}
-	if overview.Summary.RemoteObservedCostUSD != 0.13 {
+	if overview.Summary.RemoteObservedCostUSD != 0.08 {
 		t.Fatalf("unexpected overview remote observed cost: %v", overview.Summary.RemoteObservedCostUSD)
 	}
-	if len(overview.BatchSummaries) != 1 || overview.BatchSummaries[0].RemoteObservedCostUSD != 0.13 {
+	if len(overview.BatchSummaries) != 1 || overview.BatchSummaries[0].RemoteObservedCostUSD != 0.08 {
 		t.Fatalf("unexpected overview batch summaries: %+v", overview.BatchSummaries)
 	}
 	if len(overview.RemoteObserverStates) != 1 {
@@ -1010,16 +1013,16 @@ func TestProfitBoardReportAndOverviewIncludeRemoteObservedCost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateProfitBoardReport: %v", err)
 	}
-	if report.Summary.RemoteObservedCostUSD != 0.13 {
+	if report.Summary.RemoteObservedCostUSD != 0.08 {
 		t.Fatalf("unexpected report remote observed cost: %v", report.Summary.RemoteObservedCostUSD)
 	}
-	if len(report.BatchSummaries) != 1 || report.BatchSummaries[0].RemoteObservedCostUSD != 0.13 {
+	if len(report.BatchSummaries) != 1 || report.BatchSummaries[0].RemoteObservedCostUSD != 0.08 {
 		t.Fatalf("unexpected report batch summaries: %+v", report.BatchSummaries)
 	}
 	if len(report.RemoteObserverStates) != 1 {
 		t.Fatalf("expected remote observer state in report")
 	}
-	if len(report.Timeseries) != 1 || report.Timeseries[0].RemoteObservedCostUSD != 0.13 {
+	if len(report.Timeseries) != 1 || report.Timeseries[0].RemoteObservedCostUSD != 0.08 {
 		t.Fatalf("unexpected report remote timeseries: %+v", report.Timeseries)
 	}
 }

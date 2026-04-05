@@ -304,9 +304,21 @@ export const createDefaultUpstreamAccountDraft = () => ({
   user_id: 0,
   access_token: '',
   access_token_masked: '',
+  resource_display_mode: 'both',
   low_balance_threshold_usd: 0,
   enabled: true,
 });
+
+export const normalizeUpstreamAccountResourceDisplayMode = (value) => {
+  switch (String(value || '').trim()) {
+    case 'wallet':
+      return 'wallet';
+    case 'subscription':
+      return 'subscription';
+    default:
+      return 'both';
+  }
+};
 
 export const normalizeUpstreamAccountBaseUrl = (value) => {
   let next = String(value || '').trim();
@@ -345,6 +357,9 @@ export const prepareUpstreamAccountDraftForSave = (
     base_url: baseUrl,
     access_token: String(draft?.access_token || '').trim(),
     user_id: Number(draft?.user_id || 0),
+    resource_display_mode: normalizeUpstreamAccountResourceDisplayMode(
+      draft?.resource_display_mode,
+    ),
   };
 };
 
@@ -399,7 +414,7 @@ const RESOURCE_RISK_TONES = {
     amountTone: 'text-red-600 dark:text-red-400',
     badgeTone: 'bg-red-500/10 text-red-700 dark:bg-red-500/15 dark:text-red-300',
     statusBarTone:
-      'border border-red-300 bg-red-500/12 text-red-700 dark:border-red-500/35 dark:bg-red-500/14 dark:text-red-200',
+      'border border-red-200 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200',
     priority: 40,
   },
   warning: {
@@ -408,7 +423,7 @@ const RESOURCE_RISK_TONES = {
     badgeTone:
       'bg-amber-500/10 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200',
     statusBarTone:
-      'border border-amber-300 bg-amber-500/12 text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/14 dark:text-amber-200',
+      'border border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-200',
     priority: 20,
   },
   healthy: {
@@ -442,7 +457,7 @@ const getWalletRiskMeta = (account) => {
       statusText: '钱包余额告急',
     };
   }
-  if (balance <= 50) {
+  if (balance < 50) {
     return {
       kind: 'wallet',
       level: 'warning',
@@ -531,25 +546,113 @@ export const buildAccountResourceMetrics = (account, status, t) => {
   const hasFailedSync = accountStatus === 'failed';
   const isDisabled =
     accountStatus === 'disabled' || accountStatus === 'not_configured';
+  const resourceDisplayMode = normalizeUpstreamAccountResourceDisplayMode(
+    account?.resource_display_mode,
+  );
+  const showWallet =
+    resourceDisplayMode === 'both' || resourceDisplayMode === 'wallet';
+  const showSubscription =
+    resourceDisplayMode === 'both' || resourceDisplayMode === 'subscription';
+
+  const buildWalletMetric = (risk, overrides = {}) => {
+    const tone = getResourceRiskTone(risk?.level);
+    return {
+      key: 'wallet',
+      kind: 'wallet',
+      risk,
+      title: t('钱包余额'),
+      value: overrides.value ?? formatMoney(account?.wallet_balance_usd, status),
+      valueTone: overrides.valueTone || tone.amountTone,
+      badgeTone: overrides.badgeTone || tone.badgeTone,
+      statusLabel: overrides.statusLabel || t(risk?.statusLabel || '正常'),
+      metaItems: [
+        {
+          label: t('累计已用'),
+          value: formatMoney(account?.wallet_used_total_usd, status),
+        },
+      ],
+    };
+  };
+
+  const buildSubscriptionMetric = (risk, overrides = {}) => {
+    const tone = getResourceRiskTone(risk?.level);
+    const hasSubscriptionData = !!account?.has_subscription_data;
+    return {
+      key: 'subscription',
+      kind: 'subscription',
+      risk,
+      title: t('订阅剩余'),
+      value:
+        overrides.value ??
+        (hasSubscriptionData
+          ? formatUpstreamSubscriptionRemaining(account, status, t)
+          : '--'),
+      valueTone: overrides.valueTone || tone.amountTone,
+      badgeTone: overrides.badgeTone || tone.badgeTone,
+      statusLabel:
+        overrides.statusLabel ||
+        (hasSubscriptionData ? t(risk?.statusLabel || '正常') : t('未获取')),
+      metaItems: hasSubscriptionData
+        ? [
+            {
+              label: t('订阅已用'),
+              value: formatMoney(account?.subscription_used_quota_usd, status),
+            },
+            {
+              label: t('最早到期'),
+              value: formatUpstreamExpiryDate(
+                account?.subscription_earliest_expire_at,
+                t,
+              ),
+            },
+          ]
+        : [
+            {
+              label: t('订阅状态'),
+              value: t('未获取到订阅数据'),
+            },
+          ],
+    };
+  };
 
   if (hasFailedSync) {
     const neutralTone = getResourceRiskTone('neutral');
     return {
       metrics: [
-        {
-          key: 'wallet',
-          title: t('钱包余额'),
-          value: '--',
-          valueTone: neutralTone.amountTone,
-          badgeTone: neutralTone.badgeTone,
-          statusLabel: t('同步失败'),
-          metaItems: [
-            {
-              label: t('钱包已用'),
-              value: formatMoney(account?.wallet_used_total_usd, status),
-            },
-          ],
-        },
+        ...(showWallet
+          ? [
+              buildWalletMetric(
+                {
+                  kind: 'wallet',
+                  level: 'neutral',
+                  statusLabel: '同步失败',
+                },
+                {
+                  value: '--',
+                  valueTone: neutralTone.amountTone,
+                  badgeTone: neutralTone.badgeTone,
+                  statusLabel: t('同步失败'),
+                },
+              ),
+            ]
+          : []),
+        ...(showSubscription
+          ? [
+              buildSubscriptionMetric(
+                {
+                  kind: 'subscription',
+                  level: 'neutral',
+                  statusLabel: '同步失败',
+                },
+                {
+                  value: '--',
+                  valueTone: neutralTone.amountTone,
+                  badgeTone: neutralTone.badgeTone,
+                  statusLabel: t('同步失败'),
+                },
+              ),
+            ]
+          : []),
       ],
       statusBar: null,
       accentBorderColor: neutralTone.accentBorderColor,
@@ -560,20 +663,38 @@ export const buildAccountResourceMetrics = (account, status, t) => {
     const neutralTone = getResourceRiskTone('neutral');
     return {
       metrics: [
-        {
-          key: 'wallet',
-          title: t('钱包余额'),
-          value: formatMoney(account?.wallet_balance_usd, status),
-          valueTone: neutralTone.amountTone,
-          badgeTone: neutralTone.badgeTone,
-          statusLabel: t('已停用'),
-          metaItems: [
-            {
-              label: t('钱包已用'),
-              value: formatMoney(account?.wallet_used_total_usd, status),
-            },
-          ],
-        },
+        ...(showWallet
+          ? [
+              buildWalletMetric(
+                {
+                  kind: 'wallet',
+                  level: 'neutral',
+                  statusLabel: '已停用',
+                },
+                {
+                  valueTone: neutralTone.amountTone,
+                  badgeTone: neutralTone.badgeTone,
+                  statusLabel: t('已停用'),
+                },
+              ),
+            ]
+          : []),
+        ...(showSubscription
+          ? [
+              buildSubscriptionMetric(
+                {
+                  kind: 'subscription',
+                  level: 'neutral',
+                  statusLabel: '已停用',
+                },
+                {
+                  valueTone: neutralTone.amountTone,
+                  badgeTone: neutralTone.badgeTone,
+                  statusLabel: t('已停用'),
+                },
+              ),
+            ]
+          : []),
       ],
       statusBar: null,
       accentBorderColor: neutralTone.accentBorderColor,
@@ -581,56 +702,21 @@ export const buildAccountResourceMetrics = (account, status, t) => {
   }
 
   const metrics = [];
-  const walletRisk = getWalletRiskMeta(account);
-  const walletTone = getResourceRiskTone(walletRisk.level);
-  metrics.push({
-    key: 'wallet',
-    kind: 'wallet',
-    risk: walletRisk,
-    title: t('钱包余额'),
-    value: formatMoney(account?.wallet_balance_usd, status),
-    valueTone: walletTone.amountTone,
-    badgeTone: walletTone.badgeTone,
-    statusLabel: t(walletRisk.statusLabel),
-    metaItems: [
-      {
-        label: t('钱包已用'),
-        value: formatMoney(account?.wallet_used_total_usd, status),
-      },
-    ],
-  });
+  if (showWallet) {
+    const walletRisk = getWalletRiskMeta(account);
+    metrics.push(buildWalletMetric(walletRisk));
+  }
 
-  if (account?.has_subscription_data) {
+  if (showSubscription) {
     const subscriptionRisk = getSubscriptionRiskMeta(account);
-    const subscriptionTone = getResourceRiskTone(subscriptionRisk.level);
-    metrics.push({
-      key: 'subscription',
-      kind: 'subscription',
-      risk: subscriptionRisk,
-      title: t('订阅剩余'),
-      value: formatUpstreamSubscriptionRemaining(account, status, t),
-      valueTone: subscriptionTone.amountTone,
-      badgeTone: subscriptionTone.badgeTone,
-      statusLabel: t(subscriptionRisk.statusLabel),
-      metaItems: [
-        {
-          label: t('订阅已用'),
-          value: formatMoney(account?.subscription_used_quota_usd, status),
-        },
-        {
-          label: t('最早到期'),
-          value: formatUpstreamExpiryDate(
-            account?.subscription_earliest_expire_at,
-            t,
-          ),
-        },
-      ],
-    });
+    metrics.push(buildSubscriptionMetric(subscriptionRisk));
   }
 
   const riskCandidates = metrics
     .map((item) => item.risk)
-    .filter((item) => item && (item.level === 'warning' || item.level === 'critical'))
+    .filter(
+      (item) => item && (item.level === 'warning' || item.level === 'critical'),
+    )
     .sort((left, right) => getRiskPriority(right) - getRiskPriority(left));
 
   const sharedRisk = riskCandidates[0] || null;
@@ -691,9 +777,9 @@ export const getAccountBalanceVisualMeta = (account, status, t) => {
 
 export const getAccountResourceSummaryTones = (account) => ({
   wallet: getResourceRiskTone(getWalletRiskMeta(account).level).amountTone,
-  subscription: account?.has_subscription_data
-    ? getResourceRiskTone(getSubscriptionRiskMeta(account).level).amountTone
-    : 'text-semi-color-text-0',
+  subscription: getResourceRiskTone(
+    getSubscriptionRiskMeta(account).level,
+  ).amountTone,
 });
 
 export const createDefaultState = () => {

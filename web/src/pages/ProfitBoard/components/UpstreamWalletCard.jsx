@@ -117,17 +117,8 @@ const AccountCard = ({
 
   return (
     <div
-      className='cursor-pointer rounded-xl border border-l-4 bg-semi-color-bg-1 transition-colors'
+      className='rounded-xl border border-l-4 bg-semi-color-bg-1 transition-colors'
       style={{ borderLeftColor: resourceMeta.accentBorderColor }}
-      onClick={() => openDetailSideSheet(item.id)}
-      role='button'
-      tabIndex={0}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          openDetailSideSheet(item.id);
-        }
-      }}
     >
       <div className='flex items-start justify-between gap-3 px-4 pt-3 pb-2'>
         <div className='min-w-0 flex-1'>
@@ -151,6 +142,13 @@ const AccountCard = ({
         </div>
         <div className='shrink-0' onClick={stopCardEvent}>
           <Space spacing={4}>
+            <Button
+              type='tertiary'
+              onClick={() => openDetailSideSheet(item.id)}
+              size='small'
+            >
+              {t('详情')}
+            </Button>
             <Button
               type='tertiary'
               icon={<RefreshCw size={14} />}
