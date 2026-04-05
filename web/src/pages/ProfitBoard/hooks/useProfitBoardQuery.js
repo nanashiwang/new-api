@@ -27,6 +27,7 @@ export const useProfitBoardQuery = ({
   batchPayload,
   validationErrors,
   persistReportCache,
+  queryReady,
 }) => {
   const [querying, setQuerying] = useState(false);
   const [overviewQuerying, setOverviewQuerying] = useState(false);
@@ -70,9 +71,15 @@ export const useProfitBoardQuery = ({
     restoredState.detailPageSize || 12,
   );
   const [detailTotal, setDetailTotal] = useState(0);
+  const [autoRefreshing, setAutoRefreshing] = useState(false);
   const lastActivityWatermarkRef = useRef(
     cachedBundle?.activityWatermark || '',
   );
+  const activeQueryKeyRef = useRef('');
+  const autoRefreshTimerRef = useRef(null);
+  const scheduledAutoQueryKeyRef = useRef('');
+  const overviewRequestIdRef = useRef(0);
+  const queryRequestIdRef = useRef(0);
 
   const currentQueryKey = useMemo(
     () =>
@@ -93,6 +100,19 @@ export const useProfitBoardQuery = ({
           granularity === 'custom' ? customIntervalMinutes : 0,
       }),
     [batchPayload, configPayload, customIntervalMinutes, dateRange, granularity],
+  );
+
+  useEffect(() => {
+    activeQueryKeyRef.current = currentQueryKey;
+  }, [currentQueryKey]);
+
+  useEffect(
+    () => () => {
+      if (autoRefreshTimerRef.current) {
+        window.clearTimeout(autoRefreshTimerRef.current);
+      }
+    },
+    [],
   );
 
   const reportMatchesCurrentFilters =
@@ -122,45 +142,114 @@ export const useProfitBoardQuery = ({
     [configPayload, customIntervalMinutes, dateRange, granularity],
   );
 
-  const runOverviewQuery = useCallback(async () => {
-    if (validationErrors.length > 0) return;
+  const runOverviewQuery = useCallback(async (options = {}) => {
+    const { expectedQueryKey = currentQueryKey } = options;
+    if (!queryReady || validationErrors.length > 0) return false;
+    const requestId = ++overviewRequestIdRef.current;
     setOverviewQuerying(true);
     try {
       const res = await API.post('/api/profit_board/overview', configPayload);
       if (!res.data.success) return showError(res.data.message);
+      if (
+        overviewRequestIdRef.current !== requestId ||
+        activeQueryKeyRef.current !== expectedQueryKey
+      ) {
+        return false;
+      }
       setOverviewReport(res.data.data);
+      return true;
     } catch (error) {
       showError(error);
+      return false;
     } finally {
-      setOverviewQuerying(false);
+      if (overviewRequestIdRef.current === requestId) {
+        setOverviewQuerying(false);
+      }
     }
-  }, [configPayload, validationErrors.length]);
+  }, [configPayload, currentQueryKey, queryReady, validationErrors.length]);
 
-  const runQuery = useCallback(async () => {
-    if (validationErrors.length > 0) return showError(validationErrors[0]);
+  const runQuery = useCallback(async (options = {}) => {
+    const {
+      expectedQueryKey = currentQueryKey,
+      resetDetailPage = true,
+      showValidationError = true,
+    } = options;
+    if (!queryReady || validationErrors.length > 0) {
+      if (showValidationError && validationErrors.length > 0) {
+        showError(validationErrors[0]);
+      }
+      return false;
+    }
+    const requestId = ++queryRequestIdRef.current;
     setQuerying(true);
-    setDetailPage(1);
+    if (resetDetailPage) setDetailPage(1);
     try {
       const res = await API.post('/api/profit_board/query', queryPayload);
       if (!res.data.success) return showError(res.data.message);
+      if (
+        queryRequestIdRef.current !== requestId ||
+        activeQueryKeyRef.current !== expectedQueryKey
+      ) {
+        return false;
+      }
       const nextReport = res.data.data;
       setReport(nextReport);
-      setLastQueryKey(currentQueryKey);
+      setLastQueryKey(expectedQueryKey);
       setHasNewActivity(false);
       lastActivityWatermarkRef.current =
         nextReport?.meta?.activity_watermark || '';
-      persistReportCache(nextReport, currentQueryKey);
+      persistReportCache(nextReport, expectedQueryKey);
+      return true;
     } catch (error) {
       showError(error);
+      return false;
     } finally {
-      setQuerying(false);
+      if (queryRequestIdRef.current === requestId) {
+        setQuerying(false);
+      }
     }
-  }, [currentQueryKey, persistReportCache, queryPayload, validationErrors]);
+  }, [
+    currentQueryKey,
+    persistReportCache,
+    queryPayload,
+    queryReady,
+    validationErrors,
+  ]);
 
-  const runFullRefresh = useCallback(async () => {
-    await runOverviewQuery();
-    await runQuery();
-  }, [runOverviewQuery, runQuery]);
+  const runFullRefresh = useCallback(
+    async (options = {}) => {
+      const {
+        expectedQueryKey = currentQueryKey,
+        resetDetailPage = true,
+        showValidationError = true,
+      } = options;
+      if (autoRefreshTimerRef.current) {
+        window.clearTimeout(autoRefreshTimerRef.current);
+        autoRefreshTimerRef.current = null;
+      }
+      setAutoRefreshing(false);
+      if (!queryReady || validationErrors.length > 0) {
+        if (showValidationError && validationErrors.length > 0) {
+          showError(validationErrors[0]);
+        }
+        return false;
+      }
+      if (resetDetailPage) setDetailPage(1);
+      await runOverviewQuery({ expectedQueryKey });
+      return runQuery({
+        expectedQueryKey,
+        resetDetailPage: false,
+        showValidationError: false,
+      });
+    },
+    [
+      currentQueryKey,
+      queryReady,
+      runOverviewQuery,
+      runQuery,
+      validationErrors,
+    ],
+  );
 
   const checkActivity = useCallback(async () => {
     if (!autoRefreshMode || !autoRefreshEligible || validationErrors.length > 0)
@@ -196,6 +285,59 @@ export const useProfitBoardQuery = ({
     }, 90000);
     return () => window.clearInterval(timer);
   }, [autoRefreshMode, checkActivity]);
+
+  useEffect(() => {
+    if (autoRefreshTimerRef.current) {
+      window.clearTimeout(autoRefreshTimerRef.current);
+      autoRefreshTimerRef.current = null;
+    }
+
+    if (!queryReady || validationErrors.length > 0) {
+      scheduledAutoQueryKeyRef.current = '';
+      setAutoRefreshing(false);
+      setOverviewReport(null);
+      setReport(null);
+      setLastQueryKey('');
+      setHasNewActivity(false);
+      lastActivityWatermarkRef.current = '';
+      setDetailRows([]);
+      setDetailTotal(0);
+      return undefined;
+    }
+
+    const usingCurrentCachedReport =
+      !!report && lastQueryKey === currentQueryKey;
+    if (!usingCurrentCachedReport) {
+      setOverviewReport(null);
+      setReport(null);
+      setLastQueryKey('');
+      setHasNewActivity(false);
+      lastActivityWatermarkRef.current = '';
+      setDetailRows([]);
+      setDetailTotal(0);
+    }
+
+    setAutoRefreshing(true);
+    scheduledAutoQueryKeyRef.current = currentQueryKey;
+    autoRefreshTimerRef.current = window.setTimeout(async () => {
+      const expectedQueryKey = scheduledAutoQueryKeyRef.current;
+      await runFullRefresh({
+        expectedQueryKey,
+        resetDetailPage: true,
+        showValidationError: false,
+      });
+      if (scheduledAutoQueryKeyRef.current === expectedQueryKey) {
+        setAutoRefreshing(false);
+      }
+    }, 400);
+
+    return () => {
+      if (autoRefreshTimerRef.current) {
+        window.clearTimeout(autoRefreshTimerRef.current);
+        autoRefreshTimerRef.current = null;
+      }
+    };
+  }, [currentQueryKey, queryReady, runFullRefresh, validationErrors.length]);
 
   const loadDetailPage = useCallback(
     async (page = detailPage, pageSize = detailPageSize) => {
@@ -281,6 +423,7 @@ export const useProfitBoardQuery = ({
     setAutoRefreshMode,
     hasNewActivity,
     activityChecking,
+    autoRefreshing,
     detailRows,
     detailLoading,
     detailPage,

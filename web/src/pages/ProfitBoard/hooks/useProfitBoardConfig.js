@@ -141,7 +141,7 @@ export const useProfitBoardConfig = ({
     });
     if (!res.data.success) throw new Error(res.data.message || '加载配置失败');
     const config = res.data.data?.config;
-    if (!config) return;
+    if (!config) return null;
     setSiteConfig((prev) => ({
       ...prev,
       ...(config.shared_site || {}),
@@ -165,20 +165,28 @@ export const useProfitBoardConfig = ({
         ),
       })),
     );
+    return true;
   }, [batchPayload, configLookupKey, setComboConfigs]);
 
   const saveConfig = useCallback(
     async (validationErrors) => {
-      if (validationErrors.length > 0) return showError(validationErrors[0]);
+      if (validationErrors.length > 0) {
+        showError(validationErrors[0]);
+        return false;
+      }
       setSaving(true);
       try {
         const res = await API.put('/api/profit_board/config', configPayload);
-        if (!res.data.success) return showError(res.data.message);
+        if (!res.data.success) {
+          showError(res.data.message);
+          return false;
+        }
         const savedConfig = res.data.data?.config;
         if (savedConfig) {
           setSiteConfig((prev) => ({
             ...prev,
             ...(savedConfig.shared_site || {}),
+            model_names: savedConfig.shared_site?.model_names || [],
           }));
           setUpstreamConfig((prev) => ({
             ...prev,
@@ -203,8 +211,10 @@ export const useProfitBoardConfig = ({
           );
         }
         showSuccess('收益看板配置已保存');
+        return true;
       } catch (error) {
         showError(error);
+        return false;
       } finally {
         setSaving(false);
       }

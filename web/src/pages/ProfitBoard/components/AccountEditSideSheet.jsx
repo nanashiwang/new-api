@@ -158,23 +158,6 @@ const AccountEditSideSheet = ({
           </Text>
         ) : null}
       </div>
-      <div>
-        <Text type='tertiary' size='small' className='mb-1 block'>
-          低余额提醒线
-        </Text>
-        <InputNumber
-          min={0}
-          value={accountDraft.low_balance_threshold_usd || 0}
-          onChange={(value) =>
-            setAccountDraft((prev) => ({
-              ...prev,
-              low_balance_threshold_usd: Number(value || 0),
-            }))
-          }
-          placeholder='不填则不提醒'
-          style={{ width: '100%' }}
-        />
-      </div>
 
       <div className='lg:col-span-2'>
         <Text type='tertiary' size='small' className='mb-1 block'>

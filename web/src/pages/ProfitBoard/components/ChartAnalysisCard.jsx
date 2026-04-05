@@ -55,8 +55,11 @@ const ChartAnalysisCard = ({
   channelGroupMode,
   setChannelGroupMode,
   report,
+  reportMatchesCurrentFilters,
+  queryReady,
   chartContent,
   trendBucketCount,
+  tagAggregationHint,
   t,
 }) => {
   const clearAllFilters = () => {
@@ -195,22 +198,40 @@ const ChartAnalysisCard = ({
       </Tabs>
 
       {chartTab === 'channel' ? (
-        <div className='mb-3 flex items-center justify-end'>
-          <Radio.Group
-            type='button'
-            value={channelGroupMode}
-            onChange={(event) => setChannelGroupMode(event.target.value)}
-            size='small'
-          >
-            <Radio value='channel'>{t('单渠道')}</Radio>
-            <Radio value='tag'>{t('标签聚合')}</Radio>
-          </Radio.Group>
-        </div>
+        <>
+          <div className='mb-3 flex items-center justify-end'>
+            <Radio.Group
+              type='button'
+              value={channelGroupMode}
+              onChange={(event) => setChannelGroupMode(event.target.value)}
+              size='small'
+            >
+              <Radio value='channel'>{t('单渠道')}</Radio>
+              <Radio value='tag'>{t('标签聚合')}</Radio>
+            </Radio.Group>
+          </div>
+          {channelGroupMode === 'tag' && tagAggregationHint ? (
+            <Banner
+              type='info'
+              description={tagAggregationHint}
+              closeIcon={null}
+              className='mb-3'
+            />
+          ) : null}
+        </>
       ) : null}
 
       <div className='min-h-[300px]'>
-        {report ? (
+        {queryReady ? (
           <>
+            {!reportMatchesCurrentFilters && querying ? (
+              <Banner
+                type='info'
+                description={t('筛选条件已变化，正在刷新收益分析')}
+                closeIcon={null}
+                className='mb-3'
+              />
+            ) : null}
             {chartTab === 'trend' &&
               trendBucketCount > 0 &&
               trendBucketCount < 4 &&
@@ -222,10 +243,14 @@ const ChartAnalysisCard = ({
                   className='mb-3'
                 />
               )}
-            {chartContent[chartTab]}
+            {report && reportMatchesCurrentFilters ? (
+              chartContent[chartTab]
+            ) : (
+              <Empty description={t('当前收益分析正在加载')} />
+            )}
           </>
         ) : (
-          <Empty description={t('设置时间范围后刷新即可查看分析')} />
+          <Empty description={t('添加组合并完成加载后会自动生成图表')} />
         )}
       </div>
     </Card>

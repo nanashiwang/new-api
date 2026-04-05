@@ -24,20 +24,20 @@ import React, {
   useMemo,
   useState,
 } from 'react';
-import { Empty, Spin, Tabs } from '@douyinfe/semi-ui';
+import { Empty, Modal, Spin, Tabs } from '@douyinfe/semi-ui';
+import { VChart } from '@visactor/react-vchart';
 import { initVChartSemiTheme } from '@visactor/vchart-semi-theme';
 import { BadgeDollarSign, BarChart3, CircleDollarSign } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { CHART_CONFIG } from '../../constants/dashboard.constants';
 import { StatusContext } from '../../context/Status';
-import { useActualTheme } from '../../context/Theme';
-import { showError, timestamp2string } from '../../helpers';
+import { showError, showSuccess, timestamp2string } from '../../helpers';
 import { useIsMobile } from '@/hooks/common/useIsMobile';
 import ChartAnalysisCard from './components/ChartAnalysisCard';
 import ComboManagerCard from './components/ComboManagerCard';
 import OverviewPanel from './components/OverviewPanel';
-import PricingRulesCard from './components/PricingRulesCard';
+import PricingConfigModal from './components/PricingConfigModal';
 import ProfitBoardHeader from './components/ProfitBoardHeader';
-import ResponsiveVChart from './components/ResponsiveVChart';
 import UpstreamWalletCard from './components/UpstreamWalletCard';
 import { useProfitBoardBatches } from './hooks/useProfitBoardBatches';
 import { useProfitBoardConfig } from './hooks/useProfitBoardConfig';
@@ -52,6 +52,7 @@ import {
   combineChannelMetricsByTag,
   combineTimeseriesMetrics,
   createBarSpec,
+  createBatchId,
   createDefaultComboPricingConfig,
   createDefaultPricingRule,
   createMetricOptions,
@@ -61,12 +62,73 @@ import {
   formatRatio,
 } from './utils';
 
-initVChartSemiTheme();
+initVChartSemiTheme({
+  isWatchingThemeSwitch: true,
+});
+
+const buildBatchOverlapError = (batches, channelMap, tagChannelMap) => {
+  const ownerMap = new Map();
+  for (const batch of batches) {
+    const channelIds =
+      batch.scope_type === 'tag'
+        ? (batch.tags || []).flatMap((tag) => tagChannelMap.get(tag) || [])
+        : batch.channel_ids || [];
+    for (const channelId of Array.from(new Set(channelIds))) {
+      const owner = ownerMap.get(channelId);
+      if (owner && owner !== batch.name) {
+        const channelName = channelMap.get(String(channelId))?.name || `#${channelId}`;
+        return `${channelName} 同时出现在组合"${owner}"和"${batch.name}"中，请拆开后再统计`;
+      }
+      ownerMap.set(channelId, batch.name);
+    }
+  }
+  return '';
+};
+
+const cloneComboDraft = (batch, comboConfig) => ({
+  id: batch.id,
+  name: batch.name || '',
+  scope_type: batch.scope_type || 'channel',
+  channel_ids: [...(batch.channel_ids || [])],
+  tags: [...(batch.tags || [])],
+  combo_id: comboConfig.combo_id,
+  site_mode: comboConfig.site_mode,
+  upstream_mode: comboConfig.upstream_mode,
+  upstream_account_id: Number(comboConfig.upstream_account_id || 0),
+  shared_site: { ...(comboConfig.shared_site || {}) },
+  site_rules: (comboConfig.site_rules || []).map((rule) =>
+    createDefaultPricingRule(rule),
+  ),
+  upstream_rules: (comboConfig.upstream_rules || []).map((rule) =>
+    createDefaultPricingRule(rule),
+  ),
+  site_fixed_total_amount: clampNumber(comboConfig.site_fixed_total_amount),
+  upstream_fixed_total_amount: clampNumber(
+    comboConfig.upstream_fixed_total_amount,
+  ),
+  remote_observer: { ...(comboConfig.remote_observer || {}) },
+});
+
+const getSiteSummaryText = (comboConfig, t) => {
+  if (comboConfig.site_mode !== 'shared_site_model') return t('手动定价');
+  const modelCount = comboConfig.shared_site?.model_names?.length || 0;
+  if (modelCount === 0) return t('本站模型价格');
+  return t('本站模型价格 · {{count}} 个模型', { count: modelCount });
+};
+
+const getUpstreamSummaryText = (comboConfig, options, t) => {
+  if (comboConfig.upstream_mode !== 'wallet_observer') return t('按模型单价');
+  const account = (options?.upstream_accounts || []).find(
+    (item) => item.id === Number(comboConfig.upstream_account_id || 0),
+  );
+  return account
+    ? t('按钱包余额变化 · {{name}}', { name: account.name })
+    : t('按钱包余额变化');
+};
 
 const ProfitBoardPage = () => {
   const { t } = useTranslation();
   const [statusState] = useContext(StatusContext);
-  const actualTheme = useActualTheme();
   const isMobile = useIsMobile();
 
   const { restoredState, cachedBundle, persistState, persistReportCache } =
@@ -76,6 +138,15 @@ const ProfitBoardPage = () => {
   const [comboConfigs, setComboConfigs] = useState(
     restoredState.comboConfigs || [],
   );
+  const [editorDraft, setEditorDraft] = useState(null);
+  const [editingBatchId, setEditingBatchId] = useState('');
+  const [editorVisible, setEditorVisible] = useState(false);
+  const [editorValidationError, setEditorValidationError] = useState('');
+  const [hasUnsavedConfigChanges, setHasUnsavedConfigChanges] = useState(false);
+  const [optionsReady, setOptionsReady] = useState(false);
+  const [configReady, setConfigReady] = useState(
+    !(restoredState.batches || []).length,
+  );
 
   const configHook = useProfitBoardConfig({
     batchPayload: batchesHook.batchPayload,
@@ -84,17 +155,7 @@ const ProfitBoardPage = () => {
     restoredState,
   });
 
-  const {
-    batches,
-    draft,
-    setDraft,
-    editingBatchId,
-    batchPayload,
-    addOrUpdateBatch,
-    editBatch,
-    resetDraft,
-    removeBatch,
-  } = batchesHook;
+  const { batches, batchPayload, upsertBatch, removeBatch } = batchesHook;
 
   const {
     loading,
@@ -116,6 +177,32 @@ const ProfitBoardPage = () => {
     saveConfig,
     resolveSharedSitePreview,
   } = configHook;
+
+  const tagOptions = useMemo(
+    () =>
+      (options.tags || []).map((item) => ({
+        label: item,
+        value: item,
+      })),
+    [options.tags],
+  );
+
+  const availableAccountIds = useMemo(
+    () =>
+      new Set(
+        (options.upstream_accounts || [])
+          .filter((item) => item.enabled !== false)
+          .map((item) => Number(item.id)),
+      ),
+    [options.upstream_accounts],
+  );
+
+  const resolveComboConfig = useCallback(
+    (batchId) =>
+      comboConfigs.find((item) => item.combo_id === batchId) ||
+      createDefaultComboPricingConfig(batchId, siteConfig, siteConfig, upstreamConfig),
+    [comboConfigs, siteConfig, upstreamConfig],
+  );
 
   useEffect(() => {
     setComboConfigs((prev) =>
@@ -152,74 +239,37 @@ const ProfitBoardPage = () => {
     );
   }, [batches, siteConfig, upstreamConfig]);
 
-  const updateComboConfig = useCallback(
-    (comboId, updater) =>
-      setComboConfigs((prev) =>
-        prev.map((item) =>
-          item.combo_id === comboId
-            ? {
-                ...item,
-                ...(typeof updater === 'function' ? updater(item) : updater),
-              }
-            : item,
-        ),
-      ),
-    [],
+  const duplicateBatchError = useMemo(
+    () => buildBatchOverlapError(batches, channelMap, tagChannelMap),
+    [batches, channelMap, tagChannelMap],
   );
-
-  const duplicateBatchError = useMemo(() => {
-    const ownerMap = new Map();
-    for (const batch of batches) {
-      const channelIds =
-        batch.scope_type === 'tag'
-          ? (batch.tags || []).flatMap((tag) => tagChannelMap.get(tag) || [])
-          : batch.channel_ids || [];
-      for (const channelId of Array.from(new Set(channelIds))) {
-        const owner = ownerMap.get(channelId);
-        if (owner && owner !== batch.name) {
-          const channelName =
-            channelMap.get(String(channelId))?.name || `#${channelId}`;
-          return `${channelName} 同时出现在组合"${owner}"和"${batch.name}"中，请拆开后再统计`;
-        }
-        ownerMap.set(channelId, batch.name);
-      }
-    }
-    return '';
-  }, [batches, channelMap, tagChannelMap]);
 
   const validationErrors = useMemo(() => {
     const errors = [];
-    const availableAccounts = new Set(
-      (options.upstream_accounts || [])
-        .filter((item) => item.enabled !== false)
-        .map((item) => Number(item.id)),
-    );
     if (!batches.length) errors.push(t('请至少添加一个组合'));
     if (duplicateBatchError) errors.push(duplicateBatchError);
     if (
       comboConfigs.some(
-        (c) =>
-          c.site_mode === 'shared_site_model' &&
-          !(c.shared_site?.model_names || []).length,
+        (item) =>
+          item.site_mode === 'shared_site_model' &&
+          !(item.shared_site?.model_names || []).length,
       )
-    )
+    ) {
       errors.push(t('启用了本站模型价格的组合必须至少选择一个模型'));
+    }
     if (
       comboConfigs.some((item) => {
         if (item.upstream_mode !== 'wallet_observer') return false;
         const accountId = Number(item.upstream_account_id || 0);
-        return accountId <= 0 || !availableAccounts.has(accountId);
+        return accountId <= 0 || !availableAccountIds.has(accountId);
       })
-    )
+    ) {
       errors.push(t('钱包扣减模式必须绑定一个上游账户'));
+    }
     return Array.from(new Set(errors));
-  }, [
-    batches.length,
-    comboConfigs,
-    duplicateBatchError,
-    options.upstream_accounts,
-    t,
-  ]);
+  }, [availableAccountIds, batches.length, comboConfigs, duplicateBatchError, t]);
+
+  const queryReady = optionsReady && configReady && batchPayload.length > 0;
 
   const queryHook = useProfitBoardQuery({
     restoredState,
@@ -228,6 +278,7 @@ const ProfitBoardPage = () => {
     batchPayload,
     validationErrors,
     persistReportCache,
+    queryReady,
   });
 
   const {
@@ -258,13 +309,12 @@ const ProfitBoardPage = () => {
     setAutoRefreshMode,
     hasNewActivity,
     activityChecking,
-    detailRows,
-    detailLoading,
+    autoRefreshing,
     detailPage,
     setDetailPage,
     detailPageSize,
     setDetailPageSize,
-    detailTotal,
+    lastQueryKey,
     runFullRefresh,
     runQuery,
   } = queryHook;
@@ -278,18 +328,56 @@ const ProfitBoardPage = () => {
     runFullRefresh,
   });
 
+  const buildDraftValidationError = useCallback(
+    (draft) => {
+      if (!draft) return '';
+      const selectedCount =
+        draft.scope_type === 'channel'
+          ? (draft.channel_ids || []).length
+          : (draft.tags || []).length;
+      if (!selectedCount) return t('请先选择渠道或标签');
+      if (
+        draft.site_mode === 'shared_site_model' &&
+        !(draft.shared_site?.model_names || []).length
+      ) {
+        return t('启用了本站模型价格的组合必须至少选择一个模型');
+      }
+      if (draft.upstream_mode === 'wallet_observer') {
+        const accountId = Number(draft.upstream_account_id || 0);
+        if (accountId <= 0 || !availableAccountIds.has(accountId)) {
+          return t('钱包扣减模式必须绑定一个上游账户');
+        }
+      }
+      const nextBatch = {
+        id: draft.id,
+        name: draft.name?.trim() || t('未命名组合'),
+        scope_type: draft.scope_type,
+        channel_ids: draft.scope_type === 'channel' ? draft.channel_ids || [] : [],
+        tags: draft.scope_type === 'tag' ? draft.tags || [] : [],
+      };
+      return buildBatchOverlapError(
+        [...batches.filter((item) => item.id !== draft.id), nextBatch],
+        channelMap,
+        tagChannelMap,
+      );
+    },
+    [availableAccountIds, batches, channelMap, t, tagChannelMap],
+  );
+
   useEffect(() => {
-    if (
-      detailFilter?.type === 'channel' &&
-      channelGroupMode === 'tag'
-    ) {
+    if (!editorDraft) {
+      setEditorValidationError('');
+      return;
+    }
+    setEditorValidationError(buildDraftValidationError(editorDraft));
+  }, [buildDraftValidationError, editorDraft]);
+
+  useEffect(() => {
+    if (detailFilter?.type === 'channel' && channelGroupMode === 'tag') {
       setDetailFilter(null);
       setDetailPage(1);
     }
-    if (
-      detailFilter?.type === 'tag' &&
-      channelGroupMode === 'channel'
-    ) {
+    if (detailFilter?.type === 'tag' && channelGroupMode === 'channel') {
       setDetailFilter(null);
       setDetailPage(1);
     }
@@ -300,8 +388,10 @@ const ProfitBoardPage = () => {
       setLoading(true);
       try {
         await loadOptions();
-      } catch (e) {
-        showError(e);
+        setOptionsReady(true);
+      } catch (error) {
+        setOptionsReady(false);
+        showError(error);
       } finally {
         setLoading(false);
       }
@@ -309,14 +399,33 @@ const ProfitBoardPage = () => {
   }, [loadOptions, setLoading]);
 
   useEffect(() => {
-    if (batchPayload.length) loadConfig().catch(showError);
+    if (!batchPayload.length) {
+      setConfigReady(true);
+      return;
+    }
+    setConfigReady(false);
+    loadConfig()
+      .then((loadedConfig) => {
+        if (loadedConfig) setHasUnsavedConfigChanges(false);
+        setConfigReady(true);
+      })
+      .catch((error) => {
+        setConfigReady(false);
+        showError(error);
+      });
   }, [batchPayload.length, configLookupKey, loadConfig]);
+
+  useEffect(() => {
+    if (viewBatchId === 'all') return;
+    if (batches.some((batch) => batch.id === viewBatchId)) return;
+    setViewBatchId('all');
+    setDetailFilter(null);
+    setDetailPage(1);
+  }, [batches, setDetailFilter, setDetailPage, setViewBatchId, viewBatchId]);
 
   useEffect(() => {
     persistState({
       batches,
-      draft,
-      editingBatchId,
       dateRange,
       granularity,
       customIntervalMinutes,
@@ -329,7 +438,7 @@ const ProfitBoardPage = () => {
       comboConfigs,
       upstreamConfig,
       siteConfig,
-      lastQueryKey: queryHook.lastQueryKey,
+      lastQueryKey,
       detailPage,
       detailPageSize,
       autoRefreshMode,
@@ -346,12 +455,10 @@ const ProfitBoardPage = () => {
     detailFilter,
     detailPage,
     detailPageSize,
-    draft,
-    editingBatchId,
     granularity,
     metricKey,
     persistState,
-    queryHook.lastQueryKey,
+    lastQueryKey,
     siteConfig,
     upstreamConfig,
     viewBatchId,
@@ -361,12 +468,12 @@ const ProfitBoardPage = () => {
   const batchSummaryOptions = useMemo(
     () => [
       { label: t('全部组合'), value: 'all' },
-      ...[
-        ...(overviewReport?.batch_summaries || []),
-        ...(report?.batch_summaries || []),
-      ].map((s) => ({ label: s.batch_name, value: s.batch_id })),
+      ...batches.map((batch) => ({
+        label: batch.name || t('未命名组合'),
+        value: batch.id,
+      })),
     ],
-    [overviewReport?.batch_summaries, report?.batch_summaries, t],
+    [batches, t],
   );
   const businessMetrics = useMemo(
     () => [
@@ -378,7 +485,7 @@ const ProfitBoardPage = () => {
   );
   const metricLabel = useMemo(
     () =>
-      metricOpts.find((m) => m.value === metricKey)?.label ||
+      metricOpts.find((item) => item.value === metricKey)?.label ||
       metricOpts[0].label,
     [metricKey, metricOpts],
   );
@@ -389,40 +496,40 @@ const ProfitBoardPage = () => {
 
   const trendRows = useMemo(() => {
     if (!report) return [];
-    if (analysisMode === 'business_compare')
+    if (analysisMode === 'business_compare') {
       return combineTimeseriesMetrics(
         report.timeseries || [],
         viewBatchId,
         businessMetrics,
       );
+    }
     const filtered =
       viewBatchId === 'all'
         ? report.timeseries || []
-        : (report.timeseries || []).filter((r) => r.batch_id === viewBatchId);
-    return filtered.map((r) => ({
-      bucket: r.bucket,
-      value: Number(r[metricKey] || 0),
-      batch_id: r.batch_id,
+        : (report.timeseries || []).filter((row) => row.batch_id === viewBatchId);
+    return filtered.map((row) => ({
+      bucket: row.bucket,
+      value: Number(row[metricKey] || 0),
+      batch_id: row.batch_id,
     }));
   }, [analysisMode, businessMetrics, metricKey, report, viewBatchId]);
 
   const channelTagMap = useMemo(() => {
     const map = new Map();
-    (report?.batches || []).forEach((batch) => {
-      (batch.resolved_channels || []).forEach((channel) => {
-        map.set(String(channel.id), channel.tag || t('未设置标签'));
-      });
+    (options.channels || []).forEach((channel) => {
+      map.set(String(channel.id), channel.tag || t('未设置标签'));
     });
     return map;
-  }, [report?.batches, t]);
+  }, [options.channels, t]);
 
   const channelRows = useMemo(() => {
     if (
       !report ||
       (analysisMode === 'single_metric' &&
         metricKey === 'remote_observed_cost_usd')
-    )
+    ) {
       return [];
+    }
     if (analysisMode === 'business_compare') {
       return channelGroupMode === 'tag'
         ? combineChannelMetricsByTag(
@@ -467,8 +574,9 @@ const ProfitBoardPage = () => {
       !report ||
       (analysisMode === 'single_metric' &&
         metricKey === 'remote_observed_cost_usd')
-    )
+    ) {
       return [];
+    }
     return analysisMode === 'business_compare'
       ? combineBreakdownMetrics(
           report.model_breakdown || [],
@@ -481,6 +589,40 @@ const ProfitBoardPage = () => {
           metricKey,
         );
   }, [analysisMode, businessMetrics, metricKey, report, viewBatchId]);
+
+  const tagAggregationMeta = useMemo(() => {
+    if (chartTab !== 'channel' || channelGroupMode !== 'tag') {
+      return { emptyReason: '', bucketCount: 0 };
+    }
+    if (!channelRows.length) {
+      const visibleRows =
+        viewBatchId === 'all'
+          ? report?.channel_breakdown || []
+          : (report?.channel_breakdown || []).filter(
+              (row) => row.batch_id === viewBatchId,
+            );
+      return {
+        emptyReason: visibleRows.length
+          ? t('当前渠道没有可用标签，无法按标签聚合')
+          : '',
+        bucketCount: 0,
+      };
+    }
+    return {
+      emptyReason:
+        channelRows.length <= 1
+          ? t('当前数据按标签聚合后只有一个分组')
+          : '',
+      bucketCount: channelRows.length,
+    };
+  }, [
+    channelGroupMode,
+    channelRows,
+    chartTab,
+    report?.channel_breakdown,
+    t,
+    viewBatchId,
+  ]);
 
   const trendSpec = useMemo(
     () => createTrendSpec(trendRows, chartSubtitle, statusState?.status, t),
@@ -523,48 +665,65 @@ const ProfitBoardPage = () => {
     [setDetailFilter, setDetailPage],
   );
 
+  const chartHeight = isMobile ? 320 : 420;
+  const renderChart = useCallback(
+    (chartKey, spec, onClick) => (
+      <div
+        key={chartKey}
+        className='w-full overflow-hidden rounded-lg'
+        style={{ height: chartHeight }}
+      >
+        <VChart spec={{ ...spec, height: chartHeight }} option={CHART_CONFIG} onClick={onClick} />
+      </div>
+    ),
+    [chartHeight],
+  );
+
   const chartContent = useMemo(
     () => ({
       trend: trendRows.length ? (
-        <ResponsiveVChart
-          chartKey={`trend-${actualTheme}-${analysisMode}-${viewBatchId}-${metricKey}`}
-          spec={trendSpec}
-          onClick={handleChartClick('trend')}
-        />
+        renderChart(
+          `trend-${analysisMode}-${viewBatchId}-${metricKey}-${trendRows.length}`,
+          trendSpec,
+          handleChartClick('trend'),
+        )
       ) : (
         <Empty description={t('当前没有趋势数据')} />
       ),
       channel: channelRows.length ? (
-        <ResponsiveVChart
-          chartKey={`channel-${actualTheme}-${analysisMode}-${viewBatchId}-${metricKey}-${channelGroupMode}`}
-          spec={channelSpec}
-          onClick={handleChartClick(
+        renderChart(
+          `channel-${analysisMode}-${viewBatchId}-${metricKey}-${channelGroupMode}-${channelRows.length}`,
+          channelSpec,
+          handleChartClick(
             channelGroupMode === 'tag' ? 'tag' : 'channel',
-          )}
-        />
+          ),
+        )
       ) : (
-        <Empty description={t('当前没有渠道数据')} />
+        <Empty
+          description={tagAggregationMeta.emptyReason || t('当前没有渠道数据')}
+        />
       ),
       model: modelRows.length ? (
-        <ResponsiveVChart
-          chartKey={`model-${actualTheme}-${analysisMode}-${viewBatchId}-${metricKey}`}
-          spec={modelSpec}
-          onClick={handleChartClick('model')}
-        />
+        renderChart(
+          `model-${analysisMode}-${viewBatchId}-${metricKey}-${modelRows.length}`,
+          modelSpec,
+          handleChartClick('model'),
+        )
       ) : (
         <Empty description={t('当前没有模型数据')} />
       ),
     }),
     [
-      actualTheme,
       analysisMode,
       channelGroupMode,
       channelRows.length,
       channelSpec,
       handleChartClick,
-      metricKey,
       modelRows.length,
+      metricKey,
       modelSpec,
+      renderChart,
+      tagAggregationMeta.emptyReason,
       t,
       trendRows.length,
       trendSpec,
@@ -608,61 +767,357 @@ const ProfitBoardPage = () => {
 
   const statusSummary = useMemo(() => {
     const items = [];
+    if (autoRefreshing) {
+      items.push({ key: 'refreshing', color: 'cyan', text: t('收益分析刷新中') });
+    }
     if (reportMatchesCurrentFilters) items.push({ key: 'fresh', color: 'blue', text: t('时间分析已同步') });
     else if (report) items.push({ key: 'stale', color: 'grey', text: t('筛选已变化，等待刷新') });
     if (overviewReport) items.push({ key: 'overview', color: 'green', text: t('累计总览已更新') });
     if (activityChecking) items.push({ key: 'watch', color: 'cyan', text: t('低频检查中') });
     return items;
-  }, [activityChecking, overviewReport, report, reportMatchesCurrentFilters, t]);
+  }, [activityChecking, autoRefreshing, overviewReport, report, reportMatchesCurrentFilters, t]);
 
   const combinedWarnings = useMemo(
-    () => Array.from(new Set([...(overviewReport?.warnings || []), ...(report?.warnings || []), ...validationErrors])),
+    () =>
+      Array.from(
+        new Set([
+          ...(overviewReport?.warnings || []),
+          ...(report?.warnings || []),
+          ...validationErrors,
+        ]),
+      ),
     [overviewReport?.warnings, report?.warnings, validationErrors],
   );
 
   const batchDigest = useCallback(
-    (batch) =>
-      batch.scope_type === 'channel'
-        ? (batch.channel_ids || []).map((id) => channelMap.get(String(id))?.name).filter(Boolean).slice(0, 3).join('、')
-        : (batch.tags || []).slice(0, 3).join('、'),
-    [channelMap],
+    (batch) => {
+      const labels =
+        batch.scope_type === 'channel'
+          ? (batch.channel_ids || [])
+              .map((id) => channelMap.get(String(id))?.name)
+              .filter(Boolean)
+          : batch.tags || [];
+      const total = labels.length;
+      if (!total) {
+        return batch.scope_type === 'channel' ? t('未选择渠道') : t('未选择标签');
+      }
+      const preview = labels.slice(0, 3).join('、');
+      return total > 3 ? `${preview}，共 ${total} 项` : preview;
+    },
+    [channelMap, t],
   );
 
-  const generatedAtText = report?.meta?.generated_at ? timestamp2string(report.meta.generated_at) : t('尚未生成');
-  const trendBucketCount = useMemo(() => new Set((trendRows || []).map((r) => r.bucket)).size, [trendRows]);
-  const sitePriceFactorNote = overviewReport?.meta?.site_price_factor_note || report?.meta?.site_price_factor_note || '';
+  const generatedAtText = reportMatchesCurrentFilters && report?.meta?.generated_at
+    ? timestamp2string(report.meta.generated_at)
+    : t('尚未生成');
+  const trendBucketCount = useMemo(
+    () => new Set((trendRows || []).map((row) => row.bucket)).size,
+    [trendRows],
+  );
+  const sitePriceFactorNote =
+    overviewReport?.meta?.site_price_factor_note ||
+    report?.meta?.site_price_factor_note ||
+    '';
+
+  const closeEditor = useCallback(() => {
+    setEditorVisible(false);
+    setEditingBatchId('');
+    setEditorDraft(null);
+    setEditorValidationError('');
+  }, []);
+
+  const openCreateBatchModal = useCallback(() => {
+    const batchId = createBatchId();
+    const defaultBatch = {
+      id: batchId,
+      name: `组合 ${batches.length + 1}`,
+      scope_type: 'channel',
+      channel_ids: [],
+      tags: [],
+    };
+    const defaultComboConfig = createDefaultComboPricingConfig(
+      batchId,
+      siteConfig,
+      siteConfig,
+      upstreamConfig,
+    );
+    setEditingBatchId('');
+    setEditorDraft(cloneComboDraft(defaultBatch, defaultComboConfig));
+    setEditorVisible(true);
+  }, [batches.length, siteConfig, upstreamConfig]);
+
+  const openEditBatchModal = useCallback(
+    (batch) => {
+      setEditingBatchId(batch.id);
+      setEditorDraft(cloneComboDraft(batch, resolveComboConfig(batch.id)));
+      setEditorVisible(true);
+    },
+    [resolveComboConfig],
+  );
+
+  const handleSaveEditor = useCallback(() => {
+    const error = buildDraftValidationError(editorDraft);
+    if (error) {
+      setEditorValidationError(error);
+      showError(error);
+      return;
+    }
+    const nextBatch = {
+      id: editorDraft.id,
+      name: editorDraft.name?.trim() || `组合 ${batches.length + (editingBatchId ? 0 : 1)}`,
+      scope_type: editorDraft.scope_type,
+      channel_ids:
+        editorDraft.scope_type === 'channel' ? editorDraft.channel_ids || [] : [],
+      tags: editorDraft.scope_type === 'tag' ? editorDraft.tags || [] : [],
+    };
+    const nextComboConfig = {
+      combo_id: nextBatch.id,
+      site_mode: editorDraft.site_mode,
+      upstream_mode: editorDraft.upstream_mode,
+      upstream_account_id: Number(editorDraft.upstream_account_id || 0),
+      shared_site: { ...(editorDraft.shared_site || {}) },
+      site_rules: (editorDraft.site_rules || []).map((rule) =>
+        createDefaultPricingRule(rule),
+      ),
+      upstream_rules: (editorDraft.upstream_rules || []).map((rule) =>
+        createDefaultPricingRule(rule),
+      ),
+      site_fixed_total_amount: clampNumber(editorDraft.site_fixed_total_amount),
+      upstream_fixed_total_amount: clampNumber(
+        editorDraft.upstream_fixed_total_amount,
+      ),
+      remote_observer: { ...(editorDraft.remote_observer || {}) },
+    };
+
+    upsertBatch(nextBatch);
+    setComboConfigs((prev) => {
+      const exists = prev.some((item) => item.combo_id === nextBatch.id);
+      if (!exists) return [...prev, nextComboConfig];
+      return prev.map((item) =>
+        item.combo_id === nextBatch.id ? nextComboConfig : item,
+      );
+    });
+    setHasUnsavedConfigChanges(true);
+    showSuccess(editingBatchId ? '组合已更新' : '组合已添加');
+    closeEditor();
+  }, [
+    batches.length,
+    buildDraftValidationError,
+    closeEditor,
+    editorDraft,
+    editingBatchId,
+    upsertBatch,
+  ]);
+
+  const handleRemoveBatch = useCallback(
+    (batch) => {
+      Modal.confirm({
+        title: t('确认删除'),
+        content: t(
+          '删除后将同时移除组合“{{name}}”及其定价配置，且不会自动保存到服务器。',
+          { name: batch.name },
+        ),
+        okText: t('确认删除'),
+        cancelText: t('取消'),
+        okButtonProps: {
+          type: 'danger',
+        },
+        onOk: () => {
+          removeBatch(batch.id);
+          setComboConfigs((prev) =>
+            prev.filter((item) => item.combo_id !== batch.id),
+          );
+          setHasUnsavedConfigChanges(true);
+          if (editingBatchId === batch.id) {
+            closeEditor();
+          }
+          showSuccess(t('组合已删除'));
+        },
+      });
+    },
+    [closeEditor, editingBatchId, removeBatch, t],
+  );
+
+  const handleSaveConfig = useCallback(async () => {
+    const saved = await saveConfig(validationErrors);
+    if (saved) {
+      setHasUnsavedConfigChanges(false);
+    }
+  }, [saveConfig, validationErrors]);
+
+  const overviewPanelProps = {
+    overviewQuerying,
+    autoRefreshing,
+    queryReady,
+    overviewReport,
+    report,
+    reportMatchesCurrentFilters,
+    cumulativeSummaryCards,
+    diagnosticSummaryCards,
+    summaryMetricHelp,
+    formatMoney,
+    status: statusState?.status,
+    datePresets: createPresetRanges(t),
+    dateRange,
+    setDateRange,
+    validationErrors,
+    t,
+  };
+
+  const chartAnalysisProps = {
+    analysisMode,
+    setAnalysisMode,
+    metricKey,
+    setMetricKey,
+    metricOptions: metricOpts,
+    viewBatchId,
+    setViewBatchId,
+    batchSummaryOptions,
+    granularity,
+    setGranularity,
+    customIntervalMinutes,
+    setCustomIntervalMinutes,
+    detailFilter,
+    clearDetailFilter: () => {
+      setDetailFilter(null);
+      setDetailPage(1);
+    },
+    runQuery: () => runFullRefresh(),
+    querying: querying || autoRefreshing,
+    chartTab,
+    setChartTab,
+    channelGroupMode,
+    setChannelGroupMode,
+    report,
+    reportMatchesCurrentFilters,
+    queryReady,
+    chartContent,
+    trendBucketCount,
+    tagAggregationHint: tagAggregationMeta.emptyReason,
+    t,
+  };
+
+  const comboManagerProps = {
+    batches,
+    batchDigest,
+    resolveComboConfig,
+    getSiteSummary: (comboConfig) => getSiteSummaryText(comboConfig, t),
+    getUpstreamSummary: (comboConfig) =>
+      getUpstreamSummaryText(comboConfig, options, t),
+    batchValidationError: duplicateBatchError,
+    isMobile,
+    onCreateBatch: openCreateBatchModal,
+    onEditBatch: openEditBatchModal,
+    onRemoveBatch: handleRemoveBatch,
+    t,
+  };
+
+  const walletCardProps = {
+    accounts: accountsHook.accounts,
+    accountDraft: accountsHook.accountDraft,
+    setAccountDraft: accountsHook.setAccountDraft,
+    editingAccountId: accountsHook.editingAccountId,
+    setEditingAccountId: accountsHook.setEditingAccountId,
+    saveAccount: accountsHook.saveAccount,
+    syncAccount: accountsHook.syncAccount,
+    syncAllAccounts: accountsHook.syncAllAccounts,
+    deleteAccount: accountsHook.deleteAccount,
+    savingAccount: accountsHook.savingAccount,
+    syncingAccountId: accountsHook.syncingAccountId,
+    syncingAllAccounts: accountsHook.syncingAllAccounts,
+    deletingAccountId: accountsHook.deletingAccountId,
+    sideSheetVisible: accountsHook.sideSheetVisible,
+    openCreateSideSheet: accountsHook.openCreateSideSheet,
+    openEditSideSheet: accountsHook.openEditSideSheet,
+    closeSideSheet: accountsHook.closeSideSheet,
+    formatMoney,
+    status: statusState?.status,
+    t,
+  };
+
+  const pricingModalProps = {
+    visible: editorVisible,
+    isEditing: !!editingBatchId,
+    comboConfig: editorDraft,
+    setComboConfig: setEditorDraft,
+    channelOptions,
+    tagOptions,
+    modelNameOptions,
+    options,
+    resolveSharedSitePreview,
+    isMobile,
+    clampNumber,
+    localModelMap,
+    validationError: editorValidationError,
+    onOk: handleSaveEditor,
+    onCancel: closeEditor,
+    t,
+  };
 
   return (
     <Spin spinning={loading}>
       <div className='mt-[60px] space-y-3 px-2 pb-6'>
         <ProfitBoardHeader
-          querying={querying} overviewQuerying={overviewQuerying} runFullRefresh={runFullRefresh}
-          saving={saving} saveConfig={() => saveConfig(validationErrors)}
-          autoRefreshMode={autoRefreshMode} setAutoRefreshMode={setAutoRefreshMode}
-          statusSummary={statusSummary} hasNewActivity={hasNewActivity}
-          generatedAtText={generatedAtText} combinedWarnings={combinedWarnings}
-          sitePriceFactorNote={sitePriceFactorNote} t={t}
+          querying={querying}
+          overviewQuerying={overviewQuerying}
+          runFullRefresh={runFullRefresh}
+          saving={saving}
+          saveConfig={handleSaveConfig}
+          autoRefreshMode={autoRefreshMode}
+          setAutoRefreshMode={setAutoRefreshMode}
+          statusSummary={statusSummary}
+          hasNewActivity={hasNewActivity}
+          generatedAtText={generatedAtText}
+          combinedWarnings={combinedWarnings}
+          sitePriceFactorNote={sitePriceFactorNote}
+          hasUnsavedConfigChanges={hasUnsavedConfigChanges}
+          t={t}
         />
         <Tabs type='line' size='large' className='profit-board-tabs'>
-          <Tabs.TabPane tab={<span className='flex items-center gap-1.5'><BarChart3 size={16} />{t('收益分析')}</span>} itemKey='analysis'>
+          <Tabs.TabPane
+            tab={
+              <span className='flex items-center gap-1.5'>
+                <BarChart3 size={16} />
+                {t('收益分析')}
+              </span>
+            }
+            itemKey='analysis'
+          >
             <div className='mt-3 space-y-3'>
-              <OverviewPanel overviewQuerying={overviewQuerying} overviewReport={overviewReport} report={report} reportMatchesCurrentFilters={reportMatchesCurrentFilters} cumulativeSummaryCards={cumulativeSummaryCards} diagnosticSummaryCards={diagnosticSummaryCards} summaryMetricHelp={summaryMetricHelp} formatMoney={formatMoney} status={statusState?.status} datePresets={createPresetRanges(t)} dateRange={dateRange} setDateRange={setDateRange} validationErrors={validationErrors} t={t} />
-              <ChartAnalysisCard analysisMode={analysisMode} setAnalysisMode={setAnalysisMode} metricKey={metricKey} setMetricKey={setMetricKey} metricOptions={metricOpts} viewBatchId={viewBatchId} setViewBatchId={setViewBatchId} batchSummaryOptions={batchSummaryOptions} granularity={granularity} setGranularity={setGranularity} customIntervalMinutes={customIntervalMinutes} setCustomIntervalMinutes={setCustomIntervalMinutes} detailFilter={detailFilter} clearDetailFilter={() => { setDetailFilter(null); setDetailPage(1); }} runQuery={runQuery} querying={querying} chartTab={chartTab} setChartTab={setChartTab} channelGroupMode={channelGroupMode} setChannelGroupMode={setChannelGroupMode} report={report} chartContent={chartContent} trendBucketCount={trendBucketCount} t={t} />
+              <OverviewPanel {...overviewPanelProps} />
+              <ChartAnalysisCard {...chartAnalysisProps} />
             </div>
           </Tabs.TabPane>
-          <Tabs.TabPane tab={<span className='flex items-center gap-1.5'><CircleDollarSign size={16} />{t('配置管理')}</span>} itemKey='config'>
+          <Tabs.TabPane
+            tab={
+              <span className='flex items-center gap-1.5'>
+                <CircleDollarSign size={16} />
+                {t('配置管理')}
+              </span>
+            }
+            itemKey='config'
+          >
             <div className='mt-3 space-y-3'>
-              <ComboManagerCard draft={draft} setDraft={setDraft} channelOptions={channelOptions} options={options} isMobile={isMobile} addOrUpdateBatch={addOrUpdateBatch} editingBatchId={editingBatchId} resetDraft={resetDraft} batches={batches} batchDigest={batchDigest} editBatch={editBatch} removeBatch={removeBatch} batchValidationError={duplicateBatchError} t={t} />
-              <PricingRulesCard batches={batches} comboConfigs={comboConfigs} siteConfig={siteConfig} modelNameOptions={modelNameOptions} options={options} resolveSharedSitePreview={resolveSharedSitePreview} upstreamConfig={upstreamConfig} isMobile={isMobile} createDefaultComboPricingConfig={createDefaultComboPricingConfig} updateComboConfig={updateComboConfig} localModelMap={localModelMap} clampNumber={clampNumber} t={t} />
+              <ComboManagerCard {...comboManagerProps} />
             </div>
           </Tabs.TabPane>
-          <Tabs.TabPane tab={<span className='flex items-center gap-1.5'><BadgeDollarSign size={16} />{t('上游账户')}</span>} itemKey='wallet'>
+          <Tabs.TabPane
+            tab={
+              <span className='flex items-center gap-1.5'>
+                <BadgeDollarSign size={16} />
+                {t('上游账户')}
+              </span>
+            }
+            itemKey='wallet'
+          >
             <div className='mt-3 space-y-3'>
-              <UpstreamWalletCard accounts={accountsHook.accounts} accountDraft={accountsHook.accountDraft} setAccountDraft={accountsHook.setAccountDraft} editingAccountId={accountsHook.editingAccountId} setEditingAccountId={accountsHook.setEditingAccountId} saveAccount={accountsHook.saveAccount} syncAccount={accountsHook.syncAccount} syncAllAccounts={accountsHook.syncAllAccounts} deleteAccount={accountsHook.deleteAccount} savingAccount={accountsHook.savingAccount} syncingAccountId={accountsHook.syncingAccountId} syncingAllAccounts={accountsHook.syncingAllAccounts} deletingAccountId={accountsHook.deletingAccountId} sideSheetVisible={accountsHook.sideSheetVisible} openCreateSideSheet={accountsHook.openCreateSideSheet} openEditSideSheet={accountsHook.openEditSideSheet} closeSideSheet={accountsHook.closeSideSheet} formatMoney={formatMoney} status={statusState?.status} t={t} />
+              <UpstreamWalletCard {...walletCardProps} />
             </div>
           </Tabs.TabPane>
         </Tabs>
       </div>
+
+      <PricingConfigModal {...pricingModalProps} />
     </Spin>
   );
 };

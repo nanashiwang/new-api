@@ -109,6 +109,8 @@ const DiagnosticMetric = ({ item, summaryMetricHelp }) => (
 
 const OverviewPanel = ({
   overviewQuerying,
+  autoRefreshing,
+  queryReady,
   overviewReport,
   report,
   reportMatchesCurrentFilters,
@@ -185,6 +187,9 @@ const OverviewPanel = ({
     },
   ];
 
+  const showEmptyState = !queryReady || !overviewReport;
+  const isBusy = overviewQuerying || autoRefreshing;
+
   return (
     <div className='space-y-4'>
       <Card
@@ -234,7 +239,7 @@ const OverviewPanel = ({
           )}
         </div>
 
-        <Spin spinning={overviewQuerying}>
+        <Spin spinning={isBusy}>
           {overviewReport ? (
             <div className='space-y-4'>
               <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-3'>
@@ -305,12 +310,18 @@ const OverviewPanel = ({
               </Collapsible>
             </div>
           ) : (
-            <Empty description={t('添加组合后可手动刷新数据')} />
+            <Empty
+              description={
+                !queryReady
+                  ? t('添加组合并完成加载后会自动生成总览')
+                  : t('当前范围内没有累计总览数据')
+              }
+            />
           )}
         </Spin>
       </Card>
 
-      {overviewReport?.batch_summaries?.length > 0 ? (
+      {!showEmptyState && overviewReport?.batch_summaries?.length > 0 ? (
         <Card
           bordered={false}
           title={

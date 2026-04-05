@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import {
   Banner,
+  Input,
   InputNumber,
   Modal,
   Radio,
@@ -60,15 +61,18 @@ const PricePreviewBlock = ({ title, value }) => (
 
 const PricingConfigModal = ({
   visible,
-  batchName,
+  isEditing,
   comboConfig,
   setComboConfig,
+  channelOptions,
+  tagOptions,
   modelNameOptions,
   options,
   resolveSharedSitePreview,
   isMobile,
   clampNumber,
   localModelMap,
+  validationError,
   onOk,
   onCancel,
   t,
@@ -80,6 +84,9 @@ const PricingConfigModal = ({
       label: `${item.name} · ${item.base_url || t('未填写地址')}`,
       value: item.id,
     }));
+  const scopeOptions = comboConfig?.scope_type === 'channel'
+    ? channelOptions
+    : tagOptions;
 
   const updateRule = (field, index, patch) =>
     setComboConfig((prev) => ({
@@ -114,42 +121,116 @@ const PricingConfigModal = ({
 
   return (
     <Modal
-      title={batchName}
+      title={isEditing ? t('编辑组合') : t('新建组合')}
       visible={visible}
       onOk={onOk}
       onCancel={onCancel}
       size='large'
       centered
-      okText={t('完成')}
+      okText={isEditing ? t('保存组合') : t('创建组合')}
       cancelText={t('取消')}
       bodyStyle={{ paddingTop: 8 }}
     >
       {comboConfig ? (
         <div className='space-y-5'>
-          <div className='rounded-2xl border border-semi-color-border bg-semi-color-fill-0 p-4'>
+          <Banner
+            type='info'
+            closeIcon={null}
+            description={t('关闭弹窗后，仍需点击页面顶部“保存配置”才会提交到服务器')}
+          />
+
+          {validationError ? (
+            <Banner
+              type='danger'
+              closeIcon={null}
+              description={validationError}
+            />
+          ) : null}
+
+          <section className='space-y-3 rounded-2xl border border-semi-color-border bg-semi-color-fill-0 p-4'>
             <div className='flex flex-wrap items-center justify-between gap-3'>
               <div>
                 <Text type='tertiary' size='small'>
-                  {t('组合定价')}
+                  {t('组合范围')}
                 </Text>
                 <Title heading={6} style={{ margin: '6px 0 0' }}>
-                  {batchName}
+                  {comboConfig.name?.trim() || t('未命名组合')}
                 </Title>
               </div>
-              <div className='flex flex-wrap gap-2'>
-                <Tag color={comboConfig.site_mode === 'shared_site_model' ? 'blue' : 'grey'}>
-                  {comboConfig.site_mode === 'shared_site_model'
-                    ? t('本站模型价格')
-                    : t('手动收入')}
-                </Tag>
-                <Tag color={comboConfig.upstream_mode === 'wallet_observer' ? 'amber' : 'cyan'}>
-                  {comboConfig.upstream_mode === 'wallet_observer'
-                    ? t('钱包余额变化')
-                    : t('模型单价')}
-                </Tag>
+              <Tag
+                color={comboConfig.scope_type === 'channel' ? 'blue' : 'cyan'}
+              >
+                {comboConfig.scope_type === 'channel' ? t('按渠道') : t('按标签')}
+              </Tag>
+            </div>
+
+            <div className='grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]'>
+              <div>
+                <Text type='tertiary' size='small' className='mb-1.5 block'>
+                  {t('组合名称')}
+                </Text>
+                <Input
+                  value={comboConfig.name}
+                  onChange={(value) =>
+                    setComboConfig((prev) => ({ ...prev, name: value }))
+                  }
+                  placeholder={t('组合名称，例如：OpenAI 主力')}
+                />
+              </div>
+              <div>
+                <Text type='tertiary' size='small' className='mb-1.5 block'>
+                  {t('范围类型')}
+                </Text>
+                <Radio.Group
+                  type='button'
+                  value={comboConfig.scope_type}
+                  onChange={(event) =>
+                    setComboConfig((prev) => ({
+                      ...prev,
+                      scope_type: event.target.value,
+                      channel_ids: [],
+                      tags: [],
+                    }))
+                  }
+                  size='small'
+                >
+                  <Radio value='channel'>{t('按渠道')}</Radio>
+                  <Radio value='tag'>{t('按标签')}</Radio>
+                </Radio.Group>
               </div>
             </div>
-          </div>
+
+            <div>
+              <Text type='tertiary' size='small' className='mb-1.5 block'>
+                {comboConfig.scope_type === 'channel' ? t('选择渠道') : t('选择标签')}
+              </Text>
+              <Select
+                multiple
+                filter
+                maxTagCount={isMobile ? 2 : 4}
+                optionList={scopeOptions}
+                value={
+                  comboConfig.scope_type === 'channel'
+                    ? comboConfig.channel_ids || []
+                    : comboConfig.tags || []
+                }
+                onChange={(value) =>
+                  comboConfig.scope_type === 'channel'
+                    ? setComboConfig((prev) => ({
+                        ...prev,
+                        channel_ids: value || [],
+                      }))
+                    : setComboConfig((prev) => ({ ...prev, tags: value || [] }))
+                }
+                placeholder={
+                  comboConfig.scope_type === 'channel'
+                    ? t('选择渠道')
+                    : t('选择标签')
+                }
+                style={{ width: '100%' }}
+              />
+            </div>
+          </section>
 
           <section className='space-y-3'>
             <div className='flex items-center justify-between gap-3'>
@@ -263,7 +344,7 @@ const PricingConfigModal = ({
                       );
                       return (
                         <div
-                          key={`${batchName}-${modelName}`}
+                          key={`${comboConfig.id}-${modelName}`}
                           className='rounded-2xl border border-semi-color-border bg-semi-color-bg-1 p-4'
                         >
                           <div className='mb-3 flex items-center justify-between gap-2'>
@@ -305,7 +386,7 @@ const PricingConfigModal = ({
             ) : null}
 
             <PricingRuleList
-              comboId='modal'
+              comboId={comboConfig.id || 'modal'}
               field='site_rules'
               title={t('手动定价规则')}
               rules={comboConfig.site_rules}
@@ -384,7 +465,7 @@ const PricingConfigModal = ({
 
             {comboConfig.upstream_mode === 'manual_rules' ? (
               <PricingRuleList
-                comboId='modal'
+                comboId={comboConfig.id || 'modal'}
                 field='upstream_rules'
                 title={t('成本定价规则')}
                 rules={comboConfig.upstream_rules}

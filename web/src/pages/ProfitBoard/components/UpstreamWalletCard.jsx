@@ -18,28 +18,44 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import React from 'react';
 import { Button, Card, Empty, Space, Tag, Typography } from '@douyinfe/semi-ui';
-import {
-  AlertCircle,
-  Pencil,
-  Plus,
-  RefreshCw,
-  Wallet,
-} from 'lucide-react';
+import { AlertCircle, Pencil, Plus, RefreshCw, Wallet } from 'lucide-react';
 import { timestamp2string } from '../../../helpers';
-import {
-  getAccountBalanceVisualMeta,
-  getWalletStatusMeta,
-} from '../utils';
+import { getAccountBalanceVisualMeta, getWalletStatusMeta } from '../utils';
 import AccountEditSideSheet from './AccountEditSideSheet';
 
 const { Text, Title } = Typography;
 
 const InfoMetric = ({ label, value }) => (
-  <div className='rounded-xl border border-semi-color-border bg-semi-color-fill-0 px-3 py-3'>
+  <div className='rounded-2xl border border-semi-color-border bg-semi-color-fill-0 px-3 py-3'>
     <Text type='tertiary' size='small'>
       {label}
     </Text>
-    <div className='mt-1 text-sm font-semibold'>{value}</div>
+    <div className='mt-1 text-sm font-semibold tabular-nums'>{value}</div>
+  </div>
+);
+
+const BalanceRuler = ({ segments, showMarker }) => (
+  <div className='space-y-2'>
+    <div className='grid grid-cols-3 gap-2'>
+      {segments.map((segment) => (
+        <div key={segment.key} className='space-y-1.5'>
+          <div
+            className={`relative h-3 rounded-full transition-all ${segment.className} ${segment.ringClass}`}
+          >
+            {segment.active && showMarker ? (
+              <span className='absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current shadow-sm' />
+            ) : null}
+          </div>
+          <div
+            className={`text-center text-[11px] leading-none ${
+              segment.active ? 'font-semibold text-semi-color-text-0' : ''
+            }`}
+          >
+            {segment.label}
+          </div>
+        </div>
+      ))}
+    </div>
   </div>
 );
 
@@ -100,24 +116,40 @@ const UpstreamWalletCard = ({
         {accounts.map((item) => {
           const statusMeta = getWalletStatusMeta(item.status, t);
           const balanceMeta = getAccountBalanceVisualMeta(item, status, t);
+          const balanceTitle =
+            item.status === 'failed' && item.last_success_at
+              ? t('最近有效余额')
+              : t('当前余额');
+          const balanceValue =
+            item.status === 'failed' && !item.last_success_at
+              ? '--'
+              : formatMoney(item.wallet_balance_usd, status);
+          const subtitle = item.remark || item.base_url || '-';
+          const syncTime = item.last_synced_at
+            ? timestamp2string(item.last_synced_at)
+            : '-';
 
           return (
             <div
               key={item.id}
-              className='rounded-2xl border border-semi-color-border bg-semi-color-bg-1 p-4'
+              className='rounded-3xl border border-semi-color-border bg-semi-color-bg-1 p-5 shadow-sm transition-colors'
             >
-              <div className='flex items-start justify-between gap-3'>
-                <div className='min-w-0 flex-1'>
+              <div className='flex items-start justify-between gap-4'>
+                <div className='min-w-0 flex-1 space-y-2'>
                   <div className='flex flex-wrap items-center gap-2'>
-                    <Title heading={6} style={{ margin: 0 }}>
+                    <Title heading={5} style={{ margin: 0 }}>
                       {item.name}
                     </Title>
                     <Tag color={statusMeta.color} size='small'>
                       {statusMeta.label}
                     </Tag>
                   </div>
-                  <Text type='tertiary' size='small' className='mt-1 block'>
-                    {item.remark || item.base_url || '-'}
+                  <Text
+                    type='tertiary'
+                    size='small'
+                    className='block break-all leading-5'
+                  >
+                    {subtitle}
                   </Text>
                 </div>
 
@@ -139,31 +171,52 @@ const UpstreamWalletCard = ({
               </div>
 
               <div
-                className={`mt-4 rounded-2xl border px-4 py-4 ${balanceMeta.bgColor} ${balanceMeta.borderColor}`}
+                className={`mt-5 rounded-3xl border px-4 py-4 ${balanceMeta.panelTone}`}
               >
-                <Text type='tertiary' size='small'>
-                  {t('当前余额')}
-                </Text>
-                <div
-                  className={`mt-2 text-3xl font-semibold tabular-nums ${balanceMeta.textColor}`}
-                >
-                  {formatMoney(item.wallet_balance_usd, status)}
+                <div className='flex items-start justify-between gap-3'>
+                  <div>
+                    <Text type='tertiary' size='small'>
+                      {balanceTitle}
+                    </Text>
+                    <div
+                      className={`mt-2 text-3xl font-semibold tabular-nums ${balanceMeta.amountTone}`}
+                    >
+                      {balanceValue}
+                    </div>
+                  </div>
+                  <span
+                    className={`rounded-full border px-2.5 py-1 text-xs font-medium ${balanceMeta.badgeTone}`}
+                  >
+                    {balanceMeta.label}
+                  </span>
                 </div>
-                <Text size='small' className={`mt-1 block ${balanceMeta.textColor}`}>
-                  {balanceMeta.label}
+
+                <div className='mt-4'>
+                  <BalanceRuler
+                    segments={balanceMeta.rulerSegments}
+                    showMarker={balanceMeta.showMarker}
+                  />
+                </div>
+
+                <Text
+                  size='small'
+                  className='mt-3 block leading-5 text-semi-color-text-1'
+                >
+                  {balanceMeta.helper}
                 </Text>
               </div>
 
-              <div className='mt-4 grid gap-3 sm:grid-cols-2'>
+              <div className='mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3'>
                 <InfoMetric
                   label={t('累计消耗')}
                   value={formatMoney(item.wallet_used_total_usd, status)}
                 />
+                <InfoMetric label={t('最近同步')} value={syncTime} />
                 <InfoMetric
-                  label={t('最近同步')}
+                  label={t('同步来源')}
                   value={
-                    item.last_synced_at
-                      ? timestamp2string(item.last_synced_at)
+                    item.base_url
+                      ? item.base_url.replace(/^https?:\/\//, '')
                       : '-'
                   }
                 />
@@ -182,7 +235,10 @@ const UpstreamWalletCard = ({
                   />
                   <InfoMetric
                     label={t('订阅已用')}
-                    value={formatMoney(item.subscription_used_quota_usd, status)}
+                    value={formatMoney(
+                      item.subscription_used_quota_usd,
+                      status,
+                    )}
                   />
                 </div>
               )}
@@ -194,7 +250,7 @@ const UpstreamWalletCard = ({
               ) : null}
 
               {item.error_message ? (
-                <div className='mt-3 flex items-start gap-2 rounded-xl border border-red-500/20 bg-red-500/5 px-3 py-2 text-sm'>
+                <div className='mt-3 flex items-start gap-2 rounded-2xl border border-red-500/20 bg-red-500/5 px-3 py-2.5 text-sm text-red-600 dark:text-red-300'>
                   <AlertCircle
                     size={14}
                     className='mt-0.5 shrink-0 text-red-500'

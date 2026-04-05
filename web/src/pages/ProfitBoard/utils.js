@@ -207,65 +207,123 @@ export const getWalletStatusMeta = (status, t) =>
     disabled: { color: 'grey', label: t('已停用') },
   })[status] || { color: 'grey', label: t('待同步') };
 
-/**
- * 计算账户余额健康等级
- * @returns {{ level: 'healthy'|'warning'|'critical', color: string, label: function }}
- */
-export const getBalanceHealthLevel = (account, t) => {
-  const balance = Number(account?.wallet_balance_usd || 0);
-  const threshold = Number(account?.low_balance_threshold_usd || 0);
+const createBalanceRulerSegments = (activeKey, muted = false) => {
+  const neutralSegment = 'bg-semi-color-fill-1 text-semi-color-text-2';
+  const activeRing = muted
+    ? 'ring-white/40 dark:ring-white/10 shadow-none'
+    : '';
 
-  if (threshold > 0) {
-    if (balance <= threshold) {
-      return { level: 'critical', color: 'red', bgColor: 'bg-red-500/10', textColor: 'text-red-600 dark:text-red-400', label: t('余额偏低') };
-    }
-    if (balance <= threshold * 3) {
-      return { level: 'warning', color: 'orange', bgColor: 'bg-amber-500/10', textColor: 'text-amber-600 dark:text-amber-400', label: t('注意') };
-    }
-    return { level: 'healthy', color: 'green', bgColor: 'bg-emerald-500/10', textColor: 'text-emerald-600 dark:text-emerald-400', label: t('充足') };
-  }
+  const segments = [
+    {
+      key: 'critical',
+      label: '低于 10',
+      className: muted
+        ? neutralSegment
+        : 'bg-red-500/15 text-red-600 dark:text-red-300',
+    },
+    {
+      key: 'warning',
+      label: '10 - 50',
+      className: muted
+        ? neutralSegment
+        : 'bg-amber-500/15 text-amber-600 dark:text-amber-300',
+    },
+    {
+      key: 'healthy',
+      label: '50+',
+      className: muted
+        ? neutralSegment
+        : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300',
+    },
+  ];
 
-  // 未设提醒线时的默认判断
-  if (balance < 10) {
-    return { level: 'critical', color: 'red', bgColor: 'bg-red-500/10', textColor: 'text-red-600 dark:text-red-400', label: t('余额偏低') };
-  }
-  if (balance < 50) {
-    return { level: 'warning', color: 'orange', bgColor: 'bg-amber-500/10', textColor: 'text-amber-600 dark:text-amber-400', label: t('注意') };
-  }
-  return { level: 'healthy', color: 'green', bgColor: 'bg-emerald-500/10', textColor: 'text-emerald-600 dark:text-emerald-400', label: t('充足') };
+  return segments.map((segment) => ({
+    ...segment,
+    active: activeKey === segment.key,
+    ringClass:
+      activeKey === segment.key ? `ring-2 ring-inset ${activeRing}`.trim() : '',
+  }));
 };
 
-export const getAccountBalanceVisualMeta = (account, status, t) => {
-  const { rate } = getDisplayCurrency(status);
-  const displayBalance = Number(account?.wallet_balance_usd || 0) * rate;
+export const getBalanceHealthLevel = (account) => {
+  const balance = Number(account?.wallet_balance_usd || 0);
 
-  if (displayBalance <= 10) {
+  if (balance < 10) {
     return {
-      level: 'critical',
-      color: 'red',
-      bgColor: 'bg-red-500/10',
-      borderColor: 'border-red-500/20',
-      textColor: 'text-red-600 dark:text-red-400',
-      label: t('警告'),
+      key: 'critical',
+      label: '余额紧张',
+      helper: '当前余额低于 10，建议尽快处理',
+      amountTone: 'text-red-600 dark:text-red-400',
+      badgeTone:
+        'border-red-500/20 bg-red-500/10 text-red-600 dark:text-red-300',
+      panelTone: 'border-red-500/20 bg-red-500/[0.07]',
     };
   }
-  if (displayBalance <= 50) {
+  if (balance <= 50) {
     return {
-      level: 'warning',
-      color: 'yellow',
-      bgColor: 'bg-amber-500/10',
-      borderColor: 'border-amber-500/20',
-      textColor: 'text-amber-600 dark:text-amber-400',
-      label: t('注意'),
+      key: 'warning',
+      label: '余额偏低',
+      helper: '当前余额低于 50，请关注',
+      amountTone: 'text-amber-600 dark:text-amber-400',
+      badgeTone:
+        'border-amber-500/20 bg-amber-500/10 text-amber-600 dark:text-amber-300',
+      panelTone: 'border-amber-500/20 bg-amber-500/[0.07]',
     };
   }
   return {
-    level: 'healthy',
-    color: 'green',
-    bgColor: 'bg-emerald-500/10',
-    borderColor: 'border-emerald-500/20',
-    textColor: 'text-emerald-600 dark:text-emerald-400',
-    label: t('正常'),
+    key: 'healthy',
+    label: '余额充足',
+    helper: '当前余额高于 50，可继续使用',
+    amountTone: 'text-emerald-600 dark:text-emerald-400',
+    badgeTone:
+      'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300',
+    panelTone: 'border-emerald-500/20 bg-emerald-500/[0.07]',
+  };
+};
+
+export const getAccountBalanceVisualMeta = (account, status, t) => {
+  const balance = Number(account?.wallet_balance_usd || 0);
+  const accountStatus = account?.status || '';
+  const hasFailedSync = accountStatus === 'failed';
+  const isDisabled =
+    accountStatus === 'disabled' || accountStatus === 'not_configured';
+
+  if (hasFailedSync) {
+    return {
+      label: account?.last_success_at ? t('最近有效余额') : t('当前余额'),
+      helper: t('同步失败，余额状态暂不可判断'),
+      amountTone: 'text-semi-color-text-0',
+      badgeTone:
+        'border-semi-color-border bg-semi-color-fill-0 text-semi-color-text-1',
+      panelTone: 'border-semi-color-border bg-semi-color-fill-0',
+      rulerSegments: createBalanceRulerSegments('', true),
+      showMarker: false,
+    };
+  }
+
+  if (isDisabled) {
+    return {
+      label: t('余额状态暂停'),
+      helper: t('账户已停用，暂不进行余额判断'),
+      amountTone: 'text-semi-color-text-0',
+      badgeTone:
+        'border-semi-color-border bg-semi-color-fill-0 text-semi-color-text-1',
+      panelTone: 'border-semi-color-border bg-semi-color-fill-0',
+      rulerSegments: createBalanceRulerSegments('', true),
+      showMarker: false,
+    };
+  }
+
+  const health = getBalanceHealthLevel(account, t);
+
+  return {
+    label: t(health.label),
+    helper: t(health.helper),
+    amountTone: health.amountTone,
+    badgeTone: health.badgeTone,
+    panelTone: health.panelTone,
+    rulerSegments: createBalanceRulerSegments(health.key),
+    showMarker: balance >= 0,
   };
 };
 
@@ -358,8 +416,7 @@ export const normalizeRestoredState = (state) => {
     Number(next.customIntervalMinutes || defaults.customIntervalMinutes),
     1,
   );
-  next.channelGroupMode =
-    next.channelGroupMode === 'tag' ? 'tag' : 'channel';
+  next.channelGroupMode = next.channelGroupMode === 'tag' ? 'tag' : 'channel';
   next.compareMode = next.compareMode || 'none';
   next.comparePeriod = next.comparePeriod || 'previous';
   next.upstreamConfig = {

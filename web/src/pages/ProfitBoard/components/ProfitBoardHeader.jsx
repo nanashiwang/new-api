@@ -47,6 +47,7 @@ const ProfitBoardHeader = ({
   generatedAtText,
   combinedWarnings,
   sitePriceFactorNote,
+  hasUnsavedConfigChanges,
   t,
 }) => {
   const [warningsExpanded, setWarningsExpanded] = useState(false);
@@ -85,6 +86,11 @@ const ProfitBoardHeader = ({
           )}
         </div>
         <Space wrap>
+          {hasUnsavedConfigChanges && (
+            <Tag color='orange' size='small'>
+              {t('当前有未保存更改')}
+            </Tag>
+          )}
           <Button
             theme='solid'
             type='primary'
