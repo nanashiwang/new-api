@@ -1304,12 +1304,8 @@ const ProfitBoardPage = () => {
     openCreateSideSheet: accountsHook.openCreateSideSheet,
     openEditSideSheet: accountsHook.openEditSideSheet,
     closeSideSheet: accountsHook.closeSideSheet,
-    editingAccount: accountsHook.editingAccount,
-    accountTrend: accountsHook.accountTrend,
-    accountTrendLoading: accountsHook.accountTrendLoading,
     formatMoney,
     status: statusState?.status,
-    isMobile,
     t,
   };
 

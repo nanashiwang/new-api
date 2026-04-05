@@ -21,6 +21,7 @@ import {
   Button,
   Input,
   InputNumber,
+  Modal,
   SideSheet,
   Switch,
   Typography,
@@ -117,7 +118,18 @@ const AccountEditSideSheet = ({
                 theme='light'
                 icon={<Trash2 size={14} />}
                 loading={deletingAccountId === accountDraft.id}
-                onClick={() => deleteAccount(accountDraft.id)}
+                onClick={() => {
+                  Modal.confirm({
+                    title: t('确认删除'),
+                    content: t('确定要删除账户「{{name}}」吗？删除后无法恢复。', {
+                      name: accountDraft.name || t('未命名'),
+                    }),
+                    okText: t('确认删除'),
+                    cancelText: t('取消'),
+                    okButtonProps: { type: 'danger' },
+                    onOk: () => deleteAccount(accountDraft.id),
+                  });
+                }}
               >
                 {t('删除')}
               </Button>
