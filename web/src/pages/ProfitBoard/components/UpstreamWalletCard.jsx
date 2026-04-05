@@ -17,10 +17,30 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import React from 'react';
-import { Button, Card, Empty, Space, Tag, Typography } from '@douyinfe/semi-ui';
-import { AlertCircle, Pencil, Plus, RefreshCw, Wallet } from 'lucide-react';
+import {
+  Button,
+  Card,
+  Empty,
+  Modal,
+  Space,
+  Tag,
+  Typography,
+} from '@douyinfe/semi-ui';
+import {
+  AlertCircle,
+  AlertTriangle,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Trash2,
+  Wallet,
+} from 'lucide-react';
 import { timestamp2string } from '../../../helpers';
-import { getAccountBalanceVisualMeta, getWalletStatusMeta } from '../utils';
+import {
+  getAccountBalanceVisualMeta,
+  getUpstreamAccountSuggestedName,
+  getWalletStatusMeta,
+} from '../utils';
 import AccountEditSideSheet from './AccountEditSideSheet';
 
 const { Text, Title } = Typography;
@@ -36,81 +56,129 @@ const AccountCard = ({
   syncingAccountId,
   syncAccount,
   openEditSideSheet,
+  deleteAccount,
+  deletingAccountId,
   formatMoney,
   status,
   t,
-}) => (
-  <div
-    className={`rounded-xl border border-l-4 bg-semi-color-bg-1 ${balanceMeta.accentColor} transition-colors`}
-  >
-    {/* 头部：名称 + 操作 */}
-    <div className='flex items-center justify-between gap-2 px-4 pt-3 pb-2'>
-      <div className='flex min-w-0 flex-1 items-center gap-2'>
-        <Title heading={6} ellipsis style={{ margin: 0, maxWidth: '60%' }}>
-          {item.name}
-        </Title>
-        <Tag color={statusMeta.color} size='small'>
-          {statusMeta.label}
-        </Tag>
-      </div>
-      <Space spacing={4}>
-        <Button
-          type='tertiary'
-          icon={<RefreshCw size={14} />}
-          loading={syncingAccountId === item.id}
-          onClick={() => syncAccount(item.id)}
-          size='small'
-        />
-        <Button
-          type='tertiary'
-          icon={<Pencil size={14} />}
-          onClick={() => openEditSideSheet(item.id)}
-          size='small'
-        />
-      </Space>
-    </div>
+}) => {
+  const domainLabel = getUpstreamAccountSuggestedName(item.base_url);
 
-    {/* 余额（核心信息，大字 + 颜色） */}
-    <div className='px-4 pb-3'>
-      <div className='flex items-baseline gap-2'>
-        <span
-          className={`text-2xl font-bold tabular-nums ${balanceMeta.amountTone}`}
-        >
-          {balanceValue}
-        </span>
-        <span
-          className={`rounded-full px-2 py-0.5 text-xs font-medium ${balanceMeta.badgeTone}`}
-        >
-          {balanceMeta.label}
-        </span>
+  const confirmDelete = () => {
+    Modal.confirm({
+      title: t('确认删除'),
+      content: t('确定要删除账户「{{name}}」吗？删除后无法恢复。', {
+        name: item.name || t('未命名'),
+      }),
+      okText: t('确认删除'),
+      cancelText: t('取消'),
+      okButtonProps: { type: 'danger' },
+      onOk: () => deleteAccount(item.id),
+    });
+  };
+
+  return (
+    <div
+      className={`rounded-xl border border-l-4 bg-semi-color-bg-1 ${balanceMeta.accentColor} transition-colors`}
+    >
+      <div className='flex items-start justify-between gap-3 px-4 pt-3 pb-2'>
+        <div className='min-w-0 flex-1'>
+          <div className='flex min-w-0 flex-wrap items-center gap-2'>
+            <Title heading={6} ellipsis style={{ margin: 0, maxWidth: '100%' }}>
+              {item.name}
+            </Title>
+            <Tag color={statusMeta.color} size='small'>
+              {statusMeta.label}
+            </Tag>
+          </div>
+          {domainLabel ? (
+            <Text
+              type='tertiary'
+              size='small'
+              className='mt-1 block truncate font-mono'
+            >
+              {domainLabel}
+            </Text>
+          ) : null}
+        </div>
+        <div className='shrink-0'>
+          <Space spacing={4}>
+            <Button
+              type='tertiary'
+              icon={<RefreshCw size={14} />}
+              loading={syncingAccountId === item.id}
+              onClick={() => syncAccount(item.id)}
+              size='small'
+              aria-label={t('同步账户')}
+            />
+            <Button
+              type='tertiary'
+              icon={<Pencil size={14} />}
+              onClick={() => openEditSideSheet(item.id)}
+              size='small'
+              aria-label={t('编辑账户')}
+            />
+            <Button
+              type='danger'
+              theme='borderless'
+              icon={<Trash2 size={14} />}
+              loading={deletingAccountId === item.id}
+              onClick={confirmDelete}
+              size='small'
+              aria-label={t('删除账户')}
+            />
+          </Space>
+        </div>
       </div>
 
-      {/* 次要指标：累计消耗 + 同步时间 */}
-      <div className='mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-semi-color-text-2'>
-        <span>
-          {t('累计消耗')}{' '}
-          <span className='font-medium text-semi-color-text-0'>
-            {formatMoney(item.wallet_used_total_usd, status)}
+      <div className='px-4 pb-3'>
+        <div className='flex items-baseline gap-2'>
+          <span
+            className={`text-2xl font-bold tabular-nums ${balanceMeta.amountTone}`}
+          >
+            {balanceValue}
           </span>
-        </span>
-        <span>
-          {t('同步')}{' '}
-          <span className='font-medium text-semi-color-text-0'>
-            {syncTime}
+          <span
+            className={`rounded-full px-2 py-0.5 text-xs font-medium ${balanceMeta.badgeTone}`}
+          >
+            {balanceMeta.label}
           </span>
-        </span>
-      </div>
-    </div>
+        </div>
 
-    {/* 错误信息（仅异常时显示） */}
-    {item.error_message && (
-      <div className='mx-4 mb-3 flex items-start gap-1.5 rounded-lg bg-red-500/5 px-3 py-1.5 text-xs text-red-600 dark:text-red-300'>
-        <AlertCircle size={12} className='mt-0.5 shrink-0 text-red-500' />
-        <span>{item.error_message}</span>
+        {balanceMeta.showNotice ? (
+          <div
+            className={`mt-3 flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium ${balanceMeta.noticeTone}`}
+          >
+            <AlertTriangle size={13} className='shrink-0' />
+            <span>{balanceMeta.label}</span>
+          </div>
+        ) : null}
+
+        <div className='mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-semi-color-text-2'>
+          <span>
+            {t('累计消耗')}{' '}
+            <span className='font-medium text-semi-color-text-0'>
+              {formatMoney(item.wallet_used_total_usd, status)}
+            </span>
+          </span>
+          <span>
+            {t('同步')}{' '}
+            <span className='font-medium text-semi-color-text-0'>
+              {syncTime}
+            </span>
+          </span>
+        </div>
       </div>
-    )}
-  </div>
-);
+
+      {item.error_message && (
+        <div className='mx-4 mb-3 flex items-start gap-1.5 rounded-lg bg-red-500/5 px-3 py-1.5 text-xs text-red-600 dark:text-red-300'>
+          <AlertCircle size={12} className='mt-0.5 shrink-0 text-red-500' />
+          <span>{item.error_message}</span>
+        </div>
+      )}
+    </div>
+  );
+};
 
 /* ── 主组件 ─────────────────────────────────────────── */
 
@@ -195,6 +263,8 @@ const UpstreamWalletCard = ({
               syncingAccountId={syncingAccountId}
               syncAccount={syncAccount}
               openEditSideSheet={openEditSideSheet}
+              deleteAccount={deleteAccount}
+              deletingAccountId={deletingAccountId}
               formatMoney={formatMoney}
               status={status}
               t={t}

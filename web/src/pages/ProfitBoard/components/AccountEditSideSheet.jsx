@@ -26,7 +26,7 @@ import {
   Switch,
   Typography,
 } from '@douyinfe/semi-ui';
-import { KeyRound, Pencil, Save, Trash2 } from 'lucide-react';
+import { Save, Trash2 } from 'lucide-react';
 import { getUpstreamAccountSuggestedName } from '../utils';
 
 const { Text, Title } = Typography;
@@ -205,7 +205,6 @@ const AccountEditSideSheet = ({
               }
               onBlur={() => touchAccountDraftField('access_token')}
               mode='password'
-              prefix={<KeyRound size={14} />}
               placeholder={
                 accountDraft.access_token_masked
                   ? t('留空则保留当前密钥')
@@ -240,7 +239,6 @@ const AccountEditSideSheet = ({
               onChange={(value) => updateAccountDraftField('name', value)}
               onBlur={() => touchAccountDraftField('name')}
               placeholder={t('例如：主站账号 / 包月账号 / 备用账号')}
-              prefix={<Pencil size={14} />}
             />
             <FieldMessage
               message={

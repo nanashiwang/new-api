@@ -396,29 +396,33 @@ export const getWalletStatusMeta = (status, t) =>
 export const getBalanceHealthLevel = (account) => {
   const balance = Number(account?.wallet_balance_usd || 0);
 
-  if (balance < 10) {
+  if (balance <= 10) {
     return {
       key: 'critical',
-      label: '余额紧张',
-      helper: '低于 $10，建议尽快充值',
+      label: '余额告急',
+      helper: '',
       accentColor: 'border-l-red-500',
       amountTone: 'text-red-600 dark:text-red-400',
       badgeTone: 'bg-red-500/10 text-red-600 dark:text-red-400',
+      noticeTone:
+        'border border-red-200 bg-red-500/10 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200',
     };
   }
   if (balance <= 50) {
     return {
       key: 'warning',
       label: '余额偏低',
-      helper: '低于 $50，请关注',
+      helper: '',
       accentColor: 'border-l-amber-500',
       amountTone: 'text-amber-600 dark:text-amber-400',
       badgeTone: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
+      noticeTone:
+        'border border-amber-200 bg-amber-500/10 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200',
     };
   }
   return {
     key: 'healthy',
-    label: '余额充足',
+    label: '余额正常',
     helper: '',
     accentColor: 'border-l-emerald-500',
     amountTone: 'text-emerald-600 dark:text-emerald-400',
@@ -454,11 +458,14 @@ export const getAccountBalanceVisualMeta = (account, status, t) => {
 
   const health = getBalanceHealthLevel(account, t);
   return {
+    level: health.key,
     label: t(health.label),
     helper: t(health.helper),
     accentColor: health.accentColor,
     amountTone: health.amountTone,
     badgeTone: health.badgeTone,
+    noticeTone: health.noticeTone || '',
+    showNotice: health.key === 'critical' || health.key === 'warning',
   };
 };
 
