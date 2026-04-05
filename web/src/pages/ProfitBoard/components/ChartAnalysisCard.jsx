@@ -23,6 +23,7 @@ import {
   Card,
   Empty,
   InputNumber,
+  Radio,
   Select,
   Space,
   Tabs,
@@ -51,9 +52,10 @@ const ChartAnalysisCard = ({
   querying,
   chartTab,
   setChartTab,
+  channelGroupMode,
+  setChannelGroupMode,
   report,
   chartContent,
-  trendRowCount,
   trendBucketCount,
   t,
 }) => {
@@ -62,6 +64,7 @@ const ChartAnalysisCard = ({
     setMetricKey('configured_profit_usd');
     setViewBatchId('all');
     setGranularity('day');
+    setChannelGroupMode('channel');
     if (detailFilter?.value) clearDetailFilter();
   };
 
@@ -191,18 +194,30 @@ const ChartAnalysisCard = ({
         <Tabs.TabPane tab={t('模型')} itemKey='model' />
       </Tabs>
 
+      {chartTab === 'channel' ? (
+        <div className='mb-3 flex items-center justify-end'>
+          <Radio.Group
+            type='button'
+            value={channelGroupMode}
+            onChange={(event) => setChannelGroupMode(event.target.value)}
+            size='small'
+          >
+            <Radio value='channel'>{t('单渠道')}</Radio>
+            <Radio value='tag'>{t('标签聚合')}</Radio>
+          </Radio.Group>
+        </div>
+      ) : null}
+
       <div className='min-h-[300px]'>
         {report ? (
           <>
             {chartTab === 'trend' &&
               trendBucketCount > 0 &&
-              trendBucketCount < 4 && (
+              trendBucketCount < 4 &&
+              granularity !== 'month' && (
                 <Banner
                   type='info'
-                  description={t(
-                    '当前趋势图只有 {{count}} 个时间点。即使请求很多，也会先汇总进这些时间桶；想看更明显的趋势，请扩大时间范围或调整粒度。',
-                    { count: trendBucketCount },
-                  )}
+                  description={t('数据点较少，可尝试扩大时间范围')}
                   closeIcon={null}
                   className='mb-3'
                 />

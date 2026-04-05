@@ -588,13 +588,29 @@ func migrateProfitBoardLegacyWalletAccount(payload *ProfitBoardConfigPayload) er
 		return nil
 	}
 	payload.Upstream = normalizeProfitBoardPricingConfig(payload.Upstream, false)
+	payload.ComboConfigs = normalizeProfitBoardComboConfigs(payload.Batches, payload.ComboConfigs, payload.SharedSite, payload.Site, payload.Upstream)
 	if payload.Upstream.UpstreamMode != ProfitBoardUpstreamModeWallet {
 		switch payload.Upstream.CostSource {
 		case ProfitBoardCostSourceReturnedFirst, ProfitBoardCostSourceReturnedOnly:
 			payload.Upstream.UpstreamMode = ProfitBoardUpstreamModeWallet
 		}
 	}
-	if payload.Upstream.UpstreamMode != ProfitBoardUpstreamModeWallet || payload.Upstream.UpstreamAccountID > 0 {
+	needsLegacyMigration := payload.Upstream.UpstreamMode == ProfitBoardUpstreamModeWallet
+	for index := range payload.ComboConfigs {
+		if payload.ComboConfigs[index].UpstreamMode == ProfitBoardUpstreamModeWallet && payload.ComboConfigs[index].UpstreamAccountID <= 0 {
+			needsLegacyMigration = true
+			break
+		}
+	}
+	if !needsLegacyMigration {
+		return nil
+	}
+	if payload.Upstream.UpstreamMode == ProfitBoardUpstreamModeWallet && payload.Upstream.UpstreamAccountID > 0 {
+		for index := range payload.ComboConfigs {
+			if payload.ComboConfigs[index].UpstreamMode == ProfitBoardUpstreamModeWallet && payload.ComboConfigs[index].UpstreamAccountID <= 0 {
+				payload.ComboConfigs[index].UpstreamAccountID = payload.Upstream.UpstreamAccountID
+			}
+		}
 		return nil
 	}
 	for _, combo := range payload.ComboConfigs {
@@ -604,6 +620,11 @@ func migrateProfitBoardLegacyWalletAccount(payload *ProfitBoardConfigPayload) er
 		}
 		if account != nil {
 			payload.Upstream.UpstreamAccountID = account.Id
+			for index := range payload.ComboConfigs {
+				if payload.ComboConfigs[index].UpstreamMode == ProfitBoardUpstreamModeWallet && payload.ComboConfigs[index].UpstreamAccountID <= 0 {
+					payload.ComboConfigs[index].UpstreamAccountID = account.Id
+				}
+			}
 			return nil
 		}
 	}

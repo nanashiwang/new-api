@@ -99,6 +99,8 @@ type ProfitBoardSharedSitePricingConfig struct {
 type ProfitBoardComboPricingConfig struct {
 	ComboId                  string                             `json:"combo_id"`
 	SiteMode                 string                             `json:"site_mode,omitempty"`
+	UpstreamMode             string                             `json:"upstream_mode,omitempty"`
+	UpstreamAccountID        int                                `json:"upstream_account_id,omitempty"`
 	SharedSite               ProfitBoardSharedSitePricingConfig `json:"shared_site,omitempty"`
 	SiteRules                []ProfitBoardModelPricingRule      `json:"site_rules,omitempty"`
 	UpstreamRules            []ProfitBoardModelPricingRule      `json:"upstream_rules,omitempty"`
@@ -398,6 +400,8 @@ type profitBoardLogRow struct {
 type profitBoardResolvedComboPricing struct {
 	ComboId                  string
 	SiteMode                 string
+	UpstreamMode             string
+	UpstreamAccountID        int
 	SharedSite               ProfitBoardSharedSitePricingConfig
 	SiteRules                []ProfitBoardModelPricingRule
 	UpstreamRules            []ProfitBoardModelPricingRule
@@ -704,6 +708,21 @@ func normalizeProfitBoardComboConfigs(batches []ProfitBoardBatch, comboConfigs [
 		default:
 			config.SiteMode = ProfitBoardComboSiteModeManual
 		}
+		switch strings.ToLower(strings.TrimSpace(config.UpstreamMode)) {
+		case ProfitBoardUpstreamModeWallet:
+			config.UpstreamMode = ProfitBoardUpstreamModeWallet
+		default:
+			if strings.TrimSpace(legacyUpstream.UpstreamMode) == ProfitBoardUpstreamModeWallet {
+				config.UpstreamMode = ProfitBoardUpstreamModeWallet
+			} else {
+				config.UpstreamMode = ProfitBoardUpstreamModeManual
+			}
+		}
+		if config.UpstreamMode != ProfitBoardUpstreamModeWallet {
+			config.UpstreamAccountID = 0
+		} else if config.UpstreamAccountID <= 0 {
+			config.UpstreamAccountID = legacyUpstream.UpstreamAccountID
+		}
 		if profitBoardSharedSiteConfigEmpty(config.SharedSite) {
 			config.SharedSite = normalizeProfitBoardSharedSiteConfig(sharedSite, legacySite)
 		} else {
@@ -724,6 +743,8 @@ func normalizeProfitBoardComboConfigs(batches []ProfitBoardBatch, comboConfigs [
 			config = ProfitBoardComboPricingConfig{
 				ComboId:                  batch.Id,
 				SiteMode:                 defaultProfitBoardComboSiteMode(sharedSite, legacySite),
+				UpstreamMode:             legacyUpstream.UpstreamMode,
+				UpstreamAccountID:        legacyUpstream.UpstreamAccountID,
 				SharedSite:               normalizeProfitBoardSharedSiteConfig(sharedSite, legacySite),
 				SiteRules:                normalizeProfitBoardModelPricingRules(nil, legacySite),
 				UpstreamRules:            normalizeProfitBoardModelPricingRules(nil, legacyUpstream),
@@ -733,6 +754,17 @@ func normalizeProfitBoardComboConfigs(batches []ProfitBoardBatch, comboConfigs [
 		}
 		if config.SiteMode == "" {
 			config.SiteMode = defaultProfitBoardComboSiteMode(sharedSite, legacySite)
+		}
+		if config.UpstreamMode == "" {
+			config.UpstreamMode = legacyUpstream.UpstreamMode
+		}
+		if config.UpstreamMode == "" {
+			config.UpstreamMode = ProfitBoardUpstreamModeManual
+		}
+		if config.UpstreamMode != ProfitBoardUpstreamModeWallet {
+			config.UpstreamAccountID = 0
+		} else if config.UpstreamAccountID <= 0 {
+			config.UpstreamAccountID = legacyUpstream.UpstreamAccountID
 		}
 		if profitBoardSharedSiteConfigEmpty(config.SharedSite) {
 			config.SharedSite = normalizeProfitBoardSharedSiteConfig(sharedSite, legacySite)
@@ -757,6 +789,14 @@ func validateProfitBoardComboConfigs(comboConfigs []ProfitBoardComboPricingConfi
 		case "", ProfitBoardComboSiteModeManual, ProfitBoardComboSiteModeSharedSite:
 		default:
 			return ErrProfitBoardInvalidSitePricingMode
+		}
+		switch strings.TrimSpace(config.UpstreamMode) {
+		case "", ProfitBoardUpstreamModeManual, ProfitBoardUpstreamModeWallet:
+		default:
+			return ErrProfitBoardInvalidUpstreamMode
+		}
+		if strings.TrimSpace(config.UpstreamMode) == ProfitBoardUpstreamModeWallet && config.UpstreamAccountID <= 0 {
+			return ErrProfitBoardWalletRequireAccount
 		}
 		if err := validateProfitBoardModelPricingRules(config.SiteRules); err != nil {
 			return err
@@ -1546,7 +1586,31 @@ func profitBoardUsesWalletObserver(config ProfitBoardTokenPricingConfig) bool {
 	return strings.TrimSpace(config.UpstreamMode) == ProfitBoardUpstreamModeWallet
 }
 
-func applyProfitBoardObservedWalletCost(report *ProfitBoardReport, aggregate *profitBoardUpstreamAccountObservedAggregate) {
+func profitBoardComboUsesWalletObserver(config profitBoardResolvedComboPricing) bool {
+	return strings.TrimSpace(config.UpstreamMode) == ProfitBoardUpstreamModeWallet && config.UpstreamAccountID > 0
+}
+
+func profitBoardHasWalletObserverCombo(comboPricingMap map[string]profitBoardResolvedComboPricing) bool {
+	for _, config := range comboPricingMap {
+		if profitBoardComboUsesWalletObserver(config) {
+			return true
+		}
+	}
+	return false
+}
+
+func profitBoardWalletObserverCombosByAccount(comboPricingMap map[string]profitBoardResolvedComboPricing) map[int][]string {
+	accountCombos := make(map[int][]string)
+	for comboID, config := range comboPricingMap {
+		if !profitBoardComboUsesWalletObserver(config) {
+			continue
+		}
+		accountCombos[config.UpstreamAccountID] = append(accountCombos[config.UpstreamAccountID], comboID)
+	}
+	return accountCombos
+}
+
+func applyProfitBoardObservedWalletCost(report *ProfitBoardReport, aggregate *profitBoardUpstreamAccountObservedAggregate, comboIDs []string) {
 	if report == nil || aggregate == nil {
 		return
 	}
@@ -1556,15 +1620,41 @@ func applyProfitBoardObservedWalletCost(report *ProfitBoardReport, aggregate *pr
 		return
 	}
 
+	comboIDSet := make(map[string]struct{}, len(comboIDs))
+	for _, comboID := range comboIDs {
+		comboID = strings.TrimSpace(comboID)
+		if comboID == "" {
+			continue
+		}
+		comboIDSet[comboID] = struct{}{}
+	}
+	if len(comboIDSet) == 0 {
+		return
+	}
+
 	report.Summary.UpstreamCostUSD += aggregate.TotalCostUSD
 	report.Summary.ConfiguredProfitUSD -= aggregate.TotalCostUSD
 	report.Summary.ActualProfitUSD -= aggregate.TotalCostUSD
 
 	batchRequestCount := make(map[string]int, len(report.BatchSummaries))
+	totalWalletRequests := 0
 	for index := range report.BatchSummaries {
 		summary := &report.BatchSummaries[index]
+		if _, ok := comboIDSet[summary.BatchId]; !ok {
+			continue
+		}
 		batchRequestCount[summary.BatchId] = summary.RequestCount
-		share := profitBoardFixedAllocationShare(aggregate.TotalCostUSD, report.Summary.RequestCount, summary.RequestCount)
+		totalWalletRequests += summary.RequestCount
+	}
+	if totalWalletRequests <= 0 {
+		return
+	}
+	for index := range report.BatchSummaries {
+		summary := &report.BatchSummaries[index]
+		if _, ok := comboIDSet[summary.BatchId]; !ok {
+			continue
+		}
+		share := profitBoardFixedAllocationShare(aggregate.TotalCostUSD, totalWalletRequests, summary.RequestCount)
 		summary.RemoteObservedCostUSD += share
 		summary.UpstreamCostUSD += share
 		summary.ConfiguredProfitUSD -= share
@@ -1573,10 +1663,16 @@ func applyProfitBoardObservedWalletCost(report *ProfitBoardReport, aggregate *pr
 
 	bucketRequestCount := make(map[int64]int)
 	for _, point := range report.Timeseries {
+		if _, ok := comboIDSet[point.BatchId]; !ok {
+			continue
+		}
 		bucketRequestCount[point.BucketTimestamp] += point.RequestCount
 	}
 	for index := range report.Timeseries {
 		point := &report.Timeseries[index]
+		if _, ok := comboIDSet[point.BatchId]; !ok {
+			continue
+		}
 		share := profitBoardFixedAllocationShare(
 			aggregate.BucketCostUSD[point.BucketTimestamp],
 			bucketRequestCount[point.BucketTimestamp],
@@ -1590,22 +1686,31 @@ func applyProfitBoardObservedWalletCost(report *ProfitBoardReport, aggregate *pr
 
 	for index := range report.ChannelBreakdown {
 		item := &report.ChannelBreakdown[index]
-		share := profitBoardFixedAllocationShare(aggregate.TotalCostUSD, report.Summary.RequestCount, item.RequestCount)
+		if _, ok := comboIDSet[item.BatchId]; !ok {
+			continue
+		}
+		share := profitBoardFixedAllocationShare(aggregate.TotalCostUSD, totalWalletRequests, item.RequestCount)
 		item.UpstreamCostUSD += share
 		item.ConfiguredProfitUSD -= share
 		item.ActualProfitUSD -= share
 	}
 	for index := range report.ModelBreakdown {
 		item := &report.ModelBreakdown[index]
-		share := profitBoardFixedAllocationShare(aggregate.TotalCostUSD, report.Summary.RequestCount, item.RequestCount)
+		if _, ok := comboIDSet[item.BatchId]; !ok {
+			continue
+		}
+		share := profitBoardFixedAllocationShare(aggregate.TotalCostUSD, totalWalletRequests, item.RequestCount)
 		item.UpstreamCostUSD += share
 		item.ConfiguredProfitUSD -= share
 		item.ActualProfitUSD -= share
 	}
 	if len(report.DetailRows) > 0 {
-		perRequestShare := aggregate.TotalCostUSD / float64(report.Summary.RequestCount)
+		perRequestShare := aggregate.TotalCostUSD / float64(totalWalletRequests)
 		for index := range report.DetailRows {
 			row := &report.DetailRows[index]
+			if _, ok := comboIDSet[row.BatchId]; !ok {
+				continue
+			}
 			row.UpstreamCostUSD += perRequestShare
 			row.ConfiguredProfitUSD -= perRequestShare
 			row.ActualProfitUSD -= perRequestShare
@@ -1835,6 +1940,8 @@ func resolveProfitBoardComboPricingMap(query ProfitBoardQuery, batches []ProfitB
 		configMap[batch.Id] = profitBoardResolvedComboPricing{
 			ComboId:                  batch.Id,
 			SiteMode:                 ProfitBoardComboSiteModeManual,
+			UpstreamMode:             query.Upstream.UpstreamMode,
+			UpstreamAccountID:        query.Upstream.UpstreamAccountID,
 			SharedSite:               normalizeProfitBoardSharedSiteConfig(query.SharedSite, query.Site),
 			SiteRules:                normalizeProfitBoardModelPricingRules(nil, query.Site),
 			UpstreamRules:            normalizeProfitBoardModelPricingRules(nil, query.Upstream),
@@ -1847,6 +1954,15 @@ func resolveProfitBoardComboPricingMap(query ProfitBoardQuery, batches []ProfitB
 		current.ComboId = config.ComboId
 		if config.SiteMode != "" {
 			current.SiteMode = config.SiteMode
+		}
+		if config.UpstreamMode != "" {
+			current.UpstreamMode = config.UpstreamMode
+		}
+		if strings.TrimSpace(current.UpstreamMode) != ProfitBoardUpstreamModeWallet {
+			current.UpstreamMode = ProfitBoardUpstreamModeManual
+			current.UpstreamAccountID = 0
+		} else if config.UpstreamAccountID > 0 {
+			current.UpstreamAccountID = config.UpstreamAccountID
 		}
 		if !profitBoardSharedSiteConfigEmpty(config.SharedSite) {
 			current.SharedSite = normalizeProfitBoardSharedSiteConfig(
@@ -1899,7 +2015,10 @@ func profitBoardSharedSiteMeta(comboPricingMap map[string]profitBoardResolvedCom
 }
 
 func buildProfitBoardReportCacheKey(query ProfitBoardQuery) string {
-	if profitBoardHasEnabledRemoteObserver(query.ComboConfigs) || profitBoardUsesWalletObserver(query.Upstream) {
+	if profitBoardHasEnabledRemoteObserver(query.ComboConfigs) {
+		return ""
+	}
+	if profitBoardHasWalletObserverCombo(resolveProfitBoardComboPricingMap(query, nil)) {
 		return ""
 	}
 	payloadBytes, err := common.Marshal(struct {
@@ -2048,8 +2167,6 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		},
 		DetailRows: make([]ProfitBoardDetailRow, 0),
 	}
-	walletMode := profitBoardUsesWalletObserver(normalizedQuery.Upstream)
-	var walletAggregate *profitBoardUpstreamAccountObservedAggregate
 
 	timeBuckets := make(map[string]*ProfitBoardTimeseriesPoint)
 	channelBreakdown := make(map[string]*ProfitBoardBreakdownItem)
@@ -2058,6 +2175,8 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 	channelNameMap := make(map[int]string)
 	latestLogId := 0
 	latestLogCreatedAt := int64(0)
+	accountWalletCombos := profitBoardWalletObserverCombosByAccount(comboPricingMap)
+	accountWalletAggregates := make(map[int]*profitBoardUpstreamAccountObservedAggregate, len(accountWalletCombos))
 	for _, batch := range resolvedBatches {
 		batchSummaryMap[batch.Id] = &ProfitBoardBatchSummary{
 			BatchId:   batch.Id,
@@ -2068,51 +2187,52 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		}
 	}
 
-	if walletMode && normalizedQuery.Upstream.UpstreamAccountID > 0 {
-		walletAggregate, err = collectProfitBoardUpstreamAccountObservedAggregate(
-			normalizedQuery.Upstream.UpstreamAccountID,
+	for accountID := range accountWalletCombos {
+		aggregate, aggregateErr := collectProfitBoardUpstreamAccountObservedAggregate(
+			accountID,
 			normalizedQuery.StartTimestamp,
 			normalizedQuery.EndTimestamp,
 			normalizedQuery.Granularity,
 			normalizedQuery.CustomIntervalMinutes,
 			false,
 		)
-		if err != nil {
-			return nil, err
+		if aggregateErr != nil {
+			return nil, aggregateErr
 		}
-	} else {
-		remoteAggregate, remoteErr := collectProfitBoardRemoteObserverAggregate(
-			signature,
-			resolvedBatches,
-			normalizedQuery.ComboConfigs,
-			normalizedQuery.StartTimestamp,
-			normalizedQuery.EndTimestamp,
-			normalizedQuery.Granularity,
-			normalizedQuery.CustomIntervalMinutes,
-			false,
-			true,
-		)
-		if remoteErr != nil {
-			return nil, remoteErr
+		accountWalletAggregates[accountID] = aggregate
+	}
+
+	remoteAggregate, remoteErr := collectProfitBoardRemoteObserverAggregate(
+		signature,
+		resolvedBatches,
+		normalizedQuery.ComboConfigs,
+		normalizedQuery.StartTimestamp,
+		normalizedQuery.EndTimestamp,
+		normalizedQuery.Granularity,
+		normalizedQuery.CustomIntervalMinutes,
+		false,
+		true,
+	)
+	if remoteErr != nil {
+		return nil, remoteErr
+	}
+	report.RemoteObserverStates = remoteAggregate.States
+	report.Summary.RemoteObservedCostUSD += remoteAggregate.TotalCostUSD
+	report.Warnings = append(report.Warnings, remoteAggregate.Warnings...)
+	for batchID, observedCostUSD := range remoteAggregate.BatchCostUSD {
+		if summary := batchSummaryMap[batchID]; summary != nil {
+			summary.RemoteObservedCostUSD += observedCostUSD
 		}
-		report.RemoteObserverStates = remoteAggregate.States
-		report.Summary.RemoteObservedCostUSD += remoteAggregate.TotalCostUSD
-		report.Warnings = append(report.Warnings, remoteAggregate.Warnings...)
-		for batchID, observedCostUSD := range remoteAggregate.BatchCostUSD {
-			if summary := batchSummaryMap[batchID]; summary != nil {
-				summary.RemoteObservedCostUSD += observedCostUSD
-			}
+	}
+	for _, remotePoint := range remoteAggregate.Timeseries {
+		timeKey := fmt.Sprintf("%s:%d", remotePoint.BatchId, remotePoint.BucketTimestamp)
+		point, ok := timeBuckets[timeKey]
+		if !ok {
+			current := remotePoint
+			timeBuckets[timeKey] = &current
+			continue
 		}
-		for _, remotePoint := range remoteAggregate.Timeseries {
-			timeKey := fmt.Sprintf("%s:%d", remotePoint.BatchId, remotePoint.BucketTimestamp)
-			point, ok := timeBuckets[timeKey]
-			if !ok {
-				current := remotePoint
-				timeBuckets[timeKey] = &current
-				continue
-			}
-			point.RemoteObservedCostUSD += remotePoint.RemoteObservedCostUSD
-		}
+		point.RemoteObservedCostUSD += remotePoint.RemoteObservedCostUSD
 	}
 
 	if err := iterateProfitBoardRows(normalizedQuery, resolvedBatches, func(prepared profitBoardPreparedRow) error {
@@ -2173,7 +2293,8 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		upstreamCostUSD := 0.0
 		upstreamCostSource := ""
 		upstreamCostKnown := false
-		if walletMode {
+		isWalletCombo := profitBoardComboUsesWalletObserver(comboPricing)
+		if isWalletCombo {
 			upstreamCostSource = "wallet_observer"
 		} else {
 			upstreamCostUSD, upstreamCostSource, upstreamCostKnown = profitBoardUpstreamCostUSD(
@@ -2197,7 +2318,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 			report.Summary.MissingSitePricingCount++
 			batchSummary.MissingSitePricingCount++
 		}
-		if !walletMode {
+		if !isWalletCombo {
 			if upstreamCostKnown {
 				report.Summary.KnownUpstreamCostCount++
 				batchSummary.KnownUpstreamCostCount++
@@ -2365,16 +2486,21 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		return nil, err
 	}
 
-	if report.Summary.RequestCount > 0 {
-		if walletMode {
-			if walletAggregate != nil && walletAggregate.State.BaselineReady {
-				report.Summary.ConfiguredProfitCoverageRate = 1
-			}
-		} else {
-			report.Summary.ConfiguredProfitCoverageRate = float64(report.Summary.KnownUpstreamCostCount) / float64(report.Summary.RequestCount)
-		}
+	for accountID, comboIDs := range accountWalletCombos {
+		aggregate := accountWalletAggregates[accountID]
+		applyProfitBoardObservedWalletCost(report, aggregate, comboIDs)
 	}
-	if !walletMode && report.Summary.MissingUpstreamCostCount > 0 {
+
+	if report.Summary.RequestCount > 0 {
+		knownOrWalletCount := report.Summary.KnownUpstreamCostCount
+		for _, batch := range resolvedBatches {
+			if profitBoardComboUsesWalletObserver(comboPricingMap[batch.Id]) {
+				knownOrWalletCount += batchSummaryMap[batch.Id].RequestCount
+			}
+		}
+		report.Summary.ConfiguredProfitCoverageRate = float64(knownOrWalletCount) / float64(report.Summary.RequestCount)
+	}
+	if report.Summary.MissingUpstreamCostCount > 0 {
 		report.Warnings = append(report.Warnings, "部分日志没有上游返回费用，当前统计已按你的上游费用策略回退或标记为未知")
 	}
 	if report.Summary.MissingSitePricingCount > 0 {
@@ -2391,7 +2517,11 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 	for _, batch := range resolvedBatches {
 		current := *batchSummaryMap[batch.Id]
 		if current.RequestCount > 0 {
-			current.ConfiguredProfitCoverageRate = float64(current.KnownUpstreamCostCount) / float64(current.RequestCount)
+			if profitBoardComboUsesWalletObserver(comboPricingMap[batch.Id]) {
+				current.ConfiguredProfitCoverageRate = 1
+			} else {
+				current.ConfiguredProfitCoverageRate = float64(current.KnownUpstreamCostCount) / float64(current.RequestCount)
+			}
 		}
 		current.ActualSiteRevenueUSD = roundProfitBoardAmount(current.ActualSiteRevenueUSD)
 		current.ConfiguredSiteRevenueUSD = roundProfitBoardAmount(current.ConfiguredSiteRevenueUSD)
@@ -2462,8 +2592,8 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 	})
 
 	applyProfitBoardComboFixedTotals(report, comboPricingMap)
-	if walletMode {
-		applyProfitBoardObservedWalletCost(report, walletAggregate)
+	for accountID, comboIDs := range accountWalletCombos {
+		applyProfitBoardObservedWalletCost(report, accountWalletAggregates[accountID], comboIDs)
 	}
 	for index := range report.BatchSummaries {
 		report.BatchSummaries[index].ActualSiteRevenueUSD = roundProfitBoardAmount(report.BatchSummaries[index].ActualSiteRevenueUSD)
@@ -2586,50 +2716,51 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 			LegacySiteFixedAmount:     profitBoardLegacyFixedAmountEnabled(payload.Site),
 		},
 	}
-	walletMode := profitBoardUsesWalletObserver(payload.Upstream)
-	var walletAggregate *profitBoardUpstreamAccountObservedAggregate
 
 	batchSummaryMap := make(map[string]*ProfitBoardBatchSummary, len(resolvedBatches))
 	latestLogId := 0
 	latestLogCreatedAt := int64(0)
+	accountWalletCombos := profitBoardWalletObserverCombosByAccount(comboPricingMap)
+	accountWalletAggregates := make(map[int]*profitBoardUpstreamAccountObservedAggregate, len(accountWalletCombos))
 	for _, batch := range resolvedBatches {
 		batchSummaryMap[batch.Id] = &ProfitBoardBatchSummary{BatchId: batch.Id, BatchName: batch.Name}
 	}
 
-	if walletMode && payload.Upstream.UpstreamAccountID > 0 {
-		walletAggregate, err = collectProfitBoardUpstreamAccountObservedAggregate(
-			payload.Upstream.UpstreamAccountID,
+	for accountID := range accountWalletCombos {
+		aggregate, aggregateErr := collectProfitBoardUpstreamAccountObservedAggregate(
+			accountID,
 			0,
 			common.GetTimestamp(),
 			"day",
 			0,
 			false,
 		)
-		if err != nil {
-			return nil, err
+		if aggregateErr != nil {
+			return nil, aggregateErr
 		}
-	} else {
-		remoteAggregate, remoteErr := collectProfitBoardRemoteObserverAggregate(
-			signature,
-			resolvedBatches,
-			payload.ComboConfigs,
-			0,
-			common.GetTimestamp(),
-			"day",
-			0,
-			false,
-			false,
-		)
-		if remoteErr != nil {
-			return nil, remoteErr
-		}
-		report.RemoteObserverStates = remoteAggregate.States
-		report.Summary.RemoteObservedCostUSD += remoteAggregate.TotalCostUSD
-		report.Warnings = append(report.Warnings, remoteAggregate.Warnings...)
-		for batchID, observedCostUSD := range remoteAggregate.BatchCostUSD {
-			if summary := batchSummaryMap[batchID]; summary != nil {
-				summary.RemoteObservedCostUSD += observedCostUSD
-			}
+		accountWalletAggregates[accountID] = aggregate
+	}
+
+	remoteAggregate, remoteErr := collectProfitBoardRemoteObserverAggregate(
+		signature,
+		resolvedBatches,
+		payload.ComboConfigs,
+		0,
+		common.GetTimestamp(),
+		"day",
+		0,
+		false,
+		false,
+	)
+	if remoteErr != nil {
+		return nil, remoteErr
+	}
+	report.RemoteObserverStates = remoteAggregate.States
+	report.Summary.RemoteObservedCostUSD += remoteAggregate.TotalCostUSD
+	report.Warnings = append(report.Warnings, remoteAggregate.Warnings...)
+	for batchID, observedCostUSD := range remoteAggregate.BatchCostUSD {
+		if summary := batchSummaryMap[batchID]; summary != nil {
+			summary.RemoteObservedCostUSD += observedCostUSD
 		}
 	}
 
@@ -2691,7 +2822,8 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 		upstreamCostUSD := 0.0
 		upstreamCostSource := ""
 		upstreamCostKnown := false
-		if walletMode {
+		isWalletCombo := profitBoardComboUsesWalletObserver(comboPricing)
+		if isWalletCombo {
 			upstreamCostSource = "wallet_observer"
 		} else {
 			upstreamCostUSD, upstreamCostSource, upstreamCostKnown = profitBoardUpstreamCostUSD(
@@ -2715,7 +2847,7 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 			report.Summary.MissingSitePricingCount++
 			batchSummary.MissingSitePricingCount++
 		}
-		if !walletMode {
+		if !isWalletCombo {
 			if upstreamCostKnown {
 				report.Summary.KnownUpstreamCostCount++
 				batchSummary.KnownUpstreamCostCount++
@@ -2768,19 +2900,19 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 	sort.Slice(report.BatchSummaries, func(i, j int) bool {
 		return report.BatchSummaries[i].BatchName < report.BatchSummaries[j].BatchName
 	})
-	if walletMode {
-		applyProfitBoardObservedWalletCost(report, walletAggregate)
+	for accountID, comboIDs := range accountWalletCombos {
+		applyProfitBoardObservedWalletCost(report, accountWalletAggregates[accountID], comboIDs)
 	}
 	if report.Summary.RequestCount > 0 {
-		if walletMode {
-			if walletAggregate != nil && walletAggregate.State.BaselineReady {
-				report.Summary.ConfiguredProfitCoverageRate = 1
+		knownOrWalletCount := report.Summary.KnownUpstreamCostCount
+		for _, batch := range resolvedBatches {
+			if profitBoardComboUsesWalletObserver(comboPricingMap[batch.Id]) {
+				knownOrWalletCount += batchSummaryMap[batch.Id].RequestCount
 			}
-		} else {
-			report.Summary.ConfiguredProfitCoverageRate = float64(report.Summary.KnownUpstreamCostCount) / float64(report.Summary.RequestCount)
 		}
+		report.Summary.ConfiguredProfitCoverageRate = float64(knownOrWalletCount) / float64(report.Summary.RequestCount)
 	}
-	if !walletMode && report.Summary.MissingUpstreamCostCount > 0 {
+	if report.Summary.MissingUpstreamCostCount > 0 {
 		report.Warnings = append(report.Warnings, "累计总览中部分日志没有上游返回费用，当前已按你的上游费用策略回退或标记为未知")
 	}
 	if report.Summary.MissingSitePricingCount > 0 {
@@ -2877,6 +3009,12 @@ func QueryProfitBoardDetails(query ProfitBoardDetailQuery) (*ProfitBoardDetailPa
 	}
 
 	rows := report.DetailRows
+	channelTagMap := make(map[int]string)
+	for _, batch := range report.Batches {
+		for _, channel := range batch.ResolvedChannels {
+			channelTagMap[channel.Id] = channel.Tag
+		}
+	}
 	if strings.TrimSpace(query.ViewBatchId) != "" && query.ViewBatchId != "all" {
 		filtered := make([]ProfitBoardDetailRow, 0, len(rows))
 		for _, row := range rows {
@@ -2895,6 +3033,10 @@ func QueryProfitBoardDetails(query ProfitBoardDetailQuery) (*ProfitBoardDetailPa
 			switch filterType {
 			case "channel":
 				if row.ChannelName == query.DetailFilter.Value {
+					filtered = append(filtered, row)
+				}
+			case "tag":
+				if channelTagMap[row.ChannelId] == query.DetailFilter.Value {
 					filtered = append(filtered, row)
 				}
 			case "model":

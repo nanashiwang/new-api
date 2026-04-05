@@ -76,6 +76,7 @@ func TestSaveProfitBoardConfigUsesStableSignature(t *testing.T) {
 	payload := ProfitBoardConfigPayload{
 		Batches: []ProfitBoardBatch{
 			{
+				Id:         "batch-stable",
 				Name:       "批次 A",
 				ScopeType:  ProfitBoardScopeChannel,
 				ChannelIDs: []int{9, 3, 9, 1},
@@ -99,6 +100,7 @@ func TestSaveProfitBoardConfigUsesStableSignature(t *testing.T) {
 
 	loaded, loadedSignature, err := GetProfitBoardConfig([]ProfitBoardBatch{
 		{
+			Id:         "batch-lookup",
 			Name:       "批次 B",
 			ScopeType:  ProfitBoardScopeChannel,
 			ChannelIDs: []int{3, 1, 9},
@@ -679,6 +681,63 @@ func TestSaveProfitBoardConfigKeepsComboSharedSiteIndependent(t *testing.T) {
 	}
 }
 
+func TestSaveProfitBoardConfigKeepsComboWalletModeIndependent(t *testing.T) {
+	setupProfitBoardTestDB(t)
+
+	payload := ProfitBoardConfigPayload{
+		Batches: []ProfitBoardBatch{
+			{
+				Id:         "batch-a",
+				Name:       "组合 A",
+				ScopeType:  ProfitBoardScopeChannel,
+				ChannelIDs: []int{1},
+			},
+			{
+				Id:         "batch-b",
+				Name:       "组合 B",
+				ScopeType:  ProfitBoardScopeChannel,
+				ChannelIDs: []int{2},
+			},
+		},
+		Upstream: ProfitBoardTokenPricingConfig{
+			CostSource: ProfitBoardCostSourceManualOnly,
+		},
+		Site: ProfitBoardTokenPricingConfig{
+			PricingMode: ProfitBoardSitePricingManual,
+		},
+		ComboConfigs: []ProfitBoardComboPricingConfig{
+			{
+				ComboId:           "batch-a",
+				UpstreamMode:      ProfitBoardUpstreamModeWallet,
+				UpstreamAccountID: 21,
+			},
+			{
+				ComboId:      "batch-b",
+				UpstreamMode: ProfitBoardUpstreamModeManual,
+			},
+		},
+	}
+
+	saved, _, err := SaveProfitBoardConfig(payload)
+	if err != nil {
+		t.Fatalf("SaveProfitBoardConfig: %v", err)
+	}
+	if len(saved.ComboConfigs) != 2 {
+		t.Fatalf("unexpected combo configs: %+v", saved.ComboConfigs)
+	}
+
+	comboMap := map[string]ProfitBoardComboPricingConfig{}
+	for _, combo := range saved.ComboConfigs {
+		comboMap[combo.ComboId] = combo
+	}
+	if comboMap["batch-a"].UpstreamMode != ProfitBoardUpstreamModeWallet || comboMap["batch-a"].UpstreamAccountID != 21 {
+		t.Fatalf("unexpected batch-a wallet config: %+v", comboMap["batch-a"])
+	}
+	if comboMap["batch-b"].UpstreamMode != ProfitBoardUpstreamModeManual || comboMap["batch-b"].UpstreamAccountID != 0 {
+		t.Fatalf("unexpected batch-b upstream config: %+v", comboMap["batch-b"])
+	}
+}
+
 func TestBuildProfitBoardUpstreamAccountStateUsesWalletSnapshotKey(t *testing.T) {
 	db := setupProfitBoardTestDB(t)
 
@@ -962,5 +1021,190 @@ func TestProfitBoardReportAndOverviewIncludeRemoteObservedCost(t *testing.T) {
 	}
 	if len(report.Timeseries) != 1 || report.Timeseries[0].RemoteObservedCostUSD != 0.13 {
 		t.Fatalf("unexpected report remote timeseries: %+v", report.Timeseries)
+	}
+}
+
+func TestGenerateProfitBoardReportSupportsComboWalletObserverAndManualMix(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	originQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 1000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originQuotaPerUnit
+	})
+
+	channels := []Channel{
+		{Id: 1, Name: "alpha", Tag: common.GetPointer("vip"), Status: common.ChannelStatusEnabled},
+		{Id: 2, Name: "beta", Tag: common.GetPointer("shared"), Status: common.ChannelStatusEnabled},
+	}
+	for _, channel := range channels {
+		if err := db.Create(&channel).Error; err != nil {
+			t.Fatalf("seed channel: %v", err)
+		}
+	}
+
+	now := common.GetTimestamp()
+	account := ProfitBoardUpstreamAccount{
+		Name:        "钱包账户",
+		AccountType: ProfitBoardUpstreamAccountTypeNewAPI,
+		BaseURL:     "https://remote.example.com",
+		UserID:      9,
+		Enabled:     true,
+		CreatedAt:   now - 300,
+		UpdatedAt:   now - 300,
+	}
+	encryptedToken, err := encryptProfitBoardRemoteSecret("wallet-token")
+	if err != nil {
+		t.Fatalf("encrypt token: %v", err)
+	}
+	account.AccessTokenEncrypted = encryptedToken
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatalf("create wallet account: %v", err)
+	}
+
+	config := account.remoteObserverConfig()
+	signature := profitBoardUpstreamAccountSnapshotSignature(account.Id)
+	seedProfitBoardRemoteSnapshot(t, signature, profitBoardUpstreamAccountSnapshotComboID, config, now-180, 900, 100, nil)
+	seedProfitBoardRemoteSnapshot(t, signature, profitBoardUpstreamAccountSnapshotComboID, config, now-60, 800, 200, nil)
+
+	logs := []Log{
+		{Id: 1, Type: LogTypeConsume, CreatedAt: now - 120, ChannelId: 1, ModelName: "gpt-4.1", PromptTokens: 1000, CompletionTokens: 0, Quota: 5},
+		{Id: 2, Type: LogTypeConsume, CreatedAt: now - 110, ChannelId: 1, ModelName: "gpt-4.1", PromptTokens: 1000, CompletionTokens: 0, Quota: 5},
+		{Id: 3, Type: LogTypeConsume, CreatedAt: now - 100, ChannelId: 2, ModelName: "gpt-4.1", PromptTokens: 1000, CompletionTokens: 0, Quota: 5},
+	}
+	for _, logRow := range logs {
+		if err := db.Create(&logRow).Error; err != nil {
+			t.Fatalf("seed log: %v", err)
+		}
+	}
+
+	report, err := GenerateProfitBoardReport(ProfitBoardQuery{
+		Batches: []ProfitBoardBatch{
+			{Id: "wallet-batch", Name: "钱包组合", ScopeType: ProfitBoardScopeChannel, ChannelIDs: []int{1}},
+			{Id: "manual-batch", Name: "手动组合", ScopeType: ProfitBoardScopeChannel, ChannelIDs: []int{2}},
+		},
+		ComboConfigs: []ProfitBoardComboPricingConfig{
+			{
+				ComboId:           "wallet-batch",
+				UpstreamMode:      ProfitBoardUpstreamModeWallet,
+				UpstreamAccountID: account.Id,
+				SiteRules: []ProfitBoardModelPricingRule{{
+					IsDefault:  true,
+					InputPrice: 5,
+				}},
+			},
+			{
+				ComboId:      "manual-batch",
+				UpstreamMode: ProfitBoardUpstreamModeManual,
+				SiteRules: []ProfitBoardModelPricingRule{{
+					IsDefault:  true,
+					InputPrice: 5,
+				}},
+				UpstreamRules: []ProfitBoardModelPricingRule{{
+					IsDefault:  true,
+					InputPrice: 2,
+				}},
+			},
+		},
+		Upstream: ProfitBoardTokenPricingConfig{
+			CostSource: ProfitBoardCostSourceManualOnly,
+		},
+		Site: ProfitBoardTokenPricingConfig{
+			PricingMode: ProfitBoardSitePricingManual,
+		},
+		StartTimestamp:        now - 200,
+		EndTimestamp:          now,
+		Granularity:           "day",
+		CustomIntervalMinutes: 0,
+	})
+	if err != nil {
+		t.Fatalf("GenerateProfitBoardReport: %v", err)
+	}
+
+	if report.Summary.UpstreamCostUSD != 0.202 {
+		t.Fatalf("unexpected mixed upstream cost: %+v", report.Summary)
+	}
+	if report.Summary.ConfiguredProfitCoverageRate != 1 {
+		t.Fatalf("unexpected mixed coverage: %+v", report.Summary)
+	}
+
+	batchCosts := map[string]float64{}
+	for _, summary := range report.BatchSummaries {
+		batchCosts[summary.BatchId] = summary.UpstreamCostUSD
+	}
+	if batchCosts["wallet-batch"] != 0.1 {
+		t.Fatalf("unexpected wallet batch cost: %+v", report.BatchSummaries)
+	}
+	if batchCosts["manual-batch"] != 0.002 {
+		t.Fatalf("unexpected manual batch cost: %+v", report.BatchSummaries)
+	}
+}
+
+func TestQueryProfitBoardDetailsSupportsTagFilter(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	originQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 1000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originQuotaPerUnit
+	})
+
+	channel := Channel{Id: 1, Name: "alpha", Tag: common.GetPointer("vip"), Status: common.ChannelStatusEnabled}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+
+	now := common.GetTimestamp()
+	logRow := Log{
+		Id:               1,
+		Type:             LogTypeConsume,
+		CreatedAt:        now - 30,
+		ChannelId:        1,
+		ModelName:        "gpt-4.1",
+		PromptTokens:     1000,
+		CompletionTokens: 0,
+		Quota:            5,
+	}
+	if err := db.Create(&logRow).Error; err != nil {
+		t.Fatalf("seed log: %v", err)
+	}
+
+	page, err := QueryProfitBoardDetails(ProfitBoardDetailQuery{
+		ProfitBoardQuery: ProfitBoardQuery{
+			Batches: []ProfitBoardBatch{{
+				Id:         "batch-1",
+				Name:       "批次 1",
+				ScopeType:  ProfitBoardScopeChannel,
+				ChannelIDs: []int{1},
+			}},
+			ComboConfigs: []ProfitBoardComboPricingConfig{{
+				ComboId: "batch-1",
+				SiteRules: []ProfitBoardModelPricingRule{{
+					IsDefault:  true,
+					InputPrice: 5,
+				}},
+				UpstreamRules: []ProfitBoardModelPricingRule{{
+					IsDefault:  true,
+					InputPrice: 2,
+				}},
+			}},
+			Upstream:       ProfitBoardTokenPricingConfig{CostSource: ProfitBoardCostSourceManualOnly},
+			Site:           ProfitBoardTokenPricingConfig{PricingMode: ProfitBoardSitePricingManual},
+			StartTimestamp: now - 60,
+			EndTimestamp:   now,
+			Granularity:    "day",
+		},
+		DetailFilter: ProfitBoardDetailFilter{
+			Type:  "tag",
+			Value: "vip",
+		},
+		Page:     1,
+		PageSize: 20,
+	})
+	if err != nil {
+		t.Fatalf("QueryProfitBoardDetails: %v", err)
+	}
+	if page.Total != 1 || len(page.Rows) != 1 {
+		t.Fatalf("unexpected tag filtered page: %+v", page)
 	}
 }

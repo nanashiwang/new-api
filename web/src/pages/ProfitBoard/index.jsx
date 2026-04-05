@@ -25,7 +25,6 @@ import React, {
   useState,
 } from 'react';
 import { Empty, Spin, Tabs } from '@douyinfe/semi-ui';
-import { VChart } from '@visactor/react-vchart';
 import { initVChartSemiTheme } from '@visactor/vchart-semi-theme';
 import { BadgeDollarSign, BarChart3, CircleDollarSign } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -38,6 +37,7 @@ import ComboManagerCard from './components/ComboManagerCard';
 import OverviewPanel from './components/OverviewPanel';
 import PricingRulesCard from './components/PricingRulesCard';
 import ProfitBoardHeader from './components/ProfitBoardHeader';
+import ResponsiveVChart from './components/ResponsiveVChart';
 import UpstreamWalletCard from './components/UpstreamWalletCard';
 import { useProfitBoardBatches } from './hooks/useProfitBoardBatches';
 import { useProfitBoardConfig } from './hooks/useProfitBoardConfig';
@@ -46,8 +46,10 @@ import { useProfitBoardQuery } from './hooks/useProfitBoardQuery';
 import { useUpstreamAccounts } from './hooks/useUpstreamAccounts';
 import {
   aggregateBreakdownRows,
+  aggregateChannelRowsByTag,
   clampNumber,
   combineBreakdownMetrics,
+  combineChannelMetricsByTag,
   combineTimeseriesMetrics,
   createBarSpec,
   createDefaultComboPricingConfig,
@@ -100,7 +102,6 @@ const ProfitBoardPage = () => {
     saving,
     options,
     siteConfig,
-    setSiteConfig,
     upstreamConfig,
     setUpstreamConfig,
     channelOptions,
@@ -110,8 +111,6 @@ const ProfitBoardPage = () => {
     modelNameOptions,
     configPayload,
     configLookupKey,
-    walletModeEnabled,
-    selectedAccount,
     loadOptions,
     loadConfig,
     saveConfig,
@@ -168,37 +167,6 @@ const ProfitBoardPage = () => {
     [],
   );
 
-  const addComboRule = useCallback(
-    (comboId, field, initialRule = {}) =>
-      updateComboConfig(comboId, (current) => ({
-        [field]: [
-          ...(current[field] || []),
-          createDefaultPricingRule(initialRule),
-        ],
-      })),
-    [updateComboConfig],
-  );
-
-  const updateComboRule = useCallback(
-    (comboId, field, index, patch) =>
-      updateComboConfig(comboId, (current) => ({
-        [field]: (current[field] || []).map((item, itemIndex) =>
-          itemIndex === index ? { ...item, ...patch } : item,
-        ),
-      })),
-    [updateComboConfig],
-  );
-
-  const removeComboRule = useCallback(
-    (comboId, field, index) =>
-      updateComboConfig(comboId, (current) => ({
-        [field]: (current[field] || []).filter(
-          (_, itemIndex) => itemIndex !== index,
-        ),
-      })),
-    [updateComboConfig],
-  );
-
   const duplicateBatchError = useMemo(() => {
     const ownerMap = new Map();
     for (const batch of batches) {
@@ -221,6 +189,11 @@ const ProfitBoardPage = () => {
 
   const validationErrors = useMemo(() => {
     const errors = [];
+    const availableAccounts = new Set(
+      (options.upstream_accounts || [])
+        .filter((item) => item.enabled !== false)
+        .map((item) => Number(item.id)),
+    );
     if (!batches.length) errors.push(t('请至少添加一个组合'));
     if (duplicateBatchError) errors.push(duplicateBatchError);
     if (
@@ -232,17 +205,19 @@ const ProfitBoardPage = () => {
     )
       errors.push(t('启用了本站模型价格的组合必须至少选择一个模型'));
     if (
-      upstreamConfig.upstream_mode === 'wallet_observer' &&
-      !Number(upstreamConfig.upstream_account_id || 0)
+      comboConfigs.some((item) => {
+        if (item.upstream_mode !== 'wallet_observer') return false;
+        const accountId = Number(item.upstream_account_id || 0);
+        return accountId <= 0 || !availableAccounts.has(accountId);
+      })
     )
       errors.push(t('钱包扣减模式必须绑定一个上游账户'));
-    return errors;
+    return Array.from(new Set(errors));
   }, [
     batches.length,
     comboConfigs,
     duplicateBatchError,
-    upstreamConfig.upstream_account_id,
-    upstreamConfig.upstream_mode,
+    options.upstream_accounts,
     t,
   ]);
 
@@ -266,6 +241,8 @@ const ProfitBoardPage = () => {
     setCustomIntervalMinutes,
     chartTab,
     setChartTab,
+    channelGroupMode,
+    setChannelGroupMode,
     metricKey,
     setMetricKey,
     analysisMode,
@@ -295,10 +272,28 @@ const ProfitBoardPage = () => {
   const accountsHook = useUpstreamAccounts({
     options,
     loadOptions,
+    comboConfigs,
     upstreamConfig,
     setUpstreamConfig,
     runFullRefresh,
   });
+
+  useEffect(() => {
+    if (
+      detailFilter?.type === 'channel' &&
+      channelGroupMode === 'tag'
+    ) {
+      setDetailFilter(null);
+      setDetailPage(1);
+    }
+    if (
+      detailFilter?.type === 'tag' &&
+      channelGroupMode === 'channel'
+    ) {
+      setDetailFilter(null);
+      setDetailPage(1);
+    }
+  }, [channelGroupMode, detailFilter?.type, setDetailFilter, setDetailPage]);
 
   useEffect(() => {
     (async () => {
@@ -326,6 +321,7 @@ const ProfitBoardPage = () => {
       granularity,
       customIntervalMinutes,
       chartTab,
+      channelGroupMode,
       metricKey,
       analysisMode,
       viewBatchId,
@@ -343,6 +339,7 @@ const ProfitBoardPage = () => {
     autoRefreshMode,
     batches,
     chartTab,
+    channelGroupMode,
     comboConfigs,
     customIntervalMinutes,
     dateRange,
@@ -409,6 +406,16 @@ const ProfitBoardPage = () => {
     }));
   }, [analysisMode, businessMetrics, metricKey, report, viewBatchId]);
 
+  const channelTagMap = useMemo(() => {
+    const map = new Map();
+    (report?.batches || []).forEach((batch) => {
+      (batch.resolved_channels || []).forEach((channel) => {
+        map.set(String(channel.id), channel.tag || t('未设置标签'));
+      });
+    });
+    return map;
+  }, [report?.batches, t]);
+
   const channelRows = useMemo(() => {
     if (
       !report ||
@@ -416,18 +423,44 @@ const ProfitBoardPage = () => {
         metricKey === 'remote_observed_cost_usd')
     )
       return [];
-    return analysisMode === 'business_compare'
-      ? combineBreakdownMetrics(
+    if (analysisMode === 'business_compare') {
+      return channelGroupMode === 'tag'
+        ? combineChannelMetricsByTag(
+            report.channel_breakdown || [],
+            viewBatchId,
+            businessMetrics,
+            channelTagMap,
+            t('未设置标签'),
+          )
+        : combineBreakdownMetrics(
+            report.channel_breakdown || [],
+            viewBatchId,
+            businessMetrics,
+          );
+    }
+    return channelGroupMode === 'tag'
+      ? aggregateChannelRowsByTag(
           report.channel_breakdown || [],
           viewBatchId,
-          businessMetrics,
+          metricKey,
+          channelTagMap,
+          t('未设置标签'),
         )
       : aggregateBreakdownRows(
           report.channel_breakdown || [],
           viewBatchId,
           metricKey,
         );
-  }, [analysisMode, businessMetrics, metricKey, report, viewBatchId]);
+  }, [
+    analysisMode,
+    businessMetrics,
+    channelGroupMode,
+    channelTagMap,
+    metricKey,
+    report,
+    t,
+    viewBatchId,
+  ]);
 
   const modelRows = useMemo(() => {
     if (
@@ -456,13 +489,13 @@ const ProfitBoardPage = () => {
   const channelSpec = useMemo(
     () =>
       createBarSpec(
-        t('渠道分布'),
+        channelGroupMode === 'tag' ? t('标签分布') : t('渠道分布'),
         channelRows,
         chartSubtitle,
         statusState?.status,
         t,
       ),
-    [channelRows, chartSubtitle, statusState?.status, t],
+    [channelGroupMode, channelRows, chartSubtitle, statusState?.status, t],
   );
   const modelSpec = useMemo(
     () =>
@@ -493,8 +526,8 @@ const ProfitBoardPage = () => {
   const chartContent = useMemo(
     () => ({
       trend: trendRows.length ? (
-        <VChart
-          key={`trend-${actualTheme}-${analysisMode}-${viewBatchId}-${metricKey}`}
+        <ResponsiveVChart
+          chartKey={`trend-${actualTheme}-${analysisMode}-${viewBatchId}-${metricKey}`}
           spec={trendSpec}
           onClick={handleChartClick('trend')}
         />
@@ -502,17 +535,19 @@ const ProfitBoardPage = () => {
         <Empty description={t('当前没有趋势数据')} />
       ),
       channel: channelRows.length ? (
-        <VChart
-          key={`channel-${actualTheme}-${analysisMode}-${viewBatchId}-${metricKey}`}
+        <ResponsiveVChart
+          chartKey={`channel-${actualTheme}-${analysisMode}-${viewBatchId}-${metricKey}-${channelGroupMode}`}
           spec={channelSpec}
-          onClick={handleChartClick('channel')}
+          onClick={handleChartClick(
+            channelGroupMode === 'tag' ? 'tag' : 'channel',
+          )}
         />
       ) : (
         <Empty description={t('当前没有渠道数据')} />
       ),
       model: modelRows.length ? (
-        <VChart
-          key={`model-${actualTheme}-${analysisMode}-${viewBatchId}-${metricKey}`}
+        <ResponsiveVChart
+          chartKey={`model-${actualTheme}-${analysisMode}-${viewBatchId}-${metricKey}`}
           spec={modelSpec}
           onClick={handleChartClick('model')}
         />
@@ -523,6 +558,7 @@ const ProfitBoardPage = () => {
     [
       actualTheme,
       analysisMode,
+      channelGroupMode,
       channelRows.length,
       channelSpec,
       handleChartClick,
@@ -539,9 +575,7 @@ const ProfitBoardPage = () => {
   const summaryMetricHelp = useMemo(
     () => ({
       request_count: t('当前口径内命中的消费日志数量。'),
-      remote_observed_cost_usd: t(
-        '来自上游账户钱包和订阅已用额度的增量，按本站额度口径换算。',
-      ),
+      remote_observed_cost_usd: t('来自上游账户同步到的实际消耗。'),
     }),
     [t],
   );
@@ -586,7 +620,6 @@ const ProfitBoardPage = () => {
     [overviewReport?.warnings, report?.warnings, validationErrors],
   );
 
-
   const batchDigest = useCallback(
     (batch) =>
       batch.scope_type === 'channel'
@@ -599,7 +632,6 @@ const ProfitBoardPage = () => {
   const trendBucketCount = useMemo(() => new Set((trendRows || []).map((r) => r.bucket)).size, [trendRows]);
   const sitePriceFactorNote = overviewReport?.meta?.site_price_factor_note || report?.meta?.site_price_factor_note || '';
 
-
   return (
     <Spin spinning={loading}>
       <div className='mt-[60px] space-y-3 px-2 pb-6'>
@@ -609,20 +641,19 @@ const ProfitBoardPage = () => {
           autoRefreshMode={autoRefreshMode} setAutoRefreshMode={setAutoRefreshMode}
           statusSummary={statusSummary} hasNewActivity={hasNewActivity}
           generatedAtText={generatedAtText} combinedWarnings={combinedWarnings}
-          sitePriceFactorNote={sitePriceFactorNote} walletModeEnabled={walletModeEnabled}
-          selectedAccount={selectedAccount} t={t}
+          sitePriceFactorNote={sitePriceFactorNote} t={t}
         />
         <Tabs type='line' size='large' className='profit-board-tabs'>
           <Tabs.TabPane tab={<span className='flex items-center gap-1.5'><BarChart3 size={16} />{t('收益分析')}</span>} itemKey='analysis'>
             <div className='mt-3 space-y-3'>
               <OverviewPanel overviewQuerying={overviewQuerying} overviewReport={overviewReport} report={report} reportMatchesCurrentFilters={reportMatchesCurrentFilters} cumulativeSummaryCards={cumulativeSummaryCards} diagnosticSummaryCards={diagnosticSummaryCards} summaryMetricHelp={summaryMetricHelp} formatMoney={formatMoney} status={statusState?.status} datePresets={createPresetRanges(t)} dateRange={dateRange} setDateRange={setDateRange} validationErrors={validationErrors} t={t} />
-              <ChartAnalysisCard analysisMode={analysisMode} setAnalysisMode={setAnalysisMode} metricKey={metricKey} setMetricKey={setMetricKey} metricOptions={metricOpts} viewBatchId={viewBatchId} setViewBatchId={setViewBatchId} batchSummaryOptions={batchSummaryOptions} granularity={granularity} setGranularity={setGranularity} customIntervalMinutes={customIntervalMinutes} setCustomIntervalMinutes={setCustomIntervalMinutes} detailFilter={detailFilter} clearDetailFilter={() => { setDetailFilter(null); setDetailPage(1); }} runQuery={runQuery} querying={querying} chartTab={chartTab} setChartTab={setChartTab} report={report} chartContent={chartContent} trendRowCount={trendRows.length} trendBucketCount={trendBucketCount} t={t} />
+              <ChartAnalysisCard analysisMode={analysisMode} setAnalysisMode={setAnalysisMode} metricKey={metricKey} setMetricKey={setMetricKey} metricOptions={metricOpts} viewBatchId={viewBatchId} setViewBatchId={setViewBatchId} batchSummaryOptions={batchSummaryOptions} granularity={granularity} setGranularity={setGranularity} customIntervalMinutes={customIntervalMinutes} setCustomIntervalMinutes={setCustomIntervalMinutes} detailFilter={detailFilter} clearDetailFilter={() => { setDetailFilter(null); setDetailPage(1); }} runQuery={runQuery} querying={querying} chartTab={chartTab} setChartTab={setChartTab} channelGroupMode={channelGroupMode} setChannelGroupMode={setChannelGroupMode} report={report} chartContent={chartContent} trendBucketCount={trendBucketCount} t={t} />
             </div>
           </Tabs.TabPane>
           <Tabs.TabPane tab={<span className='flex items-center gap-1.5'><CircleDollarSign size={16} />{t('配置管理')}</span>} itemKey='config'>
             <div className='mt-3 space-y-3'>
               <ComboManagerCard draft={draft} setDraft={setDraft} channelOptions={channelOptions} options={options} isMobile={isMobile} addOrUpdateBatch={addOrUpdateBatch} editingBatchId={editingBatchId} resetDraft={resetDraft} batches={batches} batchDigest={batchDigest} editBatch={editBatch} removeBatch={removeBatch} batchValidationError={duplicateBatchError} t={t} />
-              <PricingRulesCard batches={batches} comboConfigs={comboConfigs} siteConfig={siteConfig} setSiteConfig={setSiteConfig} modelNameOptions={modelNameOptions} options={options} resolveSharedSitePreview={resolveSharedSitePreview} upstreamConfig={upstreamConfig} setUpstreamConfig={setUpstreamConfig} isMobile={isMobile} createDefaultComboPricingConfig={createDefaultComboPricingConfig} updateComboConfig={updateComboConfig} updateComboRule={updateComboRule} removeComboRule={removeComboRule} addComboRule={addComboRule} localModelMap={localModelMap} clampNumber={clampNumber} t={t} />
+              <PricingRulesCard batches={batches} comboConfigs={comboConfigs} siteConfig={siteConfig} modelNameOptions={modelNameOptions} options={options} resolveSharedSitePreview={resolveSharedSitePreview} upstreamConfig={upstreamConfig} isMobile={isMobile} createDefaultComboPricingConfig={createDefaultComboPricingConfig} updateComboConfig={updateComboConfig} localModelMap={localModelMap} clampNumber={clampNumber} t={t} />
             </div>
           </Tabs.TabPane>
           <Tabs.TabPane tab={<span className='flex items-center gap-1.5'><BadgeDollarSign size={16} />{t('上游账户')}</span>} itemKey='wallet'>

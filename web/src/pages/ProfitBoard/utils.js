@@ -127,40 +127,55 @@ export const createDefaultComboPricingConfig = (
   sharedSite,
   legacySite,
   legacyUpstream,
-) => ({
-  combo_id: comboId,
-  site_mode:
-    legacySite?.pricing_mode === 'site_model' ? 'shared_site_model' : 'manual',
-  shared_site: createDefaultSharedSiteConfig({
-    model_names: sharedSite?.model_names || legacySite?.model_names || [],
-    group: sharedSite?.group || legacySite?.group || '',
-    use_recharge_price:
-      typeof sharedSite?.use_recharge_price === 'boolean'
-        ? sharedSite.use_recharge_price
-        : !!legacySite?.use_recharge_price,
-  }),
-  site_rules: [
-    createDefaultPricingRule({
-      is_default: true,
-      input_price: clampNumber(legacySite?.input_price),
-      output_price: clampNumber(legacySite?.output_price),
-      cache_read_price: clampNumber(legacySite?.cache_read_price),
-      cache_creation_price: clampNumber(legacySite?.cache_creation_price),
+) => {
+  const walletMode =
+    legacyUpstream?.upstream_mode === 'wallet_observer' ||
+    (legacyUpstream?.cost_source &&
+      legacyUpstream.cost_source !== 'manual_only');
+
+  return {
+    combo_id: comboId,
+    site_mode:
+      legacySite?.pricing_mode === 'site_model'
+        ? 'shared_site_model'
+        : 'manual',
+    upstream_mode: walletMode ? 'wallet_observer' : 'manual_rules',
+    upstream_account_id: walletMode
+      ? Number(legacyUpstream?.upstream_account_id || 0)
+      : 0,
+    shared_site: createDefaultSharedSiteConfig({
+      model_names: sharedSite?.model_names || legacySite?.model_names || [],
+      group: sharedSite?.group || legacySite?.group || '',
+      use_recharge_price:
+        typeof sharedSite?.use_recharge_price === 'boolean'
+          ? sharedSite.use_recharge_price
+          : !!legacySite?.use_recharge_price,
     }),
-  ],
-  upstream_rules: [
-    createDefaultPricingRule({
-      is_default: true,
-      input_price: clampNumber(legacyUpstream?.input_price),
-      output_price: clampNumber(legacyUpstream?.output_price),
-      cache_read_price: clampNumber(legacyUpstream?.cache_read_price),
-      cache_creation_price: clampNumber(legacyUpstream?.cache_creation_price),
-    }),
-  ],
-  site_fixed_total_amount: clampNumber(legacySite?.fixed_total_amount),
-  upstream_fixed_total_amount: clampNumber(legacyUpstream?.fixed_total_amount),
-  remote_observer: createDefaultRemoteObserverConfig(),
-});
+    site_rules: [
+      createDefaultPricingRule({
+        is_default: true,
+        input_price: clampNumber(legacySite?.input_price),
+        output_price: clampNumber(legacySite?.output_price),
+        cache_read_price: clampNumber(legacySite?.cache_read_price),
+        cache_creation_price: clampNumber(legacySite?.cache_creation_price),
+      }),
+    ],
+    upstream_rules: [
+      createDefaultPricingRule({
+        is_default: true,
+        input_price: clampNumber(legacyUpstream?.input_price),
+        output_price: clampNumber(legacyUpstream?.output_price),
+        cache_read_price: clampNumber(legacyUpstream?.cache_read_price),
+        cache_creation_price: clampNumber(legacyUpstream?.cache_creation_price),
+      }),
+    ],
+    site_fixed_total_amount: clampNumber(legacySite?.fixed_total_amount),
+    upstream_fixed_total_amount: clampNumber(
+      legacyUpstream?.fixed_total_amount,
+    ),
+    remote_observer: createDefaultRemoteObserverConfig(),
+  };
+};
 
 export const createDefaultDraft = () => ({
   id: '',
@@ -220,6 +235,40 @@ export const getBalanceHealthLevel = (account, t) => {
   return { level: 'healthy', color: 'green', bgColor: 'bg-emerald-500/10', textColor: 'text-emerald-600 dark:text-emerald-400', label: t('充足') };
 };
 
+export const getAccountBalanceVisualMeta = (account, status, t) => {
+  const { rate } = getDisplayCurrency(status);
+  const displayBalance = Number(account?.wallet_balance_usd || 0) * rate;
+
+  if (displayBalance <= 10) {
+    return {
+      level: 'critical',
+      color: 'red',
+      bgColor: 'bg-red-500/10',
+      borderColor: 'border-red-500/20',
+      textColor: 'text-red-600 dark:text-red-400',
+      label: t('警告'),
+    };
+  }
+  if (displayBalance <= 50) {
+    return {
+      level: 'warning',
+      color: 'yellow',
+      bgColor: 'bg-amber-500/10',
+      borderColor: 'border-amber-500/20',
+      textColor: 'text-amber-600 dark:text-amber-400',
+      label: t('注意'),
+    };
+  }
+  return {
+    level: 'healthy',
+    color: 'green',
+    bgColor: 'bg-emerald-500/10',
+    borderColor: 'border-emerald-500/20',
+    textColor: 'text-emerald-600 dark:text-emerald-400',
+    label: t('正常'),
+  };
+};
+
 export const createDefaultState = () => {
   const end = new Date();
   const start = dayjs(end).subtract(7, 'day').toDate();
@@ -231,6 +280,7 @@ export const createDefaultState = () => {
     granularity: 'day',
     customIntervalMinutes: 15,
     chartTab: 'trend',
+    channelGroupMode: 'channel',
     compareMode: 'none',
     comparePeriod: 'previous',
     compareDateRange: [],
@@ -308,6 +358,8 @@ export const normalizeRestoredState = (state) => {
     Number(next.customIntervalMinutes || defaults.customIntervalMinutes),
     1,
   );
+  next.channelGroupMode =
+    next.channelGroupMode === 'tag' ? 'tag' : 'channel';
   next.compareMode = next.compareMode || 'none';
   next.comparePeriod = next.comparePeriod || 'previous';
   next.upstreamConfig = {
@@ -507,6 +559,39 @@ export const aggregateBreakdownRows = (rows, viewBatchId, metricKey) => {
     .slice(0, 12);
 };
 
+export const aggregateChannelRowsByTag = (
+  rows,
+  viewBatchId,
+  metricKey,
+  channelTagMap,
+  emptyTagLabel,
+) => {
+  const filtered =
+    viewBatchId === 'all'
+      ? rows || []
+      : (rows || []).filter((item) => item.batch_id === viewBatchId);
+  const grouped = new Map();
+
+  filtered.forEach((item) => {
+    const tagLabel = channelTagMap.get(String(item.key)) || emptyTagLabel;
+    const current = grouped.get(tagLabel) || {
+      label: tagLabel,
+      key: tagLabel,
+      value: 0,
+      batch_id: item.batch_id || null,
+    };
+    current.value += Number(item[metricKey] || 0);
+    if (current.batch_id && current.batch_id !== item.batch_id) {
+      current.batch_id = null;
+    }
+    grouped.set(tagLabel, current);
+  });
+
+  return Array.from(grouped.values())
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 12);
+};
+
 export const combineTimeseriesMetrics = (rows, viewBatchId, metrics) => {
   const filtered =
     viewBatchId === 'all'
@@ -550,6 +635,46 @@ export const combineBreakdownMetrics = (rows, viewBatchId, metrics) => {
       grouped.set(key, current);
     });
   });
+  return Array.from(grouped.values())
+    .sort((a, b) => {
+      if (a.label === b.label) return a.series.localeCompare(b.series);
+      return b.value - a.value;
+    })
+    .slice(0, 24);
+};
+
+export const combineChannelMetricsByTag = (
+  rows,
+  viewBatchId,
+  metrics,
+  channelTagMap,
+  emptyTagLabel,
+) => {
+  const filtered =
+    viewBatchId === 'all'
+      ? rows || []
+      : (rows || []).filter((item) => item.batch_id === viewBatchId);
+  const grouped = new Map();
+
+  filtered.forEach((item) => {
+    const tagLabel = channelTagMap.get(String(item.key)) || emptyTagLabel;
+    metrics.forEach((metric) => {
+      const key = `${tagLabel}::${metric.key}`;
+      const current = grouped.get(key) || {
+        label: tagLabel,
+        key: tagLabel,
+        value: 0,
+        series: metric.label,
+        batch_id: item.batch_id || null,
+      };
+      current.value += Number(item[metric.key] || 0);
+      if (current.batch_id && current.batch_id !== item.batch_id) {
+        current.batch_id = null;
+      }
+      grouped.set(key, current);
+    });
+  });
+
   return Array.from(grouped.values())
     .sort((a, b) => {
       if (a.label === b.label) return a.series.localeCompare(b.series);

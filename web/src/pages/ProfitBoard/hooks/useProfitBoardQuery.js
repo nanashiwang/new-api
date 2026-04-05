@@ -38,6 +38,9 @@ export const useProfitBoardQuery = ({
     restoredState.customIntervalMinutes || 15,
   );
   const [chartTab, setChartTab] = useState(restoredState.chartTab || 'trend');
+  const [channelGroupMode, setChannelGroupMode] = useState(
+    restoredState.channelGroupMode || 'channel',
+  );
   const [metricKey, setMetricKey] = useState(
     restoredState.metricKey || 'configured_profit_usd',
   );
@@ -259,6 +262,8 @@ export const useProfitBoardQuery = ({
     setCustomIntervalMinutes,
     chartTab,
     setChartTab,
+    channelGroupMode,
+    setChannelGroupMode,
     metricKey,
     setMetricKey,
     analysisMode,

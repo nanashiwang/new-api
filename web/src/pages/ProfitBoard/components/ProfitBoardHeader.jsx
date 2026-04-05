@@ -27,14 +27,10 @@ import {
 } from '@douyinfe/semi-ui';
 import {
   AlertTriangle,
-  ChevronDown,
-  ChevronRight,
   Info,
   RefreshCw,
   Save,
-  Wallet,
 } from 'lucide-react';
-import { getWalletStatusMeta } from '../utils';
 
 const { Text, Title } = Typography;
 
@@ -51,8 +47,6 @@ const ProfitBoardHeader = ({
   generatedAtText,
   combinedWarnings,
   sitePriceFactorNote,
-  walletModeEnabled,
-  selectedAccount,
   t,
 }) => {
   const [warningsExpanded, setWarningsExpanded] = useState(false);
@@ -86,7 +80,7 @@ const ProfitBoardHeader = ({
               className='cursor-pointer'
               onClick={() => setWarningsExpanded(!warningsExpanded)}
             >
-              {combinedWarnings.length} {t('个问题')}
+              {allMessages.length} {t('条提示')}
             </Tag>
           )}
         </div>
@@ -123,6 +117,16 @@ const ProfitBoardHeader = ({
           </div>
         </Space>
       </div>
+
+      {statusSummary?.length > 0 ? (
+        <div className='mt-2 flex flex-wrap gap-2'>
+          {statusSummary.map((item) => (
+            <Tag key={item.key} color={item.color} size='small'>
+              {item.text}
+            </Tag>
+          ))}
+        </div>
+      ) : null}
 
       {hasMessages && (
         <Collapsible isOpen={warningsExpanded}>

@@ -22,7 +22,6 @@ import {
   clampNumber,
   createDefaultComboPricingConfig,
   createDefaultPricingRule,
-  createDefaultSharedSiteConfig,
 } from '../utils';
 
 export const useProfitBoardConfig = ({

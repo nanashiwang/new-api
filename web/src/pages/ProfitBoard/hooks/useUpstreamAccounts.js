@@ -23,6 +23,7 @@ import { createDefaultUpstreamAccountDraft } from '../utils';
 export const useUpstreamAccounts = ({
   options,
   loadOptions,
+  comboConfigs,
   upstreamConfig,
   setUpstreamConfig,
   runFullRefresh,
@@ -50,6 +51,24 @@ export const useUpstreamAccounts = ({
       null,
     [editingAccountId, accounts],
   );
+
+  const activeWalletAccountIds = useMemo(() => {
+    const ids = new Set();
+    (comboConfigs || []).forEach((item) => {
+      if (item?.upstream_mode !== 'wallet_observer') return;
+      const accountId = Number(item?.upstream_account_id || 0);
+      if (accountId > 0) ids.add(accountId);
+    });
+    if (upstreamConfig?.upstream_mode === 'wallet_observer') {
+      const legacyAccountId = Number(upstreamConfig?.upstream_account_id || 0);
+      if (legacyAccountId > 0) ids.add(legacyAccountId);
+    }
+    return ids;
+  }, [
+    comboConfigs,
+    upstreamConfig?.upstream_account_id,
+    upstreamConfig?.upstream_mode,
+  ]);
 
   // Auto-select first account when list changes
   useEffect(() => {
@@ -220,9 +239,7 @@ export const useUpstreamAccounts = ({
         }
         await loadOptions();
         await loadAccountTrend(accountId);
-        if (
-          Number(upstreamConfig.upstream_account_id || 0) === Number(accountId)
-        ) {
+        if (activeWalletAccountIds.has(Number(accountId))) {
           await runFullRefresh();
         }
       } catch (error) {
@@ -232,10 +249,10 @@ export const useUpstreamAccounts = ({
       }
     },
     [
+      activeWalletAccountIds,
       loadAccountTrend,
       loadOptions,
       runFullRefresh,
-      upstreamConfig.upstream_account_id,
     ],
   );
 
@@ -251,7 +268,7 @@ export const useUpstreamAccounts = ({
       if (editingAccountId) {
         await loadAccountTrend(editingAccountId);
       }
-      if (Number(upstreamConfig.upstream_account_id || 0) > 0) {
+      if (activeWalletAccountIds.size > 0) {
         await runFullRefresh();
       }
     } catch (error) {
@@ -260,11 +277,11 @@ export const useUpstreamAccounts = ({
       setSyncingAllAccounts(false);
     }
   }, [
+    activeWalletAccountIds,
     editingAccountId,
     loadAccountTrend,
     loadOptions,
     runFullRefresh,
-    upstreamConfig.upstream_account_id,
   ]);
 
   const deleteAccount = useCallback(
