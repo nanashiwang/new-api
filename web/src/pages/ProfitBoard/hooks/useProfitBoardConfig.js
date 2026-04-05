@@ -29,6 +29,7 @@ export const useProfitBoardConfig = ({
   comboConfigs,
   setComboConfigs,
   restoredState,
+  rechargePriceFactor = 1,
 }) => {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -279,7 +280,7 @@ export const useProfitBoardConfig = ({
           cache_creation_price: 0,
         };
       const factor = currentSharedSite.use_recharge_price
-        ? clampNumber(model.model_price || 1)
+        ? rechargePriceFactor
         : 1;
       const baseInput = clampNumber(model.model_ratio) * 2 * factor;
       return {
@@ -297,7 +298,7 @@ export const useProfitBoardConfig = ({
           : 0,
       };
     },
-    [localModelMap],
+    [localModelMap, rechargePriceFactor],
   );
 
   return {

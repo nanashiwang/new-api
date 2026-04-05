@@ -136,6 +136,13 @@ const ProfitBoardPage = () => {
   const [statusState] = useContext(StatusContext);
   const isMobile = useIsMobile();
 
+  const rechargePriceFactor = useMemo(() => {
+    const price = statusState?.status?.price ?? 1;
+    const usdRate = statusState?.status?.usd_exchange_rate;
+    if (!usdRate || usdRate <= 0) return 1;
+    return price / usdRate;
+  }, [statusState?.status?.price, statusState?.status?.usd_exchange_rate]);
+
   const { restoredState, cachedBundle, persistState, persistReportCache } =
     useProfitBoardPersist();
 
@@ -159,6 +166,7 @@ const ProfitBoardPage = () => {
     comboConfigs,
     setComboConfigs,
     restoredState,
+    rechargePriceFactor,
   });
 
   const { batches, batchPayload, upsertBatch, removeBatch } = batchesHook;

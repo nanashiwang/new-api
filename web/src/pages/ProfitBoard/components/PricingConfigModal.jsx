@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   Banner,
   Button,
@@ -31,7 +31,7 @@ import {
   Tooltip,
   Typography,
 } from '@douyinfe/semi-ui';
-import { ChevronDown, Download } from 'lucide-react';
+import { ChevronDown, Download, Pencil } from 'lucide-react';
 import PricingRuleList from './PricingRuleList';
 
 const { Text, Title } = Typography;
@@ -105,6 +105,7 @@ const PricingConfigModal = ({
   t,
 }) => {
   const sharedSite = comboConfig?.shared_site || {};
+  const [editingCell, setEditingCell] = useState(null);
   const availableAccounts = (options?.upstream_accounts || []).filter(
     (item) => item.enabled !== false,
   );
@@ -229,6 +230,101 @@ const PricingConfigModal = ({
       return { modelName, preview };
     });
   }, [sharedSite, resolveSharedSitePreview]);
+
+  const siteRuleMap = useMemo(() => {
+    const map = new Map();
+    (comboConfig?.site_rules || []).forEach((rule) => {
+      if (!rule.is_default && rule.model_name) {
+        map.set(rule.model_name, rule);
+      }
+    });
+    return map;
+  }, [comboConfig?.site_rules]);
+
+  const handlePreviewCellEdit = useCallback(
+    (modelName, field, value) => {
+      setComboConfig((prev) => {
+        const rules = [...(prev?.site_rules || [])];
+        const existingIndex = rules.findIndex(
+          (r) => !r.is_default && r.model_name === modelName,
+        );
+        if (existingIndex >= 0) {
+          rules[existingIndex] = {
+            ...rules[existingIndex],
+            [field]: clampNumber(value),
+          };
+        } else {
+          const preview = resolveSharedSitePreview(
+            prev?.shared_site || {},
+            modelName,
+          );
+          rules.push({
+            model_name: modelName,
+            input_price: preview?.input_price || 0,
+            output_price: preview?.output_price || 0,
+            cache_read_price: preview?.cache_read_price || 0,
+            cache_creation_price: preview?.cache_creation_price || 0,
+            is_default: false,
+            is_custom: false,
+            [field]: clampNumber(value),
+          });
+        }
+        return { ...prev, site_rules: rules };
+      });
+    },
+    [setComboConfig, resolveSharedSitePreview, clampNumber],
+  );
+
+  const PRICE_FIELDS = useMemo(
+    () => [
+      { key: 'input_price', label: t('输入') },
+      { key: 'output_price', label: t('输出') },
+      { key: 'cache_read_price', label: t('缓存读') },
+      { key: 'cache_creation_price', label: t('缓存写') },
+    ],
+    [t],
+  );
+
+  const renderEditableCell = useCallback(
+    (modelName, field, previewValue) => {
+      const override = siteRuleMap.get(modelName);
+      const displayValue = override?.[field] ?? previewValue;
+      const isOverridden = override != null && override[field] != null;
+      const isEditing =
+        editingCell?.modelName === modelName && editingCell?.field === field;
+
+      if (isEditing) {
+        return (
+          <InputNumber
+            min={0}
+            value={displayValue ?? 0}
+            onChange={(val) => handlePreviewCellEdit(modelName, field, val)}
+            onBlur={() => setEditingCell(null)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === 'Escape')
+                setEditingCell(null);
+            }}
+            size='small'
+            style={{ width: '100%', minWidth: 70 }}
+            autoFocus
+          />
+        );
+      }
+
+      return (
+        <span
+          className={`inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 transition-colors hover:bg-semi-color-fill-1 ${isOverridden ? 'font-medium text-blue-600 dark:text-blue-400' : ''}`}
+          onClick={() => setEditingCell({ modelName, field })}
+        >
+          {displayValue?.toFixed(4) || '-'}
+          {isOverridden ? (
+            <Pencil size={9} className='shrink-0 opacity-60' />
+          ) : null}
+        </span>
+      );
+    },
+    [editingCell, siteRuleMap, handlePreviewCellEdit],
+  );
 
   const footer = (
     <div className='flex items-center justify-end gap-2'>
@@ -502,49 +598,49 @@ const PricingConfigModal = ({
 
                 {/* 模型价格预览 - 紧凑表格 */}
                 {modelPreviewRows.length > 0 ? (
-                  <div className='space-y-1'>
-                    <Text strong size='small' className='block'>{t('价格预览')}</Text>
+                  <div className='space-y-1.5'>
+                    <div className='flex items-center justify-between'>
+                      <Text strong size='small'>{t('价格预览')}</Text>
+                      <Text type='tertiary' size='small'>{t('点击价格可编辑，编辑后自动写入手动规则')}</Text>
+                    </div>
                     <div className='rounded-xl border border-semi-color-border overflow-hidden'>
                       <table className='w-full text-xs'>
                         <thead>
                           <tr className='bg-semi-color-fill-0'>
                             <th className='px-2 py-1.5 text-left font-medium text-semi-color-text-2'>{t('模型')}</th>
-                            <th className='px-2 py-1.5 text-right font-medium text-semi-color-text-2'>{t('输入')}</th>
-                            <th className='px-2 py-1.5 text-right font-medium text-semi-color-text-2'>{t('输出')}</th>
-                            <th className='px-2 py-1.5 text-right font-medium text-semi-color-text-2'>{t('缓存读')}</th>
-                            <th className='px-2 py-1.5 text-right font-medium text-semi-color-text-2'>{t('缓存写')}</th>
+                            {PRICE_FIELDS.map(({ key, label }) => (
+                              <th key={key} className='px-2 py-1.5 text-right font-medium text-semi-color-text-2'>{label}</th>
+                            ))}
                           </tr>
                         </thead>
                         <tbody>
-                          {modelPreviewRows.map(({ modelName, preview }) => (
-                            <tr
-                              key={`${comboConfig.id}-${modelName}`}
-                              className='border-t border-semi-color-border'
-                            >
-                              <td className='px-2 py-1.5'>
-                                <div className='flex items-center gap-1.5'>
-                                  <span className={`truncate max-w-[140px] ${preview ? '' : 'text-semi-color-text-2'}`}>
-                                    {modelName}
-                                  </span>
-                                  {!preview ? (
-                                    <Tag color='grey' size='small' className='shrink-0'>{t('未匹配')}</Tag>
-                                  ) : null}
-                                </div>
-                              </td>
-                              <td className='px-2 py-1.5 text-right tabular-nums'>
-                                {preview?.input_price?.toFixed(4) || '-'}
-                              </td>
-                              <td className='px-2 py-1.5 text-right tabular-nums'>
-                                {preview?.output_price?.toFixed(4) || '-'}
-                              </td>
-                              <td className='px-2 py-1.5 text-right tabular-nums'>
-                                {preview?.cache_read_price?.toFixed(4) || '-'}
-                              </td>
-                              <td className='px-2 py-1.5 text-right tabular-nums'>
-                                {preview?.cache_creation_price?.toFixed(4) || '-'}
-                              </td>
-                            </tr>
-                          ))}
+                          {modelPreviewRows.map(({ modelName, preview }) => {
+                            const hasOverride = siteRuleMap.has(modelName);
+                            return (
+                              <tr
+                                key={`${comboConfig.id}-${modelName}`}
+                                className='border-t border-semi-color-border'
+                              >
+                                <td className='px-2 py-1.5'>
+                                  <div className='flex items-center gap-1.5'>
+                                    <span className={`truncate max-w-[140px] ${preview ? '' : 'text-semi-color-text-2'}`}>
+                                      {modelName}
+                                    </span>
+                                    {hasOverride ? (
+                                      <Tag color='blue' size='small' className='shrink-0'>{t('已覆盖')}</Tag>
+                                    ) : !preview ? (
+                                      <Tag color='grey' size='small' className='shrink-0'>{t('未匹配')}</Tag>
+                                    ) : null}
+                                  </div>
+                                </td>
+                                {PRICE_FIELDS.map(({ key }) => (
+                                  <td key={key} className='px-2 py-1.5 text-right tabular-nums'>
+                                    {renderEditableCell(modelName, key, preview?.[key])}
+                                  </td>
+                                ))}
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
