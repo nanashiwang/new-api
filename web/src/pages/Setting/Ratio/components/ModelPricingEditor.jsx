@@ -19,7 +19,6 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React, { useMemo, useState } from 'react';
 import {
-  Banner,
   Button,
   Card,
   Checkbox,
@@ -357,6 +356,7 @@ export default function ModelPricingEditor({
           </Card>
 
           <Card
+            key={selectedModel ? selectedModel.name : 'empty-model-pricing-editor'}
             style={isMobile ? { order: 1 } : undefined}
             title={selectedModel ? selectedModel.name : t('模型计费编辑器')}
             headerExtraContent={
@@ -456,17 +456,8 @@ export default function ModelPricingEditor({
                             </div>
                             <div className='mt-1 text-xs text-gray-500'>
                               {completionReadOnly
-                                ? t('开启后可改写官方默认补全倍率 {{ratio}}', {
-                                    ratio:
-                                      selectedModel.lockedCompletionRatio || '-',
-                                  })
-                                : t(
-                                    '当前正在覆盖官方默认补全倍率 {{ratio}}，保存后按你的自定义价格生效。',
-                                    {
-                                      ratio:
-                                        selectedModel.lockedCompletionRatio || '-',
-                                    },
-                                  )}
+                                ? t('开启后可覆盖当前官方补全价格')
+                                : t('当前已启用覆盖官方价格')}
                             </div>
                           </div>
                           <Switch
@@ -477,34 +468,13 @@ export default function ModelPricingEditor({
                       ) : null}
 
                       {completionReadOnly ? (
-                        <Banner
-                          type='warning'
-                          bordered
-                          fullMode={false}
-                          closeIcon={null}
-                          style={{ marginBottom: 12 }}
-                          title={t('补全价格已锁定')}
-                          description={t(
-                            '该模型补全倍率由后端固定为 {{ratio}}。补全价格不能在这里修改。',
-                            {
-                              ratio: selectedModel.lockedCompletionRatio || '-',
-                            },
-                          )}
-                        />
-                      ) : selectedModel.canOverrideCompletionRatio ? (
-                        <Banner
-                          type='info'
-                          bordered
-                          fullMode={false}
-                          closeIcon={null}
-                          style={{ marginBottom: 12 }}
-                          title={t('已启用官方价格覆盖')}
-                          description={t(
-                            '当前正在覆盖官方默认补全倍率 {{ratio}}，保存后按你的自定义价格生效。',
-                            {
-                              ratio: selectedModel.lockedCompletionRatio || '-',
-                            },
-                          )}
+                        <PriceInput
+                          label={t('补全倍率')}
+                          value={selectedModel.lockedCompletionRatio || ''}
+                          placeholder=''
+                          onChange={() => {}}
+                          suffix=''
+                          disabled
                         />
                       ) : null}
 
@@ -535,14 +505,7 @@ export default function ModelPricingEditor({
                           !hasValue(selectedModel.inputPrice) || completionReadOnly
                         }
                         extraText={
-                          completionReadOnly
-                            ? t(
-                                '固定倍率：{{ratio}}。该字段仅展示换算后的价格。',
-                                {
-                                  ratio: selectedModel.lockedCompletionRatio || '-',
-                                },
-                              )
-                            : !selectedModel.canOverrideCompletionRatio &&
+                          !selectedModel.canOverrideCompletionRatio &&
                                 !isOptionalFieldEnabled(
                                   selectedModel,
                                   'completionPrice',
