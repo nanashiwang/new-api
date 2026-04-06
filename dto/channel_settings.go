@@ -1,6 +1,9 @@
 package dto
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 type ChatCompletionsToResponsesMode string
 
@@ -104,11 +107,39 @@ func (s ChannelSettings) Validate() error {
 
 func (s ChannelSettings) ValidateClientRestriction() error {
 	switch s.ClientRestrictionMode {
-	case "", ClientRestrictionModeAllowlist, ClientRestrictionModeBlocklist:
+	case "", ClientRestrictionModeBlocklist:
+		return nil
+	case ClientRestrictionModeAllowlist:
+		if len(NormalizeClientRestrictionClients(s.ClientRestrictionClients)) == 0 {
+			return fmt.Errorf("allowlist client_restriction_clients cannot be empty")
+		}
 		return nil
 	default:
 		return fmt.Errorf("invalid client_restriction_mode: %s", s.ClientRestrictionMode)
 	}
+}
+
+func NormalizeClientRestrictionClients(clients []string) []string {
+	if len(clients) == 0 {
+		return nil
+	}
+	normalized := make([]string, 0, len(clients))
+	seen := make(map[string]struct{}, len(clients))
+	for _, client := range clients {
+		client = strings.TrimSpace(client)
+		if client == "" {
+			continue
+		}
+		if _, ok := seen[client]; ok {
+			continue
+		}
+		seen[client] = struct{}{}
+		normalized = append(normalized, client)
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
 }
 
 func (s ChannelSettings) ValidateChatCompletionsToResponsesMode() error {

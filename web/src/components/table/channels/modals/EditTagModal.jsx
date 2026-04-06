@@ -255,9 +255,21 @@ const EditTagModal = (props) => {
       formVals.client_restriction_mode !== undefined &&
       formVals.client_restriction_mode !== null
     ) {
+      const normalizedClientRestrictionClients = (
+        formVals.client_restriction_clients || []
+      )
+        .map((client) => (typeof client === 'string' ? client.trim() : ''))
+        .filter(Boolean);
+      if (
+        formVals.client_restriction_mode === 'allowlist' &&
+        normalizedClientRestrictionClients.length === 0
+      ) {
+        showInfo('白名单模式至少选择一个客户端');
+        setLoading(false);
+        return;
+      }
       data.client_restriction_mode = formVals.client_restriction_mode;
-      data.client_restriction_clients =
-        formVals.client_restriction_clients || [];
+      data.client_restriction_clients = normalizedClientRestrictionClients;
     }
     if (
       data.model_mapping === undefined &&

@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -571,10 +572,23 @@ func validateTwoFactorAuth(twoFA *model.TwoFA, code string) bool {
 	return false
 }
 
+func clientRestrictionValidationMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	if strings.Contains(err.Error(), "allowlist client_restriction_clients cannot be empty") {
+		return "白名单模式至少选择一个客户端"
+	}
+	return "无效的客户端限制模式"
+}
+
 // validateChannel 通用的渠道校验函数
 func validateChannel(channel *model.Channel, isAdd bool) error {
 	// 校验 channel settings
 	if err := channel.ValidateSettings(); err != nil {
+		if msg := clientRestrictionValidationMessage(err); msg != "" {
+			return errors.New(msg)
+		}
 		return fmt.Errorf("渠道额外设置[channel setting] 格式错误：%s", err.Error())
 	}
 
@@ -834,16 +848,16 @@ func DeleteDisabledChannel(c *gin.Context) {
 }
 
 type ChannelTag struct {
-	Tag                     string   `json:"tag"`
-	NewTag                  *string  `json:"new_tag"`
-	Priority                *int64   `json:"priority"`
-	Weight                  *uint    `json:"weight"`
-	ModelMapping            *string  `json:"model_mapping"`
-	Models                  *string  `json:"models"`
-	Groups                  *string  `json:"groups"`
-	ParamOverride           *string  `json:"param_override"`
-	HeaderOverride          *string  `json:"header_override"`
-	ClientRestrictionMode   *string  `json:"client_restriction_mode"`
+	Tag                      string   `json:"tag"`
+	NewTag                   *string  `json:"new_tag"`
+	Priority                 *int64   `json:"priority"`
+	Weight                   *uint    `json:"weight"`
+	ModelMapping             *string  `json:"model_mapping"`
+	Models                   *string  `json:"models"`
+	Groups                   *string  `json:"groups"`
+	ParamOverride            *string  `json:"param_override"`
+	HeaderOverride           *string  `json:"header_override"`
+	ClientRestrictionMode    *string  `json:"client_restriction_mode"`
 	ClientRestrictionClients []string `json:"client_restriction_clients"`
 }
 
@@ -934,13 +948,15 @@ func EditTagChannels(c *gin.Context) {
 	}
 	// Validate client restriction mode
 	if channelTag.ClientRestrictionMode != nil {
-		mode := dto.ClientRestrictionMode(*channelTag.ClientRestrictionMode)
-		switch mode {
-		case "", dto.ClientRestrictionModeAllowlist, dto.ClientRestrictionModeBlocklist:
-		default:
+		channelTag.ClientRestrictionClients = dto.NormalizeClientRestrictionClients(channelTag.ClientRestrictionClients)
+		settings := dto.ChannelSettings{
+			ClientRestrictionMode:    dto.ClientRestrictionMode(*channelTag.ClientRestrictionMode),
+			ClientRestrictionClients: channelTag.ClientRestrictionClients,
+		}
+		if err := settings.ValidateClientRestriction(); err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
-				"message": "无效的客户端限制模式",
+				"message": clientRestrictionValidationMessage(err),
 			})
 			return
 		}

@@ -70,3 +70,77 @@ func TestChannelSettingsValidateClaudeImageTransportMode(t *testing.T) {
 		})
 	}
 }
+
+func TestChannelSettingsValidateClientRestriction(t *testing.T) {
+	tests := []struct {
+		name     string
+		settings ChannelSettings
+		wantErr  bool
+	}{
+		{
+			name: "allowlist requires at least one client",
+			settings: ChannelSettings{
+				ClientRestrictionMode:    ClientRestrictionModeAllowlist,
+				ClientRestrictionClients: []string{},
+			},
+			wantErr: true,
+		},
+		{
+			name: "allowlist ignores blank clients",
+			settings: ChannelSettings{
+				ClientRestrictionMode:    ClientRestrictionModeAllowlist,
+				ClientRestrictionClients: []string{"  "},
+			},
+			wantErr: true,
+		},
+		{
+			name: "allowlist accepts normalized clients",
+			settings: ChannelSettings{
+				ClientRestrictionMode:    ClientRestrictionModeAllowlist,
+				ClientRestrictionClients: []string{" codex-cli ", "codex-cli"},
+			},
+		},
+		{
+			name: "blocklist can be empty",
+			settings: ChannelSettings{
+				ClientRestrictionMode:    ClientRestrictionModeBlocklist,
+				ClientRestrictionClients: []string{},
+			},
+		},
+		{
+			name: "empty mode can be empty",
+			settings: ChannelSettings{
+				ClientRestrictionMode:    ClientRestrictionModeNone,
+				ClientRestrictionClients: []string{},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.settings.ValidateClientRestriction()
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected validation error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected validation error: %v", err)
+			}
+		})
+	}
+}
+
+func TestNormalizeClientRestrictionClients(t *testing.T) {
+	got := NormalizeClientRestrictionClients([]string{" codex-cli ", "", "codex-cli", "cursor"})
+	want := []string{"codex-cli", "cursor"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v want %v", got, want)
+		}
+	}
+}

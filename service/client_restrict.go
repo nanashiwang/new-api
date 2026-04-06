@@ -21,9 +21,9 @@ func isClientAllowed(settings dto.ChannelSettings, clientID string) bool {
 		return true
 	}
 
-	clients := settings.ClientRestrictionClients
+	clients := dto.NormalizeClientRestrictionClients(settings.ClientRestrictionClients)
 	if len(clients) == 0 {
-		return true // empty list means no restriction regardless of mode
+		return mode != dto.ClientRestrictionModeAllowlist
 	}
 
 	found := false

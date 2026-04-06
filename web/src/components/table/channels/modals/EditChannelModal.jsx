@@ -1516,6 +1516,20 @@ const EditChannelModal = (props) => {
       localInputs.other = 'v2.1';
     }
 
+    const normalizedClientRestrictionClients = (
+      localInputs.client_restriction_clients || []
+    )
+      .map((client) => (typeof client === 'string' ? client.trim() : ''))
+      .filter(Boolean);
+    localInputs.client_restriction_clients = normalizedClientRestrictionClients;
+    if (
+      localInputs.client_restriction_mode === 'allowlist' &&
+      normalizedClientRestrictionClients.length === 0
+    ) {
+      showError(t('白名单模式至少选择一个客户端'));
+      return;
+    }
+
     // 生成渠道额外设置JSON
     const channelExtraSettings = {
       force_format: localInputs.force_format || false,
@@ -1525,7 +1539,7 @@ const EditChannelModal = (props) => {
       system_prompt: localInputs.system_prompt || '',
       system_prompt_override: localInputs.system_prompt_override || false,
       client_restriction_mode: localInputs.client_restriction_mode || '',
-      client_restriction_clients: localInputs.client_restriction_clients || [],
+      client_restriction_clients: normalizedClientRestrictionClients,
     };
     localInputs.setting = JSON.stringify(channelExtraSettings);
 
