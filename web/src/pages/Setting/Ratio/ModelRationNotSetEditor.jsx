@@ -39,6 +39,19 @@ import {
 import { API, showError, showSuccess } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
 
+const parseOptionJSON = (rawValue) => {
+  if (!rawValue || rawValue.trim() === '') {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(rawValue);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (error) {
+    console.error('JSON解析错误:', error);
+    return {};
+  }
+};
+
 export default function ModelRatioNotSetEditor(props) {
   const { t } = useTranslation();
   const [models, setModels] = useState([]);
@@ -82,9 +95,12 @@ export default function ModelRatioNotSetEditor(props) {
 
   useEffect(() => {
     try {
-      const modelPrice = JSON.parse(props.options.ModelPrice || '{}');
-      const modelRatio = JSON.parse(props.options.ModelRatio || '{}');
-      const completionRatio = JSON.parse(props.options.CompletionRatio || '{}');
+      const modelPrice = parseOptionJSON(props.options.ModelPrice);
+      const modelRatio = parseOptionJSON(props.options.ModelRatio);
+      const completionRatio = parseOptionJSON(props.options.CompletionRatio);
+      const completionRatioMeta = parseOptionJSON(
+        props.options.CompletionRatioMeta,
+      );
 
       // 找出所有未设置价格和倍率的模型
       const unsetModels = enabledModels.filter((modelName) => {
@@ -101,6 +117,11 @@ export default function ModelRatioNotSetEditor(props) {
         price: modelPrice[name] || '',
         ratio: modelRatio[name] || '',
         completionRatio: completionRatio[name] || '',
+        completionRatioLocked: Boolean(completionRatioMeta[name]?.locked),
+        lockedCompletionRatio:
+          completionRatioMeta[name]?.ratio === undefined
+            ? ''
+            : completionRatioMeta[name]?.ratio,
       }));
 
       setModels(modelData);
@@ -154,7 +175,7 @@ export default function ModelRatioNotSetEditor(props) {
         } else {
           if (model.ratio !== '')
             output.ModelRatio[model.name] = parseFloat(model.ratio);
-          if (model.completionRatio !== '')
+          if (!model.completionRatioLocked && model.completionRatio !== '')
             output.CompletionRatio[model.name] = parseFloat(
               model.completionRatio,
             );
@@ -244,8 +265,16 @@ export default function ModelRatioNotSetEditor(props) {
       render: (text, record) => (
         <Input
           value={text}
-          placeholder={record.price !== '' ? t('补全倍率') : t('输入补全倍率')}
-          disabled={record.price !== ''}
+          placeholder={
+            record.completionRatioLocked
+              ? t('后端固定倍率 {{ratio}}', {
+                  ratio: record.lockedCompletionRatio || '-',
+                })
+              : record.price !== ''
+                ? t('补全倍率')
+                : t('输入补全倍率')
+          }
+          disabled={record.price !== '' || record.completionRatioLocked}
           onChange={(value) =>
             updateModel(record.name, 'completionRatio', value)
           }
@@ -261,7 +290,11 @@ export default function ModelRatioNotSetEditor(props) {
     }
     setModels((prev) =>
       prev.map((model) =>
-        model.name === name ? { ...model, [field]: value } : model,
+        model.name === name
+          ? field === 'completionRatio' && model.completionRatioLocked
+            ? model
+            : { ...model, [field]: value }
+          : model,
       ),
     );
   };
@@ -278,6 +311,8 @@ export default function ModelRatioNotSetEditor(props) {
         price: values.price || '',
         ratio: values.ratio || '',
         completionRatio: values.completionRatio || '',
+        completionRatioLocked: values.completionRatioLocked || false,
+        lockedCompletionRatio: values.lockedCompletionRatio || '',
       },
       ...prev,
     ]);
@@ -330,6 +365,9 @@ export default function ModelRatioNotSetEditor(props) {
               ratio: batchFillValue,
             };
           } else if (batchFillType === 'completionRatio') {
+            if (model.completionRatioLocked) {
+              return model;
+            }
             return {
               ...model,
               price: '',
@@ -340,7 +378,9 @@ export default function ModelRatioNotSetEditor(props) {
               ...model,
               price: '',
               ratio: batchRatioValue,
-              completionRatio: batchCompletionRatioValue,
+              completionRatio: model.completionRatioLocked
+                ? model.completionRatio
+                : batchCompletionRatioValue,
             };
           }
         }

@@ -3433,6 +3433,15 @@
     "缺失本站价格": "Missing site pricing",
     "上游返回费用条数": "Rows with returned upstream cost",
     "手动回退条数": "Rows with manual fallback",
-    "进度条现在直接对应已用比例": "The progress bar now directly reflects the used ratio"
+    "进度条现在直接对应已用比例": "The progress bar now directly reflects the used ratio",
+    "分组相关设置": "Group Settings",
+    "未设置价格模型": "Models without pricing",
+    "后端固定倍率 {{ratio}}": "Backend fixed ratio {{ratio}}",
+    "补全价格已锁定": "Completion price locked",
+    "该模型补全倍率由后端固定为 {{ratio}}。补全价格不能在这里修改。": "This model's completion ratio is fixed by the backend as {{ratio}}. Completion price cannot be edited here.",
+    "覆盖官方价格": "Override official price",
+    "开启后可改写官方默认补全倍率 {{ratio}}": "Enable to override the official default completion ratio {{ratio}}",
+    "已启用官方价格覆盖": "Official price override enabled",
+    "当前正在覆盖官方默认补全倍率 {{ratio}}，保存后按你的自定义价格生效。": "You are overriding the official default completion ratio {{ratio}}. After saving, your custom price will take effect."
   }
 }

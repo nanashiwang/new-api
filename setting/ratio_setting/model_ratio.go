@@ -433,19 +433,70 @@ func UpdateCompletionRatioByJSONString(jsonStr string) error {
 func GetCompletionRatio(name string) float64 {
 	name = FormatMatchingModelName(name)
 
-	if strings.Contains(name, "/") {
-		if ratio, ok := completionRatioMap.Get(name); ok {
+	if ratio, ok := completionRatioMap.Get(name); ok {
+		_, locked := getHardcodedCompletionModelRatio(name)
+		if locked || strings.Contains(name, "/") {
 			return ratio
 		}
+		return ratio
 	}
 	hardCodedRatio, contain := getHardcodedCompletionModelRatio(name)
 	if contain {
 		return hardCodedRatio
 	}
-	if ratio, ok := completionRatioMap.Get(name); ok {
-		return ratio
-	}
 	return hardCodedRatio
+}
+
+type CompletionRatioInfo struct {
+	Ratio        float64 `json:"ratio"`
+	Locked       bool    `json:"locked"`
+	CanOverride  bool    `json:"can_override"`
+	IsOverridden bool    `json:"is_overridden"`
+	DefaultRatio float64 `json:"default_ratio"`
+}
+
+func GetCompletionRatioInfo(name string) CompletionRatioInfo {
+	name = FormatMatchingModelName(name)
+
+	customRatio, hasCustomRatio := completionRatioMap.Get(name)
+
+	hardCodedRatio, locked := getHardcodedCompletionModelRatio(name)
+	if locked {
+		if hasCustomRatio {
+			return CompletionRatioInfo{
+				Ratio:        customRatio,
+				Locked:       false,
+				CanOverride:  true,
+				IsOverridden: true,
+				DefaultRatio: hardCodedRatio,
+			}
+		}
+		return CompletionRatioInfo{
+			Ratio:        hardCodedRatio,
+			Locked:       true,
+			CanOverride:  true,
+			IsOverridden: false,
+			DefaultRatio: hardCodedRatio,
+		}
+	}
+
+	if hasCustomRatio {
+		return CompletionRatioInfo{
+			Ratio:        customRatio,
+			Locked:       false,
+			CanOverride:  false,
+			IsOverridden: false,
+			DefaultRatio: 0,
+		}
+	}
+
+	return CompletionRatioInfo{
+		Ratio:        hardCodedRatio,
+		Locked:       false,
+		CanOverride:  false,
+		IsOverridden: false,
+		DefaultRatio: 0,
+	}
 }
 
 func getHardcodedCompletionModelRatio(name string) (float64, bool) {
@@ -467,8 +518,11 @@ func getHardcodedCompletionModelRatio(name string) (float64, bool) {
 		}
 		// gpt-5 匹配
 		if strings.HasPrefix(name, "gpt-5") {
-			if strings.HasPrefix(name, "gpt-5.4-nano") {
-				return 6.25, true
+			if strings.HasPrefix(name, "gpt-5.4") {
+				if strings.HasPrefix(name, "gpt-5.4-nano") {
+					return 6.25, true
+				}
+				return 6, true
 			}
 			return 8, true
 		}

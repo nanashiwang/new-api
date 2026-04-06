@@ -28,7 +28,9 @@ import {
   RadioGroup,
   Radio,
   Checkbox,
+  Switch,
   Tag,
+  Banner,
 } from '@douyinfe/semi-ui';
 import {
   IconDelete,
@@ -39,6 +41,19 @@ import {
 } from '@douyinfe/semi-icons';
 import { API, showError, showSuccess, getQuotaPerUnit } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
+
+const parseOptionJSON = (rawValue) => {
+  if (!rawValue || rawValue.trim() === '') {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(rawValue);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (error) {
+    console.error('JSON解析错误:', error);
+    return {};
+  }
+};
 
 export default function ModelSettingsVisualEditor(props) {
   const { t } = useTranslation();
@@ -58,15 +73,19 @@ export default function ModelSettingsVisualEditor(props) {
 
   useEffect(() => {
     try {
-      const modelPrice = JSON.parse(props.options.ModelPrice || '{}');
-      const modelRatio = JSON.parse(props.options.ModelRatio || '{}');
-      const completionRatio = JSON.parse(props.options.CompletionRatio || '{}');
+      const modelPrice = parseOptionJSON(props.options.ModelPrice);
+      const modelRatio = parseOptionJSON(props.options.ModelRatio);
+      const completionRatio = parseOptionJSON(props.options.CompletionRatio);
+      const completionRatioMeta = parseOptionJSON(
+        props.options.CompletionRatioMeta,
+      );
 
       // 合并所有模型名称
       const modelNames = new Set([
         ...Object.keys(modelPrice),
         ...Object.keys(modelRatio),
         ...Object.keys(completionRatio),
+        ...Object.keys(completionRatioMeta),
       ]);
 
       const modelData = Array.from(modelNames).map((name) => {
@@ -74,12 +93,35 @@ export default function ModelSettingsVisualEditor(props) {
         const ratio = modelRatio[name] === undefined ? '' : modelRatio[name];
         const comp =
           completionRatio[name] === undefined ? '' : completionRatio[name];
+        const completionMeta =
+          completionRatioMeta[name] &&
+          typeof completionRatioMeta[name] === 'object' &&
+          !Array.isArray(completionRatioMeta[name])
+            ? completionRatioMeta[name]
+            : {};
+        const canOverrideCompletionRatio = Boolean(
+          completionMeta.can_override,
+        );
+        const completionRatioOverridden = Boolean(
+          completionMeta.is_overridden,
+        );
+        const officialCompletionRatio =
+          completionMeta.default_ratio === undefined
+            ? completionMeta.ratio === undefined
+              ? ''
+              : completionMeta.ratio
+            : completionMeta.default_ratio;
 
         return {
           name,
           price,
           ratio,
           completionRatio: comp,
+          completionRatioLocked: Boolean(completionMeta.locked),
+          lockedCompletionRatio: officialCompletionRatio,
+          canOverrideCompletionRatio,
+          completionRatioOverridden,
+          overrideOfficialCompletionRatio: completionRatioOverridden,
           hasConflict: price !== '' && (ratio !== '' || comp !== ''),
         };
       });
@@ -126,7 +168,11 @@ export default function ModelSettingsVisualEditor(props) {
         } else {
           if (model.ratio !== '')
             output.ModelRatio[model.name] = parseFloat(model.ratio);
-          if (model.completionRatio !== '')
+          const shouldSaveCompletionRatio = model.canOverrideCompletionRatio
+            ? model.overrideOfficialCompletionRatio &&
+              model.completionRatio !== ''
+            : !model.completionRatioLocked && model.completionRatio !== '';
+          if (shouldSaveCompletionRatio)
             output.CompletionRatio[model.name] = parseFloat(
               model.completionRatio,
             );
@@ -224,8 +270,16 @@ export default function ModelSettingsVisualEditor(props) {
       render: (text, record) => (
         <Input
           value={text}
-          placeholder={record.price !== '' ? t('补全倍率') : t('默认补全倍率')}
-          disabled={record.price !== ''}
+          placeholder={
+            isCompletionRatioReadOnly(record)
+              ? t('后端固定倍率 {{ratio}}', {
+                  ratio: record.lockedCompletionRatio || '-',
+                })
+              : record.price !== ''
+                ? t('补全倍率')
+                : t('默认补全倍率')
+          }
+          disabled={record.price !== '' || isCompletionRatioReadOnly(record)}
           onChange={(value) =>
             updateModel(record.name, 'completionRatio', value)
           }
@@ -252,6 +306,23 @@ export default function ModelSettingsVisualEditor(props) {
     },
   ];
 
+  function getEffectiveCompletionRatio(model) {
+    if (!model) return '';
+    if (model.canOverrideCompletionRatio) {
+      if (model.overrideOfficialCompletionRatio) {
+        return model.completionRatio || model.lockedCompletionRatio || '';
+      }
+      return model.lockedCompletionRatio || '';
+    }
+    return model.completionRatio || '';
+  }
+
+  function isCompletionRatioReadOnly(model) {
+    return model?.canOverrideCompletionRatio
+      ? !model?.overrideOfficialCompletionRatio
+      : model?.completionRatioLocked;
+  }
+
   const updateModel = (name, field, value) => {
     if (isNaN(value)) {
       showError('请输入数字');
@@ -260,6 +331,9 @@ export default function ModelSettingsVisualEditor(props) {
     setModels((prev) =>
       prev.map((model) => {
         if (model.name !== name) return model;
+        if (field === 'completionRatio' && isCompletionRatioReadOnly(model)) {
+          return model;
+        }
         const updated = { ...model, [field]: value };
         updated.hasConflict =
           updated.price !== '' &&
@@ -307,6 +381,9 @@ export default function ModelSettingsVisualEditor(props) {
   };
 
   const handleCompletionTokenPriceChange = (value) => {
+    if (isCompletionRatioReadOnly(currentModel)) {
+      return;
+    }
     // Use a temporary variable to hold the new state
     let newState = {
       ...(currentModel || {}),
@@ -331,6 +408,41 @@ export default function ModelSettingsVisualEditor(props) {
     setCurrentModel(newState);
   };
 
+  const handleOverrideOfficialCompletionChange = (checked) => {
+    setCurrentModel((prev) => {
+      const nextModel = {
+        ...(prev || {}),
+        overrideOfficialCompletionRatio: checked,
+      };
+
+      if (checked && nextModel.completionRatio === '') {
+        nextModel.completionRatio = nextModel.lockedCompletionRatio || '';
+      }
+      if (!checked) {
+        nextModel.completionRatio = '';
+      }
+
+      const effectiveCompletionRatio = getEffectiveCompletionRatio(nextModel);
+      if (nextModel.tokenPrice && effectiveCompletionRatio !== '') {
+        nextModel.completionTokenPrice = (
+          parseFloat(nextModel.tokenPrice) *
+          parseFloat(effectiveCompletionRatio)
+        ).toString();
+      }
+
+      if (formRef.current) {
+        formRef.current.setValues({
+          completionRatioInput: checked
+            ? nextModel.completionRatio || ''
+            : nextModel.lockedCompletionRatio || '',
+          completionTokenPrice: nextModel.completionTokenPrice || '',
+        });
+      }
+
+      return nextModel;
+    });
+  };
+
   const addOrUpdateModel = (values) => {
     // Check if we're editing an existing model or adding a new one
     const existingModelIndex = models.findIndex(
@@ -347,6 +459,14 @@ export default function ModelSettingsVisualEditor(props) {
             price: values.price || '',
             ratio: values.ratio || '',
             completionRatio: values.completionRatio || '',
+            completionRatioLocked: values.completionRatioLocked || false,
+            lockedCompletionRatio: values.lockedCompletionRatio || '',
+            canOverrideCompletionRatio:
+              values.canOverrideCompletionRatio || false,
+            completionRatioOverridden:
+              values.completionRatioOverridden || false,
+            overrideOfficialCompletionRatio:
+              values.overrideOfficialCompletionRatio || false,
           };
           updated.hasConflict =
             updated.price !== '' &&
@@ -370,6 +490,14 @@ export default function ModelSettingsVisualEditor(props) {
           price: values.price || '',
           ratio: values.ratio || '',
           completionRatio: values.completionRatio || '',
+          completionRatioLocked: values.completionRatioLocked || false,
+          lockedCompletionRatio: values.lockedCompletionRatio || '',
+          canOverrideCompletionRatio:
+            values.canOverrideCompletionRatio || false,
+          completionRatioOverridden:
+            values.completionRatioOverridden || false,
+          overrideOfficialCompletionRatio:
+            values.overrideOfficialCompletionRatio || false,
         };
         newModel.hasConflict =
           newModel.price !== '' &&
@@ -418,9 +546,11 @@ export default function ModelSettingsVisualEditor(props) {
         parseFloat(record.ratio),
       ).toString();
 
-      if (record.completionRatio) {
+      const effectiveCompletionRatio = getEffectiveCompletionRatio(record);
+
+      if (effectiveCompletionRatio) {
         modelCopy.completionTokenPrice = (
-          parseFloat(modelCopy.tokenPrice) * parseFloat(record.completionRatio)
+          parseFloat(modelCopy.tokenPrice) * parseFloat(effectiveCompletionRatio)
         ).toString();
       }
     }
@@ -443,7 +573,7 @@ export default function ModelSettingsVisualEditor(props) {
           formValues.priceInput = modelCopy.price;
         } else if (initialPricingMode === 'per-token') {
           formValues.ratioInput = modelCopy.ratio;
-          formValues.completionRatioInput = modelCopy.completionRatio;
+          formValues.completionRatioInput = getEffectiveCompletionRatio(modelCopy);
           formValues.modelTokenPrice = modelCopy.tokenPrice;
           formValues.completionTokenPrice = modelCopy.completionTokenPrice;
         }
@@ -528,7 +658,8 @@ export default function ModelSettingsVisualEditor(props) {
               // Calculate and set completion ratio if both token prices are available
               if (
                 currentModel.completionTokenPrice &&
-                currentModel.tokenPrice
+                currentModel.tokenPrice &&
+                !isCompletionRatioReadOnly(currentModel)
               ) {
                 const completionPrice = parseFloat(
                   currentModel.completionTokenPrice,
@@ -549,6 +680,26 @@ export default function ModelSettingsVisualEditor(props) {
               // Clear ratios if we're in per-request mode
               valuesToSave.ratio = '';
               valuesToSave.completionRatio = '';
+            }
+
+            if (pricingMode === 'per-token') {
+              if (currentModel.canOverrideCompletionRatio) {
+                valuesToSave.overrideOfficialCompletionRatio = Boolean(
+                  currentModel.overrideOfficialCompletionRatio,
+                );
+                valuesToSave.completionRatioLocked = !Boolean(
+                  currentModel.overrideOfficialCompletionRatio,
+                );
+                valuesToSave.completionRatio = currentModel.overrideOfficialCompletionRatio
+                  ? currentModel.completionRatio || currentModel.lockedCompletionRatio || ''
+                  : '';
+                valuesToSave.completionRatioOverridden = Boolean(
+                  currentModel.overrideOfficialCompletionRatio,
+                );
+              } else if (currentModel.completionRatioLocked) {
+                valuesToSave.completionRatio =
+                  currentModel.completionRatio || '';
+              }
             }
 
             addOrUpdateModel(valuesToSave);
@@ -592,7 +743,7 @@ export default function ModelSettingsVisualEditor(props) {
                       } else if (newMode === 'per-token') {
                         formValues.ratioInput = updatedModel.ratio || '';
                         formValues.completionRatioInput =
-                          updatedModel.completionRatio || '';
+                          getEffectiveCompletionRatio(updatedModel);
                         formValues.modelTokenPrice =
                           updatedModel.tokenPrice || '';
                         formValues.completionTokenPrice =
@@ -640,10 +791,13 @@ export default function ModelSettingsVisualEditor(props) {
                                 parseFloat(updatedModel.ratio),
                               ).toString();
 
-                            if (updatedModel.completionRatio) {
+                            const effectiveCompletionRatio =
+                              getEffectiveCompletionRatio(updatedModel);
+
+                            if (effectiveCompletionRatio) {
                               updatedModel.completionTokenPrice = (
                                 parseFloat(updatedModel.tokenPrice) *
-                                parseFloat(updatedModel.completionRatio)
+                                parseFloat(effectiveCompletionRatio)
                               ).toString();
                             }
                           }
@@ -661,7 +815,7 @@ export default function ModelSettingsVisualEditor(props) {
                           if (newSubMode === 'ratio') {
                             formValues.ratioInput = updatedModel.ratio || '';
                             formValues.completionRatioInput =
-                              updatedModel.completionRatio || '';
+                              getEffectiveCompletionRatio(updatedModel);
                           } else if (newSubMode === 'token-price') {
                             formValues.modelTokenPrice =
                               updatedModel.tokenPrice || '';
@@ -684,6 +838,32 @@ export default function ModelSettingsVisualEditor(props) {
 
               {pricingSubMode === 'ratio' && (
                 <>
+                  {currentModel?.canOverrideCompletionRatio ? (
+                    <div
+                      style={{
+                        marginBottom: '16px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '12px',
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: 500 }}>
+                          {t('覆盖官方价格')}
+                        </div>
+                        <div style={{ fontSize: 12, color: 'var(--semi-color-text-2)' }}>
+                          {t('开启后可改写官方默认补全倍率 {{ratio}}', {
+                            ratio: currentModel?.lockedCompletionRatio || '-',
+                          })}
+                        </div>
+                      </div>
+                      <Switch
+                        checked={!!currentModel?.overrideOfficialCompletionRatio}
+                        onChange={handleOverrideOfficialCompletionChange}
+                      />
+                    </div>
+                  ) : null}
                   <Form.Input
                     field='ratioInput'
                     label={t('模型倍率')}
@@ -700,19 +880,50 @@ export default function ModelSettingsVisualEditor(props) {
                     field='completionRatioInput'
                     label={t('补全倍率')}
                     placeholder={t('输入补全倍率')}
+                    disabled={isCompletionRatioReadOnly(currentModel)}
                     onChange={(value) =>
                       setCurrentModel((prev) => ({
                         ...(prev || {}),
                         completionRatio: value,
                       }))
                     }
-                    initValue={currentModel?.completionRatio || ''}
+                    initValue={
+                      isCompletionRatioReadOnly(currentModel)
+                        ? currentModel?.lockedCompletionRatio || ''
+                        : currentModel?.completionRatio || ''
+                    }
                   />
                 </>
               )}
 
               {pricingSubMode === 'token-price' && (
                 <>
+                  {currentModel?.canOverrideCompletionRatio ? (
+                    <div
+                      style={{
+                        marginBottom: '16px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '12px',
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: 500 }}>
+                          {t('覆盖官方价格')}
+                        </div>
+                        <div style={{ fontSize: 12, color: 'var(--semi-color-text-2)' }}>
+                          {t('开启后可改写官方默认补全倍率 {{ratio}}', {
+                            ratio: currentModel?.lockedCompletionRatio || '-',
+                          })}
+                        </div>
+                      </div>
+                      <Switch
+                        checked={!!currentModel?.overrideOfficialCompletionRatio}
+                        onChange={handleOverrideOfficialCompletionChange}
+                      />
+                    </div>
+                  ) : null}
                   <Form.Input
                     field='modelTokenPrice'
                     label={t('输入价格')}
@@ -722,9 +933,41 @@ export default function ModelSettingsVisualEditor(props) {
                     initValue={currentModel?.tokenPrice || ''}
                     suffix={t('$/1M tokens')}
                   />
+                  {isCompletionRatioReadOnly(currentModel) ? (
+                    <Banner
+                      type='warning'
+                      bordered
+                      fullMode={false}
+                      closeIcon={null}
+                      style={{ marginBottom: 16 }}
+                      title={t('补全价格已锁定')}
+                      description={t(
+                        '该模型补全倍率由后端固定为 {{ratio}}。补全价格不能在这里修改。',
+                        {
+                          ratio: currentModel.lockedCompletionRatio || '-',
+                        },
+                      )}
+                    />
+                  ) : currentModel?.canOverrideCompletionRatio ? (
+                    <Banner
+                      type='info'
+                      bordered
+                      fullMode={false}
+                      closeIcon={null}
+                      style={{ marginBottom: 16 }}
+                      title={t('已启用官方价格覆盖')}
+                      description={t(
+                        '当前正在覆盖官方默认补全倍率 {{ratio}}，保存后按你的自定义价格生效。',
+                        {
+                          ratio: currentModel.lockedCompletionRatio || '-',
+                        },
+                      )}
+                    />
+                  ) : null}
                   <Form.Input
                     field='completionTokenPrice'
                     label={t('输出价格')}
+                    disabled={isCompletionRatioReadOnly(currentModel)}
                     onChange={(value) => {
                       handleCompletionTokenPriceChange(value);
                     }}
