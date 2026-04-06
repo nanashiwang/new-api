@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { API, showError } from '../../../helpers';
-import { DETAIL_LIMIT, buildQueryKey } from '../utils';
+import { buildQueryKey } from '../utils';
 
 export const useProfitBoardQuery = ({
   restoredState,
@@ -64,13 +64,10 @@ export const useProfitBoardQuery = ({
   );
   const [hasNewActivity, setHasNewActivity] = useState(false);
   const [activityChecking, setActivityChecking] = useState(false);
-  const [detailRows, setDetailRows] = useState([]);
-  const [detailLoading, setDetailLoading] = useState(false);
   const [detailPage, setDetailPage] = useState(restoredState.detailPage || 1);
   const [detailPageSize, setDetailPageSize] = useState(
     restoredState.detailPageSize || 12,
   );
-  const [detailTotal, setDetailTotal] = useState(0);
   const [autoRefreshing, setAutoRefreshing] = useState(false);
   const lastActivityWatermarkRef = useRef(
     cachedBundle?.activityWatermark || '',
@@ -300,8 +297,6 @@ export const useProfitBoardQuery = ({
       setLastQueryKey('');
       setHasNewActivity(false);
       lastActivityWatermarkRef.current = '';
-      setDetailRows([]);
-      setDetailTotal(0);
       return undefined;
     }
 
@@ -313,8 +308,6 @@ export const useProfitBoardQuery = ({
       setLastQueryKey('');
       setHasNewActivity(false);
       lastActivityWatermarkRef.current = '';
-      setDetailRows([]);
-      setDetailTotal(0);
     }
 
     setAutoRefreshing(true);
@@ -338,60 +331,6 @@ export const useProfitBoardQuery = ({
       }
     };
   }, [currentQueryKey, queryReady, runFullRefresh, validationErrors.length]);
-
-  const loadDetailPage = useCallback(
-    async (page = detailPage, pageSize = detailPageSize) => {
-      if (!reportMatchesCurrentFilters || validationErrors.length > 0) {
-        setDetailRows([]);
-        setDetailTotal(0);
-        return;
-      }
-      setDetailLoading(true);
-      try {
-        const res = await API.post('/api/profit_board/details', {
-          ...queryPayload,
-          include_details: true,
-          detail_limit: DETAIL_LIMIT,
-          page,
-          page_size: pageSize,
-          view_batch_id: viewBatchId,
-          detail_filter: detailFilter || {},
-        });
-        if (!res.data.success) return showError(res.data.message);
-        setDetailRows(res.data.data?.rows || []);
-        setDetailTotal(res.data.data?.total || 0);
-      } catch (error) {
-        showError(error);
-      } finally {
-        setDetailLoading(false);
-      }
-    },
-    [
-      detailFilter,
-      detailPage,
-      detailPageSize,
-      queryPayload,
-      reportMatchesCurrentFilters,
-      validationErrors.length,
-      viewBatchId,
-    ],
-  );
-
-  useEffect(() => {
-    if (!reportMatchesCurrentFilters) {
-      setDetailRows([]);
-      setDetailTotal(0);
-      return;
-    }
-    loadDetailPage(detailPage, detailPageSize);
-  }, [
-    detailFilter,
-    detailPage,
-    detailPageSize,
-    loadDetailPage,
-    reportMatchesCurrentFilters,
-    viewBatchId,
-  ]);
 
   return {
     querying,
@@ -424,17 +363,13 @@ export const useProfitBoardQuery = ({
     hasNewActivity,
     activityChecking,
     autoRefreshing,
-    detailRows,
-    detailLoading,
     detailPage,
     setDetailPage,
     detailPageSize,
     setDetailPageSize,
-    detailTotal,
     runOverviewQuery,
     runQuery,
     runFullRefresh,
-    loadDetailPage,
     queryPayload,
   };
 };

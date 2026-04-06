@@ -87,7 +87,7 @@ const ChartAnalysisCard = ({
             {t('时间范围分析')}
           </Text>
           <Text type='tertiary' size='small'>
-            {t('分析时间范围只影响本区图表和明细')}
+            {t('分析时间范围只影响本区图表')}
           </Text>
         </div>
       }
