@@ -59,6 +59,12 @@ import { StatusContext } from '../../../../context/Status';
 
 const { Text, Title } = Typography;
 const TOKEN_CHANNEL_LIMIT_TAG_MODE_KEY = 'token-channel-limit-tag-mode';
+const readStoredChannelLimitTagMode = () => {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  return localStorage.getItem(TOKEN_CHANNEL_LIMIT_TAG_MODE_KEY) === 'true';
+};
 
 const EditTokenModal = (props) => {
   const { t } = useTranslation();
@@ -75,12 +81,9 @@ const EditTokenModal = (props) => {
   const isEdit = props.editingToken.id !== undefined;
   const isSellableToken = props.editingToken?.source_type === 'sellable_token';
   const channelRequestRef = useRef(0);
-  const [channelLimitTagMode, setChannelLimitTagMode] = useState(() => {
-    if (typeof window === 'undefined') {
-      return false;
-    }
-    return localStorage.getItem(TOKEN_CHANNEL_LIMIT_TAG_MODE_KEY) === 'true';
-  });
+  const [channelLimitTagMode, setChannelLimitTagMode] = useState(
+    readStoredChannelLimitTagMode,
+  );
 
   const getInitValues = () => ({
     name: '',
@@ -124,6 +127,7 @@ const EditTokenModal = (props) => {
   };
 
   const handleCancel = () => {
+    setChannelLimitTagMode(readStoredChannelLimitTagMode());
     props.handleClose();
   };
 
@@ -188,7 +192,11 @@ const EditTokenModal = (props) => {
   const buildChannelOptions = (data) => {
     return (Array.isArray(data) ? data : []).map((channel) => {
       const channelId = String(channel.id);
-      const channelName = `${channel.name} (#${channel.id})`;
+      const rawChannelName = `${channel.name} (#${channel.id})`;
+      const available = channel.available !== false;
+      const channelName = available
+        ? rawChannelName
+        : `${rawChannelName}（${t('已保存，当前不可选')}）`;
       const channelTag =
         typeof channel.tag === 'string' ? channel.tag.trim() : '';
       const matchedGroupsArray = Array.isArray(channel.matched_groups)
@@ -215,17 +223,25 @@ const EditTokenModal = (props) => {
           `${t('模型')}: ${matchedModels}${hiddenModelCount > 0 ? ` +${hiddenModelCount}` : ''}`,
         );
       }
+      if (!available) {
+        summaryParts.push(t('该渠道已保存在令牌限制中，当前不可重新选择'));
+      }
       const summary = summaryParts.join(' | ');
       return {
         label: (
           <div className='flex flex-col'>
-            <span>{channelName}</span>
+            <span className={available ? '' : 'text-gray-500'}>
+              {channelName}
+            </span>
             {summary ? (
               <span className='text-xs text-gray-500'>{summary}</span>
             ) : null}
           </div>
         ),
         value: channelId,
+        disabled: !available,
+        available,
+        rawChannelName,
         channelName,
         channelSummary: summary,
         channelTag,
@@ -235,14 +251,111 @@ const EditTokenModal = (props) => {
     });
   };
 
+  const normalizeChannelLimitValues = (channelLimits) => {
+    const seen = new Set();
+    return (channelLimits || []).reduce((values, channelId) => {
+      const normalized = String(channelId || '').trim();
+      if (!normalized || seen.has(normalized)) {
+        return values;
+      }
+      seen.add(normalized);
+      values.push(normalized);
+      return values;
+    }, []);
+  };
+
+  const sortChannelOptions = (optionList) => {
+    return [...optionList].sort((a, b) => {
+      const aAvailable = a?.available !== false;
+      const bAvailable = b?.available !== false;
+      if (aAvailable !== bAvailable) {
+        return aAvailable ? -1 : 1;
+      }
+      if (a.channelName === b.channelName) {
+        return String(b.value).localeCompare(String(a.value), 'zh-CN', {
+          numeric: true,
+        });
+      }
+      return String(a.channelName || '').localeCompare(
+        String(b.channelName || ''),
+        'zh-CN',
+      );
+    });
+  };
+
+  const createPreservedChannelOption = (channelId, fallbackOption) => {
+    const value = String(channelId);
+    const rawChannelName =
+      fallbackOption?.rawChannelName ||
+      fallbackOption?.channelName ||
+      `${t('渠道')} #${value}`;
+    const channelName = `${rawChannelName}（${t('已保存，当前不可选')}）`;
+    const matchedGroups = Array.isArray(fallbackOption?.matchedGroups)
+      ? fallbackOption.matchedGroups
+      : [];
+    const matchedModels = Array.isArray(fallbackOption?.matchedModels)
+      ? fallbackOption.matchedModels
+      : [];
+    const summaryParts = [];
+    if (matchedGroups.length > 0) {
+      summaryParts.push(`${t('分组')}: ${matchedGroups.join(', ')}`);
+    }
+    if (matchedModels.length > 0) {
+      const visibleModels = matchedModels.slice(0, 3).join(', ');
+      const hiddenModelCount = Math.max(matchedModels.length - 3, 0);
+      summaryParts.push(
+        `${t('模型')}: ${visibleModels}${hiddenModelCount > 0 ? ` +${hiddenModelCount}` : ''}`,
+      );
+    }
+    summaryParts.push(t('该渠道已保存在令牌限制中，当前不可重新选择'));
+    const channelSummary = summaryParts.join(' | ');
+    return {
+      label: (
+        <div className='flex flex-col'>
+          <span className='text-gray-500'>{channelName}</span>
+          <span className='text-xs text-gray-500'>{channelSummary}</span>
+        </div>
+      ),
+      value,
+      disabled: true,
+      available: false,
+      rawChannelName,
+      channelName,
+      channelSummary,
+      channelTag:
+        typeof fallbackOption?.channelTag === 'string'
+          ? fallbackOption.channelTag
+          : '',
+      matchedGroups,
+      matchedModels,
+    };
+  };
+
+  const mergePreservedChannelOptions = (optionList, selectedChannelLimits) => {
+    const mergedMap = new Map(
+      (optionList || []).map((option) => [String(option.value), option]),
+    );
+    const fallbackMap = new Map(
+      channelOptions.map((option) => [String(option.value), option]),
+    );
+    normalizeChannelLimitValues(selectedChannelLimits).forEach((channelId) => {
+      if (mergedMap.has(channelId)) {
+        return;
+      }
+      mergedMap.set(
+        channelId,
+        createPreservedChannelOption(channelId, fallbackMap.get(channelId)),
+      );
+    });
+    return sortChannelOptions(Array.from(mergedMap.values()));
+  };
+
   const alignChannelLimitValues = (
     channelLimits,
     optionList = channelOptions,
   ) => {
     const allowedValues = optionList.map((item) => String(item.value));
-    const selectedSet = new Set(
-      (channelLimits || []).map((channelId) => String(channelId)),
-    );
+    const selectedSet = new Set(normalizeChannelLimitValues(channelLimits));
     return allowedValues.filter((channelId) => selectedSet.has(channelId));
   };
 
@@ -298,7 +411,7 @@ const EditTokenModal = (props) => {
   ) => {
     if (!isAdminUser || isSellableToken) {
       setChannelOptions([]);
-      return;
+      return [];
     }
     const requestId = ++channelRequestRef.current;
     let res = await API.get(`/api/token/channels`, {
@@ -310,15 +423,24 @@ const EditTokenModal = (props) => {
         token_id: isEdit ? props.editingToken.id : undefined,
       },
     });
-    if (requestId !== channelRequestRef.current) return;
+    if (requestId !== channelRequestRef.current) return [];
     const { success, message, data } = res.data;
     if (success) {
-      const localChannelOptions = buildChannelOptions(data);
+      const selectedChannelLimits =
+        formApiRef.current?.getValue('channel_limits') ||
+        loadedTokenValuesRef.current?.channel_limits ||
+        [];
+      const localChannelOptions = mergePreservedChannelOptions(
+        buildChannelOptions(data),
+        selectedChannelLimits,
+      );
       setChannelOptions(localChannelOptions);
       syncChannelLimitsWithOptions(localChannelOptions, shouldNotify);
+      return localChannelOptions;
     } else {
       setChannelOptions([]);
       showError(t(message));
+      return [];
     }
   };
 
@@ -402,7 +524,6 @@ const EditTokenModal = (props) => {
       applyLoadedTokenValues();
       await loadModels(data.group || '');
       await loadChannels(data.group || '', data.model_limits || []);
-      applyChannelLimitValues(data.channel_limits || []);
       setTokenMode(data.package_enabled ? 'package' : 'standard');
     } else {
       showError(message);
@@ -430,6 +551,7 @@ const EditTokenModal = (props) => {
 
   useEffect(() => {
     if (props.visiable) {
+      setChannelLimitTagMode(readStoredChannelLimitTagMode());
       if (isEdit) {
         loadToken();
       } else {
@@ -443,6 +565,7 @@ const EditTokenModal = (props) => {
       loadedTokenValuesRef.current = null;
       formApiRef.current?.reset();
       setChannelOptions([]);
+      setChannelLimitTagMode(readStoredChannelLimitTagMode());
     }
   }, [props.visiable, props.editingToken.id]);
 
@@ -450,34 +573,36 @@ const EditTokenModal = (props) => {
     const tagGroupMap = new Map();
     const untaggedChannels = [];
 
-    channelOptions.forEach((option) => {
-      const channelTag = (option.channelTag || '').trim();
-      if (!channelTag) {
-        untaggedChannels.push(option);
-        return;
-      }
+    channelOptions
+      .filter((option) => option.available !== false)
+      .forEach((option) => {
+        const channelTag = (option.channelTag || '').trim();
+        if (!channelTag) {
+          untaggedChannels.push(option);
+          return;
+        }
 
-      if (!tagGroupMap.has(channelTag)) {
-        tagGroupMap.set(channelTag, {
-          tag: channelTag,
-          value: `tag:${channelTag}`,
-          channelIds: [],
-          channels: [],
-          matchedGroupsSet: new Set(),
-          matchedModelsSet: new Set(),
-        });
-      }
+        if (!tagGroupMap.has(channelTag)) {
+          tagGroupMap.set(channelTag, {
+            tag: channelTag,
+            value: `tag:${channelTag}`,
+            channelIds: [],
+            channels: [],
+            matchedGroupsSet: new Set(),
+            matchedModelsSet: new Set(),
+          });
+        }
 
-      const tagGroup = tagGroupMap.get(channelTag);
-      tagGroup.channelIds.push(option.value);
-      tagGroup.channels.push(option);
-      (option.matchedGroups || []).forEach((groupName) =>
-        tagGroup.matchedGroupsSet.add(groupName),
-      );
-      (option.matchedModels || []).forEach((modelName) =>
-        tagGroup.matchedModelsSet.add(modelName),
-      );
-    });
+        const tagGroup = tagGroupMap.get(channelTag);
+        tagGroup.channelIds.push(option.value);
+        tagGroup.channels.push(option);
+        (option.matchedGroups || []).forEach((groupName) =>
+          tagGroup.matchedGroupsSet.add(groupName),
+        );
+        (option.matchedModels || []).forEach((modelName) =>
+          tagGroup.matchedModelsSet.add(modelName),
+        );
+      });
 
     return {
       tagGroups: Array.from(tagGroupMap.values())
@@ -492,10 +617,6 @@ const EditTokenModal = (props) => {
   }, [channelOptions]);
 
   const updateChannelLimitTagMode = (enabled) => {
-    localStorage.setItem(
-      TOKEN_CHANNEL_LIMIT_TAG_MODE_KEY,
-      enabled ? 'true' : 'false',
-    );
     setChannelLimitTagMode(enabled);
   };
 
@@ -776,6 +897,12 @@ const EditTokenModal = (props) => {
       });
       const { success, message } = res.data;
       if (success) {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(
+            TOKEN_CHANNEL_LIMIT_TAG_MODE_KEY,
+            channelLimitTagMode ? 'true' : 'false',
+          );
+        }
         showSuccess(t('令牌更新成功！'));
         props.refresh();
         props.handleClose();
@@ -845,6 +972,12 @@ const EditTokenModal = (props) => {
         }
       }
       if (successCount > 0) {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(
+            TOKEN_CHANNEL_LIMIT_TAG_MODE_KEY,
+            channelLimitTagMode ? 'true' : 'false',
+          );
+        }
         showSuccess(t('令牌创建成功，请在列表页面点击复制获取令牌！'));
         props.refresh();
         props.handleClose();
@@ -1361,6 +1494,12 @@ const EditTokenModal = (props) => {
                                   String(channelId),
                                 ),
                               );
+                              const selectedUnavailableChannels =
+                                channelOptions.filter(
+                                  (option) =>
+                                    option.available === false &&
+                                    selectedChannelSet.has(option.value),
+                                );
                               const selectedTagItems =
                                 channelTagGroups.tagGroups
                                   .map((tagGroup) => {
@@ -1435,7 +1574,8 @@ const EditTokenModal = (props) => {
                               return (
                                 <div className='rounded-xl border border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] px-3 py-3'>
                                   {selectedTagItems.length > 0 ||
-                                  selectedUntaggedChannels.length > 0 ? (
+                                  selectedUntaggedChannels.length > 0 ||
+                                  selectedUnavailableChannels.length > 0 ? (
                                     <div className='mb-3 flex flex-wrap gap-2'>
                                       {selectedTagItems.map((tagGroup) => (
                                         <Tag
@@ -1468,6 +1608,24 @@ const EditTokenModal = (props) => {
                                             closable
                                             size='small'
                                             color='cyan'
+                                            shape='circle'
+                                            onClose={() =>
+                                              removeChannelLimitValues([
+                                                option.value,
+                                              ])
+                                            }
+                                          >
+                                            {option.channelName}
+                                          </Tag>
+                                        ),
+                                      )}
+                                      {selectedUnavailableChannels.map(
+                                        (option) => (
+                                          <Tag
+                                            key={option.value}
+                                            closable
+                                            size='small'
+                                            color='grey'
                                             shape='circle'
                                             onClose={() =>
                                               removeChannelLimitValues([
@@ -1568,7 +1726,9 @@ const EditTokenModal = (props) => {
                                       ),
                                     )}
 
-                                    {channelOptions.length === 0 ? (
+                                    {channelTagGroups.tagGroups.length === 0 &&
+                                    channelTagGroups.untaggedChannels.length ===
+                                      0 ? (
                                       <div className='py-2 text-sm text-gray-500'>
                                         {t('当前分组和模型限制下暂无可选渠道')}
                                       </div>

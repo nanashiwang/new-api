@@ -54,7 +54,7 @@ func seedTokenModelHelperData(t *testing.T) {
 	t.Helper()
 
 	users := []model.User{
-		{Id: 1, Username: "user1", Group: "default", Status: common.UserStatusEnabled},
+		{Id: 1, Username: "user1", Group: "default", Status: common.UserStatusEnabled, AffCode: "aff-user1"},
 	}
 	if err := model.DB.Create(&users).Error; err != nil {
 		t.Fatalf("seed users: %v", err)
@@ -85,7 +85,7 @@ func seedTokenModelHelperUser(t *testing.T) {
 	t.Helper()
 
 	users := []model.User{
-		{Id: 1, Username: "user1", Group: "default", Status: common.UserStatusEnabled},
+		{Id: 1, Username: "user1", Group: "default", Status: common.UserStatusEnabled, AffCode: "aff-user1"},
 	}
 	if err := model.DB.Create(&users).Error; err != nil {
 		t.Fatalf("seed users: %v", err)
@@ -220,7 +220,7 @@ func TestSelectTokenTestChannelByAbility_IgnoresChannelModelsMismatch(t *testing
 	setupTokenModelHelperDB(t)
 
 	users := []model.User{
-		{Id: 1, Username: "user1", Group: "default", Status: common.UserStatusEnabled},
+		{Id: 1, Username: "user1", Group: "default", Status: common.UserStatusEnabled, AffCode: "aff-user1"},
 	}
 	if err := model.DB.Create(&users).Error; err != nil {
 		t.Fatalf("seed users: %v", err)

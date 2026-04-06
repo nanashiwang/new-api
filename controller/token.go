@@ -721,6 +721,7 @@ func AddToken(c *gin.Context) {
 		token.ModelLimitsEnabled,
 		token.ChannelLimits,
 		token.ChannelLimitsEnabled,
+		"",
 	)
 	if err != nil {
 		common.ApiError(c, err)
@@ -839,6 +840,11 @@ func UpdateToken(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgTokenNameTooLong)
 		return
 	}
+	cleanToken, err := model.GetTokenByIds(token.Id, userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	if statusOnly == "" {
 		if err := validateTokenGroupSelection(userId, token.Group); err != nil {
 			common.ApiError(c, err)
@@ -852,6 +858,7 @@ func UpdateToken(c *gin.Context) {
 			token.ModelLimitsEnabled,
 			token.ChannelLimits,
 			token.ChannelLimitsEnabled,
+			cleanToken.ChannelLimits,
 		)
 		if err != nil {
 			common.ApiError(c, err)
@@ -878,11 +885,6 @@ func UpdateToken(c *gin.Context) {
 			common.ApiErrorI18n(c, i18n.MsgTokenQuotaExceedMax, map[string]any{"Max": maxQuotaValue})
 			return
 		}
-	}
-	cleanToken, err := model.GetTokenByIds(token.Id, userId)
-	if err != nil {
-		common.ApiError(c, err)
-		return
 	}
 	if token.Status == common.TokenStatusEnabled {
 		cleanToken, err = model.ValidateTokenCanEnable(cleanToken)

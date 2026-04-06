@@ -21,6 +21,7 @@ type tokenChannelOption struct {
 	Type          int      `json:"type"`
 	Status        int      `json:"status"`
 	BaseURL       string   `json:"base_url"`
+	Available     bool     `json:"available"`
 	MatchedGroups []string `json:"matched_groups"`
 	MatchedModels []string `json:"matched_models"`
 }
@@ -32,8 +33,17 @@ type tokenChannelCandidateRow struct {
 	Type      int     `json:"type"`
 	Status    int     `json:"status"`
 	BaseURL   *string `json:"base_url"`
-	Group     string  `json:"group"`
+	GroupName string  `json:"ability_group" gorm:"column:ability_group"`
 	Model     string  `json:"model"`
+}
+
+type tokenChannelMetaRow struct {
+	ID      int     `json:"id"`
+	Name    string  `json:"name"`
+	Tag     *string `json:"tag"`
+	Type    int     `json:"type"`
+	Status  int     `json:"status"`
+	BaseURL *string `json:"base_url"`
 }
 
 func normalizeChannelLimitIDs(raw string) []int {
@@ -118,8 +128,12 @@ func buildTokenChannelOptions(userID int, requestedGroup string, modelLimits str
 	}
 
 	rows := make([]tokenChannelCandidateRow, 0)
+	groupSelect := "abilities.`group` as ability_group"
+	if common.UsingPostgreSQL {
+		groupSelect = `abilities."group" as ability_group`
+	}
 	query := model.DB.Table("abilities").
-		Select("channels.id as channel_id, channels.name, channels.tag, channels.type, channels.status, channels.base_url, abilities.group, abilities.model").
+		Select("channels.id as channel_id, channels.name, channels.tag, channels.type, channels.status, channels.base_url, " + groupSelect + ", abilities.model").
 		Joins("left join channels on abilities.channel_id = channels.id").
 		Where(clause.Eq{Column: clause.Column{Table: "abilities", Name: "enabled"}, Value: true}).
 		Where(clause.Eq{Column: clause.Column{Table: "channels", Name: "status"}, Value: common.ChannelStatusEnabled}).
@@ -146,18 +160,19 @@ func buildTokenChannelOptions(userID int, requestedGroup string, modelLimits str
 				tag = strings.TrimSpace(*row.Tag)
 			}
 			option = &tokenChannelOption{
-				ID:      row.ChannelID,
-				Name:    row.Name,
-				Tag:     tag,
-				Type:    row.Type,
-				Status:  row.Status,
-				BaseURL: baseURL,
+				ID:        row.ChannelID,
+				Name:      row.Name,
+				Tag:       tag,
+				Type:      row.Type,
+				Status:    row.Status,
+				BaseURL:   baseURL,
+				Available: true,
 			}
 			optionsMap[row.ChannelID] = option
 			groupSetByChannel[row.ChannelID] = make(map[string]struct{})
 			modelSetByChannel[row.ChannelID] = make(map[string]struct{})
 		}
-		groupSetByChannel[row.ChannelID][row.Group] = struct{}{}
+		groupSetByChannel[row.ChannelID][row.GroupName] = struct{}{}
 		modelSetByChannel[row.ChannelID][row.Model] = struct{}{}
 	}
 
@@ -186,7 +201,69 @@ func sortedStringKeys(values map[string]struct{}) []string {
 	return items
 }
 
-func normalizeTokenChannelLimitsForSave(userID int, role int, group string, modelLimits string, modelLimitsEnabled bool, channelLimits string, channelLimitsEnabled bool) (bool, string, error) {
+func mergePersistedTokenChannelOptions(options []tokenChannelOption, channelLimitIDs []int) ([]tokenChannelOption, error) {
+	if len(channelLimitIDs) == 0 {
+		return options, nil
+	}
+
+	optionMap := make(map[int]tokenChannelOption, len(options))
+	for _, option := range options {
+		optionMap[option.ID] = option
+	}
+
+	missingIDs := make([]int, 0, len(channelLimitIDs))
+	for _, channelID := range channelLimitIDs {
+		if _, ok := optionMap[channelID]; ok {
+			continue
+		}
+		missingIDs = append(missingIDs, channelID)
+	}
+	if len(missingIDs) == 0 {
+		return options, nil
+	}
+
+	rows := make([]tokenChannelMetaRow, 0, len(missingIDs))
+	if err := model.DB.Table("channels").
+		Select("id, name, tag, type, status, base_url").
+		Where("id IN ?", missingIDs).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	for _, row := range rows {
+		tag := ""
+		if row.Tag != nil {
+			tag = strings.TrimSpace(*row.Tag)
+		}
+		baseURL := ""
+		if row.BaseURL != nil {
+			baseURL = *row.BaseURL
+		}
+		optionMap[row.ID] = tokenChannelOption{
+			ID:        row.ID,
+			Name:      row.Name,
+			Tag:       tag,
+			Type:      row.Type,
+			Status:    row.Status,
+			BaseURL:   baseURL,
+			Available: false,
+		}
+	}
+
+	merged := make([]tokenChannelOption, 0, len(optionMap))
+	for _, option := range optionMap {
+		merged = append(merged, option)
+	}
+	sort.Slice(merged, func(i, j int) bool {
+		if merged[i].Name == merged[j].Name {
+			return merged[i].ID > merged[j].ID
+		}
+		return merged[i].Name < merged[j].Name
+	})
+	return merged, nil
+}
+
+func normalizeTokenChannelLimitsForSave(userID int, role int, group string, modelLimits string, modelLimitsEnabled bool, channelLimits string, channelLimitsEnabled bool, existingChannelLimits string) (bool, string, error) {
 	normalizedIDs := normalizeChannelLimitIDs(channelLimits)
 	if role < common.RoleAdminUser {
 		if channelLimitsEnabled || len(normalizedIDs) > 0 || strings.TrimSpace(channelLimits) != "" {
@@ -206,7 +283,17 @@ func normalizeTokenChannelLimitsForSave(userID int, role int, group string, mode
 	for _, option := range options {
 		allowedSet[option.ID] = struct{}{}
 	}
+	existingSet := make(map[int]struct{})
+	for _, channelID := range normalizeChannelLimitIDs(existingChannelLimits) {
+		existingSet[channelID] = struct{}{}
+	}
 	for _, channelID := range normalizedIDs {
+		if _, ok := allowedSet[channelID]; ok {
+			continue
+		}
+		if _, ok := existingSet[channelID]; ok {
+			continue
+		}
 		if _, ok := allowedSet[channelID]; !ok {
 			return false, "", fmt.Errorf("渠道 %d 与当前令牌分组或模型限制不匹配", channelID)
 		}
@@ -226,6 +313,7 @@ func GetTokenChannels(c *gin.Context) {
 	modelLimitsEnabled := modelLimits != ""
 
 	tokenIDRaw := strings.TrimSpace(c.Query("token_id"))
+	tokenChannelLimitIDs := []int{}
 	if tokenIDRaw != "" {
 		tokenID, err := strconv.Atoi(tokenIDRaw)
 		if err != nil || tokenID <= 0 {
@@ -244,9 +332,15 @@ func GetTokenChannels(c *gin.Context) {
 			modelLimits = token.ModelLimits
 			modelLimitsEnabled = token.ModelLimitsEnabled
 		}
+		tokenChannelLimitIDs = token.GetChannelLimitIDs()
 	}
 
 	options, err := buildTokenChannelOptions(userID, group, modelLimits, modelLimitsEnabled)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	options, err = mergePersistedTokenChannelOptions(options, tokenChannelLimitIDs)
 	if err != nil {
 		common.ApiError(c, err)
 		return
