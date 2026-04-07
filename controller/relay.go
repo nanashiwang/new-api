@@ -226,7 +226,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			if _, ok := c.Get("specific_channel_id"); ok {
 				break
 			}
-			retryParam.ExcludeChannels = append(retryParam.ExcludeChannels, channel.Id)
+			service.ApplyChannelFailureRetryExclusion(retryParam, channel, newAPIError)
 			retryParam.ResetRetryNextTry()
 			logger.LogInfo(c, fmt.Sprintf("跳过不兼容渠道并继续重试：channel=%d model=%s err=%s", channel.Id, relayInfo.OriginModelName, newAPIError.Error()))
 			continue
@@ -234,6 +234,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
 
+		// 同渠道多 Key 快速切换：配额耗尽时先在当前渠道内换一个 Key 重试。
+		// 此处故意不调用 ApplyChannelFailureRetryExclusion，因为目的是换 Key 而非换渠道，
+		// 不应将当前渠道排除出重试列表。
 		allowSameChannelFailover := common.QuotaStabilityEnabled &&
 			common.MultiKeySameChannelFailoverOnce &&
 			channel.ChannelInfo.IsMultiKey &&
@@ -247,7 +250,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			continue
 		}
 
-		retryParam.ExcludeChannels = append(retryParam.ExcludeChannels, channel.Id)
+		service.ApplyChannelFailureRetryExclusion(retryParam, channel, newAPIError)
 
 		if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
 			break
@@ -330,35 +333,7 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 }
 
 func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
-	if openaiErr == nil {
-		return false
-	}
-	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
-		return false
-	}
-	if types.IsChannelError(openaiErr) {
-		return true
-	}
-	if types.IsSkipRetryError(openaiErr) {
-		return false
-	}
-	if retryTimes <= 0 {
-		return false
-	}
-	if _, ok := c.Get("specific_channel_id"); ok {
-		return false
-	}
-	code := openaiErr.StatusCode
-	if code >= 200 && code < 300 {
-		return false
-	}
-	if code < 100 || code > 599 {
-		return true
-	}
-	if operation_setting.IsAlwaysSkipRetryCode(openaiErr.GetErrorCode()) {
-		return false
-	}
-	return operation_setting.ShouldRetryByStatusCode(code)
+	return service.ShouldRetryChannelError(c, openaiErr, retryTimes)
 }
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) {

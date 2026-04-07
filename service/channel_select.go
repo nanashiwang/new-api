@@ -21,6 +21,8 @@ type RetryParam struct {
 	ExcludeChannels []int // 需要排除的渠道 ID（重试时跳过已失败的渠道）
 	// SameChannelFailoverDone 同渠道额度错误快速切换只允许触发一次，避免重试风暴。
 	SameChannelFailoverDone bool
+	// tagChannelCache 请求级 tag->渠道ID 缓存，避免重试时重复查库。
+	tagChannelCache map[string][]int
 }
 
 func (p *RetryParam) GetRetry() int {
@@ -47,6 +49,24 @@ func (p *RetryParam) IncreaseRetry() {
 
 func (p *RetryParam) ResetRetryNextTry() {
 	p.resetNextTry = true
+}
+
+// getCachedTagChannelIDs 查询同 tag 下启用的渠道 ID，结果在本次请求生命周期内缓存，避免重试时重复打库。
+func (p *RetryParam) getCachedTagChannelIDs(tag string, allowedChannels []int) []int {
+	if p.tagChannelCache != nil {
+		if ids, ok := p.tagChannelCache[tag]; ok {
+			return ids
+		}
+	}
+	ids, err := model.GetEnabledChannelIDsByTag(tag, allowedChannels)
+	if err != nil || len(ids) == 0 {
+		return nil
+	}
+	if p.tagChannelCache == nil {
+		p.tagChannelCache = make(map[string][]int)
+	}
+	p.tagChannelCache[tag] = ids
+	return ids
 }
 
 // CacheGetRandomSatisfiedChannel tries to get a random channel that satisfies the requirements.

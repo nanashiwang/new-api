@@ -412,8 +412,7 @@ func runTokenRelayTest(parent *gin.Context, token *model.Token, modelName string
 
 	var lastErr error
 	lastMessage := ""
-	const maxTokenTestAttempts = 2
-	for attempt := 0; attempt < maxTokenTestAttempts; attempt++ {
+	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
 		channel, selectedGroup, err := service.CacheGetRandomSatisfiedChannel(retryParam)
 		if err != nil {
 			lastErr = err
@@ -463,8 +462,15 @@ func runTokenRelayTest(parent *gin.Context, token *model.Token, modelName string
 		lastMessage = message
 
 		if result.newAPIError != nil && service.IsChannelModelMismatchError(result.newAPIError) {
-			retryParam.ExcludeChannels = append(retryParam.ExcludeChannels, channel.Id)
+			service.ApplyChannelFailureRetryExclusion(retryParam, channel, result.newAPIError)
+			retryParam.ResetRetryNextTry()
 			continue
+		}
+		if result.newAPIError != nil {
+			service.ApplyChannelFailureRetryExclusion(retryParam, channel, result.newAPIError)
+			if service.ShouldRetryChannelError(execCtx, result.newAPIError, common.RetryTimes-retryParam.GetRetry()) {
+				continue
+			}
 		}
 		return elapsed, message, result.localErr
 	}
