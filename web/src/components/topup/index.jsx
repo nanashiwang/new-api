@@ -168,6 +168,23 @@ const TopUp = () => {
     discount: {},
   });
 
+  const isPayMethodEnabled = (paymentMethod) => {
+    if (!paymentMethod) return false;
+    if (paymentMethod === 'stripe') return enableStripeTopUp;
+    return enableOnlineTopUp;
+  };
+
+  const canUsePayMethodForAmount = (paymentMethod, amountValue) => {
+    if (!paymentMethod || !isPayMethodEnabled(paymentMethod)) return false;
+    const payMethod = payMethods.find((item) => item.type === paymentMethod);
+    if (!payMethod) return false;
+    const minTopupVal = Number(payMethod.min_topup) || 0;
+    return Number(amountValue || 0) >= minTopupVal;
+  };
+
+  const pickAvailablePayMethod = (amountValue) =>
+    payMethods.find((item) => canUsePayMethodForAmount(item.type, amountValue));
+
   const topUp = async (renewTargetSubscriptionId = 0, purchaseMode = '') => {
     if (redemptionCode === '') {
       showInfo(t('请输入兑换码！'));
@@ -403,18 +420,40 @@ const TopUp = () => {
     fetchQuotedAmount(value, options.paymentMethod || payWay, options);
   }, 400);
 
-  const preTopUp = async (payment) => {
+  const selectPayMethod = (payment) => {
+    if (!payment || !canUsePayMethodForAmount(payment, topUpCount)) return;
     setPayWay(payment);
+  };
+
+  const openPaymentConfirm = async () => {
+    if (!payWay) {
+      showError(t('请选择支付方式'));
+      return;
+    }
+    if (topUpCount < minTopUp) {
+      showError(t('充值数量不能小于') + minTopUp);
+      return;
+    }
+    if (!canUsePayMethodForAmount(payWay, topUpCount)) {
+      const payMethod = payMethods.find((item) => item.type === payWay);
+      const minTopupVal = Number(payMethod?.min_topup) || 0;
+      if (minTopupVal > Number(topUpCount || 0)) {
+        showError(t('此支付方式最低充值金额为') + ' ' + minTopupVal);
+      } else {
+        showError(t('请选择支付方式'));
+      }
+      return;
+    }
+
     setPaymentLoading(true);
     try {
       debouncedGetAmount.cancel();
-      const quotedAmount = await fetchQuotedAmount(topUpCount, payment, { showErrorToast: true });
-      if (topUpCount < minTopUp) {
-        showError(t('充值数量不能小于') + minTopUp);
-        return;
-      }
+      const quotedAmount = await fetchQuotedAmount(topUpCount, payWay, {
+        showErrorToast: true,
+      });
       if (quotedAmount !== null && quotedAmount > 0) setOpen(true);
-    } catch (error) {} finally {
+    } catch (error) {
+    } finally {
       setPaymentLoading(false);
     }
   };
@@ -599,6 +638,36 @@ const TopUp = () => {
     }
   }, [statusState?.status]);
 
+  useEffect(() => {
+    if (!payMethods.length) {
+      if (payWay) setPayWay('');
+      setAmount(0);
+      return;
+    }
+
+    if (payWay && canUsePayMethodForAmount(payWay, topUpCount)) return;
+
+    const nextPayMethod = pickAvailablePayMethod(topUpCount);
+    if (nextPayMethod) {
+      if (nextPayMethod.type !== payWay) setPayWay(nextPayMethod.type);
+      return;
+    }
+
+    if (payWay) setPayWay('');
+    setAmount(0);
+  }, [payMethods, payWay, topUpCount, enableOnlineTopUp, enableStripeTopUp]);
+
+  useEffect(() => {
+    debouncedGetAmount.cancel();
+    if (!payWay || !canUsePayMethodForAmount(payWay, topUpCount)) {
+      setAmount(0);
+      return;
+    }
+
+    debouncedGetAmount(topUpCount, { paymentMethod: payWay });
+    return () => debouncedGetAmount.cancel();
+  }, [payWay, topUpCount]);
+
   const renderAmount = () => `${getPaymentCurrencySymbol()}${Number(amount || 0).toFixed(2)}`;
   const showSellableTokenTab =
     sellableTokenLoading ||
@@ -617,7 +686,42 @@ const TopUp = () => {
       <div className='grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.22fr)_minmax(380px,1fr)]'>
         <div>
           <RechargeCard
-            t={t} enableOnlineTopUp={enableOnlineTopUp} enableStripeTopUp={enableStripeTopUp} enableCreemTopUp={enableCreemTopUp} creemProducts={creemProducts} creemPreTopUp={creemPreTopUp} presetAmounts={presetAmounts} selectedPreset={selectedPreset} selectPresetAmount={selectPresetAmount} formatLargeNumber={formatLargeNumber} topUpCount={topUpCount} minTopUp={minTopUp} renderQuotaWithAmount={renderQuotaWithAmount} getAmount={fetchQuotedAmount} scheduleAmountRefresh={debouncedGetAmount} setTopUpCount={setTopUpCount} setSelectedPreset={setSelectedPreset} renderAmount={renderAmount} amountLoading={amountLoading} payMethods={payMethods} preTopUp={preTopUp} paymentLoading={paymentLoading} payWay={payWay} userState={userState} renderQuota={renderQuota} statusLoading={statusLoading} topupInfo={topupInfo} onOpenHistory={() => setOpenHistory(true)} subscriptionLoading={subscriptionLoading} subscriptionPlans={subscriptionPlans} billingPreference={billingPreference} onChangeBillingPreference={updateBillingPreference} activeSubscriptions={activeSubscriptions} activeQuantityByPlan={activeQuantityByPlan} allSubscriptions={allSubscriptions} reloadSubscriptionSelf={getSubscriptionSelf} showSellableTokenTab
+            t={t}
+            enableOnlineTopUp={enableOnlineTopUp}
+            enableStripeTopUp={enableStripeTopUp}
+            enableCreemTopUp={enableCreemTopUp}
+            creemProducts={creemProducts}
+            creemPreTopUp={creemPreTopUp}
+            presetAmounts={presetAmounts}
+            selectedPreset={selectedPreset}
+            selectPresetAmount={selectPresetAmount}
+            formatLargeNumber={formatLargeNumber}
+            topUpCount={topUpCount}
+            minTopUp={minTopUp}
+            renderQuotaWithAmount={renderQuotaWithAmount}
+            setTopUpCount={setTopUpCount}
+            setSelectedPreset={setSelectedPreset}
+            renderAmount={renderAmount}
+            amountLoading={amountLoading}
+            payMethods={payMethods}
+            selectPayMethod={selectPayMethod}
+            openPaymentConfirm={openPaymentConfirm}
+            paymentLoading={paymentLoading}
+            payWay={payWay}
+            userState={userState}
+            renderQuota={renderQuota}
+            statusLoading={statusLoading}
+            topupInfo={topupInfo}
+            onOpenHistory={() => setOpenHistory(true)}
+            subscriptionLoading={subscriptionLoading}
+            subscriptionPlans={subscriptionPlans}
+            billingPreference={billingPreference}
+            onChangeBillingPreference={updateBillingPreference}
+            activeSubscriptions={activeSubscriptions}
+            activeQuantityByPlan={activeQuantityByPlan}
+            allSubscriptions={allSubscriptions}
+            reloadSubscriptionSelf={getSubscriptionSelf}
+            showSellableTokenTab
             sellableTokenContent={
               <div className='space-y-6'>
                 <MyTokensCard

@@ -64,14 +64,13 @@ const RechargeCard = ({
   topUpCount,
   minTopUp,
   renderQuotaWithAmount,
-  getAmount,
-  scheduleAmountRefresh,
   setTopUpCount,
   setSelectedPreset,
   renderAmount,
   amountLoading,
   payMethods,
-  preTopUp,
+  selectPayMethod,
+  openPaymentConfirm,
   paymentLoading,
   payWay,
   userState,
@@ -121,6 +120,7 @@ const RechargeCard = ({
       setActiveTab(shouldShowSubscription ? 'subscription' : 'topup');
     }
   }, [shouldShowSubscription, shouldShowTabs, showSellableTokenTab, activeTab]);
+  const hasSelectedPayMethod = Boolean(payWay);
   const topupContent = (
     <Space vertical style={{ width: '100%' }}>
       {/* 统计信息 */}
@@ -255,18 +255,14 @@ const RechargeCard = ({
                         if (value && value >= 1) {
                           setTopUpCount(value);
                           setSelectedPreset(null);
-                          scheduleAmountRefresh(value);
                         }
                       }}
                       onBlur={(e) => {
                         const value = parseInt(e.target.value);
                         if (!value || value < minTopUp) {
                           setTopUpCount(minTopUp);
-                          getAmount(minTopUp);
                           return;
                         }
-
-                        getAmount(value);
                       }}
                       formatter={(value) => (value ? `${value}` : '')}
                       parser={(value) =>
@@ -277,7 +273,9 @@ const RechargeCard = ({
                           <Text type='secondary' className='text-red-600'>
                             {t('实付金额：')}
                             <span style={{ color: 'red' }}>
-                              {renderAmount()}
+                              {hasSelectedPayMethod
+                                ? renderAmount()
+                                : t('请选择支付方式')}
                             </span>
                           </Text>
                           <div className='mt-1 h-5 flex items-center'>
@@ -320,11 +318,8 @@ const RechargeCard = ({
                                   key={payMethod.type}
                                   theme={isSelected ? 'solid' : 'outline'}
                                   type={isSelected ? 'primary' : 'tertiary'}
-                                  onClick={() => preTopUp(payMethod.type)}
+                                  onClick={() => selectPayMethod(payMethod.type)}
                                   disabled={disabled}
-                                  loading={
-                                    paymentLoading && payWay === payMethod.type
-                                  }
                                   aria-pressed={isSelected}
                                   icon={
                                     payMethod.type === 'alipay' ? (
@@ -492,6 +487,22 @@ const RechargeCard = ({
                     })}
                   </div>
                 </Form.Slot>
+              )}
+
+              {(enableOnlineTopUp || enableStripeTopUp) && (
+                <div className='flex justify-end'>
+                  <Button
+                    theme='solid'
+                    type='primary'
+                    onClick={openPaymentConfirm}
+                    disabled={!hasSelectedPayMethod || amountLoading}
+                    loading={paymentLoading}
+                    icon={<CreditCard size={16} />}
+                    className='!rounded-lg !px-5'
+                  >
+                    {t('充值')}
+                  </Button>
+                </div>
               )}
 
               {/* Creem 充值区 */}
