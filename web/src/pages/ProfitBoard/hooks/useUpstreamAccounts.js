@@ -28,7 +28,7 @@ import {
 
 export const useUpstreamAccounts = ({
   options,
-  loadOptions,
+  loadUpstreamAccounts,
   comboConfigs,
   upstreamConfig,
   setUpstreamConfig,
@@ -299,7 +299,7 @@ export const useUpstreamAccounts = ({
         } else {
           showSuccess('账户数据已刷新');
         }
-        await loadOptions();
+        await loadUpstreamAccounts();
         await loadAccountTrend(accountId);
         if (activeWalletAccountIds.has(Number(accountId))) {
           await runFullRefresh();
@@ -315,7 +315,7 @@ export const useUpstreamAccounts = ({
     [
       activeWalletAccountIds,
       loadAccountTrend,
-      loadOptions,
+      loadUpstreamAccounts,
       runFullRefresh,
     ],
   );
@@ -343,7 +343,7 @@ export const useUpstreamAccounts = ({
       if (!res.data.success) return showError(res.data.message);
       if (isEditing) {
         showSuccess('上游账户已更新');
-        await loadOptions();
+        await loadUpstreamAccounts();
         setEditingAccountId(preparedDraft.id);
         await loadAccountTrend(preparedDraft.id);
       } else {
@@ -357,7 +357,7 @@ export const useUpstreamAccounts = ({
         if (createdAccountId > 0) {
           await syncAccountInternal(createdAccountId);
         } else {
-          await loadOptions();
+          await loadUpstreamAccounts();
         }
       }
       setSideSheetVisible(false);
@@ -371,7 +371,7 @@ export const useUpstreamAccounts = ({
     accountNameManuallyEdited,
     accountDraft,
     loadAccountTrend,
-    loadOptions,
+    loadUpstreamAccounts,
     resetAccountDraft,
     setUpstreamConfig,
     syncAccountInternal,
@@ -392,7 +392,7 @@ export const useUpstreamAccounts = ({
       );
       if (!res.data.success) return showError(res.data.message);
       showSuccess('全部账户已刷新');
-      await loadOptions();
+      await loadUpstreamAccounts();
       if (editingAccountId) {
         await loadAccountTrend(editingAccountId);
       }
@@ -408,7 +408,7 @@ export const useUpstreamAccounts = ({
     activeWalletAccountIds,
     editingAccountId,
     loadAccountTrend,
-    loadOptions,
+    loadUpstreamAccounts,
     runFullRefresh,
   ]);
 
@@ -422,7 +422,7 @@ export const useUpstreamAccounts = ({
         );
         if (!res.data.success) return showError(res.data.message);
         showSuccess('上游账户已删除');
-        await loadOptions();
+        await loadUpstreamAccounts();
         if (
           Number(upstreamConfig.upstream_account_id || 0) === Number(accountId)
         ) {
@@ -444,7 +444,7 @@ export const useUpstreamAccounts = ({
       }
     },
     [
-      loadOptions,
+      loadUpstreamAccounts,
       editingAccountId,
       resetAccountDraft,
       setUpstreamConfig,

@@ -50,8 +50,6 @@ const ChartAnalysisCard = ({
   datePresets,
   dateRange,
   setDateRange,
-  detailFilter,
-  clearDetailFilter,
   runQuery,
   querying,
   chartTab,
@@ -73,7 +71,6 @@ const ChartAnalysisCard = ({
     setViewBatchId('all');
     setGranularity('day');
     setChannelGroupMode('channel');
-    if (detailFilter?.value) clearDetailFilter();
   };
 
   return (

@@ -24,8 +24,7 @@ import React, {
   useMemo,
   useState,
 } from 'react';
-import { Empty, Modal, Spin, Tabs } from '@douyinfe/semi-ui';
-import { VChart } from '@visactor/react-vchart';
+import { Empty, Modal, Tabs } from '@douyinfe/semi-ui';
 import { initVChartSemiTheme } from '@visactor/vchart-semi-theme';
 import { BadgeDollarSign, BarChart3, CircleDollarSign } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -38,6 +37,7 @@ import ComboManagerCard from './components/ComboManagerCard';
 import OverviewPanel from './components/OverviewPanel';
 import PricingConfigModal from './components/PricingConfigModal';
 import ProfitBoardHeader from './components/ProfitBoardHeader';
+import ResponsiveVChart from './components/ResponsiveVChart';
 import UpstreamWalletCard from './components/UpstreamWalletCard';
 import { useProfitBoardBatches } from './hooks/useProfitBoardBatches';
 import { useProfitBoardConfig } from './hooks/useProfitBoardConfig';
@@ -53,6 +53,7 @@ import {
   combineTimeseriesMetrics,
   createBarSpec,
   createBatchId,
+  createBatchCreatedAt,
   createDefaultComboPricingConfig,
   createDefaultPricingRule,
   createMetricOptions,
@@ -96,6 +97,7 @@ const cloneComboDraft = (batch, comboConfig) => ({
   scope_type: batch.scope_type || 'channel',
   channel_ids: [...(batch.channel_ids || [])],
   tags: [...(batch.tags || [])],
+  created_at: Number(batch.created_at || createBatchCreatedAt()),
   combo_id: comboConfig.combo_id,
   site_mode: comboConfig.site_mode,
   upstream_mode: comboConfig.upstream_mode,
@@ -158,7 +160,9 @@ const ProfitBoardPage = () => {
   const [hasUnsavedConfigChanges, setHasUnsavedConfigChanges] = useState(
     !!restoredState.hasUnsavedConfigChanges,
   );
-  const [optionsReady, setOptionsReady] = useState(false);
+  const [activeTab, setActiveTab] = useState('wallet');
+  const [builderOptionsReady, setBuilderOptionsReady] = useState(false);
+  const [accountsReady, setAccountsReady] = useState(false);
   const [configReady, setConfigReady] = useState(
     !(restoredState.batches || []).length,
   );
@@ -174,8 +178,8 @@ const ProfitBoardPage = () => {
   const { batches, batchPayload, upsertBatch, removeBatch } = batchesHook;
 
   const {
-    loading,
-    setLoading,
+    builderLoading,
+    accountsLoading,
     saving,
     options,
     siteConfig,
@@ -189,7 +193,8 @@ const ProfitBoardPage = () => {
     modelNameOptions,
     configPayload,
     configLookupKey,
-    loadOptions,
+    loadBuilderOptions,
+    loadUpstreamAccounts,
     loadConfig,
     applyLoadedConfig,
     saveConfig,
@@ -310,7 +315,7 @@ const ProfitBoardPage = () => {
     t,
   ]);
 
-  const queryReady = optionsReady && configReady && batchPayload.length > 0;
+  const queryReady = accountsReady && configReady && batchPayload.length > 0;
 
   const queryHook = useProfitBoardQuery({
     restoredState,
@@ -341,8 +346,6 @@ const ProfitBoardPage = () => {
     setAnalysisMode,
     viewBatchId,
     setViewBatchId,
-    detailFilter,
-    setDetailFilter,
     overviewReport,
     report,
     reportMatchesCurrentFilters,
@@ -351,18 +354,13 @@ const ProfitBoardPage = () => {
     hasNewActivity,
     activityChecking,
     autoRefreshing,
-    detailPage,
-    setDetailPage,
-    detailPageSize,
-    setDetailPageSize,
     lastQueryKey,
     runFullRefresh,
-    runQuery,
   } = queryHook;
 
   const accountsHook = useUpstreamAccounts({
     options,
-    loadOptions,
+    loadUpstreamAccounts,
     comboConfigs,
     upstreamConfig,
     setUpstreamConfig,
@@ -415,30 +413,45 @@ const ProfitBoardPage = () => {
   }, [buildDraftValidationError, editorDraft]);
 
   useEffect(() => {
-    if (detailFilter?.type === 'channel' && channelGroupMode === 'tag') {
-      setDetailFilter(null);
-      setDetailPage(1);
-    }
-    if (detailFilter?.type === 'tag' && channelGroupMode === 'channel') {
-      setDetailFilter(null);
-      setDetailPage(1);
-    }
-  }, [channelGroupMode, detailFilter?.type, setDetailFilter, setDetailPage]);
+    let cancelled = false;
+    loadUpstreamAccounts()
+      .then(() => {
+        if (!cancelled) setAccountsReady(true);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setAccountsReady(false);
+        showError(error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadUpstreamAccounts]);
 
   useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        await loadOptions();
-        setOptionsReady(true);
-      } catch (error) {
-        setOptionsReady(false);
+    if (builderOptionsReady) return;
+    if (activeTab !== 'config' && !editorVisible && channelGroupMode !== 'tag') {
+      return;
+    }
+    let cancelled = false;
+    loadBuilderOptions()
+      .then(() => {
+        if (!cancelled) setBuilderOptionsReady(true);
+      })
+      .catch((error) => {
+        if (cancelled) return;
         showError(error);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [loadOptions, setLoading]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeTab,
+    builderOptionsReady,
+    channelGroupMode,
+    editorVisible,
+    loadBuilderOptions,
+  ]);
 
   useEffect(() => {
     if (!batchPayload.length) {
@@ -480,9 +493,7 @@ const ProfitBoardPage = () => {
     if (viewBatchId === 'all') return;
     if (batches.some((batch) => batch.id === viewBatchId)) return;
     setViewBatchId('all');
-    setDetailFilter(null);
-    setDetailPage(1);
-  }, [batches, setDetailFilter, setDetailPage, setViewBatchId, viewBatchId]);
+  }, [batches, setViewBatchId, viewBatchId]);
 
   useEffect(() => {
     persistState({
@@ -495,13 +506,10 @@ const ProfitBoardPage = () => {
       metricKey,
       analysisMode,
       viewBatchId,
-      detailFilter,
       comboConfigs,
       upstreamConfig,
       siteConfig,
       lastQueryKey,
-      detailPage,
-      detailPageSize,
       autoRefreshMode,
       hasUnsavedConfigChanges,
     });
@@ -514,9 +522,6 @@ const ProfitBoardPage = () => {
     comboConfigs,
     customIntervalMinutes,
     dateRange,
-    detailFilter,
-    detailPage,
-    detailPageSize,
     granularity,
     hasUnsavedConfigChanges,
     metricKey,
@@ -542,7 +547,7 @@ const ProfitBoardPage = () => {
     () => [
       { key: 'configured_site_revenue_usd', label: t('本站配置收入') },
       { key: 'upstream_cost_usd', label: t('上游费用') },
-      { key: 'configured_profit_usd', label: t('配置利润') },
+      { key: 'configured_profit_usd', label: t('利润') },
     ],
     [t],
   );
@@ -554,7 +559,7 @@ const ProfitBoardPage = () => {
   );
   const chartSubtitle =
     analysisMode === 'business_compare'
-      ? t('本站配置收入 / 上游费用 / 配置利润')
+      ? t('本站配置收入 / 上游费用 / 利润')
       : metricLabel;
 
   const trendRows = useMemo(() => {
@@ -714,34 +719,16 @@ const ProfitBoardPage = () => {
     [chartSubtitle, modelRows, statusState?.status, t],
   );
 
-  const handleChartClick = useCallback(
-    (type) => (event) => {
-      const label = event?.datum?.label || event?.datum?.bucket;
-      if (!label) return;
-      setDetailPage(1);
-      setDetailFilter({
-        type,
-        value: label,
-        batchId: event?.datum?.batch_id || null,
-      });
-    },
-    [setDetailFilter, setDetailPage],
-  );
-
   const chartHeight = isMobile ? 320 : 420;
   const renderChart = useCallback(
-    (chartKey, spec, onClick) => (
-      <div
+    (chartKey, spec) => (
+      <ResponsiveVChart
         key={chartKey}
-        className='w-full overflow-hidden rounded-lg'
-        style={{ height: chartHeight }}
-      >
-        <VChart
-          spec={{ ...spec, height: chartHeight }}
-          option={CHART_CONFIG}
-          onClick={onClick}
-        />
-      </div>
+        chartKey={chartKey}
+        spec={{ ...spec, height: chartHeight }}
+        option={CHART_CONFIG}
+        minHeight={chartHeight}
+      />
     ),
     [chartHeight],
   );
@@ -750,18 +737,16 @@ const ProfitBoardPage = () => {
     () => ({
       trend: trendRows.length ? (
         renderChart(
-          `trend-${analysisMode}-${viewBatchId}-${metricKey}-${trendRows.length}`,
+          `trend-${analysisMode}-${viewBatchId}-${metricKey}-${granularity}-${customIntervalMinutes}-${lastQueryKey}-${trendRows.length}`,
           trendSpec,
-          handleChartClick('trend'),
         )
       ) : (
         <Empty description={t('当前没有趋势数据')} />
       ),
       channel: channelRows.length ? (
         renderChart(
-          `channel-${analysisMode}-${viewBatchId}-${metricKey}-${channelGroupMode}-${channelRows.length}`,
+          `channel-${analysisMode}-${viewBatchId}-${metricKey}-${channelGroupMode}-${granularity}-${customIntervalMinutes}-${lastQueryKey}-${channelRows.length}`,
           channelSpec,
-          handleChartClick(channelGroupMode === 'tag' ? 'tag' : 'channel'),
         )
       ) : (
         <Empty
@@ -770,9 +755,8 @@ const ProfitBoardPage = () => {
       ),
       model: modelRows.length ? (
         renderChart(
-          `model-${analysisMode}-${viewBatchId}-${metricKey}-${modelRows.length}`,
+          `model-${analysisMode}-${viewBatchId}-${metricKey}-${granularity}-${customIntervalMinutes}-${lastQueryKey}-${modelRows.length}`,
           modelSpec,
-          handleChartClick('model'),
         )
       ) : (
         <Empty description={t('当前没有模型数据')} />
@@ -783,7 +767,9 @@ const ProfitBoardPage = () => {
       channelGroupMode,
       channelRows.length,
       channelSpec,
-      handleChartClick,
+      customIntervalMinutes,
+      granularity,
+      lastQueryKey,
       modelRows.length,
       metricKey,
       modelSpec,
@@ -831,7 +817,7 @@ const ProfitBoardPage = () => {
             },
             {
               key: 'configured_profit_usd',
-              title: t('配置利润'),
+              title: t('利润'),
               value: formatMoney(
                 overviewReport.summary.configured_profit_usd,
                 statusState?.status,
@@ -1033,51 +1019,76 @@ const ProfitBoardPage = () => {
     setEditorValidationError('');
   }, []);
 
-  const openCreateBatchModal = useCallback(() => {
-    const batchId = createBatchId();
-    const defaultBatch = {
-      id: batchId,
-      name: `组合 ${batches.length + 1}`,
-      scope_type: 'channel',
-      channel_ids: [],
-      tags: [],
-    };
-    const defaultComboConfig = createDefaultComboPricingConfig(
-      batchId,
-      siteConfig,
-      siteConfig,
-      upstreamConfig,
-    );
-    const nextDraft = cloneComboDraft(defaultBatch, defaultComboConfig);
-    setEditingBatchId('');
-    setEditorNameAuto(true);
-    setEditorDraft({
-      ...nextDraft,
-      name: createSuggestedComboName(
-        nextDraft,
-        channelMap,
-        t,
-        `组合 ${batches.length + 1}`,
-      ),
-    });
-    setEditorVisible(true);
-  }, [batches.length, channelMap, siteConfig, t, upstreamConfig]);
+  const openCreateBatchModal = useCallback(async () => {
+    try {
+      if (!builderOptionsReady) {
+        await loadBuilderOptions();
+        setBuilderOptionsReady(true);
+      }
+      const batchId = createBatchId();
+      const defaultBatch = {
+        id: batchId,
+        name: `组合 ${batches.length + 1}`,
+        scope_type: 'channel',
+        channel_ids: [],
+        tags: [],
+        created_at: createBatchCreatedAt(),
+      };
+      const defaultComboConfig = createDefaultComboPricingConfig(
+        batchId,
+        siteConfig,
+        siteConfig,
+        upstreamConfig,
+      );
+      const nextDraft = cloneComboDraft(defaultBatch, defaultComboConfig);
+      setEditingBatchId('');
+      setEditorNameAuto(true);
+      setEditorDraft({
+        ...nextDraft,
+        name: createSuggestedComboName(
+          nextDraft,
+          channelMap,
+          t,
+          `组合 ${batches.length + 1}`,
+        ),
+      });
+      setEditorVisible(true);
+    } catch (error) {
+      showError(error);
+    }
+  }, [
+    batches.length,
+    builderOptionsReady,
+    channelMap,
+    loadBuilderOptions,
+    siteConfig,
+    t,
+    upstreamConfig,
+  ]);
 
   const openEditBatchModal = useCallback(
-    (batch) => {
-      const nextDraft = cloneComboDraft(batch, resolveComboConfig(batch.id));
-      const suggestedName = createSuggestedComboName(
-        nextDraft,
-        channelMap,
-        t,
-        batch.name || t('未命名组合'),
-      );
-      setEditingBatchId(batch.id);
-      setEditorNameAuto(isLikelyAutoComboName(batch.name, suggestedName));
-      setEditorDraft(nextDraft);
-      setEditorVisible(true);
+    async (batch) => {
+      try {
+        if (!builderOptionsReady) {
+          await loadBuilderOptions();
+          setBuilderOptionsReady(true);
+        }
+        const nextDraft = cloneComboDraft(batch, resolveComboConfig(batch.id));
+        const suggestedName = createSuggestedComboName(
+          nextDraft,
+          channelMap,
+          t,
+          batch.name || t('未命名组合'),
+        );
+        setEditingBatchId(batch.id);
+        setEditorNameAuto(isLikelyAutoComboName(batch.name, suggestedName));
+        setEditorDraft(nextDraft);
+        setEditorVisible(true);
+      } catch (error) {
+        showError(error);
+      }
     },
-    [channelMap, resolveComboConfig, t],
+    [builderOptionsReady, channelMap, loadBuilderOptions, resolveComboConfig, t],
   );
 
   const handleApplyRecommendedModes = useCallback(() => {
@@ -1140,6 +1151,7 @@ const ProfitBoardPage = () => {
           ? editorDraft.channel_ids || []
           : [],
       tags: editorDraft.scope_type === 'tag' ? editorDraft.tags || [] : [],
+      created_at: Number(editorDraft.created_at || createBatchCreatedAt()),
     };
     const nextComboConfig = {
       combo_id: nextBatch.id,
@@ -1277,11 +1289,6 @@ const ProfitBoardPage = () => {
     datePresets: createPresetRanges(t),
     dateRange,
     setDateRange,
-    detailFilter,
-    clearDetailFilter: () => {
-      setDetailFilter(null);
-      setDetailPage(1);
-    },
     runQuery: () => runFullRefresh(),
     querying: querying || autoRefreshing,
     chartTab,
@@ -1374,7 +1381,7 @@ const ProfitBoardPage = () => {
   };
 
   return (
-    <Spin spinning={loading}>
+    <>
       <div className='mt-[60px] space-y-3 px-2 pb-6'>
         <ProfitBoardHeader
           querying={querying}
@@ -1392,7 +1399,30 @@ const ProfitBoardPage = () => {
           hasUnsavedConfigChanges={hasUnsavedConfigChanges}
           t={t}
         />
-        <Tabs type='line' size='large' className='profit-board-tabs'>
+        <Tabs
+          type='line'
+          size='large'
+          className='profit-board-tabs'
+          activeKey={activeTab}
+          onChange={setActiveTab}
+        >
+          <Tabs.TabPane
+            tab={
+              <span className='flex items-center gap-1.5'>
+                <BadgeDollarSign size={16} />
+                {t('上游账户')}
+              </span>
+            }
+            itemKey='wallet'
+          >
+            <div className='mt-3 space-y-3'>
+              {accountsLoading && !options.upstream_accounts?.length ? (
+                <Empty description={t('上游账户加载中')} />
+              ) : (
+                <UpstreamWalletCard {...walletCardProps} />
+              )}
+            </div>
+          </Tabs.TabPane>
           <Tabs.TabPane
             tab={
               <span className='flex items-center gap-1.5'>
@@ -1417,27 +1447,18 @@ const ProfitBoardPage = () => {
             itemKey='config'
           >
             <div className='mt-3 space-y-3'>
-              <ComboManagerCard {...comboManagerProps} />
-            </div>
-          </Tabs.TabPane>
-          <Tabs.TabPane
-            tab={
-              <span className='flex items-center gap-1.5'>
-                <BadgeDollarSign size={16} />
-                {t('上游账户')}
-              </span>
-            }
-            itemKey='wallet'
-          >
-            <div className='mt-3 space-y-3'>
-              <UpstreamWalletCard {...walletCardProps} />
+              {builderLoading && !builderOptionsReady ? (
+                <Empty description={t('配置选项加载中')} />
+              ) : (
+                <ComboManagerCard {...comboManagerProps} />
+              )}
             </div>
           </Tabs.TabPane>
         </Tabs>
       </div>
 
       <PricingConfigModal {...pricingModalProps} />
-    </Spin>
+    </>
   );
 };
 

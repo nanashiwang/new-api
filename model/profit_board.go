@@ -14,7 +14,6 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/pkg/cachex"
-	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/samber/hot"
@@ -65,6 +64,7 @@ type ProfitBoardBatch struct {
 	ScopeType  string   `json:"scope_type"`
 	ChannelIDs []int    `json:"channel_ids,omitempty"`
 	Tags       []string `json:"tags,omitempty"`
+	CreatedAt  int64    `json:"created_at,omitempty"`
 }
 
 type ProfitBoardTokenPricingConfig struct {
@@ -331,6 +331,7 @@ type ProfitBoardBatchInfo struct {
 	Signature        string                     `json:"signature"`
 	ChannelIDs       []int                      `json:"channel_ids"`
 	Tags             []string                   `json:"tags,omitempty"`
+	CreatedAt        int64                      `json:"created_at,omitempty"`
 	ResolvedChannels []ProfitBoardChannelOption `json:"resolved_channels"`
 }
 
@@ -865,6 +866,7 @@ func normalizeProfitBoardBatch(batch ProfitBoardBatch, index int) (ProfitBoardBa
 		ScopeType:  normalizedSelection.ScopeType,
 		ChannelIDs: normalizedSelection.ChannelIDs,
 		Tags:       normalizedSelection.Tags,
+		CreatedAt:  batch.CreatedAt,
 	}, signature, nil
 }
 
@@ -1448,6 +1450,7 @@ func resolveProfitBoardBatch(batch ProfitBoardBatch) (ProfitBoardBatchInfo, erro
 		Signature:        signature,
 		ChannelIDs:       channelIDs,
 		Tags:             batch.Tags,
+		CreatedAt:        batch.CreatedAt,
 		ResolvedChannels: resolvedChannels,
 	}, nil
 }
@@ -1580,261 +1583,6 @@ func GetProfitBoardActivity(query ProfitBoardQuery) (*ProfitBoardActivity, error
 		LatestLogCreatedAt: latestRow.CreatedAt,
 		RequestCount:       0,
 	}, nil
-}
-
-func roundProfitBoardAmount(value float64) float64 {
-	return math.Round(value*1000000) / 1000000
-}
-
-func profitBoardCSVMoney(value float64) string {
-	return strconv.FormatFloat(roundProfitBoardAmount(value), 'f', 6, 64)
-}
-
-func profitBoardTokenMoneyUSD(inputTokens, completionTokens, cacheReadTokens, cacheCreationTokens int, config ProfitBoardTokenPricingConfig) float64 {
-	return float64(inputTokens)*config.InputPrice/1_000_000 +
-		float64(completionTokens)*config.OutputPrice/1_000_000 +
-		float64(cacheReadTokens)*config.CacheReadPrice/1_000_000 +
-		float64(cacheCreationTokens)*config.CacheCreationPrice/1_000_000 +
-		config.FixedAmount
-}
-
-func profitBoardLegacyFixedAmountEnabled(config ProfitBoardTokenPricingConfig) bool {
-	return config.FixedAmount > 0
-}
-
-func profitBoardFixedAllocationShare(total float64, totalRequests int, itemRequests int) float64 {
-	if total == 0 || totalRequests <= 0 || itemRequests <= 0 {
-		return 0
-	}
-	return total * float64(itemRequests) / float64(totalRequests)
-}
-
-func applyProfitBoardComboFixedTotals(report *ProfitBoardReport, comboPricingMap map[string]profitBoardResolvedComboPricing) {
-	if report == nil {
-		return
-	}
-	if report.Meta.FixedAmountAllocationMode == "" {
-		report.Meta.FixedAmountAllocationMode = "request_count"
-	}
-	if report.Meta.FixedTotalAmountScope == "" {
-		report.Meta.FixedTotalAmountScope = "period_only"
-	}
-	batchRequestCount := make(map[string]int, len(report.BatchSummaries))
-	totalSiteFixed := 0.0
-	totalUpstreamFixed := 0.0
-	for index := range report.BatchSummaries {
-		batchSummary := &report.BatchSummaries[index]
-		batchRequestCount[batchSummary.BatchId] = batchSummary.RequestCount
-		comboPricing := comboPricingMap[batchSummary.BatchId]
-		totalSiteFixed += comboPricing.SiteFixedTotalAmount
-		totalUpstreamFixed += comboPricing.UpstreamFixedTotalAmount
-		batchSummary.ConfiguredSiteRevenueUSD += comboPricing.SiteFixedTotalAmount
-		batchSummary.UpstreamCostUSD += comboPricing.UpstreamFixedTotalAmount
-		batchSummary.ConfiguredProfitUSD += comboPricing.SiteFixedTotalAmount - comboPricing.UpstreamFixedTotalAmount
-		batchSummary.ActualProfitUSD -= comboPricing.UpstreamFixedTotalAmount
-	}
-
-	for index := range report.Timeseries {
-		point := &report.Timeseries[index]
-		totalRequests := batchRequestCount[point.BatchId]
-		comboPricing := comboPricingMap[point.BatchId]
-		siteShare := profitBoardFixedAllocationShare(comboPricing.SiteFixedTotalAmount, totalRequests, point.RequestCount)
-		upstreamShare := profitBoardFixedAllocationShare(comboPricing.UpstreamFixedTotalAmount, totalRequests, point.RequestCount)
-		point.ConfiguredSiteRevenueUSD += siteShare
-		point.UpstreamCostUSD += upstreamShare
-		point.ConfiguredProfitUSD += siteShare - upstreamShare
-		point.ActualProfitUSD -= upstreamShare
-	}
-
-	for index := range report.ChannelBreakdown {
-		item := &report.ChannelBreakdown[index]
-		totalRequests := batchRequestCount[item.BatchId]
-		comboPricing := comboPricingMap[item.BatchId]
-		siteShare := profitBoardFixedAllocationShare(comboPricing.SiteFixedTotalAmount, totalRequests, item.RequestCount)
-		upstreamShare := profitBoardFixedAllocationShare(comboPricing.UpstreamFixedTotalAmount, totalRequests, item.RequestCount)
-		item.ConfiguredSiteRevenueUSD += siteShare
-		item.UpstreamCostUSD += upstreamShare
-		item.ConfiguredProfitUSD += siteShare - upstreamShare
-		item.ActualProfitUSD -= upstreamShare
-	}
-
-	for index := range report.ModelBreakdown {
-		item := &report.ModelBreakdown[index]
-		totalRequests := batchRequestCount[item.BatchId]
-		comboPricing := comboPricingMap[item.BatchId]
-		siteShare := profitBoardFixedAllocationShare(comboPricing.SiteFixedTotalAmount, totalRequests, item.RequestCount)
-		upstreamShare := profitBoardFixedAllocationShare(comboPricing.UpstreamFixedTotalAmount, totalRequests, item.RequestCount)
-		item.ConfiguredSiteRevenueUSD += siteShare
-		item.UpstreamCostUSD += upstreamShare
-		item.ConfiguredProfitUSD += siteShare - upstreamShare
-		item.ActualProfitUSD -= upstreamShare
-	}
-
-	report.Meta.SiteFixedTotalAmount = roundProfitBoardAmount(totalSiteFixed)
-	report.Meta.UpstreamFixedTotalAmount = roundProfitBoardAmount(totalUpstreamFixed)
-	report.Summary.ConfiguredSiteRevenueUSD += totalSiteFixed
-	report.Summary.UpstreamCostUSD += totalUpstreamFixed
-	report.Summary.ConfiguredProfitUSD += totalSiteFixed - totalUpstreamFixed
-	report.Summary.ActualProfitUSD -= totalUpstreamFixed
-}
-
-func profitBoardUsesWalletObserver(config ProfitBoardTokenPricingConfig) bool {
-	return strings.TrimSpace(config.UpstreamMode) == ProfitBoardUpstreamModeWallet
-}
-
-func profitBoardComboUsesWalletObserver(config profitBoardResolvedComboPricing) bool {
-	return strings.TrimSpace(config.UpstreamMode) == ProfitBoardUpstreamModeWallet && config.UpstreamAccountID > 0
-}
-
-func profitBoardHasWalletObserverCombo(comboPricingMap map[string]profitBoardResolvedComboPricing) bool {
-	for _, config := range comboPricingMap {
-		if profitBoardComboUsesWalletObserver(config) {
-			return true
-		}
-	}
-	return false
-}
-
-func profitBoardWalletObserverCombosByAccount(comboPricingMap map[string]profitBoardResolvedComboPricing) map[int][]string {
-	accountCombos := make(map[int][]string)
-	for comboID, config := range comboPricingMap {
-		if !profitBoardComboUsesWalletObserver(config) {
-			continue
-		}
-		accountCombos[config.UpstreamAccountID] = append(accountCombos[config.UpstreamAccountID], comboID)
-	}
-	return accountCombos
-}
-
-func applyProfitBoardObservedWalletCost(report *ProfitBoardReport, aggregate *profitBoardUpstreamAccountObservedAggregate, comboIDs []string) {
-	if report == nil || aggregate == nil {
-		return
-	}
-	report.Summary.RemoteObservedCostUSD += aggregate.TotalCostUSD
-	report.Warnings = append(report.Warnings, aggregate.Warnings...)
-	if report.Summary.RequestCount <= 0 || aggregate.TotalCostUSD <= 0 {
-		return
-	}
-
-	comboIDSet := make(map[string]struct{}, len(comboIDs))
-	for _, comboID := range comboIDs {
-		comboID = strings.TrimSpace(comboID)
-		if comboID == "" {
-			continue
-		}
-		comboIDSet[comboID] = struct{}{}
-	}
-	if len(comboIDSet) == 0 {
-		return
-	}
-
-	report.Summary.UpstreamCostUSD += aggregate.TotalCostUSD
-	report.Summary.ConfiguredProfitUSD -= aggregate.TotalCostUSD
-	report.Summary.ActualProfitUSD -= aggregate.TotalCostUSD
-
-	batchRequestCount := make(map[string]int, len(report.BatchSummaries))
-	totalWalletRequests := 0
-	for index := range report.BatchSummaries {
-		summary := &report.BatchSummaries[index]
-		if _, ok := comboIDSet[summary.BatchId]; !ok {
-			continue
-		}
-		batchRequestCount[summary.BatchId] = summary.RequestCount
-		totalWalletRequests += summary.RequestCount
-	}
-	if totalWalletRequests <= 0 {
-		return
-	}
-	for index := range report.BatchSummaries {
-		summary := &report.BatchSummaries[index]
-		if _, ok := comboIDSet[summary.BatchId]; !ok {
-			continue
-		}
-		share := profitBoardFixedAllocationShare(aggregate.TotalCostUSD, totalWalletRequests, summary.RequestCount)
-		summary.RemoteObservedCostUSD += share
-		summary.UpstreamCostUSD += share
-		summary.ConfiguredProfitUSD -= share
-		summary.ActualProfitUSD -= share
-	}
-
-	bucketRequestCount := make(map[int64]int)
-	for _, point := range report.Timeseries {
-		if _, ok := comboIDSet[point.BatchId]; !ok {
-			continue
-		}
-		bucketRequestCount[point.BucketTimestamp] += point.RequestCount
-	}
-	for index := range report.Timeseries {
-		point := &report.Timeseries[index]
-		if _, ok := comboIDSet[point.BatchId]; !ok {
-			continue
-		}
-		share := profitBoardFixedAllocationShare(
-			aggregate.BucketCostUSD[point.BucketTimestamp],
-			bucketRequestCount[point.BucketTimestamp],
-			point.RequestCount,
-		)
-		point.RemoteObservedCostUSD += share
-		point.UpstreamCostUSD += share
-		point.ConfiguredProfitUSD -= share
-		point.ActualProfitUSD -= share
-	}
-
-	for index := range report.ChannelBreakdown {
-		item := &report.ChannelBreakdown[index]
-		if _, ok := comboIDSet[item.BatchId]; !ok {
-			continue
-		}
-		share := profitBoardFixedAllocationShare(aggregate.TotalCostUSD, totalWalletRequests, item.RequestCount)
-		item.UpstreamCostUSD += share
-		item.ConfiguredProfitUSD -= share
-		item.ActualProfitUSD -= share
-	}
-	for index := range report.ModelBreakdown {
-		item := &report.ModelBreakdown[index]
-		if _, ok := comboIDSet[item.BatchId]; !ok {
-			continue
-		}
-		share := profitBoardFixedAllocationShare(aggregate.TotalCostUSD, totalWalletRequests, item.RequestCount)
-		item.UpstreamCostUSD += share
-		item.ConfiguredProfitUSD -= share
-		item.ActualProfitUSD -= share
-	}
-	if len(report.DetailRows) > 0 {
-		perRequestShare := aggregate.TotalCostUSD / float64(totalWalletRequests)
-		for index := range report.DetailRows {
-			row := &report.DetailRows[index]
-			if _, ok := comboIDSet[row.BatchId]; !ok {
-				continue
-			}
-			row.UpstreamCostUSD += perRequestShare
-			row.ConfiguredProfitUSD -= perRequestShare
-			row.ActualProfitUSD -= perRequestShare
-			row.UpstreamCostKnown = true
-			row.UpstreamCostSource = "wallet_observer"
-		}
-	}
-}
-
-func profitBoardPriceFactor(useRechargePrice bool) float64 {
-	if !useRechargePrice {
-		return 1
-	}
-	if operation_setting.USDExchangeRate <= 0 {
-		return 1
-	}
-	return operation_setting.Price / operation_setting.USDExchangeRate
-}
-
-func profitBoardPriceFactorMeta(useRechargePrice bool) (float64, string) {
-	factor := profitBoardPriceFactor(useRechargePrice)
-	if !useRechargePrice {
-		return factor, "当前按本站模型原价重算"
-	}
-	if math.Abs(factor-1) < 0.000001 {
-		return factor, "已开启按充值价格读取，但当前充值倍率为 1.000x，所以结果会与原价一致"
-	}
-	return factor, fmt.Sprintf("已开启按充值价格读取，当前充值倍率为 %.3fx", factor)
 }
 
 func profitBoardResolveGroupRatio(groups []string, preferredGroup string, groupRatios map[string]float64) (float64, bool) {
@@ -2183,6 +1931,9 @@ func iterateProfitBoardRows(query ProfitBoardQuery, batches []ProfitBoardBatchIn
 		if !ok {
 			continue
 		}
+		if row.CreatedAt < profitBoardEffectiveStartTimestamp(batch, query.StartTimestamp) {
+			continue
+		}
 		other := profitBoardOtherInfo{}
 		if row.Other != "" {
 			_ = common.UnmarshalJsonStr(row.Other, &other)
@@ -2256,7 +2007,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 			SitePriceFactor:           roundProfitBoardAmount(sitePriceFactor),
 			SitePriceFactorNote:       sitePriceFactorNote,
 			GeneratedAt:               common.GetTimestamp(),
-			FixedTotalAmountScope:     "period_only",
+			FixedTotalAmountScope:     "created_at_once",
 			FixedAmountAllocationMode: "request_count",
 			LegacyUpstreamFixedAmount: profitBoardLegacyFixedAmountEnabled(normalizedQuery.Upstream),
 			LegacySiteFixedAmount:     profitBoardLegacyFixedAmountEnabled(normalizedQuery.Site),
@@ -2443,12 +2194,20 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 
 		configuredProfitUSD := 0.0
 		actualProfitUSD := 0.0
-		if upstreamCostKnown && sitePricingKnown {
+		if isWalletCombo && sitePricingKnown {
+			configuredProfitUSD = configuredSiteRevenueUSD
+			report.Summary.ConfiguredProfitUSD += configuredProfitUSD
+			batchSummary.ConfiguredProfitUSD += configuredProfitUSD
+		} else if upstreamCostKnown && sitePricingKnown {
 			configuredProfitUSD = configuredSiteRevenueUSD - upstreamCostUSD
 			report.Summary.ConfiguredProfitUSD += configuredProfitUSD
 			batchSummary.ConfiguredProfitUSD += configuredProfitUSD
 		}
-		if upstreamCostKnown {
+		if isWalletCombo {
+			actualProfitUSD = actualSiteRevenueUSD
+			report.Summary.ActualProfitUSD += actualProfitUSD
+			batchSummary.ActualProfitUSD += actualProfitUSD
+		} else if upstreamCostKnown {
 			actualProfitUSD = actualSiteRevenueUSD - upstreamCostUSD
 			report.Summary.ActualProfitUSD += actualProfitUSD
 			batchSummary.ActualProfitUSD += actualProfitUSD
@@ -2488,7 +2247,9 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		if !sitePricingKnown {
 			point.MissingSitePricingCount++
 		}
-		if upstreamCostKnown && sitePricingKnown {
+		if isWalletCombo && sitePricingKnown {
+			point.ConfiguredProfitUSD += configuredProfitUSD
+		} else if upstreamCostKnown && sitePricingKnown {
 			point.ConfiguredProfitUSD += configuredProfitUSD
 		}
 
@@ -2519,7 +2280,9 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		} else {
 			channelItem.MissingUpstreamCostCount++
 		}
-		if upstreamCostKnown && sitePricingKnown {
+		if isWalletCombo && sitePricingKnown {
+			channelItem.ConfiguredProfitUSD += configuredProfitUSD
+		} else if upstreamCostKnown && sitePricingKnown {
 			channelItem.ConfiguredProfitUSD += configuredProfitUSD
 		}
 
@@ -2546,7 +2309,9 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		} else {
 			modelItem.MissingUpstreamCostCount++
 		}
-		if upstreamCostKnown && sitePricingKnown {
+		if isWalletCombo && sitePricingKnown {
+			modelItem.ConfiguredProfitUSD += configuredProfitUSD
+		} else if upstreamCostKnown && sitePricingKnown {
 			modelItem.ConfiguredProfitUSD += configuredProfitUSD
 		}
 
@@ -2580,11 +2345,6 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		return nil
 	}); err != nil {
 		return nil, err
-	}
-
-	for accountID, comboIDs := range accountWalletCombos {
-		aggregate := accountWalletAggregates[accountID]
-		applyProfitBoardObservedWalletCost(report, aggregate, comboIDs)
 	}
 
 	if report.Summary.RequestCount > 0 {
@@ -2687,9 +2447,24 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		return report.ModelBreakdown[i].ConfiguredProfitUSD > report.ModelBreakdown[j].ConfiguredProfitUSD
 	})
 
-	applyProfitBoardComboFixedTotals(report, comboPricingMap)
+	applyProfitBoardComboFixedTotals(
+		report,
+		comboPricingMap,
+		resolvedBatches,
+		normalizedQuery.StartTimestamp,
+		normalizedQuery.EndTimestamp,
+		normalizedQuery.Granularity,
+		normalizedQuery.CustomIntervalMinutes,
+	)
 	for accountID, comboIDs := range accountWalletCombos {
-		applyProfitBoardObservedWalletCost(report, accountWalletAggregates[accountID], comboIDs)
+		applyProfitBoardObservedWalletCost(
+			report,
+			accountWalletAggregates[accountID],
+			resolvedBatches,
+			comboIDs,
+			normalizedQuery.Granularity,
+			normalizedQuery.CustomIntervalMinutes,
+		)
 	}
 	for index := range report.BatchSummaries {
 		report.BatchSummaries[index].ActualSiteRevenueUSD = roundProfitBoardAmount(report.BatchSummaries[index].ActualSiteRevenueUSD)
@@ -2804,7 +2579,7 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 			SitePriceFactorNote:       sitePriceFactorNote,
 			GeneratedAt:               common.GetTimestamp(),
 			CumulativeScope:           "all_time",
-			FixedTotalAmountScope:     "period_only",
+			FixedTotalAmountScope:     "created_at_once",
 			FixedAmountAllocationMode: "request_count",
 			UpstreamFixedTotalAmount:  0,
 			SiteFixedTotalAmount:      0,
@@ -2969,12 +2744,20 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 			report.Summary.ConfiguredSiteRevenueUSD += configuredSiteRevenueUSD
 			batchSummary.ConfiguredSiteRevenueUSD += configuredSiteRevenueUSD
 		}
-		if upstreamCostKnown && sitePricingKnown {
+		if isWalletCombo && sitePricingKnown {
+			configuredProfitUSD := configuredSiteRevenueUSD
+			report.Summary.ConfiguredProfitUSD += configuredProfitUSD
+			batchSummary.ConfiguredProfitUSD += configuredProfitUSD
+		} else if upstreamCostKnown && sitePricingKnown {
 			configuredProfitUSD := configuredSiteRevenueUSD - upstreamCostUSD
 			report.Summary.ConfiguredProfitUSD += configuredProfitUSD
 			batchSummary.ConfiguredProfitUSD += configuredProfitUSD
 		}
-		if upstreamCostKnown {
+		if isWalletCombo {
+			actualProfitUSD := actualSiteRevenueUSD
+			report.Summary.ActualProfitUSD += actualProfitUSD
+			batchSummary.ActualProfitUSD += actualProfitUSD
+		} else if upstreamCostKnown {
 			actualProfitUSD := actualSiteRevenueUSD - upstreamCostUSD
 			report.Summary.ActualProfitUSD += actualProfitUSD
 			batchSummary.ActualProfitUSD += actualProfitUSD
@@ -2997,8 +2780,24 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 		return report.BatchSummaries[i].BatchName < report.BatchSummaries[j].BatchName
 	})
 	for accountID, comboIDs := range accountWalletCombos {
-		applyProfitBoardObservedWalletCost(report, accountWalletAggregates[accountID], comboIDs)
+		applyProfitBoardObservedWalletCost(
+			report,
+			accountWalletAggregates[accountID],
+			resolvedBatches,
+			comboIDs,
+			"day",
+			0,
+		)
 	}
+	applyProfitBoardComboFixedTotals(
+		report,
+		comboPricingMap,
+		resolvedBatches,
+		0,
+		common.GetTimestamp(),
+		"day",
+		0,
+	)
 	if report.Summary.RequestCount > 0 {
 		knownOrWalletCount := report.Summary.KnownUpstreamCostCount
 		for _, batch := range resolvedBatches {
@@ -3020,17 +2819,6 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 	if report.Meta.LegacySiteFixedAmount {
 		report.Warnings = append(report.Warnings, "当前本站价格配置仍包含旧版按次固定金额，请确认后改成固定总金额")
 	}
-	hasFixedTotals := false
-	for _, config := range payload.ComboConfigs {
-		if config.UpstreamFixedTotalAmount > 0 || config.SiteFixedTotalAmount > 0 {
-			hasFixedTotals = true
-			break
-		}
-	}
-	if hasFixedTotals {
-		report.Warnings = append(report.Warnings, "固定总金额只参与时间分析，不计入累计总览")
-	}
-
 	report.Summary.ActualSiteRevenueUSD = roundProfitBoardAmount(report.Summary.ActualSiteRevenueUSD)
 	report.Summary.ConfiguredSiteRevenueUSD = roundProfitBoardAmount(report.Summary.ConfiguredSiteRevenueUSD)
 	report.Summary.UpstreamCostUSD = roundProfitBoardAmount(report.Summary.UpstreamCostUSD)

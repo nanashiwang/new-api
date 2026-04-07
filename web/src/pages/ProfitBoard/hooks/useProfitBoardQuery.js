@@ -51,9 +51,6 @@ export const useProfitBoardQuery = ({
   const [viewBatchId, setViewBatchId] = useState(
     restoredState.viewBatchId || 'all',
   );
-  const [detailFilter, setDetailFilter] = useState(
-    restoredState.detailFilter || null,
-  );
   const [overviewReport, setOverviewReport] = useState(null);
   const [report, setReport] = useState(cachedBundle?.report || null);
   const [lastQueryKey, setLastQueryKey] = useState(
@@ -64,10 +61,6 @@ export const useProfitBoardQuery = ({
   );
   const [hasNewActivity, setHasNewActivity] = useState(false);
   const [activityChecking, setActivityChecking] = useState(false);
-  const [detailPage, setDetailPage] = useState(restoredState.detailPage || 1);
-  const [detailPageSize, setDetailPageSize] = useState(
-    restoredState.detailPageSize || 12,
-  );
   const [autoRefreshing, setAutoRefreshing] = useState(false);
   const lastActivityWatermarkRef = useRef(
     cachedBundle?.activityWatermark || '',
@@ -166,11 +159,8 @@ export const useProfitBoardQuery = ({
   }, [configPayload, currentQueryKey, queryReady, validationErrors.length]);
 
   const runQuery = useCallback(async (options = {}) => {
-    const {
-      expectedQueryKey = currentQueryKey,
-      resetDetailPage = true,
-      showValidationError = true,
-    } = options;
+    const { expectedQueryKey = currentQueryKey, showValidationError = true } =
+      options;
     if (!queryReady || validationErrors.length > 0) {
       if (showValidationError && validationErrors.length > 0) {
         showError(validationErrors[0]);
@@ -179,7 +169,6 @@ export const useProfitBoardQuery = ({
     }
     const requestId = ++queryRequestIdRef.current;
     setQuerying(true);
-    if (resetDetailPage) setDetailPage(1);
     try {
       const res = await API.post('/api/profit_board/query', queryPayload);
       if (!res.data.success) return showError(res.data.message);
@@ -215,11 +204,8 @@ export const useProfitBoardQuery = ({
 
   const runFullRefresh = useCallback(
     async (options = {}) => {
-      const {
-        expectedQueryKey = currentQueryKey,
-        resetDetailPage = true,
-        showValidationError = true,
-      } = options;
+      const { expectedQueryKey = currentQueryKey, showValidationError = true } =
+        options;
       if (autoRefreshTimerRef.current) {
         window.clearTimeout(autoRefreshTimerRef.current);
         autoRefreshTimerRef.current = null;
@@ -231,11 +217,9 @@ export const useProfitBoardQuery = ({
         }
         return false;
       }
-      if (resetDetailPage) setDetailPage(1);
       await runOverviewQuery({ expectedQueryKey });
       return runQuery({
         expectedQueryKey,
-        resetDetailPage: false,
         showValidationError: false,
       });
     },
@@ -316,7 +300,6 @@ export const useProfitBoardQuery = ({
       const expectedQueryKey = scheduledAutoQueryKeyRef.current;
       await runFullRefresh({
         expectedQueryKey,
-        resetDetailPage: true,
         showValidationError: false,
       });
       if (scheduledAutoQueryKeyRef.current === expectedQueryKey) {
@@ -351,8 +334,6 @@ export const useProfitBoardQuery = ({
     setAnalysisMode,
     viewBatchId,
     setViewBatchId,
-    detailFilter,
-    setDetailFilter,
     overviewReport,
     report,
     lastQueryKey,
@@ -363,10 +344,6 @@ export const useProfitBoardQuery = ({
     hasNewActivity,
     activityChecking,
     autoRefreshing,
-    detailPage,
-    setDetailPage,
-    detailPageSize,
-    setDetailPageSize,
     runOverviewQuery,
     runQuery,
     runFullRefresh,

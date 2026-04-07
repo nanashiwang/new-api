@@ -117,7 +117,7 @@ const OverviewPanel = ({
       ),
     },
     {
-      title: t('配置利润'),
+      title: t('利润'),
       dataIndex: 'configured_profit_usd',
       key: 'configured_profit_usd',
       render: (val) => (

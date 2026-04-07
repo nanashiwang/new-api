@@ -76,8 +76,14 @@ type profitBoardUpstreamAccountObservedAggregate struct {
 	TotalCostUSD  float64
 	BucketCostUSD map[int64]float64
 	BucketLabels  map[int64]string
+	Points        []profitBoardUpstreamAccountObservedPoint
 	State         ProfitBoardUpstreamAccountOption
 	Warnings      []string
+}
+
+type profitBoardUpstreamAccountObservedPoint struct {
+	SyncedAt int64
+	CostUSD  float64
 }
 
 type profitBoardUpstreamSubscriptionSummary struct {
@@ -521,6 +527,7 @@ func collectProfitBoardUpstreamAccountObservedAggregate(accountID int, startTime
 	aggregate := &profitBoardUpstreamAccountObservedAggregate{
 		BucketCostUSD: make(map[int64]float64),
 		BucketLabels:  make(map[int64]string),
+		Points:        make([]profitBoardUpstreamAccountObservedPoint, 0),
 		Warnings:      make([]string, 0),
 	}
 	totalCostQuota := int64(0)
@@ -534,9 +541,14 @@ func collectProfitBoardUpstreamAccountObservedAggregate(accountID int, startTime
 				continue
 			}
 			totalCostQuota += deltaQuota
+			costUSD := float64(deltaQuota) / common.QuotaPerUnit
 			bucketTimestamp, bucketLabel := buildProfitBoardBucket(snapshots[index].SyncedAt, granularity, customIntervalMinutes)
-			aggregate.BucketCostUSD[bucketTimestamp] += float64(deltaQuota) / common.QuotaPerUnit
+			aggregate.BucketCostUSD[bucketTimestamp] += costUSD
 			aggregate.BucketLabels[bucketTimestamp] = bucketLabel
+			aggregate.Points = append(aggregate.Points, profitBoardUpstreamAccountObservedPoint{
+				SyncedAt: snapshots[index].SyncedAt,
+				CostUSD:  costUSD,
+			})
 		}
 	}
 	aggregate.TotalCostUSD = roundProfitBoardAmount(float64(totalCostQuota) / common.QuotaPerUnit)

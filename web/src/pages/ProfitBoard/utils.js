@@ -23,7 +23,7 @@ export const REPORT_CACHE_KEY = 'profit-board:report';
 export const DETAIL_LIMIT = 600;
 
 export const createMetricOptions = (t) => [
-  { value: 'configured_profit_usd', label: t('配置利润') },
+  { value: 'configured_profit_usd', label: t('利润') },
   { value: 'actual_profit_usd', label: t('实际利润') },
   { value: 'actual_site_revenue_usd', label: t('本站实际收入') },
   { value: 'configured_site_revenue_usd', label: t('本站配置收入') },
@@ -33,7 +33,7 @@ export const createMetricOptions = (t) => [
 
 /** @deprecated Use createMetricOptions(t) instead */
 export const metricOptions = [
-  { value: 'configured_profit_usd', label: '配置利润' },
+  { value: 'configured_profit_usd', label: '利润' },
   { value: 'actual_profit_usd', label: '实际利润' },
   { value: 'actual_site_revenue_usd', label: '本站实际收入' },
   { value: 'configured_site_revenue_usd', label: '本站配置收入' },
@@ -800,13 +800,10 @@ export const createDefaultState = () => {
     metricKey: 'configured_profit_usd',
     analysisMode: 'business_compare',
     viewBatchId: 'all',
-    detailFilter: null,
     comboConfigs: [],
     upstreamConfig: createDefaultUpstreamConfig(),
     siteConfig: createDefaultSiteConfig(),
     lastQueryKey: '',
-    detailPage: 1,
-    detailPageSize: 12,
     autoRefreshMode: false,
     hasUnsavedConfigChanges: false,
   };
@@ -820,12 +817,15 @@ export const safeParse = (raw, fallback) => {
   }
 };
 
+export const createBatchCreatedAt = () => dayjs().unix();
+
 export const normalizeBatchForState = (batch, index) => ({
   id: batch?.id || createBatchId(),
   name: batch?.name || `组合 ${index + 1}`,
   scope_type: batch?.scope_type || 'channel',
   channel_ids: (batch?.channel_ids || []).map((item) => item.toString()),
   tags: batch?.tags || [],
+  created_at: Number(batch?.created_at || createBatchCreatedAt()),
 });
 
 export const normalizeRestoredState = (state) => {
@@ -919,11 +919,6 @@ export const normalizeRestoredState = (state) => {
   next.viewBatchId = next.viewBatchId || 'all';
   next.lastQueryKey = next.lastQueryKey || '';
   next.analysisMode = next.analysisMode || 'business_compare';
-  next.detailPage = Math.max(Number(next.detailPage || 1), 1);
-  next.detailPageSize = Math.min(
-    Math.max(Number(next.detailPageSize || defaults.detailPageSize), 1),
-    100,
-  );
   next.autoRefreshMode = !!next.autoRefreshMode;
   next.hasUnsavedConfigChanges = !!next.hasUnsavedConfigChanges;
   return next;

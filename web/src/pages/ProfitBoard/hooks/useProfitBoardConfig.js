@@ -31,7 +31,8 @@ export const useProfitBoardConfig = ({
   restoredState,
   rechargePriceFactor = 1,
 }) => {
-  const [loading, setLoading] = useState(false);
+  const [builderLoading, setBuilderLoading] = useState(false);
+  const [accountsLoading, setAccountsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [options, setOptions] = useState({
     channels: [],
@@ -203,19 +204,40 @@ export const useProfitBoardConfig = ({
     [normalizeLoadedConfig, setComboConfigs],
   );
 
-  const loadOptions = useCallback(async () => {
-    const res = await API.get('/api/profit_board/options');
-    if (!res.data.success) throw new Error(res.data.message || '加载选项失败');
-    setOptions(
-      res.data.data || {
-        channels: [],
-        tags: [],
-        groups: [],
-        local_models: [],
-        site_models: [],
-        upstream_accounts: [],
-      },
-    );
+  const loadBuilderOptions = useCallback(async () => {
+    setBuilderLoading(true);
+    try {
+      const res = await API.get('/api/profit_board/options');
+      if (!res.data.success)
+        throw new Error(res.data.message || '加载选项失败');
+      setOptions(
+        res.data.data || {
+          channels: [],
+          tags: [],
+          groups: [],
+          local_models: [],
+          site_models: [],
+          upstream_accounts: [],
+        },
+      );
+    } finally {
+      setBuilderLoading(false);
+    }
+  }, []);
+
+  const loadUpstreamAccounts = useCallback(async () => {
+    setAccountsLoading(true);
+    try {
+      const res = await API.get('/api/profit_board/upstream_accounts');
+      if (!res.data.success)
+        throw new Error(res.data.message || '加载上游账户失败');
+      setOptions((prev) => ({
+        ...prev,
+        upstream_accounts: res.data.data || [],
+      }));
+    } finally {
+      setAccountsLoading(false);
+    }
   }, []);
 
   const loadConfig = useCallback(async () => {
@@ -299,8 +321,8 @@ export const useProfitBoardConfig = ({
   );
 
   return {
-    loading,
-    setLoading,
+    builderLoading,
+    accountsLoading,
     saving,
     options,
     siteConfig,
@@ -317,7 +339,8 @@ export const useProfitBoardConfig = ({
     configPayload,
     walletModeEnabled,
     selectedAccount,
-    loadOptions,
+    loadBuilderOptions,
+    loadUpstreamAccounts,
     loadConfig,
     applyLoadedConfig,
     saveConfig,

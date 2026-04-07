@@ -31,6 +31,7 @@ export const useProfitBoardBatches = ({ restoredState }) => {
           .map((item) => Number(item))
           .filter(Boolean),
         tags: batch.tags || [],
+        created_at: Number(batch.created_at || 0),
       })),
     [batches],
   );

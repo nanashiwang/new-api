@@ -1212,8 +1212,11 @@ func TestGenerateProfitBoardReportSupportsComboWalletObserverAndManualMix(t *tes
 		t.Fatalf("GenerateProfitBoardReport: %v", err)
 	}
 
-	if report.Summary.UpstreamCostUSD != 0.202 {
+	if report.Summary.UpstreamCostUSD != 0.102 {
 		t.Fatalf("unexpected mixed upstream cost: %+v", report.Summary)
+	}
+	if report.Summary.ConfiguredProfitUSD != -0.087 {
+		t.Fatalf("unexpected mixed configured profit: %+v", report.Summary)
 	}
 	if report.Summary.ConfiguredProfitCoverageRate != 1 {
 		t.Fatalf("unexpected mixed coverage: %+v", report.Summary)
@@ -1228,6 +1231,155 @@ func TestGenerateProfitBoardReportSupportsComboWalletObserverAndManualMix(t *tes
 	}
 	if batchCosts["manual-batch"] != 0.002 {
 		t.Fatalf("unexpected manual batch cost: %+v", report.BatchSummaries)
+	}
+}
+
+func TestProfitBoardReportAndOverviewRespectBatchCreatedAt(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	originQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 1000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originQuotaPerUnit
+	})
+
+	channel := Channel{Id: 1, Name: "alpha", Status: common.ChannelStatusEnabled}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+
+	now := common.GetTimestamp()
+	logs := []Log{
+		{Id: 1, Type: LogTypeConsume, CreatedAt: now - 300, ChannelId: 1, ModelName: "gpt-4.1", PromptTokens: 1000, CompletionTokens: 0, Quota: 5},
+		{Id: 2, Type: LogTypeConsume, CreatedAt: now - 100, ChannelId: 1, ModelName: "gpt-4.1", PromptTokens: 1000, CompletionTokens: 0, Quota: 5},
+	}
+	for _, logRow := range logs {
+		if err := db.Create(&logRow).Error; err != nil {
+			t.Fatalf("seed log: %v", err)
+		}
+	}
+
+	batches := []ProfitBoardBatch{{
+		Id:         "batch-1",
+		Name:       "组合 1",
+		ScopeType:  ProfitBoardScopeChannel,
+		ChannelIDs: []int{1},
+		CreatedAt:  now - 150,
+	}}
+
+	query := ProfitBoardQuery{
+		Batches: batches,
+		ComboConfigs: []ProfitBoardComboPricingConfig{{
+			ComboId: "batch-1",
+			SiteRules: []ProfitBoardModelPricingRule{{
+				IsDefault:  true,
+				InputPrice: 5,
+			}},
+			UpstreamRules: []ProfitBoardModelPricingRule{{
+				IsDefault:  true,
+				InputPrice: 2,
+			}},
+		}},
+		Upstream: ProfitBoardTokenPricingConfig{
+			CostSource: ProfitBoardCostSourceManualOnly,
+		},
+		Site: ProfitBoardTokenPricingConfig{
+			PricingMode: ProfitBoardSitePricingManual,
+		},
+		StartTimestamp: now - 400,
+		EndTimestamp:   now,
+		Granularity:    "day",
+	}
+
+	report, err := GenerateProfitBoardReport(query)
+	if err != nil {
+		t.Fatalf("GenerateProfitBoardReport: %v", err)
+	}
+	if report.Summary.RequestCount != 1 {
+		t.Fatalf("unexpected request count: %+v", report.Summary)
+	}
+	if report.Summary.ConfiguredSiteRevenueUSD != 0.005 || report.Summary.UpstreamCostUSD != 0.002 || report.Summary.ConfiguredProfitUSD != 0.003 {
+		t.Fatalf("unexpected report summary: %+v", report.Summary)
+	}
+
+	overview, err := GenerateProfitBoardOverview(ProfitBoardConfigPayload{
+		Batches:      batches,
+		ComboConfigs: query.ComboConfigs,
+		Upstream:     query.Upstream,
+		Site:         query.Site,
+	})
+	if err != nil {
+		t.Fatalf("GenerateProfitBoardOverview: %v", err)
+	}
+	if overview.Summary.RequestCount != 1 {
+		t.Fatalf("unexpected overview request count: %+v", overview.Summary)
+	}
+	if overview.Summary.ConfiguredSiteRevenueUSD != 0.005 || overview.Summary.UpstreamCostUSD != 0.002 || overview.Summary.ConfiguredProfitUSD != 0.003 {
+		t.Fatalf("unexpected overview summary: %+v", overview.Summary)
+	}
+}
+
+func TestProfitBoardFixedTotalsApplyOnceFromBatchCreatedAt(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	channel := Channel{Id: 1, Name: "alpha", Status: common.ChannelStatusEnabled}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+
+	now := common.GetTimestamp()
+	createdAt := now - 120
+	batches := []ProfitBoardBatch{{
+		Id:         "batch-1",
+		Name:       "组合 1",
+		ScopeType:  ProfitBoardScopeChannel,
+		ChannelIDs: []int{1},
+		CreatedAt:  createdAt,
+	}}
+	comboConfigs := []ProfitBoardComboPricingConfig{{
+		ComboId:                  "batch-1",
+		SiteFixedTotalAmount:     1.2,
+		UpstreamFixedTotalAmount: 0.2,
+	}}
+
+	overview, err := GenerateProfitBoardOverview(ProfitBoardConfigPayload{
+		Batches:      batches,
+		ComboConfigs: comboConfigs,
+		Upstream: ProfitBoardTokenPricingConfig{
+			CostSource: ProfitBoardCostSourceManualOnly,
+		},
+		Site: ProfitBoardTokenPricingConfig{
+			PricingMode: ProfitBoardSitePricingManual,
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateProfitBoardOverview: %v", err)
+	}
+	if overview.Summary.ConfiguredSiteRevenueUSD != 1.2 || overview.Summary.UpstreamCostUSD != 0.2 || overview.Summary.ConfiguredProfitUSD != 1 {
+		t.Fatalf("unexpected overview fixed totals: %+v", overview.Summary)
+	}
+
+	report, err := GenerateProfitBoardReport(ProfitBoardQuery{
+		Batches:      batches,
+		ComboConfigs: comboConfigs,
+		Upstream: ProfitBoardTokenPricingConfig{
+			CostSource: ProfitBoardCostSourceManualOnly,
+		},
+		Site: ProfitBoardTokenPricingConfig{
+			PricingMode: ProfitBoardSitePricingManual,
+		},
+		StartTimestamp: createdAt - 60,
+		EndTimestamp:   now,
+		Granularity:    "day",
+	})
+	if err != nil {
+		t.Fatalf("GenerateProfitBoardReport: %v", err)
+	}
+	if report.Summary.ConfiguredSiteRevenueUSD != 1.2 || report.Summary.UpstreamCostUSD != 0.2 || report.Summary.ConfiguredProfitUSD != 1 {
+		t.Fatalf("unexpected report fixed totals: %+v", report.Summary)
+	}
+	if len(report.Timeseries) != 1 || report.Timeseries[0].ConfiguredSiteRevenueUSD != 1.2 || report.Timeseries[0].UpstreamCostUSD != 0.2 {
+		t.Fatalf("unexpected report fixed total timeseries: %+v", report.Timeseries)
 	}
 }
 
