@@ -155,7 +155,9 @@ const ProfitBoardPage = () => {
   const [editingBatchId, setEditingBatchId] = useState('');
   const [editorVisible, setEditorVisible] = useState(false);
   const [editorValidationError, setEditorValidationError] = useState('');
-  const [hasUnsavedConfigChanges, setHasUnsavedConfigChanges] = useState(false);
+  const [hasUnsavedConfigChanges, setHasUnsavedConfigChanges] = useState(
+    !!restoredState.hasUnsavedConfigChanges,
+  );
   const [optionsReady, setOptionsReady] = useState(false);
   const [configReady, setConfigReady] = useState(
     !(restoredState.batches || []).length,
@@ -189,6 +191,7 @@ const ProfitBoardPage = () => {
     configLookupKey,
     loadOptions,
     loadConfig,
+    applyLoadedConfig,
     saveConfig,
     resolveSharedSitePreview,
     getModelsByChannelIds,
@@ -442,17 +445,36 @@ const ProfitBoardPage = () => {
       setConfigReady(true);
       return;
     }
+    if (hasUnsavedConfigChanges) {
+      setConfigReady(true);
+      return;
+    }
     setConfigReady(false);
+    let cancelled = false;
     loadConfig()
       .then((loadedConfig) => {
-        if (loadedConfig) setHasUnsavedConfigChanges(false);
+        if (cancelled) return;
+        if (loadedConfig) {
+          applyLoadedConfig(loadedConfig);
+          setHasUnsavedConfigChanges(false);
+        }
         setConfigReady(true);
       })
       .catch((error) => {
+        if (cancelled) return;
         setConfigReady(false);
         showError(error);
       });
-  }, [batchPayload.length, configLookupKey, loadConfig]);
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    applyLoadedConfig,
+    batchPayload.length,
+    configLookupKey,
+    hasUnsavedConfigChanges,
+    loadConfig,
+  ]);
 
   useEffect(() => {
     if (viewBatchId === 'all') return;
@@ -481,6 +503,7 @@ const ProfitBoardPage = () => {
       detailPage,
       detailPageSize,
       autoRefreshMode,
+      hasUnsavedConfigChanges,
     });
   }, [
     analysisMode,
@@ -495,6 +518,7 @@ const ProfitBoardPage = () => {
     detailPage,
     detailPageSize,
     granularity,
+    hasUnsavedConfigChanges,
     metricKey,
     persistState,
     lastQueryKey,

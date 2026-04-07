@@ -922,6 +922,65 @@ func parseProfitBoardConfigBatches(raw string) []ProfitBoardBatch {
 	return nil
 }
 
+func profitBoardBatchSelectionSignature(batch ProfitBoardBatch) string {
+	_, signature, err := normalizeProfitBoardSelection(ProfitBoardSelection{
+		ScopeType:  batch.ScopeType,
+		ChannelIDs: batch.ChannelIDs,
+		Tags:       batch.Tags,
+	})
+	if err != nil {
+		return ""
+	}
+	return signature
+}
+
+func remapProfitBoardComboConfigsByBatchSelection(currentBatches []ProfitBoardBatch, persistedBatches []ProfitBoardBatch, comboConfigs []ProfitBoardComboPricingConfig) []ProfitBoardComboPricingConfig {
+	if len(currentBatches) == 0 || len(persistedBatches) == 0 || len(comboConfigs) == 0 {
+		return comboConfigs
+	}
+
+	comboByID := make(map[string]ProfitBoardComboPricingConfig, len(comboConfigs))
+	for _, config := range comboConfigs {
+		comboID := strings.TrimSpace(config.ComboId)
+		if comboID == "" {
+			continue
+		}
+		comboByID[comboID] = config
+	}
+
+	configBySignature := make(map[string]ProfitBoardComboPricingConfig, len(persistedBatches))
+	for _, batch := range persistedBatches {
+		signature := profitBoardBatchSelectionSignature(batch)
+		if signature == "" {
+			continue
+		}
+		config, ok := comboByID[strings.TrimSpace(batch.Id)]
+		if !ok {
+			continue
+		}
+		configBySignature[signature] = config
+	}
+
+	remapped := make([]ProfitBoardComboPricingConfig, 0, len(currentBatches))
+	for _, batch := range currentBatches {
+		signature := profitBoardBatchSelectionSignature(batch)
+		if signature == "" {
+			continue
+		}
+		config, ok := configBySignature[signature]
+		if !ok {
+			continue
+		}
+		config.ComboId = batch.Id
+		remapped = append(remapped, config)
+	}
+
+	if len(remapped) == 0 {
+		return comboConfigs
+	}
+	return remapped
+}
+
 func normalizeProfitBoardPricingConfig(config ProfitBoardTokenPricingConfig, isSite bool) ProfitBoardTokenPricingConfig {
 	if !isSite {
 		switch strings.ToLower(strings.TrimSpace(config.UpstreamMode)) {
@@ -991,6 +1050,7 @@ func GetProfitBoardConfig(batches []ProfitBoardBatch, selection ProfitBoardSelec
 	if err != nil {
 		return nil, "", err
 	}
+	explicitBatches := len(batches) > 0
 
 	defaultUpstream := normalizeProfitBoardPricingConfig(ProfitBoardTokenPricingConfig{
 		CostSource: ProfitBoardCostSourceManualOnly,
@@ -1029,8 +1089,9 @@ func GetProfitBoardConfig(batches []ProfitBoardBatch, selection ProfitBoardSelec
 		Upstream: defaultUpstream,
 		Site:     defaultSite,
 	}
-	if parsedBatches := parseProfitBoardConfigBatches(config.SelectionValues); len(parsedBatches) > 0 {
-		payload.Batches = parsedBatches
+	persistedBatches := parseProfitBoardConfigBatches(config.SelectionValues)
+	if !explicitBatches && len(persistedBatches) > 0 {
+		payload.Batches = persistedBatches
 	}
 	_ = common.UnmarshalJsonStr(config.UpstreamConfig, &payload.Upstream)
 	payload.Upstream = normalizeProfitBoardPricingConfig(payload.Upstream, false)
@@ -1043,7 +1104,17 @@ func GetProfitBoardConfig(batches []ProfitBoardBatch, selection ProfitBoardSelec
 			len(persistedSite.LegacySite.ModelNames) > 0) {
 		payload.Site = normalizeProfitBoardPricingConfig(persistedSite.LegacySite, true)
 		payload.SharedSite = normalizeProfitBoardSharedSiteConfig(persistedSite.SharedSite, payload.Site)
-		payload.ComboConfigs = normalizeProfitBoardComboConfigs(payload.Batches, persistedSite.ComboConfigs, payload.SharedSite, payload.Site, payload.Upstream)
+		payload.ComboConfigs = normalizeProfitBoardComboConfigs(
+			payload.Batches,
+			remapProfitBoardComboConfigsByBatchSelection(
+				payload.Batches,
+				persistedBatches,
+				persistedSite.ComboConfigs,
+			),
+			payload.SharedSite,
+			payload.Site,
+			payload.Upstream,
+		)
 	} else {
 		_ = common.UnmarshalJsonStr(config.SiteConfig, &payload.Site)
 		payload.Site = normalizeProfitBoardPricingConfig(payload.Site, true)

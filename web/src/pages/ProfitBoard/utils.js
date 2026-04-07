@@ -808,6 +808,7 @@ export const createDefaultState = () => {
     detailPage: 1,
     detailPageSize: 12,
     autoRefreshMode: false,
+    hasUnsavedConfigChanges: false,
   };
 };
 
@@ -924,6 +925,7 @@ export const normalizeRestoredState = (state) => {
     100,
   );
   next.autoRefreshMode = !!next.autoRefreshMode;
+  next.hasUnsavedConfigChanges = !!next.hasUnsavedConfigChanges;
   return next;
 };
 

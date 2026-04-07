@@ -117,6 +117,83 @@ func TestSaveProfitBoardConfigUsesStableSignature(t *testing.T) {
 	}
 }
 
+func TestGetProfitBoardConfigRemapsComboConfigToCurrentBatchID(t *testing.T) {
+	setupProfitBoardTestDB(t)
+
+	payload := ProfitBoardConfigPayload{
+		Batches: []ProfitBoardBatch{
+			{
+				Id:         "batch-saved",
+				Name:       "组合 A",
+				ScopeType:  ProfitBoardScopeChannel,
+				ChannelIDs: []int{3, 1},
+			},
+		},
+		Upstream: ProfitBoardTokenPricingConfig{
+			CostSource: ProfitBoardCostSourceManualOnly,
+		},
+		Site: ProfitBoardTokenPricingConfig{
+			PricingMode: ProfitBoardSitePricingManual,
+		},
+		ComboConfigs: []ProfitBoardComboPricingConfig{
+			{
+				ComboId:                  "batch-saved",
+				SiteMode:                 ProfitBoardComboSiteModeManual,
+				UpstreamMode:             ProfitBoardUpstreamModeManual,
+				SiteFixedTotalAmount:     12.5,
+				UpstreamFixedTotalAmount: 4.25,
+				SiteRules: []ProfitBoardModelPricingRule{
+					{
+						IsDefault:   true,
+						InputPrice:  1.23,
+						OutputPrice: 4.56,
+					},
+				},
+				UpstreamRules: []ProfitBoardModelPricingRule{
+					{
+						IsDefault:   true,
+						InputPrice:  0.78,
+						OutputPrice: 0.9,
+					},
+				},
+			},
+		},
+	}
+
+	if _, _, err := SaveProfitBoardConfig(payload); err != nil {
+		t.Fatalf("SaveProfitBoardConfig: %v", err)
+	}
+
+	loaded, _, err := GetProfitBoardConfig([]ProfitBoardBatch{
+		{
+			Id:         "batch-current",
+			Name:       "组合 B",
+			ScopeType:  ProfitBoardScopeChannel,
+			ChannelIDs: []int{1, 3},
+		},
+	}, ProfitBoardSelection{})
+	if err != nil {
+		t.Fatalf("GetProfitBoardConfig: %v", err)
+	}
+	if len(loaded.ComboConfigs) != 1 {
+		t.Fatalf("unexpected combo configs: %+v", loaded.ComboConfigs)
+	}
+
+	combo := loaded.ComboConfigs[0]
+	if combo.ComboId != "batch-current" {
+		t.Fatalf("unexpected combo id: %+v", combo)
+	}
+	if combo.SiteFixedTotalAmount != 12.5 || combo.UpstreamFixedTotalAmount != 4.25 {
+		t.Fatalf("fixed totals not remapped: %+v", combo)
+	}
+	if len(combo.SiteRules) != 1 || combo.SiteRules[0].InputPrice != 1.23 || combo.SiteRules[0].OutputPrice != 4.56 {
+		t.Fatalf("site rules not preserved: %+v", combo.SiteRules)
+	}
+	if len(combo.UpstreamRules) != 1 || combo.UpstreamRules[0].InputPrice != 0.78 || combo.UpstreamRules[0].OutputPrice != 0.9 {
+		t.Fatalf("upstream rules not preserved: %+v", combo.UpstreamRules)
+	}
+}
+
 func TestGenerateProfitBoardReportUsesReturnedAndManualFallback(t *testing.T) {
 	db := setupProfitBoardTestDB(t)
 

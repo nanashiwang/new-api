@@ -158,6 +158,51 @@ export const useProfitBoardConfig = ({
     [options.upstream_accounts, upstreamConfig.upstream_account_id],
   );
 
+  const normalizeLoadedConfig = useCallback(
+    (config) => ({
+      siteConfig: {
+        ...(config.shared_site || {}),
+        model_names: config.shared_site?.model_names || [],
+      },
+      upstreamConfig: {
+        ...(config.upstream || {}),
+      },
+      comboConfigs: (config.combo_configs || []).map((item) => ({
+        ...createDefaultComboPricingConfig(
+          item.combo_id || '',
+          item.shared_site || config.shared_site,
+          config.site,
+          config.upstream,
+        ),
+        ...item,
+        site_rules: (item.site_rules || []).map((rule) =>
+          createDefaultPricingRule(rule),
+        ),
+        upstream_rules: (item.upstream_rules || []).map((rule) =>
+          createDefaultPricingRule(rule),
+        ),
+      })),
+    }),
+    [],
+  );
+
+  const applyLoadedConfig = useCallback(
+    (config) => {
+      if (!config) return;
+      const next = normalizeLoadedConfig(config);
+      setSiteConfig((prev) => ({
+        ...prev,
+        ...next.siteConfig,
+      }));
+      setUpstreamConfig((prev) => ({
+        ...prev,
+        ...next.upstreamConfig,
+      }));
+      setComboConfigs(next.comboConfigs);
+    },
+    [normalizeLoadedConfig, setComboConfigs],
+  );
+
   const loadOptions = useCallback(async () => {
     const res = await API.get('/api/profit_board/options');
     if (!res.data.success) throw new Error(res.data.message || '加载选项失败');
@@ -181,31 +226,8 @@ export const useProfitBoardConfig = ({
     if (!res.data.success) throw new Error(res.data.message || '加载配置失败');
     const config = res.data.data?.config;
     if (!config) return null;
-    setSiteConfig((prev) => ({
-      ...prev,
-      ...(config.shared_site || {}),
-      model_names: config.shared_site?.model_names || [],
-    }));
-    setUpstreamConfig((prev) => ({ ...prev, ...(config.upstream || {}) }));
-    setComboConfigs(
-      (config.combo_configs || []).map((item) => ({
-        ...createDefaultComboPricingConfig(
-          item.combo_id || '',
-          item.shared_site || config.shared_site,
-          config.site,
-          config.upstream,
-        ),
-        ...item,
-        site_rules: (item.site_rules || []).map((rule) =>
-          createDefaultPricingRule(rule),
-        ),
-        upstream_rules: (item.upstream_rules || []).map((rule) =>
-          createDefaultPricingRule(rule),
-        ),
-      })),
-    );
-    return true;
-  }, [batchPayload, configLookupKey, setComboConfigs]);
+    return config;
+  }, [batchPayload, configLookupKey]);
 
   const saveConfig = useCallback(
     async (validationErrors) => {
@@ -222,32 +244,7 @@ export const useProfitBoardConfig = ({
         }
         const savedConfig = res.data.data?.config;
         if (savedConfig) {
-          setSiteConfig((prev) => ({
-            ...prev,
-            ...(savedConfig.shared_site || {}),
-            model_names: savedConfig.shared_site?.model_names || [],
-          }));
-          setUpstreamConfig((prev) => ({
-            ...prev,
-            ...(savedConfig.upstream || {}),
-          }));
-          setComboConfigs(
-            (savedConfig.combo_configs || []).map((item) => ({
-              ...createDefaultComboPricingConfig(
-                item.combo_id || '',
-                item.shared_site || savedConfig.shared_site,
-                savedConfig.site,
-                savedConfig.upstream,
-              ),
-              ...item,
-              site_rules: (item.site_rules || []).map((rule) =>
-                createDefaultPricingRule(rule),
-              ),
-              upstream_rules: (item.upstream_rules || []).map((rule) =>
-                createDefaultPricingRule(rule),
-              ),
-            })),
-          );
+          applyLoadedConfig(savedConfig);
         }
         showSuccess('收益看板配置已保存');
         return true;
@@ -258,7 +255,7 @@ export const useProfitBoardConfig = ({
         setSaving(false);
       }
     },
-    [configPayload, setComboConfigs],
+    [applyLoadedConfig, configPayload],
   );
 
   const resolveSharedSitePreview = useCallback(
@@ -322,6 +319,7 @@ export const useProfitBoardConfig = ({
     selectedAccount,
     loadOptions,
     loadConfig,
+    applyLoadedConfig,
     saveConfig,
     resolveSharedSitePreview,
     getModelsByChannelIds,
