@@ -31,6 +31,8 @@ import { usePricingFilterCounts } from '../../../../hooks/model-pricing/usePrici
 const PricingSidebar = ({
   showWithRecharge,
   setShowWithRecharge,
+  setPriceConvertMode,
+  setSelectedPlanId,
   currency,
   setCurrency,
   handleChange,
@@ -79,6 +81,8 @@ const PricingSidebar = ({
       handleChange,
       setShowWithRecharge,
       setCurrency,
+      setPriceConvertMode,
+      setSelectedPlanId,
       setShowRatio,
       setViewMode,
       setFilterGroup,

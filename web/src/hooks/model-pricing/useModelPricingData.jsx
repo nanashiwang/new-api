@@ -32,6 +32,23 @@ const normalizeSubscriptionPlans = (items) => {
     .filter(Boolean);
 };
 
+const pickBestValuePlan = (plans, quotaPerUnit, usdExchangeRate) => {
+  if (!Array.isArray(plans) || plans.length === 0) return null;
+
+  let bestPlan = null;
+  let bestRate = Infinity;
+
+  for (const plan of plans) {
+    const rate = computePackageEffectiveRate(plan, quotaPerUnit, usdExchangeRate);
+    if (rate != null && rate < bestRate) {
+      bestRate = rate;
+      bestPlan = plan;
+    }
+  }
+
+  return bestPlan || plans[0];
+};
+
 // 计算套餐的实际汇率（CNY/USD）
 const computePackageEffectiveRate = (plan, quotaPerUnit, usdExchangeRate) => {
   const totalAmount = Number(plan?.total_amount || 0);
@@ -94,7 +111,7 @@ export const useModelPricingData = () => {
   const [pageSize, setPageSize] = useState(20);
   const [currentPage, setCurrentPage] = useState(1);
   const [currency, setCurrency] = useState('USD');
-  const [showWithRecharge, setShowWithRecharge] = useState(false);
+  const [showWithRecharge, setShowWithRecharge] = useState(true);
   const [tokenUnit, setTokenUnit] = useState('M');
   const [models, setModels] = useState([]);
   const [vendorsMap, setVendorsMap] = useState({});
@@ -149,20 +166,28 @@ export const useModelPricingData = () => {
 
   // 套餐加载后自动选中第一个（仅在 package 模式下且尚未选择时）
   useEffect(() => {
-    if (priceConvertMode === 'package' && !selectedPlanId && availablePlans.length > 0) {
-      const quotaPerUnit = getQuotaPerUnit();
-      let bestPlan = availablePlans[0];
-      let bestRate = Infinity;
-      for (const plan of availablePlans) {
-        const rate = computePackageEffectiveRate(plan, quotaPerUnit, usdExchangeRate);
-        if (rate != null && rate < bestRate) {
-          bestRate = rate;
-          bestPlan = plan;
-        }
-      }
+    if (priceConvertMode !== 'package' || availablePlans.length === 0) {
+      return;
+    }
+
+    const currentPlanStillAvailable = availablePlans.some(
+      (plan) => Number(plan.id) === Number(selectedPlanId),
+    );
+    if (currentPlanStillAvailable) {
+      return;
+    }
+
+    const quotaPerUnit = getQuotaPerUnit();
+    const bestPlan = pickBestValuePlan(
+      availablePlans,
+      quotaPerUnit,
+      usdExchangeRate,
+    );
+
+    if (bestPlan?.id != null) {
       setSelectedPlanId(bestPlan.id);
     }
-  }, [priceConvertMode, selectedPlanId, availablePlans]);
+  }, [priceConvertMode, selectedPlanId, availablePlans, usdExchangeRate]);
 
   useEffect(() => {
     if (availablePlans.length > 0) return;

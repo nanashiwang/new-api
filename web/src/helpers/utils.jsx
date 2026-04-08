@@ -904,8 +904,9 @@ export const createCardProPagination = ({
 // 模型定价筛选条件默认值
 const DEFAULT_PRICING_FILTERS = {
   search: '',
-  showWithRecharge: false,
-  currency: 'USD',
+  showWithRecharge: true,
+  currency: 'CNY',
+  priceConvertMode: 'package',
   showRatio: false,
   viewMode: 'card',
   tokenUnit: 'M',
@@ -922,6 +923,8 @@ export const resetPricingFilters = ({
   handleChange,
   setShowWithRecharge,
   setCurrency,
+  setPriceConvertMode,
+  setSelectedPlanId,
   setShowRatio,
   setViewMode,
   setFilterGroup,
@@ -935,6 +938,8 @@ export const resetPricingFilters = ({
   handleChange?.(DEFAULT_PRICING_FILTERS.search);
   setShowWithRecharge?.(DEFAULT_PRICING_FILTERS.showWithRecharge);
   setCurrency?.(DEFAULT_PRICING_FILTERS.currency);
+  setPriceConvertMode?.(DEFAULT_PRICING_FILTERS.priceConvertMode);
+  setSelectedPlanId?.(null);
   setShowRatio?.(DEFAULT_PRICING_FILTERS.showRatio);
   setViewMode?.(DEFAULT_PRICING_FILTERS.viewMode);
   setTokenUnit?.(DEFAULT_PRICING_FILTERS.tokenUnit);
