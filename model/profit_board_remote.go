@@ -870,10 +870,14 @@ func collectProfitBoardRemoteObserverAggregate(signature string, batches []Profi
 		}
 		configHash := profitBoardRemoteObserverConfigHash(remoteConfig)
 		effectiveStart := startTimestamp
+		effectiveEnd := endTimestamp
 		if batch.CreatedAt > 0 && batch.CreatedAt > effectiveStart {
 			effectiveStart = batch.CreatedAt
 		}
-		snapshots, err := listProfitBoardRemoteSuccessSnapshots(signature, batch.Id, configHash, effectiveStart, endTimestamp)
+		if latestSuccess != nil && latestSuccess.SyncedAt > effectiveEnd {
+			effectiveEnd = latestSuccess.SyncedAt
+		}
+		snapshots, err := listProfitBoardRemoteSuccessSnapshots(signature, batch.Id, configHash, effectiveStart, effectiveEnd)
 		if err != nil {
 			return nil, err
 		}

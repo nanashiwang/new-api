@@ -554,7 +554,11 @@ func collectProfitBoardUpstreamAccountObservedAggregate(accountID int, startTime
 	if configHash == "" && latestSuccess != nil {
 		configHash = latestSuccess.ConfigHash
 	}
-	snapshots, err := listProfitBoardRemoteSuccessSnapshots(signature, profitBoardUpstreamAccountSnapshotComboID, configHash, startTimestamp, endTimestamp)
+	effectiveEndTimestamp := endTimestamp
+	if latestSuccess != nil && latestSuccess.SyncedAt > effectiveEndTimestamp {
+		effectiveEndTimestamp = latestSuccess.SyncedAt
+	}
+	snapshots, err := listProfitBoardRemoteSuccessSnapshots(signature, profitBoardUpstreamAccountSnapshotComboID, configHash, startTimestamp, effectiveEndTimestamp)
 	if err != nil {
 		return nil, err
 	}

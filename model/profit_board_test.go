@@ -664,6 +664,65 @@ func TestGetProfitBoardActivityWatermarkChangesWhenWalletSnapshotChanges(t *test
 	}
 }
 
+func TestCollectProfitBoardUpstreamAccountObservedAggregateIncludesLatestSnapshotBeyondQueryEnd(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	now := common.GetTimestamp()
+	account := ProfitBoardUpstreamAccount{
+		Name:        "钱包账户",
+		AccountType: ProfitBoardUpstreamAccountTypeNewAPI,
+		BaseURL:     "https://remote.example.com",
+		UserID:      9,
+		Enabled:     true,
+		CreatedAt:   now - 300,
+		UpdatedAt:   now - 300,
+	}
+	encryptedToken, err := encryptProfitBoardRemoteSecret("wallet-token")
+	if err != nil {
+		t.Fatalf("encrypt token: %v", err)
+	}
+	account.AccessTokenEncrypted = encryptedToken
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatalf("create wallet account: %v", err)
+	}
+
+	config := account.remoteObserverConfig()
+	signature := profitBoardUpstreamAccountSnapshotSignature(account.Id)
+	seedProfitBoardRemoteSnapshot(
+		t,
+		signature,
+		profitBoardUpstreamAccountSnapshotComboID,
+		config,
+		now-2,
+		800,
+		120,
+		nil,
+	)
+
+	aggregate, err := collectProfitBoardUpstreamAccountObservedAggregate(
+		account.Id,
+		now-600,
+		now-10,
+		"day",
+		0,
+		false,
+	)
+	if err != nil {
+		t.Fatalf("collectProfitBoardUpstreamAccountObservedAggregate: %v", err)
+	}
+
+	if aggregate.State.SnapshotCount != 1 {
+		t.Fatalf("expected latest snapshot to be included, got snapshot_count=%d", aggregate.State.SnapshotCount)
+	}
+	warnings := strings.Join(aggregate.Warnings, "\n")
+	if strings.Contains(warnings, "在所选时间范围内没有成功同步的远端快照") {
+		t.Fatalf("expected latest snapshot to suppress no-snapshot warning, got warnings=%v", aggregate.Warnings)
+	}
+	if !strings.Contains(warnings, "当前仅有 1 个成功快照") {
+		t.Fatalf("expected single-snapshot warning, got warnings=%v", aggregate.Warnings)
+	}
+}
+
 func TestSaveProfitBoardConfigMasksRemoteObserverToken(t *testing.T) {
 	db := setupProfitBoardTestDB(t)
 
