@@ -49,6 +49,8 @@ const SearchActions = memo(
     setTokenUnit,
     t,
   }) => {
+    const hasAvailablePlans = availablePlans.length > 0;
+
     const handleCopyClick = useCallback(() => {
       if (copyText && selectedRowKeys.length > 0) {
         copyText(selectedRowKeys);
@@ -66,6 +68,16 @@ const SearchActions = memo(
     const handleTokenUnitToggle = useCallback(() => {
       setTokenUnit?.(tokenUnit === 'K' ? 'M' : 'K');
     }, [tokenUnit, setTokenUnit]);
+
+    const handlePriceModeChange = useCallback(
+      (value) => {
+        if (value === 'package' && !hasAvailablePlans) {
+          return;
+        }
+        setPriceConvertMode?.(value);
+      },
+      [hasAvailablePlans, setPriceConvertMode],
+    );
 
     return (
       <div className='flex items-center gap-2 w-full'>
@@ -99,16 +111,21 @@ const SearchActions = memo(
             {/* 价格显示模式下拉框 + 开关 */}
             <Select
               value={priceConvertMode}
-              onChange={setPriceConvertMode}
+              onChange={handlePriceModeChange}
               style={{ width: 120 }}
               optionList={[
                 { value: 'recharge', label: t('充值价格') },
-                { value: 'package', label: t('套餐价格') },
+                {
+                  value: 'package',
+                  label: t('套餐价格'),
+                  disabled: !hasAvailablePlans,
+                },
               ]}
             />
             <Switch
               checked={showWithRecharge}
               onChange={setShowWithRecharge}
+              disabled={priceConvertMode === 'package' && !hasAvailablePlans}
             />
 
             {/* 套餐选择器（选了套餐价格时始终显示） */}
@@ -116,9 +133,9 @@ const SearchActions = memo(
               <Select
                 value={selectedPlanId}
                 onChange={setSelectedPlanId}
-                placeholder={availablePlans.length > 0 ? t('选择套餐') : t('暂无可用套餐')}
+                placeholder={hasAvailablePlans ? t('选择套餐') : t('暂无可用套餐')}
                 style={{ width: 180 }}
-                disabled={availablePlans.length === 0}
+                disabled={!hasAvailablePlans}
                 optionList={availablePlans.map((p) => ({
                   value: p.id,
                   label: `${p.title} - ¥${p.price_amount}`,

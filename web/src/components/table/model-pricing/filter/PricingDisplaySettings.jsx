@@ -25,6 +25,7 @@ const PricingDisplaySettings = ({
   setShowWithRecharge,
   priceConvertMode,
   setPriceConvertMode,
+  availablePlans = [],
   currency,
   setCurrency,
   showRatio,
@@ -36,6 +37,8 @@ const PricingDisplaySettings = ({
   loading = false,
   t,
 }) => {
+  const hasAvailablePlans = availablePlans.length > 0;
+
   const items = [
     {
       value: 'recharge',
@@ -57,7 +60,7 @@ const PricingDisplaySettings = ({
 
   const priceModeItems = [
     { value: 'recharge', label: t('充值价格') },
-    { value: 'package', label: t('套餐价格') },
+    { value: 'package', label: t('套餐价格'), disabled: !hasAvailablePlans },
   ];
 
   const currencyItems = [
@@ -109,7 +112,10 @@ const PricingDisplaySettings = ({
         title={t('价格模式')}
         items={priceModeItems}
         activeValue={priceConvertMode || 'recharge'}
-        onChange={setPriceConvertMode}
+        onChange={(value) => {
+          if (value === 'package' && !hasAvailablePlans) return;
+          setPriceConvertMode(value);
+        }}
         collapsible={false}
         loading={loading}
         t={t}

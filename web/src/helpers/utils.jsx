@@ -650,12 +650,17 @@ const formatTokenUnitPrice = ({
   precision,
 }) => {
   const unitDivisor = tokenUnit === 'K' ? 1000 : 1;
-  const rawDisplay = displayPrice(priceUSD);
-  const numericValue =
-    parseFloat(rawDisplay.replace(/[^0-9.]/g, '')) / unitDivisor;
+  const rawAmount =
+    typeof displayPrice?.toAmount === 'function'
+      ? displayPrice.toAmount(priceUSD)
+      : parseFloat(String(displayPrice(priceUSD)).replace(/[^0-9.]/g, ''));
+  const numericValue = rawAmount / unitDivisor;
   const symbol = getDisplayCurrencySymbol(currency);
+  const formattedValue = Number.isFinite(numericValue)
+    ? numericValue.toFixed(precision).replace(/\.?0+$/, '')
+    : '0';
 
-  return `${symbol}${numericValue.toFixed(precision)}`;
+  return `${symbol}${formattedValue}`;
 };
 
 export const getModelPricingItems = (priceData) => {

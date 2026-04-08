@@ -75,6 +75,7 @@ const PricingTopSection = memo(
                 priceConvertMode={priceConvertMode}
                 setPriceConvertMode={setPriceConvertMode}
                 subscriptionPlans={subscriptionPlans}
+                availablePlans={availablePlans}
                 selectedPlanId={selectedPlanId}
                 setSelectedPlanId={setSelectedPlanId}
                 currency={currency}
