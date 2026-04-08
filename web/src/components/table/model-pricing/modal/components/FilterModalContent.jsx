@@ -30,6 +30,8 @@ const FilterModalContent = ({ sidebarProps, t }) => {
   const {
     showWithRecharge,
     setShowWithRecharge,
+    priceConvertMode,
+    setPriceConvertMode,
     currency,
     setCurrency,
     handleChange,
@@ -75,6 +77,8 @@ const FilterModalContent = ({ sidebarProps, t }) => {
       <PricingDisplaySettings
         showWithRecharge={showWithRecharge}
         setShowWithRecharge={setShowWithRecharge}
+        priceConvertMode={priceConvertMode}
+        setPriceConvertMode={setPriceConvertMode}
         currency={currency}
         setCurrency={setCurrency}
         showRatio={showRatio}

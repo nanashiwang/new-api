@@ -36,6 +36,7 @@ const SearchActions = memo(
     priceConvertMode = 'recharge',
     setPriceConvertMode,
     subscriptionPlans = [],
+    availablePlans = [],
     selectedPlanId,
     setSelectedPlanId,
     currency,
@@ -110,19 +111,18 @@ const SearchActions = memo(
               onChange={setShowWithRecharge}
             />
 
-            {/* 套餐选择器 */}
-            {priceConvertMode === 'package' && subscriptionPlans.length > 0 && (
+            {/* 套餐选择器（选了套餐价格时始终显示） */}
+            {priceConvertMode === 'package' && (
               <Select
                 value={selectedPlanId}
                 onChange={setSelectedPlanId}
-                placeholder={t('选择套餐')}
+                placeholder={availablePlans.length > 0 ? t('选择套餐') : t('暂无可用套餐')}
                 style={{ width: 180 }}
-                optionList={subscriptionPlans
-                  .filter((p) => p.total_amount > 0)
-                  .map((p) => ({
-                    value: p.id,
-                    label: `${p.title} - ¥${p.price_amount}`,
-                  }))}
+                disabled={availablePlans.length === 0}
+                optionList={availablePlans.map((p) => ({
+                  value: p.id,
+                  label: `${p.title} - ¥${p.price_amount}`,
+                }))}
               />
             )}
 

@@ -151,6 +151,7 @@ const PricingVendorIntro = memo(
     priceConvertMode,
     setPriceConvertMode,
     subscriptionPlans,
+    availablePlans,
     selectedPlanId,
     setSelectedPlanId,
     currency,
@@ -291,6 +292,7 @@ const PricingVendorIntro = memo(
           priceConvertMode={priceConvertMode}
           setPriceConvertMode={setPriceConvertMode}
           subscriptionPlans={subscriptionPlans}
+          availablePlans={availablePlans}
           selectedPlanId={selectedPlanId}
           setSelectedPlanId={setSelectedPlanId}
           currency={currency}
@@ -318,6 +320,7 @@ const PricingVendorIntro = memo(
         priceConvertMode,
         setPriceConvertMode,
         subscriptionPlans,
+        availablePlans,
         selectedPlanId,
         setSelectedPlanId,
         currency,

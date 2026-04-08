@@ -41,6 +41,7 @@ const PricingTopSection = memo(
     priceConvertMode,
     setPriceConvertMode,
     subscriptionPlans,
+    availablePlans,
     selectedPlanId,
     setSelectedPlanId,
     currency,

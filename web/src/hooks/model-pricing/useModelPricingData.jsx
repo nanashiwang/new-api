@@ -126,11 +126,24 @@ export const useModelPricingData = () => {
     setCurrency(showWithRecharge ? 'CNY' : 'USD');
   }, [showWithRecharge]);
 
+  // 可用套餐（过滤掉无限额度的）
+  const availablePlans = useMemo(
+    () => subscriptionPlans.filter((p) => p.total_amount > 0),
+    [subscriptionPlans],
+  );
+
   // 当前选中的套餐
   const selectedPlan = useMemo(
-    () => subscriptionPlans.find((p) => p.id === selectedPlanId) || null,
-    [subscriptionPlans, selectedPlanId],
+    () => availablePlans.find((p) => p.id === selectedPlanId) || null,
+    [availablePlans, selectedPlanId],
   );
+
+  // 套餐加载后自动选中第一个（仅在 package 模式下且尚未选择时）
+  useEffect(() => {
+    if (priceConvertMode === 'package' && !selectedPlanId && availablePlans.length > 0) {
+      setSelectedPlanId(availablePlans[0].id);
+    }
+  }, [priceConvertMode, selectedPlanId, availablePlans]);
 
   // 套餐实际汇率（CNY/USD）
   const packageEffectiveRate = useMemo(() => {
@@ -428,6 +441,7 @@ export const useModelPricingData = () => {
     priceConvertMode,
     setPriceConvertMode,
     subscriptionPlans,
+    availablePlans,
     selectedPlanId,
     setSelectedPlanId,
     tokenUnit,

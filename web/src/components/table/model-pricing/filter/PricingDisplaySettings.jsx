@@ -23,6 +23,8 @@ import SelectableButtonGroup from '../../../common/ui/SelectableButtonGroup';
 const PricingDisplaySettings = ({
   showWithRecharge,
   setShowWithRecharge,
+  priceConvertMode,
+  setPriceConvertMode,
   currency,
   setCurrency,
   showRatio,
@@ -51,6 +53,11 @@ const PricingDisplaySettings = ({
       value: 'tokenUnit',
       label: t('按K显示单位'),
     },
+  ];
+
+  const priceModeItems = [
+    { value: 'recharge', label: t('充值价格') },
+    { value: 'package', label: t('套餐价格') },
   ];
 
   const currencyItems = [
@@ -93,6 +100,16 @@ const PricingDisplaySettings = ({
         activeValue={getActiveValues()}
         onChange={handleChange}
         withCheckbox
+        collapsible={false}
+        loading={loading}
+        t={t}
+      />
+
+      <SelectableButtonGroup
+        title={t('价格模式')}
+        items={priceModeItems}
+        activeValue={priceConvertMode || 'recharge'}
+        onChange={setPriceConvertMode}
         collapsible={false}
         loading={loading}
         t={t}
