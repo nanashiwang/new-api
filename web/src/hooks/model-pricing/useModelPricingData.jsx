@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import { useState, useEffect, useContext, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useContext, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { API, copy, showError, showInfo, showSuccess } from '../../helpers';
 import { Modal } from '@douyinfe/semi-ui';
@@ -319,7 +319,9 @@ export const useModelPricingData = () => {
   };
 
   const refresh = async () => {
-    await Promise.all([loadPricing(), loadSubscriptionPlans()]);
+    await loadPricing();
+    // 套餐数据加载不阻塞主流程
+    loadSubscriptionPlans();
   };
 
   const copyText = async (text) => {
