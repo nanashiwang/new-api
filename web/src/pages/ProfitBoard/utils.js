@@ -402,9 +402,9 @@ export const getUpstreamAccountDraftValidation = (draft, options) => {
 export const getWalletStatusMeta = (status, t) =>
   ({
     ready: { color: 'green', label: t('运行中') },
-    needs_baseline: { color: 'orange', label: t('待同步') },
+    needs_baseline: { color: 'orange', label: t('建立基线中') },
     failed: { color: 'red', label: t('异常') },
-    not_configured: { color: 'grey', label: t('已停用') },
+    not_configured: { color: 'grey', label: t('未配置') },
     disabled: { color: 'grey', label: t('已停用') },
   })[status] || { color: 'grey', label: t('待同步') };
 

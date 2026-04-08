@@ -48,6 +48,7 @@ const ProfitBoardHeader = ({
   combinedWarnings,
   sitePriceFactorNote,
   hasUnsavedConfigChanges,
+  configReady,
   t,
 }) => {
   const [warningsExpanded, setWarningsExpanded] = useState(false);
@@ -72,6 +73,11 @@ const ProfitBoardHeader = ({
           {hasNewActivity && (
             <Tag color='orange' size='small'>
               {t('有新数据')}
+            </Tag>
+          )}
+          {!configReady && (
+            <Tag color='blue' size='small'>
+              {t('正在从服务器加载配置...')}
             </Tag>
           )}
           {hasMessages && (

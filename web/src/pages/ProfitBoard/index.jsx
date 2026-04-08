@@ -458,10 +458,8 @@ const ProfitBoardPage = () => {
       setConfigReady(true);
       return;
     }
-    if (hasUnsavedConfigChanges) {
-      setConfigReady(true);
-      return;
-    }
+    // 始终从服务器加载配置，localStorage 仅用于首次渲染
+    // 服务器响应为最终数据来源
     setConfigReady(false);
     let cancelled = false;
     loadConfig()
@@ -475,7 +473,9 @@ const ProfitBoardPage = () => {
       })
       .catch((error) => {
         if (cancelled) return;
-        setConfigReady(false);
+        // 加载失败时仍标记为就绪，避免 UI 卡死
+        // localStorage 数据作为兜底
+        setConfigReady(true);
         showError(error);
       });
     return () => {
@@ -485,7 +485,6 @@ const ProfitBoardPage = () => {
     applyLoadedConfig,
     batchPayload.length,
     configLookupKey,
-    hasUnsavedConfigChanges,
     loadConfig,
   ]);
 
@@ -1397,6 +1396,7 @@ const ProfitBoardPage = () => {
           combinedWarnings={combinedWarnings}
           sitePriceFactorNote={sitePriceFactorNote}
           hasUnsavedConfigChanges={hasUnsavedConfigChanges}
+          configReady={configReady}
           t={t}
         />
         <Tabs

@@ -191,14 +191,9 @@ export const useProfitBoardConfig = ({
     (config) => {
       if (!config) return;
       const next = normalizeLoadedConfig(config);
-      setSiteConfig((prev) => ({
-        ...prev,
-        ...next.siteConfig,
-      }));
-      setUpstreamConfig((prev) => ({
-        ...prev,
-        ...next.upstreamConfig,
-      }));
+      // 直接替换，不做合并——服务器数据为最终来源
+      setSiteConfig(next.siteConfig);
+      setUpstreamConfig(next.upstreamConfig);
       setComboConfigs(next.comboConfigs);
     },
     [normalizeLoadedConfig, setComboConfigs],

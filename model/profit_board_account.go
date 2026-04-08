@@ -70,6 +70,7 @@ type ProfitBoardUpstreamAccountOption struct {
 	LowBalanceThresholdUSD       float64 `json:"low_balance_threshold_usd"`
 	LowBalanceAlert              bool    `json:"low_balance_alert"`
 	BaselineReady                bool    `json:"baseline_ready"`
+	SnapshotCount                int     `json:"snapshot_count"`
 }
 
 type profitBoardUpstreamAccountObservedAggregate struct {
@@ -531,6 +532,18 @@ func collectProfitBoardUpstreamAccountObservedAggregate(accountID int, startTime
 		Warnings:      make([]string, 0),
 	}
 	totalCostQuota := int64(0)
+	if len(snapshots) == 0 {
+		if configHash == "" {
+			aggregate.Warnings = append(aggregate.Warnings,
+				fmt.Sprintf("%s：未找到有效的远端快照，请确认账户凭证（Base URL / User ID / Access Token）是否正确配置", account.Name))
+		} else {
+			aggregate.Warnings = append(aggregate.Warnings,
+				fmt.Sprintf("%s：在所选时间范围内没有成功同步的远端快照。首次使用钱包观测模式需要至少一次手动同步，此后系统会自动定期同步", account.Name))
+		}
+	} else if len(snapshots) == 1 {
+		aggregate.Warnings = append(aggregate.Warnings,
+			fmt.Sprintf("%s：当前仅有 1 个成功快照，需要至少 2 个快照才能计算额度消耗差值。请再次手动同步或等待自动同步", account.Name))
+	}
 	if len(snapshots) >= 2 {
 		for index := 1; index < len(snapshots); index++ {
 			deltaQuota, warnings := profitBoardRemoteSnapshotDelta(snapshots[index-1], snapshots[index])
@@ -550,10 +563,27 @@ func collectProfitBoardUpstreamAccountObservedAggregate(accountID int, startTime
 				CostUSD:  costUSD,
 			})
 		}
+		if totalCostQuota == 0 {
+			allRolledBack := true
+			for index := 1; index < len(snapshots); index++ {
+				if snapshots[index].WalletUsedQuota >= snapshots[index-1].WalletUsedQuota {
+					allRolledBack = false
+					break
+				}
+			}
+			if allRolledBack {
+				aggregate.Warnings = append(aggregate.Warnings,
+					fmt.Sprintf("%s：远端钱包已用额度在所有快照间均出现回退（可能因为远端账户充值或额度重置），当前时间段观测成本按 0 处理", account.Name))
+			} else {
+				aggregate.Warnings = append(aggregate.Warnings,
+					fmt.Sprintf("%s：快照间额度差值均为 0，说明所选时间范围内远端钱包没有新的额度消耗", account.Name))
+			}
+		}
 	}
 	aggregate.TotalCostUSD = roundProfitBoardAmount(float64(totalCostQuota) / common.QuotaPerUnit)
 	state := buildProfitBoardRemoteObserverState(signature, batch, config, latestAny, latestSuccess, aggregate.TotalCostUSD)
 	aggregate.State = buildProfitBoardUpstreamAccountOption(*account, state)
+	aggregate.State.SnapshotCount = len(snapshots)
 	if state.QuotaPerUnitMismatch {
 		aggregate.Warnings = append(aggregate.Warnings, fmt.Sprintf("%s 的远端 quota_per_unit 与本站不同，当前仍按本站额度口径换算金额", account.Name))
 	}

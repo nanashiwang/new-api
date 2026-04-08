@@ -205,6 +205,24 @@ const AccountCard = ({
           <span>{item.error_message}</span>
         </div>
       ) : null}
+
+      {(item.status === 'needs_baseline' || item.status === 'failed') && !item.error_message ? (
+        <div className='mx-4 mb-3 flex items-start gap-1.5 rounded-lg bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'>
+          <AlertCircle size={12} className='mt-0.5 shrink-0' />
+          <div>
+            <span>
+              {item.status === 'needs_baseline'
+                ? t('钱包观测模式需要至少 2 次成功同步才能计算成本，请点击同步按钮触发同步')
+                : t('远端同步失败，请检查账户配置或网络连接')}
+            </span>
+            {item.snapshot_count != null && (
+              <div className='mt-1 text-amber-600/70 dark:text-amber-400/70'>
+                {t('当前快照数：{{count}}', { count: item.snapshot_count })}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };
