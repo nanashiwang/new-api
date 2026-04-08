@@ -124,6 +124,7 @@ export const useModelPricingData = () => {
   // 价格转换模式：'recharge'=充值汇率, 'package'=套餐汇率
   const [priceConvertMode, setPriceConvertMode] = useState('package');
   const [subscriptionPlans, setSubscriptionPlans] = useState([]);
+  const [subscriptionPlansLoaded, setSubscriptionPlansLoaded] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState(null);
 
   const [statusState] = useContext(StatusContext);
@@ -190,6 +191,9 @@ export const useModelPricingData = () => {
   }, [priceConvertMode, selectedPlanId, availablePlans, usdExchangeRate]);
 
   useEffect(() => {
+    if (!subscriptionPlansLoaded) {
+      return;
+    }
     if (availablePlans.length > 0) return;
     if (priceConvertMode === 'package') {
       setPriceConvertMode('recharge');
@@ -197,7 +201,7 @@ export const useModelPricingData = () => {
     if (selectedPlanId != null) {
       setSelectedPlanId(null);
     }
-  }, [availablePlans, priceConvertMode, selectedPlanId]);
+  }, [subscriptionPlansLoaded, availablePlans, priceConvertMode, selectedPlanId]);
 
   // 套餐实际汇率（CNY/USD）
   const packageEffectiveRate = useMemo(() => {
@@ -389,6 +393,8 @@ export const useModelPricingData = () => {
       }
     } catch {
       // 未登录或接口不可用，静默忽略
+    } finally {
+      setSubscriptionPlansLoaded(true);
     }
   };
 
