@@ -34,6 +34,11 @@ const PricingContent = ({ isMobile, sidebarProps, ...props }) => {
           sidebarProps={sidebarProps}
           showWithRecharge={sidebarProps.showWithRecharge}
           setShowWithRecharge={sidebarProps.setShowWithRecharge}
+          priceConvertMode={sidebarProps.priceConvertMode}
+          setPriceConvertMode={sidebarProps.setPriceConvertMode}
+          subscriptionPlans={sidebarProps.subscriptionPlans}
+          selectedPlanId={sidebarProps.selectedPlanId}
+          setSelectedPlanId={sidebarProps.setSelectedPlanId}
           currency={sidebarProps.currency}
           setCurrency={sidebarProps.setCurrency}
           showRatio={sidebarProps.showRatio}

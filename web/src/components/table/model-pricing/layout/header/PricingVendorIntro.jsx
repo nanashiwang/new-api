@@ -148,6 +148,11 @@ const PricingVendorIntro = memo(
     setShowFilterModal,
     showWithRecharge,
     setShowWithRecharge,
+    priceConvertMode,
+    setPriceConvertMode,
+    subscriptionPlans,
+    selectedPlanId,
+    setSelectedPlanId,
     currency,
     setCurrency,
     showRatio,
@@ -283,6 +288,11 @@ const PricingVendorIntro = memo(
           setShowFilterModal={setShowFilterModal}
           showWithRecharge={showWithRecharge}
           setShowWithRecharge={setShowWithRecharge}
+          priceConvertMode={priceConvertMode}
+          setPriceConvertMode={setPriceConvertMode}
+          subscriptionPlans={subscriptionPlans}
+          selectedPlanId={selectedPlanId}
+          setSelectedPlanId={setSelectedPlanId}
           currency={currency}
           setCurrency={setCurrency}
           showRatio={showRatio}
@@ -305,6 +315,11 @@ const PricingVendorIntro = memo(
         setShowFilterModal,
         showWithRecharge,
         setShowWithRecharge,
+        priceConvertMode,
+        setPriceConvertMode,
+        subscriptionPlans,
+        selectedPlanId,
+        setSelectedPlanId,
         currency,
         setCurrency,
         showRatio,

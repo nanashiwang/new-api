@@ -17,12 +17,56 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import { useState, useEffect, useContext, useRef, useMemo } from 'react';
+import { useState, useEffect, useContext, useRef, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { API, copy, showError, showInfo, showSuccess } from '../../helpers';
 import { Modal } from '@douyinfe/semi-ui';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
+import { getQuotaPerUnit } from '../../helpers/quota';
+
+// 计算套餐的实际汇率（CNY/USD）
+const computePackageEffectiveRate = (plan, quotaPerUnit, usdExchangeRate) => {
+  if (!plan || plan.total_amount <= 0) return null;
+
+  const quotaPerResetUSD = plan.total_amount / quotaPerUnit;
+
+  // 套餐时长（秒）
+  let durationSeconds = 0;
+  switch (plan.duration_unit) {
+    case 'year':  durationSeconds = plan.duration_value * 365 * 86400; break;
+    case 'month': durationSeconds = plan.duration_value * 30 * 86400; break;
+    case 'day':   durationSeconds = plan.duration_value * 86400; break;
+    case 'hour':  durationSeconds = plan.duration_value * 3600; break;
+    case 'custom': durationSeconds = plan.custom_seconds || 0; break;
+  }
+
+  let totalQuotaUSD;
+  if (plan.quota_reset_period === 'never') {
+    totalQuotaUSD = quotaPerResetUSD;
+  } else {
+    let resetSeconds;
+    switch (plan.quota_reset_period) {
+      case 'daily':   resetSeconds = 86400; break;
+      case 'weekly':  resetSeconds = 7 * 86400; break;
+      case 'monthly': resetSeconds = 30 * 86400; break;
+      case 'custom':  resetSeconds = plan.quota_reset_custom_seconds || durationSeconds; break;
+      default:        resetSeconds = durationSeconds; break;
+    }
+    const numPeriods = resetSeconds > 0 ? Math.max(1, Math.floor(durationSeconds / resetSeconds)) : 1;
+    totalQuotaUSD = quotaPerResetUSD * numPeriods;
+  }
+
+  if (totalQuotaUSD <= 0) return null;
+
+  // 统一转为 CNY
+  let planPriceCNY = plan.price_amount;
+  if (plan.currency === 'USD') {
+    planPriceCNY = plan.price_amount * usdExchangeRate;
+  }
+
+  return planPriceCNY / totalQuotaUSD;
+};
 
 export const useModelPricingData = () => {
   const { t } = useTranslation();
@@ -52,6 +96,11 @@ export const useModelPricingData = () => {
   const [endpointMap, setEndpointMap] = useState({});
   const [autoGroups, setAutoGroups] = useState([]);
 
+  // 价格转换模式：'recharge'=充值汇率, 'package'=套餐汇率
+  const [priceConvertMode, setPriceConvertMode] = useState('recharge');
+  const [subscriptionPlans, setSubscriptionPlans] = useState([]);
+  const [selectedPlanId, setSelectedPlanId] = useState(null);
+
   const [statusState] = useContext(StatusContext);
   const [userState] = useContext(UserContext);
 
@@ -76,6 +125,18 @@ export const useModelPricingData = () => {
   useEffect(() => {
     setCurrency(showWithRecharge ? 'CNY' : 'USD');
   }, [showWithRecharge]);
+
+  // 当前选中的套餐
+  const selectedPlan = useMemo(
+    () => subscriptionPlans.find((p) => p.id === selectedPlanId) || null,
+    [subscriptionPlans, selectedPlanId],
+  );
+
+  // 套餐实际汇率（CNY/USD）
+  const packageEffectiveRate = useMemo(() => {
+    const quotaPerUnit = getQuotaPerUnit();
+    return computePackageEffectiveRate(selectedPlan, quotaPerUnit, usdExchangeRate);
+  }, [selectedPlan, usdExchangeRate]);
 
   const filteredModels = useMemo(() => {
     let result = models;
@@ -161,17 +222,20 @@ export const useModelPricingData = () => {
   );
 
   const displayPrice = (usdPrice) => {
-    let priceInUSD = usdPrice;
-    if (showWithRecharge) {
-      priceInUSD = (usdPrice * priceRate) / usdExchangeRate;
+    // 开关关闭时直接显示 USD
+    if (!showWithRecharge) {
+      return `$${usdPrice.toFixed(3)}`;
     }
 
-    if (currency === 'CNY') {
-      return `¥${(priceInUSD * usdExchangeRate).toFixed(3)}`;
-    } else if (currency === 'CUSTOM') {
-      return `${customCurrencySymbol}${(priceInUSD * customExchangeRate).toFixed(3)}`;
+    // 开关开启，按模式转换
+    if (priceConvertMode === 'package' && packageEffectiveRate != null) {
+      // 套餐模式：直接用套餐汇率
+      return `¥${(usdPrice * packageEffectiveRate).toFixed(3)}`;
     }
-    return `$${priceInUSD.toFixed(3)}`;
+
+    // 充值模式（默认）
+    const priceInUSD = (usdPrice * priceRate) / usdExchangeRate;
+    return `¥${(priceInUSD * usdExchangeRate).toFixed(3)}`;
   };
 
   const setModelsFormat = (models, groupRatio, vendorMap) => {
@@ -242,8 +306,20 @@ export const useModelPricingData = () => {
     setLoading(false);
   };
 
+  // 获取订阅套餐列表（需登录，静默失败）
+  const loadSubscriptionPlans = async () => {
+    try {
+      const res = await API.get('/api/subscription/plans');
+      if (res.data?.success) {
+        setSubscriptionPlans(res.data.data || []);
+      }
+    } catch {
+      // 未登录或接口不可用，静默忽略
+    }
+  };
+
   const refresh = async () => {
-    await loadPricing();
+    await Promise.all([loadPricing(), loadSubscriptionPlans()]);
   };
 
   const copyText = async (text) => {
@@ -347,6 +423,11 @@ export const useModelPricingData = () => {
     setCurrency,
     showWithRecharge,
     setShowWithRecharge,
+    priceConvertMode,
+    setPriceConvertMode,
+    subscriptionPlans,
+    selectedPlanId,
+    setSelectedPlanId,
     tokenUnit,
     setTokenUnit,
     models,

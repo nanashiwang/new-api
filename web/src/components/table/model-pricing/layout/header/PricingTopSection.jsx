@@ -38,6 +38,11 @@ const PricingTopSection = memo(
     searchValue,
     showWithRecharge,
     setShowWithRecharge,
+    priceConvertMode,
+    setPriceConvertMode,
+    subscriptionPlans,
+    selectedPlanId,
+    setSelectedPlanId,
     currency,
     setCurrency,
     showRatio,
@@ -66,6 +71,11 @@ const PricingTopSection = memo(
                 setShowFilterModal={setShowFilterModal}
                 showWithRecharge={showWithRecharge}
                 setShowWithRecharge={setShowWithRecharge}
+                priceConvertMode={priceConvertMode}
+                setPriceConvertMode={setPriceConvertMode}
+                subscriptionPlans={subscriptionPlans}
+                selectedPlanId={selectedPlanId}
+                setSelectedPlanId={setSelectedPlanId}
                 currency={currency}
                 setCurrency={setCurrency}
                 showRatio={showRatio}
