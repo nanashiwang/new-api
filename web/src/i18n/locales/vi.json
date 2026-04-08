@@ -3903,6 +3903,8 @@
     "缺失本站价格": "Thiếu giá tại site",
     "上游返回费用条数": "Số dòng có chi phí upstream trả về",
     "手动回退条数": "Số dòng fallback thủ công",
-    "进度条现在直接对应已用比例": "Thanh tiến độ giờ phản ánh trực tiếp tỷ lệ đã dùng"
+    "进度条现在直接对应已用比例": "Thanh tiến độ giờ phản ánh trực tiếp tỷ lệ đã dùng",
+    "页面渲染出错，请刷新页面重试": "Đã xảy ra lỗi khi hiển thị trang. Vui lòng tải lại trang và thử lại.",
+    "刷新页面": "Tải lại trang"
   }
 }

@@ -3519,6 +3519,8 @@
     "缺失本站价格": "Tarification locale manquante",
     "上游返回费用条数": "Lignes avec coût amont retourné",
     "手动回退条数": "Lignes avec repli manuel",
-    "进度条现在直接对应已用比例": "La barre de progression reflète désormais directement le ratio utilisé"
+    "进度条现在直接对应已用比例": "La barre de progression reflète désormais directement le ratio utilisé",
+    "页面渲染出错，请刷新页面重试": "Une erreur est survenue lors du rendu de la page. Veuillez rafraîchir et réessayer.",
+    "刷新页面": "Recharger la page"
   }
 }

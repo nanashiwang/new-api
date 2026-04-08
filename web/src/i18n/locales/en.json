@@ -3445,6 +3445,8 @@
     "覆盖官方价格": "Override official price",
     "开启后可改写官方默认补全倍率 {{ratio}}": "Enable to override the official default completion ratio {{ratio}}",
     "已启用官方价格覆盖": "Official price override enabled",
-    "当前正在覆盖官方默认补全倍率 {{ratio}}，保存后按你的自定义价格生效。": "You are overriding the official default completion ratio {{ratio}}. After saving, your custom price will take effect."
+    "当前正在覆盖官方默认补全倍率 {{ratio}}，保存后按你的自定义价格生效。": "You are overriding the official default completion ratio {{ratio}}. After saving, your custom price will take effect.",
+    "页面渲染出错，请刷新页面重试": "An error occurred while rendering the page. Please refresh and try again.",
+    "刷新页面": "Reload Page"
   }
 }
