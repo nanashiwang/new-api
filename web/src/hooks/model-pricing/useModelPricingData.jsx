@@ -105,7 +105,7 @@ export const useModelPricingData = () => {
   const [autoGroups, setAutoGroups] = useState([]);
 
   // 价格转换模式：'recharge'=充值汇率, 'package'=套餐汇率
-  const [priceConvertMode, setPriceConvertMode] = useState('recharge');
+  const [priceConvertMode, setPriceConvertMode] = useState('package');
   const [subscriptionPlans, setSubscriptionPlans] = useState([]);
   const [selectedPlanId, setSelectedPlanId] = useState(null);
 
@@ -150,7 +150,17 @@ export const useModelPricingData = () => {
   // 套餐加载后自动选中第一个（仅在 package 模式下且尚未选择时）
   useEffect(() => {
     if (priceConvertMode === 'package' && !selectedPlanId && availablePlans.length > 0) {
-      setSelectedPlanId(availablePlans[0].id);
+      const quotaPerUnit = getQuotaPerUnit();
+      let bestPlan = availablePlans[0];
+      let bestRate = Infinity;
+      for (const plan of availablePlans) {
+        const rate = computePackageEffectiveRate(plan, quotaPerUnit, usdExchangeRate);
+        if (rate != null && rate < bestRate) {
+          bestRate = rate;
+          bestPlan = plan;
+        }
+      }
+      setSelectedPlanId(bestPlan.id);
     }
   }, [priceConvertMode, selectedPlanId, availablePlans]);
 
