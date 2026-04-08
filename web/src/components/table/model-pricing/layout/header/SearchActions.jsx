@@ -95,26 +95,19 @@ const SearchActions = memo(
           <>
             <Divider layout='vertical' margin='8px' />
 
-            {/* 充值价格显示开关 */}
-            <div className='flex items-center gap-2'>
-              <span className='text-sm text-gray-600'>{t('充值价格显示')}</span>
-              <Switch
-                checked={showWithRecharge}
-                onChange={setShowWithRecharge}
-              />
-            </div>
-
-            {/* 价格转换模式选择（始终可见，可提前选） */}
+            {/* 价格显示模式下拉框 + 开关 */}
             <Select
               value={priceConvertMode}
               onChange={setPriceConvertMode}
               style={{ width: 120 }}
               optionList={[
                 { value: 'recharge', label: t('充值价格') },
-                ...(subscriptionPlans.length > 0
-                  ? [{ value: 'package', label: t('套餐价格') }]
-                  : []),
+                { value: 'package', label: t('套餐价格') },
               ]}
+            />
+            <Switch
+              checked={showWithRecharge}
+              onChange={setShowWithRecharge}
             />
 
             {/* 套餐选择器 */}
