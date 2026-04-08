@@ -615,7 +615,6 @@ const TopUp = () => {
   const selectPresetAmount = (preset) => {
     setTopUpCount(preset.value);
     setSelectedPreset(preset.value);
-    fetchQuotedAmount(preset.value, payWay);
   };
 
   const formatLargeNumber = (num) => num.toString();
