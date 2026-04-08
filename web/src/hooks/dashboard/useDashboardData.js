@@ -40,6 +40,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const initialized = useRef(false);
   const quotaRequestGuard = useLatestRequestGuard();
   const uptimeRequestGuard = useLatestRequestGuard();
+  const userQuotaRequestGuard = useLatestRequestGuard();
 
   // ========== 基础状态 ==========
   const [loading, setLoading] = useState(false);
@@ -234,6 +235,30 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     }
   }, [activeUptimeTab, uptimeRequestGuard]);
 
+  const loadUserQuotaData = useCallback(async () => {
+    if (!isAdminUser) return [];
+    const requestId = userQuotaRequestGuard.createRequestId();
+    try {
+      const { start_timestamp, end_timestamp } = inputs;
+      const localStartTimestamp = Date.parse(start_timestamp) / 1000;
+      const localEndTimestamp = Date.parse(end_timestamp) / 1000;
+      const url = `/api/data/users?start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}`;
+      const res = await API.get(url);
+      if (!userQuotaRequestGuard.isLatestRequest(requestId)) {
+        return [];
+      }
+      const { success, message, data } = res.data;
+      if (success) {
+        return data || [];
+      }
+      showError(message);
+      return [];
+    } catch (err) {
+      console.error(err);
+      return [];
+    }
+  }, [inputs, isAdminUser, userQuotaRequestGuard]);
+
   const getUserData = useCallback(async () => {
     let res = await API.get(`/api/user/self`);
     const { success, message, data } = res.data;
@@ -333,6 +358,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     showSearchModal,
     handleCloseModal,
     loadQuotaData,
+    loadUserQuotaData,
     loadUptimeData,
     getUserData,
     refresh,
