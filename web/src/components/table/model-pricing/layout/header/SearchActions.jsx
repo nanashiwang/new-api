@@ -104,23 +104,21 @@ const SearchActions = memo(
               />
             </div>
 
-            {/* 价格转换模式选择 */}
-            {showWithRecharge && (
-              <Select
-                value={priceConvertMode}
-                onChange={setPriceConvertMode}
-                style={{ width: 120 }}
-                optionList={[
-                  { value: 'recharge', label: t('充值价格') },
-                  ...(subscriptionPlans.length > 0
-                    ? [{ value: 'package', label: t('套餐价格') }]
-                    : []),
-                ]}
-              />
-            )}
+            {/* 价格转换模式选择（始终可见，可提前选） */}
+            <Select
+              value={priceConvertMode}
+              onChange={setPriceConvertMode}
+              style={{ width: 120 }}
+              optionList={[
+                { value: 'recharge', label: t('充值价格') },
+                ...(subscriptionPlans.length > 0
+                  ? [{ value: 'package', label: t('套餐价格') }]
+                  : []),
+              ]}
+            />
 
             {/* 套餐选择器 */}
-            {showWithRecharge && priceConvertMode === 'package' && subscriptionPlans.length > 0 && (
+            {priceConvertMode === 'package' && subscriptionPlans.length > 0 && (
               <Select
                 value={selectedPlanId}
                 onChange={setSelectedPlanId}
