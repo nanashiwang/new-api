@@ -30,8 +30,10 @@ export const useUpstreamAccounts = ({
   options,
   loadUpstreamAccounts,
   comboConfigs,
+  setComboConfigs,
   upstreamConfig,
   setUpstreamConfig,
+  setHasUnsavedConfigChanges,
   runFullRefresh,
 }) => {
   const [accountDraft, setAccountDraft] = useState(
@@ -275,7 +277,12 @@ export const useUpstreamAccounts = ({
   }, []);
 
   const syncAccountInternal = useCallback(
-    async (accountId) => {
+    async (accountId, options = {}) => {
+      const {
+        forceRefresh = false,
+        suppressReadyToast = false,
+        suppressNeedsBaselineToast = false,
+      } = options;
       if (!accountId) return false;
       setSyncingAccountId(accountId);
       try {
@@ -295,13 +302,17 @@ export const useUpstreamAccounts = ({
                 : ''),
           );
         } else if (syncedStatus === 'needs_baseline') {
-          showSuccess('首次同步完成，下次开始统计近 7 天已用');
+          if (!suppressNeedsBaselineToast) {
+            showSuccess('首次同步完成，下次开始统计近 7 天已用');
+          }
         } else {
-          showSuccess('账户数据已刷新');
+          if (!suppressReadyToast) {
+            showSuccess('账户数据已刷新');
+          }
         }
         await loadUpstreamAccounts();
         await loadAccountTrend(accountId);
-        if (activeWalletAccountIds.has(Number(accountId))) {
+        if (forceRefresh || activeWalletAccountIds.has(Number(accountId))) {
           await runFullRefresh();
         }
         return syncedStatus !== 'failed';
@@ -378,8 +389,8 @@ export const useUpstreamAccounts = ({
   ]);
 
   const syncAccount = useCallback(
-    async (accountId) => {
-      await syncAccountInternal(accountId);
+    async (accountId, options = {}) => {
+      await syncAccountInternal(accountId, options);
     },
     [syncAccountInternal],
   );
@@ -431,6 +442,24 @@ export const useUpstreamAccounts = ({
             upstream_account_id: 0,
           }));
         }
+        let removedBindings = false;
+        setComboConfigs((prev) =>
+          (prev || []).map((item) => {
+            if (Number(item?.upstream_account_id || 0) !== Number(accountId)) {
+              return item;
+            }
+            removedBindings = true;
+            return {
+              ...item,
+              upstream_mode: 'manual_rules',
+              upstream_account_id: 0,
+            };
+          }),
+        );
+        if (removedBindings) {
+          setHasUnsavedConfigChanges(true);
+          showSuccess('已移除当前页面内引用该账户的组合绑定，请记得保存配置');
+        }
         if (Number(editingAccountId || 0) === Number(accountId)) {
           setDetailSideSheetVisible(false);
           setAccountTrend(null);
@@ -447,6 +476,8 @@ export const useUpstreamAccounts = ({
       loadUpstreamAccounts,
       editingAccountId,
       resetAccountDraft,
+      setComboConfigs,
+      setHasUnsavedConfigChanges,
       setUpstreamConfig,
       upstreamConfig.upstream_account_id,
     ],

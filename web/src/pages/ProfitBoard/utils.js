@@ -128,10 +128,7 @@ export const createDefaultComboPricingConfig = (
   legacySite,
   legacyUpstream,
 ) => {
-  const walletMode =
-    legacyUpstream?.upstream_mode === 'wallet_observer' ||
-    (legacyUpstream?.cost_source &&
-      legacyUpstream.cost_source !== 'manual_only');
+  const walletMode = legacyUpstream?.upstream_mode === 'wallet_observer';
 
   return {
     combo_id: comboId,
@@ -140,6 +137,7 @@ export const createDefaultComboPricingConfig = (
         ? 'shared_site_model'
         : 'manual',
     upstream_mode: walletMode ? 'wallet_observer' : 'manual_rules',
+    cost_source: legacyUpstream?.cost_source || 'manual_only',
     upstream_account_id: walletMode
       ? Number(legacyUpstream?.upstream_account_id || 0)
       : 0,
@@ -878,17 +876,11 @@ export const normalizeRestoredState = (state) => {
   next.upstreamConfig = {
     ...createDefaultUpstreamConfig(),
     ...(next.upstreamConfig || {}),
-    upstream_mode:
-      next.upstreamConfig?.upstream_mode ||
-      (next.upstreamConfig?.cost_source &&
-      next.upstreamConfig.cost_source !== 'manual_only'
-        ? 'wallet_observer'
-        : 'manual_rules'),
+    upstream_mode: next.upstreamConfig?.upstream_mode || 'manual_rules',
     fixed_amount: 0,
   };
   if (next.upstreamConfig.upstream_mode !== 'wallet_observer') {
     next.upstreamConfig.upstream_account_id = 0;
-    next.upstreamConfig.cost_source = 'manual_only';
   }
   next.siteConfig = {
     ...createDefaultSiteConfig(),
@@ -922,6 +914,18 @@ export const normalizeRestoredState = (state) => {
   next.autoRefreshMode = !!next.autoRefreshMode;
   next.hasUnsavedConfigChanges = !!next.hasUnsavedConfigChanges;
   return next;
+};
+
+export const getUpstreamCostSourceLabel = (costSource, t) => {
+  switch (costSource) {
+    case 'returned_cost_first':
+      return t('优先用上游返回费用');
+    case 'returned_cost_only':
+      return t('只用上游返回费用');
+    case 'manual_only':
+    default:
+      return t('只用手动成本规则');
+  }
 };
 
 export const getDisplayCurrency = (status) => {

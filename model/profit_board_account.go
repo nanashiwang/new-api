@@ -275,9 +275,9 @@ func buildProfitBoardUpstreamAccountOption(
 		LastSyncedAt:                 state.LastSyncedAt,
 		LastSuccessAt:                state.LastSuccessAt,
 		WalletBalanceUSD:             state.WalletBalanceUSD,
-		WalletQuotaUSD:               state.WalletBalanceUSD,
+		WalletQuotaUSD:               state.WalletQuotaUSD,
 		WalletUsedTotalUSD:           state.WalletUsedTotalUSD,
-		WalletUsedQuotaUSD:           state.WalletUsedTotalUSD,
+		WalletUsedQuotaUSD:           state.WalletUsedQuotaUSD,
 		PeriodUsedUSD:                state.PeriodUsedUSD,
 		SubscriptionRemainingUSD:     state.SubscriptionRemainingUSD,
 		SubscriptionTotalQuotaUSD:    state.SubscriptionTotalQuotaUSD,
@@ -436,10 +436,43 @@ func DeleteProfitBoardUpstreamAccount(id int) error {
 	if err != nil {
 		return err
 	}
+	inUse, err := profitBoardUpstreamAccountInUse(id)
+	if err != nil {
+		return err
+	}
+	if inUse {
+		return ErrProfitBoardAccountInUse
+	}
 	if err := DB.Delete(account).Error; err != nil {
 		return err
 	}
 	return nil
+}
+
+func profitBoardUpstreamAccountInUse(id int) (bool, error) {
+	records := make([]ProfitBoardConfig, 0)
+	if err := DB.Find(&records).Error; err != nil {
+		return false, err
+	}
+	for _, record := range records {
+		payload, err := payloadFromProfitBoardConfigRecord(record)
+		if err != nil {
+			return false, err
+		}
+		if payload == nil {
+			continue
+		}
+		comboConfigs := normalizeProfitBoardComboConfigs(payload.Batches, payload.ComboConfigs, payload.SharedSite, payload.Site, payload.Upstream)
+		for _, comboConfig := range comboConfigs {
+			if comboConfig.UpstreamMode != ProfitBoardUpstreamModeWallet {
+				continue
+			}
+			if comboConfig.UpstreamAccountID == id {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 func SyncProfitBoardUpstreamAccount(id int, force bool) (*ProfitBoardUpstreamAccountOption, error) {
@@ -740,12 +773,6 @@ func migrateProfitBoardLegacyWalletAccount(payload *ProfitBoardConfigPayload) er
 	}
 	payload.Upstream = normalizeProfitBoardPricingConfig(payload.Upstream, false)
 	payload.ComboConfigs = normalizeProfitBoardComboConfigs(payload.Batches, payload.ComboConfigs, payload.SharedSite, payload.Site, payload.Upstream)
-	if payload.Upstream.UpstreamMode != ProfitBoardUpstreamModeWallet {
-		switch payload.Upstream.CostSource {
-		case ProfitBoardCostSourceReturnedFirst, ProfitBoardCostSourceReturnedOnly:
-			payload.Upstream.UpstreamMode = ProfitBoardUpstreamModeWallet
-		}
-	}
 	needsLegacyMigration := payload.Upstream.UpstreamMode == ProfitBoardUpstreamModeWallet
 	for index := range payload.ComboConfigs {
 		if payload.ComboConfigs[index].UpstreamMode == ProfitBoardUpstreamModeWallet && payload.ComboConfigs[index].UpstreamAccountID <= 0 {

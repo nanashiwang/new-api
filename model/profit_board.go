@@ -103,6 +103,7 @@ type ProfitBoardComboPricingConfig struct {
 	ComboId                  string                             `json:"combo_id"`
 	SiteMode                 string                             `json:"site_mode,omitempty"`
 	UpstreamMode             string                             `json:"upstream_mode,omitempty"`
+	CostSource               string                             `json:"cost_source,omitempty"`
 	UpstreamAccountID        int                                `json:"upstream_account_id,omitempty"`
 	SharedSite               ProfitBoardSharedSitePricingConfig `json:"shared_site,omitempty"`
 	SiteRules                []ProfitBoardModelPricingRule      `json:"site_rules,omitempty"`
@@ -427,6 +428,7 @@ type profitBoardResolvedComboPricing struct {
 	ComboId                  string
 	SiteMode                 string
 	UpstreamMode             string
+	CostSource               string
 	UpstreamAccountID        int
 	SharedSite               ProfitBoardSharedSitePricingConfig
 	SiteRules                []ProfitBoardModelPricingRule
@@ -461,6 +463,7 @@ var (
 	ErrProfitBoardInvalidUpstreamMode      = errors.New("profit_board:invalid_upstream_mode")
 	ErrProfitBoardWalletRequireAccount     = errors.New("profit_board:wallet_require_account")
 	ErrProfitBoardInvalidSiteSource        = errors.New("profit_board:invalid_site_source")
+	ErrProfitBoardAccountInUse             = errors.New("profit_board:account_in_use")
 	ErrProfitBoardEndBeforeStart           = errors.New("profit_board:end_before_start")
 	ErrProfitBoardCustomGranularityMin     = errors.New("profit_board:custom_granularity_min")
 	ErrProfitBoardCustomGranularityMax     = errors.New("profit_board:custom_granularity_max")
@@ -722,6 +725,10 @@ func defaultProfitBoardComboSiteMode(sharedSite ProfitBoardSharedSitePricingConf
 
 func normalizeProfitBoardComboConfigs(batches []ProfitBoardBatch, comboConfigs []ProfitBoardComboPricingConfig, sharedSite ProfitBoardSharedSitePricingConfig, legacySite ProfitBoardTokenPricingConfig, legacyUpstream ProfitBoardTokenPricingConfig) []ProfitBoardComboPricingConfig {
 	configMap := make(map[string]ProfitBoardComboPricingConfig, len(comboConfigs))
+	legacyCostSource := normalizeProfitBoardCostSource(legacyUpstream.CostSource)
+	if legacyCostSource == "" {
+		legacyCostSource = ProfitBoardCostSourceManualOnly
+	}
 	for _, config := range comboConfigs {
 		comboID := strings.TrimSpace(config.ComboId)
 		if comboID == "" {
@@ -743,6 +750,10 @@ func normalizeProfitBoardComboConfigs(batches []ProfitBoardBatch, comboConfigs [
 			} else {
 				config.UpstreamMode = ProfitBoardUpstreamModeManual
 			}
+		}
+		config.CostSource = normalizeProfitBoardCostSource(config.CostSource)
+		if config.CostSource == "" {
+			config.CostSource = legacyCostSource
 		}
 		if config.UpstreamMode != ProfitBoardUpstreamModeWallet {
 			config.UpstreamAccountID = 0
@@ -770,6 +781,7 @@ func normalizeProfitBoardComboConfigs(batches []ProfitBoardBatch, comboConfigs [
 				ComboId:                  batch.Id,
 				SiteMode:                 defaultProfitBoardComboSiteMode(sharedSite, legacySite),
 				UpstreamMode:             legacyUpstream.UpstreamMode,
+				CostSource:               legacyCostSource,
 				UpstreamAccountID:        legacyUpstream.UpstreamAccountID,
 				SharedSite:               normalizeProfitBoardSharedSiteConfig(sharedSite, legacySite),
 				SiteRules:                normalizeProfitBoardModelPricingRules(nil, legacySite),
@@ -786,6 +798,10 @@ func normalizeProfitBoardComboConfigs(batches []ProfitBoardBatch, comboConfigs [
 		}
 		if config.UpstreamMode == "" {
 			config.UpstreamMode = ProfitBoardUpstreamModeManual
+		}
+		config.CostSource = normalizeProfitBoardCostSource(config.CostSource)
+		if config.CostSource == "" {
+			config.CostSource = legacyCostSource
 		}
 		if config.UpstreamMode != ProfitBoardUpstreamModeWallet {
 			config.UpstreamAccountID = 0
@@ -820,6 +836,11 @@ func validateProfitBoardComboConfigs(comboConfigs []ProfitBoardComboPricingConfi
 		case "", ProfitBoardUpstreamModeManual, ProfitBoardUpstreamModeWallet:
 		default:
 			return ErrProfitBoardInvalidUpstreamMode
+		}
+		switch normalizeProfitBoardCostSource(config.CostSource) {
+		case "", ProfitBoardCostSourceReturnedFirst, ProfitBoardCostSourceReturnedOnly, ProfitBoardCostSourceManualOnly:
+		default:
+			return ErrProfitBoardInvalidCostSource
 		}
 		if strings.TrimSpace(config.UpstreamMode) == ProfitBoardUpstreamModeWallet && config.UpstreamAccountID <= 0 {
 			return ErrProfitBoardWalletRequireAccount
@@ -991,12 +1012,11 @@ func normalizeProfitBoardPricingConfig(config ProfitBoardTokenPricingConfig, isS
 		default:
 			config.UpstreamMode = ProfitBoardUpstreamModeManual
 		}
-		if config.UpstreamMode == ProfitBoardUpstreamModeWallet {
-			if strings.TrimSpace(config.CostSource) == "" {
-				config.CostSource = ProfitBoardCostSourceReturnedOnly
-			}
-		} else {
+		config.CostSource = normalizeProfitBoardCostSource(config.CostSource)
+		if config.CostSource == "" {
 			config.CostSource = ProfitBoardCostSourceManualOnly
+		}
+		if config.UpstreamMode != ProfitBoardUpstreamModeWallet {
 			config.UpstreamAccountID = 0
 		}
 	}
@@ -1007,6 +1027,19 @@ func normalizeProfitBoardPricingConfig(config ProfitBoardTokenPricingConfig, isS
 		config.PricingMode = ""
 	}
 	return config
+}
+
+func normalizeProfitBoardCostSource(source string) string {
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case ProfitBoardCostSourceReturnedFirst:
+		return ProfitBoardCostSourceReturnedFirst
+	case ProfitBoardCostSourceReturnedOnly:
+		return ProfitBoardCostSourceReturnedOnly
+	case "", ProfitBoardCostSourceManualOnly:
+		return ProfitBoardCostSourceManualOnly
+	default:
+		return ""
+	}
 }
 
 func validateProfitBoardPricingConfig(config ProfitBoardTokenPricingConfig, isSite bool) error {
@@ -1379,6 +1412,41 @@ func buildProfitBoardActivityWatermark(requestCount int, latestLogID int, latest
 	return fmt.Sprintf("%d:%d:%d", requestCount, latestLogID, latestCreatedAt)
 }
 
+func buildProfitBoardCombinedActivityWatermark(requestCount int, latestLogID int, latestCreatedAt int64, walletSnapshotWatermark string) string {
+	base := buildProfitBoardActivityWatermark(requestCount, latestLogID, latestCreatedAt)
+	walletSnapshotWatermark = strings.TrimSpace(walletSnapshotWatermark)
+	if walletSnapshotWatermark == "" {
+		return base
+	}
+	return base + "|" + walletSnapshotWatermark
+}
+
+func buildProfitBoardWalletSnapshotWatermark(comboPricingMap map[string]profitBoardResolvedComboPricing) (string, error) {
+	accountCombos := profitBoardWalletObserverCombosByAccount(comboPricingMap)
+	if len(accountCombos) == 0 {
+		return "", nil
+	}
+	accountIDs := make([]int, 0, len(accountCombos))
+	for accountID := range accountCombos {
+		accountIDs = append(accountIDs, accountID)
+	}
+	sort.Ints(accountIDs)
+	parts := make([]string, 0, len(accountIDs))
+	for _, accountID := range accountIDs {
+		signature := profitBoardUpstreamAccountSnapshotSignature(accountID)
+		latestSnapshot, err := getLatestProfitBoardRemoteSnapshot(signature, profitBoardUpstreamAccountSnapshotComboID)
+		if err != nil {
+			return "", err
+		}
+		if latestSnapshot == nil {
+			parts = append(parts, fmt.Sprintf("%d:0:0", accountID))
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%d:%d:%d", accountID, latestSnapshot.Id, latestSnapshot.SyncedAt))
+	}
+	return strings.Join(parts, ","), nil
+}
+
 func resolveProfitBoardChannels(selection ProfitBoardSelection) ([]ProfitBoardChannelOption, []int, error) {
 	switch selection.ScopeType {
 	case ProfitBoardScopeChannel:
@@ -1549,13 +1617,18 @@ func GetProfitBoardActivity(query ProfitBoardQuery) (*ProfitBoardActivity, error
 	if err != nil {
 		return nil, err
 	}
+	comboPricingMap := resolveProfitBoardComboPricingMap(normalizedQuery, resolvedBatches)
+	walletSnapshotWatermark, err := buildProfitBoardWalletSnapshotWatermark(comboPricingMap)
+	if err != nil {
+		return nil, err
+	}
 
 	channelIDs := collectProfitBoardChannelIDs(resolvedBatches)
 	if len(channelIDs) == 0 {
 		return &ProfitBoardActivity{
 			Signature:         signature,
 			GeneratedAt:       common.GetTimestamp(),
-			ActivityWatermark: buildProfitBoardActivityWatermark(0, 0, 0),
+			ActivityWatermark: buildProfitBoardCombinedActivityWatermark(0, 0, 0, walletSnapshotWatermark),
 		}, nil
 	}
 
@@ -1578,7 +1651,7 @@ func GetProfitBoardActivity(query ProfitBoardQuery) (*ProfitBoardActivity, error
 	return &ProfitBoardActivity{
 		Signature:          signature,
 		GeneratedAt:        common.GetTimestamp(),
-		ActivityWatermark:  buildProfitBoardActivityWatermark(0, latestRow.Id, latestRow.CreatedAt),
+		ActivityWatermark:  buildProfitBoardCombinedActivityWatermark(0, latestRow.Id, latestRow.CreatedAt, walletSnapshotWatermark),
 		LatestLogId:        latestRow.Id,
 		LatestLogCreatedAt: latestRow.CreatedAt,
 		RequestCount:       0,
@@ -1785,6 +1858,7 @@ func resolveProfitBoardComboPricingMap(query ProfitBoardQuery, batches []ProfitB
 			ComboId:                  batch.Id,
 			SiteMode:                 ProfitBoardComboSiteModeManual,
 			UpstreamMode:             query.Upstream.UpstreamMode,
+			CostSource:               normalizeProfitBoardCostSource(query.Upstream.CostSource),
 			UpstreamAccountID:        query.Upstream.UpstreamAccountID,
 			SharedSite:               normalizeProfitBoardSharedSiteConfig(query.SharedSite, query.Site),
 			SiteRules:                normalizeProfitBoardModelPricingRules(nil, query.Site),
@@ -1801,6 +1875,9 @@ func resolveProfitBoardComboPricingMap(query ProfitBoardQuery, batches []ProfitB
 		}
 		if config.UpstreamMode != "" {
 			current.UpstreamMode = config.UpstreamMode
+		}
+		if normalizeProfitBoardCostSource(config.CostSource) != "" {
+			current.CostSource = normalizeProfitBoardCostSource(config.CostSource)
 		}
 		if strings.TrimSpace(current.UpstreamMode) != ProfitBoardUpstreamModeWallet {
 			current.UpstreamMode = ProfitBoardUpstreamModeManual
@@ -2150,7 +2227,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 				prepared.InputTokens,
 				prepared.CacheReadTokens,
 				prepared.CacheCreationTokens,
-				normalizedQuery.Upstream.CostSource,
+				comboPricing.CostSource,
 				comboPricing.UpstreamRules,
 			)
 		}
@@ -2234,7 +2311,9 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		if sitePricingKnown {
 			point.ConfiguredSiteRevenueUSD += configuredSiteRevenueUSD
 		}
-		if upstreamCostKnown {
+		if isWalletCombo {
+			point.ActualProfitUSD += actualProfitUSD
+		} else if upstreamCostKnown {
 			point.UpstreamCostUSD += upstreamCostUSD
 			point.KnownUpstreamCostCount++
 			point.ActualProfitUSD += actualProfitUSD
@@ -2273,7 +2352,9 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		if sitePricingKnown {
 			channelItem.ConfiguredSiteRevenueUSD += configuredSiteRevenueUSD
 		}
-		if upstreamCostKnown {
+		if isWalletCombo {
+			channelItem.ActualProfitUSD += actualProfitUSD
+		} else if upstreamCostKnown {
 			channelItem.UpstreamCostUSD += upstreamCostUSD
 			channelItem.KnownUpstreamCostCount++
 			channelItem.ActualProfitUSD += actualProfitUSD
@@ -2302,7 +2383,9 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		if sitePricingKnown {
 			modelItem.ConfiguredSiteRevenueUSD += configuredSiteRevenueUSD
 		}
-		if upstreamCostKnown {
+		if isWalletCombo {
+			modelItem.ActualProfitUSD += actualProfitUSD
+		} else if upstreamCostKnown {
 			modelItem.UpstreamCostUSD += upstreamCostUSD
 			modelItem.KnownUpstreamCostCount++
 			modelItem.ActualProfitUSD += actualProfitUSD
@@ -2517,10 +2600,15 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 	report.Summary.ConfiguredProfitCoverageRate = roundProfitBoardAmount(report.Summary.ConfiguredProfitCoverageRate)
 	report.Meta.LatestLogId = latestLogId
 	report.Meta.LatestLogCreatedAt = latestLogCreatedAt
-	report.Meta.ActivityWatermark = buildProfitBoardActivityWatermark(
+	walletSnapshotWatermark, watermarkErr := buildProfitBoardWalletSnapshotWatermark(comboPricingMap)
+	if watermarkErr != nil {
+		return nil, watermarkErr
+	}
+	report.Meta.ActivityWatermark = buildProfitBoardCombinedActivityWatermark(
 		report.Summary.RequestCount,
 		latestLogId,
 		latestLogCreatedAt,
+		walletSnapshotWatermark,
 	)
 	report.Warnings = uniqueProfitBoardWarnings(report.Warnings)
 	if !normalizedQuery.IncludeDetails {
@@ -2589,6 +2677,7 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 	}
 
 	batchSummaryMap := make(map[string]*ProfitBoardBatchSummary, len(resolvedBatches))
+	timeBuckets := make(map[string]*ProfitBoardTimeseriesPoint)
 	latestLogId := 0
 	latestLogCreatedAt := int64(0)
 	accountWalletCombos := profitBoardWalletObserverCombosByAccount(comboPricingMap)
@@ -2703,7 +2792,7 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 				prepared.InputTokens,
 				prepared.CacheReadTokens,
 				prepared.CacheCreationTokens,
-				payload.Upstream.CostSource,
+				comboPricing.CostSource,
 				comboPricing.UpstreamRules,
 			)
 		}
@@ -2762,9 +2851,32 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 			report.Summary.ActualProfitUSD += actualProfitUSD
 			batchSummary.ActualProfitUSD += actualProfitUSD
 		}
+
+		bucketTimestamp, bucketLabel := buildProfitBoardBucket(
+			row.CreatedAt,
+			"day",
+			0,
+		)
+		timeKey := fmt.Sprintf("%s:%d", prepared.Batch.Id, bucketTimestamp)
+		point, ok := timeBuckets[timeKey]
+		if !ok {
+			point = &ProfitBoardTimeseriesPoint{
+				BatchId:         prepared.Batch.Id,
+				BatchName:       prepared.Batch.Name,
+				Bucket:          bucketLabel,
+				BucketTimestamp: bucketTimestamp,
+			}
+			timeBuckets[timeKey] = point
+		}
+		point.RequestCount++
 		return nil
 	}); err != nil {
 		return nil, err
+	}
+
+	report.Timeseries = make([]ProfitBoardTimeseriesPoint, 0, len(timeBuckets))
+	for _, point := range timeBuckets {
+		report.Timeseries = append(report.Timeseries, *point)
 	}
 
 	for _, summary := range batchSummaryMap {
@@ -2826,9 +2938,19 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 	report.Summary.ConfiguredProfitUSD = roundProfitBoardAmount(report.Summary.ConfiguredProfitUSD)
 	report.Summary.ActualProfitUSD = roundProfitBoardAmount(report.Summary.ActualProfitUSD)
 	report.Summary.ConfiguredProfitCoverageRate = roundProfitBoardAmount(report.Summary.ConfiguredProfitCoverageRate)
+	report.Timeseries = nil
 	report.Meta.LatestLogId = latestLogId
 	report.Meta.LatestLogCreatedAt = latestLogCreatedAt
-	report.Meta.ActivityWatermark = buildProfitBoardActivityWatermark(report.Summary.RequestCount, latestLogId, latestLogCreatedAt)
+	walletSnapshotWatermark, watermarkErr := buildProfitBoardWalletSnapshotWatermark(comboPricingMap)
+	if watermarkErr != nil {
+		return nil, watermarkErr
+	}
+	report.Meta.ActivityWatermark = buildProfitBoardCombinedActivityWatermark(
+		report.Summary.RequestCount,
+		latestLogId,
+		latestLogCreatedAt,
+		walletSnapshotWatermark,
+	)
 	report.Warnings = uniqueProfitBoardWarnings(report.Warnings)
 	return report, nil
 }

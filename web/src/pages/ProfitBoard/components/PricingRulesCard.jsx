@@ -20,6 +20,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Card, Empty, Tag, Typography } from '@douyinfe/semi-ui';
 import { Pencil } from 'lucide-react';
 import PricingConfigModal from './PricingConfigModal';
+import { getUpstreamCostSourceLabel } from '../utils';
 
 const { Text, Title } = Typography;
 
@@ -34,7 +35,10 @@ const getSiteSummary = (comboConfig, t) => {
 
 const getUpstreamSummary = (comboConfig, options, t) => {
   if (comboConfig.upstream_mode !== 'wallet_observer') {
-    return t('按模型单价');
+    return getUpstreamCostSourceLabel(
+      comboConfig.cost_source || 'manual_only',
+      t,
+    );
   }
   const account = (options?.upstream_accounts || []).find(
     (item) => item.id === Number(comboConfig.upstream_account_id || 0),

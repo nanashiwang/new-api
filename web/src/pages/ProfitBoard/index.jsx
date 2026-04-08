@@ -61,6 +61,7 @@ import {
   createSuggestedComboName,
   createTrendSpec,
   formatMoney,
+  getUpstreamCostSourceLabel,
   isLikelyAutoComboName,
   mergeComboDraftWithTemplate,
   pickDominantComboModes,
@@ -101,6 +102,7 @@ const cloneComboDraft = (batch, comboConfig) => ({
   combo_id: comboConfig.combo_id,
   site_mode: comboConfig.site_mode,
   upstream_mode: comboConfig.upstream_mode,
+  cost_source: comboConfig.cost_source || 'manual_only',
   upstream_account_id: Number(comboConfig.upstream_account_id || 0),
   shared_site: { ...(comboConfig.shared_site || {}) },
   site_rules: (comboConfig.site_rules || []).map((rule) =>
@@ -124,7 +126,12 @@ const getSiteSummaryText = (comboConfig, t) => {
 };
 
 const getUpstreamSummaryText = (comboConfig, options, t) => {
-  if (comboConfig.upstream_mode !== 'wallet_observer') return t('按模型单价');
+  if (comboConfig.upstream_mode !== 'wallet_observer') {
+    return getUpstreamCostSourceLabel(
+      comboConfig.cost_source || 'manual_only',
+      t,
+    );
+  }
   const account = (options?.upstream_accounts || []).find(
     (item) => item.id === Number(comboConfig.upstream_account_id || 0),
   );
@@ -362,8 +369,10 @@ const ProfitBoardPage = () => {
     options,
     loadUpstreamAccounts,
     comboConfigs,
+    setComboConfigs,
     upstreamConfig,
     setUpstreamConfig,
+    setHasUnsavedConfigChanges,
     runFullRefresh,
   });
 
@@ -1132,7 +1141,7 @@ const ProfitBoardPage = () => {
     );
   }, [recommendedAccountId, setEditorDraftSmart]);
 
-  const handleSaveEditor = useCallback(() => {
+  const handleSaveEditor = useCallback(async () => {
     const error = buildDraftValidationError(editorDraft);
     if (error) {
       setEditorValidationError(error);
@@ -1156,6 +1165,7 @@ const ProfitBoardPage = () => {
       combo_id: nextBatch.id,
       site_mode: editorDraft.site_mode,
       upstream_mode: editorDraft.upstream_mode,
+      cost_source: editorDraft.cost_source || 'manual_only',
       upstream_account_id: Number(editorDraft.upstream_account_id || 0),
       shared_site: { ...(editorDraft.shared_site || {}) },
       site_rules: (editorDraft.site_rules || []).map((rule) =>
@@ -1180,9 +1190,30 @@ const ProfitBoardPage = () => {
       );
     });
     setHasUnsavedConfigChanges(true);
-    showSuccess(editingBatchId ? '组合已更新' : '组合已添加');
+    const walletAccountId =
+      nextComboConfig.upstream_mode === 'wallet_observer'
+        ? Number(nextComboConfig.upstream_account_id || 0)
+        : 0;
+    showSuccess(
+      walletAccountId > 0
+        ? editingBatchId
+          ? '组合已更新，正在同步上游账户'
+          : '组合已添加，正在同步上游账户'
+        : editingBatchId
+          ? '组合已更新'
+          : '组合已添加',
+    );
     closeEditor();
+
+    if (walletAccountId > 0) {
+      await accountsHook.syncAccount(walletAccountId, {
+        forceRefresh: true,
+        suppressReadyToast: true,
+        suppressNeedsBaselineToast: true,
+      });
+    }
   }, [
+    accountsHook.syncAccount,
     batches.length,
     buildDraftValidationError,
     closeEditor,

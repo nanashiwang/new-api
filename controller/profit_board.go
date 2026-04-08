@@ -51,6 +51,7 @@ var profitBoardErrorMap = map[error]string{
 	model.ErrProfitBoardAccountNameEmpty:         "上游账户名称不能为空",
 	model.ErrProfitBoardAccountInvalid:           "无效的上游账户",
 	model.ErrProfitBoardAccountTokenEmpty:        "上游 access token 不能为空",
+	model.ErrProfitBoardAccountInUse:             "该上游账户仍被收益看板组合使用，请先改掉组合绑定后再删除",
 }
 
 func translateDuplicateBatchError(err error) string {

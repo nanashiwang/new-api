@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -589,6 +590,77 @@ func TestGetProfitBoardActivityReturnsWatermark(t *testing.T) {
 	}
 	if activity.ActivityWatermark != "0:12:1710003600" {
 		t.Fatalf("unexpected watermark: %s", activity.ActivityWatermark)
+	}
+}
+
+func TestGetProfitBoardActivityWatermarkChangesWhenWalletSnapshotChanges(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	channel := Channel{Id: 1, Name: "alpha", Status: common.ChannelStatusEnabled}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+
+	now := common.GetTimestamp()
+	account := ProfitBoardUpstreamAccount{
+		Name:        "钱包账户",
+		AccountType: ProfitBoardUpstreamAccountTypeNewAPI,
+		BaseURL:     "https://remote.example.com",
+		UserID:      9,
+		Enabled:     true,
+		CreatedAt:   now - 300,
+		UpdatedAt:   now - 300,
+	}
+	encryptedToken, err := encryptProfitBoardRemoteSecret("wallet-token")
+	if err != nil {
+		t.Fatalf("encrypt token: %v", err)
+	}
+	account.AccessTokenEncrypted = encryptedToken
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatalf("create wallet account: %v", err)
+	}
+
+	query := ProfitBoardQuery{
+		Batches: []ProfitBoardBatch{{
+			Id:         "wallet-batch",
+			Name:       "钱包组合",
+			ScopeType:  ProfitBoardScopeChannel,
+			ChannelIDs: []int{1},
+		}},
+		ComboConfigs: []ProfitBoardComboPricingConfig{{
+			ComboId:           "wallet-batch",
+			UpstreamMode:      ProfitBoardUpstreamModeWallet,
+			UpstreamAccountID: account.Id,
+		}},
+		Upstream:       ProfitBoardTokenPricingConfig{CostSource: ProfitBoardCostSourceManualOnly},
+		Site:           ProfitBoardTokenPricingConfig{PricingMode: ProfitBoardSitePricingManual},
+		StartTimestamp: now - 600,
+		EndTimestamp:   now,
+		Granularity:    "day",
+	}
+
+	before, err := GetProfitBoardActivity(query)
+	if err != nil {
+		t.Fatalf("GetProfitBoardActivity before snapshot: %v", err)
+	}
+
+	config := account.remoteObserverConfig()
+	signature := profitBoardUpstreamAccountSnapshotSignature(account.Id)
+	seedProfitBoardRemoteSnapshot(t, signature, profitBoardUpstreamAccountSnapshotComboID, config, now-60, 800, 120, nil)
+
+	after, err := GetProfitBoardActivity(query)
+	if err != nil {
+		t.Fatalf("GetProfitBoardActivity after snapshot: %v", err)
+	}
+
+	if before.LatestLogId != after.LatestLogId || before.LatestLogCreatedAt != after.LatestLogCreatedAt {
+		t.Fatalf("log watermark should stay unchanged: before=%+v after=%+v", before, after)
+	}
+	if before.ActivityWatermark == after.ActivityWatermark {
+		t.Fatalf("expected wallet snapshot to change activity watermark: before=%s after=%s", before.ActivityWatermark, after.ActivityWatermark)
+	}
+	if !strings.Contains(after.ActivityWatermark, "|") {
+		t.Fatalf("expected wallet snapshot watermark suffix, got %s", after.ActivityWatermark)
 	}
 }
 
@@ -1231,6 +1303,157 @@ func TestGenerateProfitBoardReportSupportsComboWalletObserverAndManualMix(t *tes
 	}
 	if batchCosts["manual-batch"] != 0.002 {
 		t.Fatalf("unexpected manual batch cost: %+v", report.BatchSummaries)
+	}
+}
+
+func TestGenerateProfitBoardOverviewIncludesWalletObserverAccountCost(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	originQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 1000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originQuotaPerUnit
+	})
+
+	channel := Channel{Id: 1, Name: "alpha", Status: common.ChannelStatusEnabled}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+
+	now := common.GetTimestamp()
+	account := ProfitBoardUpstreamAccount{
+		Name:        "钱包账户",
+		AccountType: ProfitBoardUpstreamAccountTypeNewAPI,
+		BaseURL:     "https://remote.example.com",
+		UserID:      9,
+		Enabled:     true,
+		CreatedAt:   now - 300,
+		UpdatedAt:   now - 300,
+	}
+	encryptedToken, err := encryptProfitBoardRemoteSecret("wallet-token")
+	if err != nil {
+		t.Fatalf("encrypt token: %v", err)
+	}
+	account.AccessTokenEncrypted = encryptedToken
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatalf("create wallet account: %v", err)
+	}
+
+	config := account.remoteObserverConfig()
+	signature := profitBoardUpstreamAccountSnapshotSignature(account.Id)
+	seedProfitBoardRemoteSnapshot(t, signature, profitBoardUpstreamAccountSnapshotComboID, config, now-180, 900, 100, nil)
+	seedProfitBoardRemoteSnapshot(t, signature, profitBoardUpstreamAccountSnapshotComboID, config, now-60, 800, 200, nil)
+
+	logs := []Log{
+		{Id: 1, Type: LogTypeConsume, CreatedAt: now - 120, ChannelId: 1, ModelName: "gpt-4.1", PromptTokens: 1000, CompletionTokens: 0, Quota: 5},
+		{Id: 2, Type: LogTypeConsume, CreatedAt: now - 110, ChannelId: 1, ModelName: "gpt-4.1", PromptTokens: 1000, CompletionTokens: 0, Quota: 5},
+	}
+	for _, logRow := range logs {
+		if err := db.Create(&logRow).Error; err != nil {
+			t.Fatalf("seed log: %v", err)
+		}
+	}
+
+	overview, err := GenerateProfitBoardOverview(ProfitBoardConfigPayload{
+		Batches: []ProfitBoardBatch{{
+			Id:         "wallet-batch",
+			Name:       "钱包组合",
+			ScopeType:  ProfitBoardScopeChannel,
+			ChannelIDs: []int{1},
+			CreatedAt:  now - 200,
+		}},
+		ComboConfigs: []ProfitBoardComboPricingConfig{{
+			ComboId:           "wallet-batch",
+			UpstreamMode:      ProfitBoardUpstreamModeWallet,
+			UpstreamAccountID: account.Id,
+			SiteRules: []ProfitBoardModelPricingRule{{
+				IsDefault:  true,
+				InputPrice: 5,
+			}},
+		}},
+		Upstream: ProfitBoardTokenPricingConfig{
+			CostSource: ProfitBoardCostSourceManualOnly,
+		},
+		Site: ProfitBoardTokenPricingConfig{
+			PricingMode: ProfitBoardSitePricingManual,
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateProfitBoardOverview: %v", err)
+	}
+
+	if overview.Summary.UpstreamCostUSD != 0.1 {
+		t.Fatalf("unexpected overview upstream cost: %+v", overview.Summary)
+	}
+	if overview.Summary.ConfiguredProfitUSD != -0.09 {
+		t.Fatalf("unexpected overview configured profit: %+v", overview.Summary)
+	}
+	if overview.Summary.ActualProfitUSD != -0.09 {
+		t.Fatalf("unexpected overview actual profit: %+v", overview.Summary)
+	}
+	if len(overview.BatchSummaries) != 1 || overview.BatchSummaries[0].UpstreamCostUSD != 0.1 {
+		t.Fatalf("unexpected overview batch summaries: %+v", overview.BatchSummaries)
+	}
+}
+
+func TestDeleteProfitBoardUpstreamAccountRejectsPersistedReferences(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	channel := Channel{Id: 1, Name: "alpha", Status: common.ChannelStatusEnabled}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+
+	now := common.GetTimestamp()
+	account := ProfitBoardUpstreamAccount{
+		Name:        "钱包账户",
+		AccountType: ProfitBoardUpstreamAccountTypeNewAPI,
+		BaseURL:     "https://remote.example.com",
+		UserID:      9,
+		Enabled:     true,
+		CreatedAt:   now - 300,
+		UpdatedAt:   now - 300,
+	}
+	encryptedToken, err := encryptProfitBoardRemoteSecret("wallet-token")
+	if err != nil {
+		t.Fatalf("encrypt token: %v", err)
+	}
+	account.AccessTokenEncrypted = encryptedToken
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatalf("create wallet account: %v", err)
+	}
+
+	_, _, err = SaveProfitBoardConfig(ProfitBoardConfigPayload{
+		Batches: []ProfitBoardBatch{{
+			Id:         "wallet-batch",
+			Name:       "钱包组合",
+			ScopeType:  ProfitBoardScopeChannel,
+			ChannelIDs: []int{1},
+		}},
+		ComboConfigs: []ProfitBoardComboPricingConfig{{
+			ComboId:           "wallet-batch",
+			UpstreamMode:      ProfitBoardUpstreamModeWallet,
+			UpstreamAccountID: account.Id,
+		}},
+		Upstream: ProfitBoardTokenPricingConfig{
+			CostSource: ProfitBoardCostSourceManualOnly,
+		},
+		Site: ProfitBoardTokenPricingConfig{
+			PricingMode: ProfitBoardSitePricingManual,
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveProfitBoardConfig: %v", err)
+	}
+
+	err = DeleteProfitBoardUpstreamAccount(account.Id)
+	if !errors.Is(err, ErrProfitBoardAccountInUse) {
+		t.Fatalf("expected ErrProfitBoardAccountInUse, got %v", err)
+	}
+
+	loaded := ProfitBoardUpstreamAccount{}
+	if err := db.First(&loaded, account.Id).Error; err != nil {
+		t.Fatalf("account should still exist after protected delete: %v", err)
 	}
 }
 

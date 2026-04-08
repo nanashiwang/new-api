@@ -94,7 +94,7 @@ const ProfitBoardHeader = ({
         <Space wrap>
           {hasUnsavedConfigChanges && (
             <Tag color='orange' size='small'>
-              {t('当前有未保存更改')}
+              {t('当前有未保存更改，仅保存在当前浏览器')}
             </Tag>
           )}
           <Button

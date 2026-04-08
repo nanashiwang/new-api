@@ -33,6 +33,7 @@ import {
 } from '@douyinfe/semi-ui';
 import { ChevronDown, Download, Pencil } from 'lucide-react';
 import PricingRuleList from './PricingRuleList';
+import { getUpstreamCostSourceLabel } from '../utils';
 
 const { Text, Title } = Typography;
 
@@ -113,6 +114,8 @@ const PricingConfigModal = ({
     label: `${item.name} · ${item.base_url || t('未填写地址')}`,
     value: item.id,
   }));
+  const costSource = comboConfig?.cost_source || 'manual_only';
+  const costSourceLabel = getUpstreamCostSourceLabel(costSource, t);
   const scopeOptions =
     comboConfig?.scope_type === 'channel' ? channelOptions : tagOptions;
   const selectedScopeCount =
@@ -350,7 +353,7 @@ const PricingConfigModal = ({
           <Banner
             type='info'
             closeIcon={null}
-            description={t('关闭弹窗后，仍需点击页面顶部"保存配置"才会提交到服务器')}
+            description={t('关闭弹窗后，改动只保存在当前浏览器草稿；仍需点击页面顶部"保存配置"才会提交到服务器')}
           />
 
           {validationError ? (
@@ -685,7 +688,7 @@ const PricingConfigModal = ({
             description={
               comboConfig.upstream_mode === 'wallet_observer'
                 ? `${t('钱包余额变化')} · ${upstreamAccountLabel}`
-                : t('完全按手动成本规则计算上游费用')
+                : costSourceLabel
             }
             aside={
               <Radio.Group
@@ -739,22 +742,66 @@ const PricingConfigModal = ({
                 />
               </div>
             ) : (
-              <PricingRuleList
-                comboId={comboConfig.id || 'modal'}
-                field='upstream_rules'
-                title={t('成本定价规则')}
-                description={t('按模型定义上游成本单价')}
-                rules={comboConfig.upstream_rules}
-                modelNameOptions={modelNameOptions}
-                localModelMap={localModelMap}
-                clampNumber={clampNumber}
-                onUpdate={(_, field, index, patch) =>
-                  updateRule(field, index, patch)
-                }
-                onRemove={(_, field, index) => removeRule(field, index)}
-                onAdd={(_, field) => addRule(field)}
-                t={t}
-              />
+              <>
+                <div className='rounded-xl border border-semi-color-border bg-semi-color-fill-0 p-3'>
+                  <FieldLabel>{t('成本来源')}</FieldLabel>
+                  <Select
+                    value={costSource}
+                    onChange={(value) =>
+                      setComboConfig((prev) => ({
+                        ...prev,
+                        cost_source: value || 'manual_only',
+                      }))
+                    }
+                    optionList={[
+                      { label: t('只用手动成本规则'), value: 'manual_only' },
+                      {
+                        label: t('优先用上游返回费用'),
+                        value: 'returned_cost_first',
+                      },
+                      {
+                        label: t('只用上游返回费用'),
+                        value: 'returned_cost_only',
+                      },
+                    ]}
+                    style={{ width: '100%' }}
+                  />
+                  <Text type='tertiary' size='small' className='mt-1.5 block'>
+                    {costSource === 'returned_cost_first'
+                      ? t('先读取上游返回费用；缺失时再按下方规则回退')
+                      : costSource === 'returned_cost_only'
+                        ? t('只认上游返回费用；下方规则当前不会参与计算')
+                        : t('完全按下方手动规则计算上游费用')}
+                  </Text>
+                </div>
+                {costSource === 'returned_cost_only' ? (
+                  <Banner
+                    type='warning'
+                    closeIcon={null}
+                    description={t('当前选择“只用上游返回费用”，下面的手动规则会保留，但本次统计不会参与计算')}
+                  />
+                ) : null}
+                <PricingRuleList
+                  comboId={comboConfig.id || 'modal'}
+                  field='upstream_rules'
+                  title={t('成本定价规则')}
+                  description={
+                    costSource === 'returned_cost_first'
+                      ? t('当上游没有返回费用时，按模型定义手动成本单价')
+                      : t('按模型定义上游成本单价')
+                  }
+                  rules={comboConfig.upstream_rules}
+                  modelNameOptions={modelNameOptions}
+                  localModelMap={localModelMap}
+                  clampNumber={clampNumber}
+                  onUpdate={(_, field, index, patch) =>
+                    updateRule(field, index, patch)
+                  }
+                  onRemove={(_, field, index) => removeRule(field, index)}
+                  onAdd={(_, field) => addRule(field)}
+                  t={t}
+                />
+              </>
             )}
           </SectionCard>
         </div>
