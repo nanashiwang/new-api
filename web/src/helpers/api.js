@@ -25,16 +25,34 @@ import {
 } from './utils';
 import axios from 'axios';
 import { MESSAGE_ROLES } from '../constants/playground.constants';
+import { beginGlobalLoading, endGlobalLoading } from './globalLoading';
 
-export let API = axios.create({
-  baseURL: import.meta.env.VITE_REACT_APP_SERVER_URL
-    ? import.meta.env.VITE_REACT_APP_SERVER_URL
-    : '',
-  headers: {
-    'New-API-User': getUserIdFromLocalStorage(),
-    'Cache-Control': 'no-store',
-  },
+const GLOBAL_LOADING_TRACKED_KEY = '__globalLoadingTracked';
+
+const createAPIHeaders = () => ({
+  'New-API-User': getUserIdFromLocalStorage(),
+  'Cache-Control': 'no-store',
 });
+
+const shouldTrackGlobalLoading = (config = {}) =>
+  config.skipGlobalLoading !== true;
+
+const markGlobalLoadingStarted = (config = {}) => {
+  if (!shouldTrackGlobalLoading(config)) {
+    return config;
+  }
+  config[GLOBAL_LOADING_TRACKED_KEY] = true;
+  beginGlobalLoading();
+  return config;
+};
+
+const markGlobalLoadingFinished = (config) => {
+  if (!config?.[GLOBAL_LOADING_TRACKED_KEY]) {
+    return;
+  }
+  delete config[GLOBAL_LOADING_TRACKED_KEY];
+  endGlobalLoading();
+};
 
 function patchAPIInstance(instance) {
   const originalGet = instance.get.bind(instance);
@@ -64,33 +82,50 @@ function patchAPIInstance(instance) {
   };
 }
 
-patchAPIInstance(API);
+function attachAPIInterceptors(instance) {
+  instance.interceptors.request.use(
+    (config) => markGlobalLoadingStarted(config),
+    (error) => {
+      markGlobalLoadingFinished(error?.config);
+      return Promise.reject(error);
+    },
+  );
 
-export function updateAPI() {
-  API = axios.create({
+  instance.interceptors.response.use(
+    (response) => {
+      markGlobalLoadingFinished(response.config);
+      return response;
+    },
+    (error) => {
+      markGlobalLoadingFinished(error?.config);
+      // 如果请求配置中显式要求跳过全局错误处理，则不弹出默认错误提示
+      if (error.config && error.config.skipErrorHandler) {
+        return Promise.reject(error);
+      }
+      showError(error);
+      return Promise.reject(error);
+    },
+  );
+}
+
+function createAPIInstance() {
+  const instance = axios.create({
     baseURL: import.meta.env.VITE_REACT_APP_SERVER_URL
       ? import.meta.env.VITE_REACT_APP_SERVER_URL
       : '',
-    headers: {
-      'New-API-User': getUserIdFromLocalStorage(),
-      'Cache-Control': 'no-store',
-    },
+    headers: createAPIHeaders(),
   });
 
-  patchAPIInstance(API);
+  patchAPIInstance(instance);
+  attachAPIInterceptors(instance);
+  return instance;
 }
 
-API.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    // 如果请求配置中显式要求跳过全局错误处理，则不弹出默认错误提示
-    if (error.config && error.config.skipErrorHandler) {
-      return Promise.reject(error);
-    }
-    showError(error);
-    return Promise.reject(error);
-  },
-);
+export let API = createAPIInstance();
+
+export function updateAPI() {
+  API = createAPIInstance();
+}
 
 // playground
 

@@ -20,6 +20,7 @@ import dayjs from 'dayjs';
 
 export const STORAGE_KEY = 'profit-board:state';
 export const REPORT_CACHE_KEY = 'profit-board:report';
+export const PROFIT_BOARD_CACHE_VERSION = 1;
 export const DETAIL_LIMIT = 600;
 
 export const createMetricOptions = (t) => [

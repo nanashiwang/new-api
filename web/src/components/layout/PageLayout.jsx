@@ -39,6 +39,7 @@ import {
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
 import { useLocation } from 'react-router-dom';
+import GlobalTopProgress from '../common/ui/GlobalTopProgress';
 const { Sider, Content, Header } = Layout;
 
 const PageLayout = () => {
@@ -142,6 +143,7 @@ const PageLayout = () => {
   if (isStandalonePage) {
     return (
       <>
+        <GlobalTopProgress />
         <ErrorBoundary>
           <App />
         </ErrorBoundary>
@@ -159,6 +161,7 @@ const PageLayout = () => {
         overflow: isMobile ? 'visible' : 'hidden',
       }}
     >
+      <GlobalTopProgress />
       <Header
         style={{
           padding: 0,

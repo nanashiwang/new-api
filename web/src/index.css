@@ -31,6 +31,38 @@ body {
   background-color: var(--semi-color-bg-0);
 }
 
+.global-top-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  z-index: 160;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.global-top-progress.is-visible {
+  opacity: 1;
+}
+
+.global-top-progress__bar {
+  width: 100%;
+  height: 100%;
+  transform-origin: left center;
+  background: linear-gradient(90deg, #0ea5e9 0%, #10b981 100%);
+  box-shadow: 0 0 14px rgba(14, 165, 233, 0.45);
+  transition:
+    transform 180ms ease-out,
+    opacity 180ms ease-out;
+  will-change: transform;
+}
+
+html.dark .global-top-progress__bar {
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.3);
+}
+
 .app-layout {
   height: 100vh;
   height: 100dvh;
