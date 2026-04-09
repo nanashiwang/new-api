@@ -772,28 +772,53 @@ func UpdateChannelClientRestrictionByTag(tag string, newTag *string, mode *strin
 		targetTag = *newTag
 	}
 
-	channels, err := GetChannelsByTag(targetTag, false, false)
+	var channels []*Channel
+	err := DB.Model(&Channel{}).
+		Select("id", "setting").
+		Where("tag = ?", targetTag).
+		Order("priority desc").
+		Find(&channels).Error
 	if err != nil {
 		return err
 	}
 
-	for _, channel := range channels {
-		settings := channel.GetSetting()
-		if mode != nil {
-			settings.ClientRestrictionMode = dto.ClientRestrictionMode(*mode)
+	normalizedClients := dto.NormalizeClientRestrictionClients(clients)
+	for _, chunk := range lo.Chunk(channels, 100) {
+		updates := make(map[int]string, len(chunk))
+		for _, channel := range chunk {
+			settingStr, err := mergeChannelClientRestrictionSetting(channel, mode, normalizedClients)
+			if err != nil {
+				return err
+			}
+			updates[channel.Id] = settingStr
 		}
-		settings.ClientRestrictionClients = clients
-		settingBytes, err := common.Marshal(settings)
-		if err != nil {
-			return fmt.Errorf("failed to marshal setting: channel_id=%d, error=%v", channel.Id, err)
-		}
-		settingStr := string(settingBytes)
-		if err := DB.Model(&Channel{}).Where("id = ?", channel.Id).Update("setting", settingStr).Error; err != nil {
-			common.SysLog(fmt.Sprintf("failed to update client restriction: channel_id=%d, tag=%s, error=%v", channel.Id, targetTag, err))
+		expr, args, ids := buildBatchStringCaseExpr("id", "setting", updates)
+		if err := DB.Model(&Channel{}).
+			Where("id IN ?", ids).
+			Update("setting", gorm.Expr(expr, args...)).Error; err != nil {
+			common.SysLog(fmt.Sprintf("failed to batch update client restriction: tag=%s, error=%v", targetTag, err))
 			return err
 		}
 	}
 	return nil
+}
+
+func mergeChannelClientRestrictionSetting(channel *Channel, mode *string, clients []string) (string, error) {
+	settings := dto.ChannelSettings{}
+	if channel.Setting != nil && *channel.Setting != "" {
+		if err := common.Unmarshal([]byte(*channel.Setting), &settings); err != nil {
+			common.SysLog(fmt.Sprintf("failed to unmarshal setting, rewriting with merged client restriction: channel_id=%d, error=%v", channel.Id, err))
+		}
+	}
+	if mode != nil {
+		settings.ClientRestrictionMode = dto.ClientRestrictionMode(*mode)
+	}
+	settings.ClientRestrictionClients = clients
+	settingBytes, err := common.Marshal(settings)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal setting: channel_id=%d, error=%v", channel.Id, err)
+	}
+	return string(settingBytes), nil
 }
 
 func UpdateChannelUsedQuota(id int, quota int) {
@@ -962,8 +987,12 @@ func (channel *Channel) GetHeaderOverride() map[string]interface{} {
 }
 
 func GetChannelsByIds(ids []int) ([]*Channel, error) {
+	return getChannelsByIDsWithDB(DB, ids)
+}
+
+func getChannelsByIDsWithDB(db *gorm.DB, ids []int) ([]*Channel, error) {
 	var channels []*Channel
-	err := DB.Where("id in (?)", ids).Find(&channels).Error
+	err := db.Where("id IN ?", ids).Find(&channels).Error
 	return channels, err
 }
 
@@ -975,25 +1004,21 @@ func BatchSetChannelTag(ids []int, tag *string) error {
 	}
 
 	// 更新标签
-	err := tx.Model(&Channel{}).Where("id in (?)", ids).Update("tag", tag).Error
+	err := tx.Model(&Channel{}).Where("id IN ?", ids).Update("tag", tag).Error
 	if err != nil {
 		tx.Rollback()
 		return err
 	}
 
-	// update ability status
-	channels, err := GetChannelsByIds(ids)
+	channels, err := getChannelsByIDsWithDB(tx, ids)
 	if err != nil {
 		tx.Rollback()
 		return err
 	}
 
-	for _, channel := range channels {
-		err = channel.UpdateAbilities(tx)
-		if err != nil {
-			tx.Rollback()
-			return err
-		}
+	if err = replaceAbilitiesForChannels(tx, channels); err != nil {
+		tx.Rollback()
+		return err
 	}
 
 	// 提交事务

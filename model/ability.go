@@ -3,7 +3,6 @@ package model
 import (
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 
 	"github.com/QuantumNous/new-api/common"
@@ -162,18 +161,36 @@ func GetChannel(group string, model string, retry int, allowedChannels []int, ex
 }
 
 func (channel *Channel) AddAbilities(tx *gorm.DB) error {
-	models_ := strings.Split(channel.Models, ",")
-	groups_ := strings.Split(channel.Group, ",")
-	abilitySet := make(map[string]struct{})
-	abilities := make([]Ability, 0, len(models_))
-	for _, model := range models_ {
-		for _, group := range groups_ {
+	useDB := DB
+	if tx != nil {
+		useDB = tx
+	}
+	return insertAbilities(useDB, buildAbilitiesForChannel(channel))
+}
+
+func (channel *Channel) DeleteAbilities() error {
+	return DB.Where("channel_id = ?", channel.Id).Delete(&Ability{}).Error
+}
+
+func buildAbilitiesForChannel(channel *Channel) []Ability {
+	models := channel.GetModels()
+	groups := channel.GetGroups()
+	abilitySet := make(map[string]struct{}, len(models)*len(groups))
+	abilities := make([]Ability, 0, len(models)*len(groups))
+	for _, model := range models {
+		if model == "" {
+			continue
+		}
+		for _, group := range groups {
+			if group == "" {
+				continue
+			}
 			key := group + "|" + model
 			if _, exists := abilitySet[key]; exists {
 				continue
 			}
 			abilitySet[key] = struct{}{}
-			ability := Ability{
+			abilities = append(abilities, Ability{
 				Group:     group,
 				Model:     model,
 				ChannelId: channel.Id,
@@ -181,29 +198,43 @@ func (channel *Channel) AddAbilities(tx *gorm.DB) error {
 				Priority:  channel.Priority,
 				Weight:    uint(channel.GetWeight()),
 				Tag:       channel.Tag,
-			}
-			abilities = append(abilities, ability)
+			})
 		}
 	}
+	return abilities
+}
+
+func buildAbilitiesForChannels(channels []*Channel) []Ability {
+	total := 0
+	for _, channel := range channels {
+		total += len(channel.GetModels()) * len(channel.GetGroups())
+	}
+	abilities := make([]Ability, 0, total)
+	for _, channel := range channels {
+		abilities = append(abilities, buildAbilitiesForChannel(channel)...)
+	}
+	return abilities
+}
+
+func insertAbilities(useDB *gorm.DB, abilities []Ability) error {
 	if len(abilities) == 0 {
 		return nil
 	}
-	// choose DB or provided tx
-	useDB := DB
-	if tx != nil {
-		useDB = tx
-	}
-	for _, chunk := range lo.Chunk(abilities, 50) {
-		err := useDB.Clauses(clause.OnConflict{DoNothing: true}).Create(&chunk).Error
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	return useDB.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(abilities, 100).Error
 }
 
-func (channel *Channel) DeleteAbilities() error {
-	return DB.Where("channel_id = ?", channel.Id).Delete(&Ability{}).Error
+func replaceAbilitiesForChannels(useDB *gorm.DB, channels []*Channel) error {
+	if len(channels) == 0 {
+		return nil
+	}
+	ids := make([]int, 0, len(channels))
+	for _, channel := range channels {
+		ids = append(ids, channel.Id)
+	}
+	if err := useDB.Where("channel_id IN ?", ids).Delete(&Ability{}).Error; err != nil {
+		return err
+	}
+	return insertAbilities(useDB, buildAbilitiesForChannels(channels))
 }
 
 // UpdateAbilities updates abilities of this channel.
@@ -224,50 +255,12 @@ func (channel *Channel) UpdateAbilities(tx *gorm.DB) error {
 		}()
 	}
 
-	// First delete all abilities of this channel
-	err := tx.Where("channel_id = ?", channel.Id).Delete(&Ability{}).Error
+	err := replaceAbilitiesForChannels(tx, []*Channel{channel})
 	if err != nil {
 		if isNewTx {
 			tx.Rollback()
 		}
 		return err
-	}
-
-	// Then add new abilities
-	models_ := strings.Split(channel.Models, ",")
-	groups_ := strings.Split(channel.Group, ",")
-	abilitySet := make(map[string]struct{})
-	abilities := make([]Ability, 0, len(models_))
-	for _, model := range models_ {
-		for _, group := range groups_ {
-			key := group + "|" + model
-			if _, exists := abilitySet[key]; exists {
-				continue
-			}
-			abilitySet[key] = struct{}{}
-			ability := Ability{
-				Group:     group,
-				Model:     model,
-				ChannelId: channel.Id,
-				Enabled:   channel.Status == common.ChannelStatusEnabled,
-				Priority:  channel.Priority,
-				Weight:    uint(channel.GetWeight()),
-				Tag:       channel.Tag,
-			}
-			abilities = append(abilities, ability)
-		}
-	}
-
-	if len(abilities) > 0 {
-		for _, chunk := range lo.Chunk(abilities, 50) {
-			err = tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&chunk).Error
-			if err != nil {
-				if isNewTx {
-					tx.Rollback()
-				}
-				return err
-			}
-		}
 	}
 
 	// 如果是新创建的事务，需要提交
