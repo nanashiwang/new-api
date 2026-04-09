@@ -127,6 +127,18 @@ func GetProfitBoardOptions(c *gin.Context) {
 	common.ApiSuccess(c, options)
 }
 
+func GetLatestProfitBoardConfig(c *gin.Context) {
+	config, signature, err := model.GetLatestProfitBoardConfig()
+	if err != nil {
+		profitBoardApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{
+		"signature": signature,
+		"config":    config,
+	})
+}
+
 func GetProfitBoardConfig(c *gin.Context) {
 	batches := make([]model.ProfitBoardBatch, 0)
 	if raw := strings.TrimSpace(c.Query("batches")); raw != "" {

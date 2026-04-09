@@ -288,6 +288,7 @@ func SetApiRouter(router *gin.Engine) {
 			profitBoardRoute.POST("/upstream_accounts/:id/sync", controller.SyncProfitBoardUpstreamAccount)
 			profitBoardRoute.GET("/upstream_accounts/:id/trend", controller.GetProfitBoardUpstreamAccountTrend)
 			profitBoardRoute.GET("/config", controller.GetProfitBoardConfig)
+			profitBoardRoute.GET("/config/current", controller.GetLatestProfitBoardConfig)
 			profitBoardRoute.POST("/config/lookup", controller.LookupProfitBoardConfig)
 			profitBoardRoute.PUT("/config", controller.SaveProfitBoardConfig)
 			profitBoardRoute.POST("/overview", middleware.ProfitBoardQueryRateLimit(), controller.GetProfitBoardOverview)

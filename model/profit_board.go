@@ -1244,6 +1244,66 @@ func SaveProfitBoardConfig(payload ProfitBoardConfigPayload) (*ProfitBoardConfig
 	}, signature, nil
 }
 
+// GetLatestProfitBoardConfig 返回 updated_at 最新的那一条收益看板配置,
+// 用作跨设备同步的唯一真相源。表里没有记录时返回 (nil, "", nil)。
+func GetLatestProfitBoardConfig() (*ProfitBoardConfigPayload, string, error) {
+	record := &ProfitBoardConfig{}
+	if err := DB.Order("updated_at desc").First(record).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, "", nil
+		}
+		return nil, "", err
+	}
+	batches := parseProfitBoardConfigBatches(record.SelectionValues)
+	if len(batches) == 0 {
+		return nil, "", nil
+	}
+	defaultUpstream := normalizeProfitBoardPricingConfig(ProfitBoardTokenPricingConfig{
+		CostSource: ProfitBoardCostSourceManualOnly,
+	}, false)
+	defaultSite := normalizeProfitBoardPricingConfig(ProfitBoardTokenPricingConfig{
+		PricingMode: ProfitBoardSitePricingManual,
+	}, true)
+	payload := &ProfitBoardConfigPayload{
+		Batches:  batches,
+		Upstream: defaultUpstream,
+		Site:     defaultSite,
+	}
+	_ = common.UnmarshalJsonStr(record.UpstreamConfig, &payload.Upstream)
+	payload.Upstream = normalizeProfitBoardPricingConfig(payload.Upstream, false)
+	persistedSite := profitBoardPersistedSiteConfig{}
+	if err := common.UnmarshalJsonStr(record.SiteConfig, &persistedSite); err == nil &&
+		(len(persistedSite.ComboConfigs) > 0 ||
+			len(persistedSite.SharedSite.ModelNames) > 0 ||
+			persistedSite.LegacySite.PricingMode != "" ||
+			persistedSite.LegacySite.Group != "" ||
+			len(persistedSite.LegacySite.ModelNames) > 0) {
+		payload.Site = normalizeProfitBoardPricingConfig(persistedSite.LegacySite, true)
+		payload.SharedSite = normalizeProfitBoardSharedSiteConfig(persistedSite.SharedSite, payload.Site)
+		payload.ComboConfigs = normalizeProfitBoardComboConfigs(
+			payload.Batches,
+			remapProfitBoardComboConfigsByBatchSelection(
+				payload.Batches,
+				batches,
+				persistedSite.ComboConfigs,
+			),
+			payload.SharedSite,
+			payload.Site,
+			payload.Upstream,
+		)
+	} else {
+		_ = common.UnmarshalJsonStr(record.SiteConfig, &payload.Site)
+		payload.Site = normalizeProfitBoardPricingConfig(payload.Site, true)
+		payload.SharedSite = normalizeProfitBoardSharedSiteConfig(ProfitBoardSharedSitePricingConfig{}, payload.Site)
+		payload.ComboConfigs = normalizeProfitBoardComboConfigs(payload.Batches, nil, payload.SharedSite, payload.Site, payload.Upstream)
+	}
+	if err := migrateProfitBoardLegacyWalletAccount(payload); err != nil {
+		return nil, "", err
+	}
+	payload.ComboConfigs = stripProfitBoardRemoteObserverSecrets(payload.ComboConfigs)
+	return payload, record.SelectionSignature, nil
+}
+
 func GetProfitBoardOptions() (*ProfitBoardOptions, error) {
 	options := &ProfitBoardOptions{}
 

@@ -22,6 +22,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { Empty, Modal, Tabs } from '@douyinfe/semi-ui';
@@ -170,9 +171,8 @@ const ProfitBoardPage = () => {
   const [activeTab, setActiveTab] = useState('wallet');
   const [builderOptionsReady, setBuilderOptionsReady] = useState(false);
   const [accountsReady, setAccountsReady] = useState(false);
-  const [configReady, setConfigReady] = useState(
-    !(restoredState.batches || []).length,
-  );
+  const [configReady, setConfigReady] = useState(false);
+  const serverRestoredRef = useRef(false);
 
   const configHook = useProfitBoardConfig({
     batchPayload: batchesHook.batchPayload,
@@ -182,7 +182,7 @@ const ProfitBoardPage = () => {
     rechargePriceFactor,
   });
 
-  const { batches, batchPayload, upsertBatch, removeBatch } = batchesHook;
+  const { batches, setBatches, batchPayload, upsertBatch, removeBatch } = batchesHook;
 
   const {
     builderLoading,
@@ -199,10 +199,9 @@ const ProfitBoardPage = () => {
     localModelMap,
     modelNameOptions,
     configPayload,
-    configLookupKey,
     loadBuilderOptions,
     loadUpstreamAccounts,
-    loadConfig,
+    loadCurrentConfig,
     applyLoadedConfig,
     saveConfig,
     resolveSharedSitePreview,
@@ -293,7 +292,7 @@ const ProfitBoardPage = () => {
 
   const validationErrors = useMemo(() => {
     const errors = [];
-    if (!batches.length) errors.push(t('请至少添加一个组合'));
+    if (configReady && !batches.length) errors.push(t('请至少添加一个组合'));
     if (duplicateBatchError) errors.push(duplicateBatchError);
     if (
       comboConfigs.some(
@@ -318,6 +317,7 @@ const ProfitBoardPage = () => {
     availableAccountIds,
     batches.length,
     comboConfigs,
+    configReady,
     duplicateBatchError,
     t,
   ]);
@@ -432,10 +432,38 @@ const ProfitBoardPage = () => {
         setAccountsReady(false);
         showError(error);
       });
+    if (!serverRestoredRef.current) {
+      serverRestoredRef.current = true;
+      (async () => {
+        try {
+          const serverConfig = await loadCurrentConfig();
+          if (cancelled) return;
+          if (serverConfig) {
+            const serverBatches = (serverConfig.batches || []).map((batch) => ({
+              id: batch.id || '',
+              name: batch.name || '',
+              scope_type: batch.scope_type || 'channel',
+              channel_ids: (batch.channel_ids || []).map(Number).filter(Boolean),
+              tags: batch.tags || [],
+              created_at: Number(batch.created_at || 0),
+            }));
+            if (serverBatches.length > 0) {
+              setBatches(serverBatches);
+            }
+            applyLoadedConfig(serverConfig);
+            setHasUnsavedConfigChanges(false);
+          }
+        } catch (error) {
+          if (!cancelled) showError(error);
+        } finally {
+          if (!cancelled) setConfigReady(true);
+        }
+      })();
+    }
     return () => {
       cancelled = true;
     };
-  }, [loadUpstreamAccounts]);
+  }, [applyLoadedConfig, loadCurrentConfig, loadUpstreamAccounts, setBatches]);
 
   useEffect(() => {
     if (builderOptionsReady) return;
@@ -460,41 +488,6 @@ const ProfitBoardPage = () => {
     channelGroupMode,
     editorVisible,
     loadBuilderOptions,
-  ]);
-
-  useEffect(() => {
-    if (!batchPayload.length) {
-      setConfigReady(true);
-      return;
-    }
-    // 始终从服务器加载配置，localStorage 仅用于首次渲染
-    // 服务器响应为最终数据来源
-    setConfigReady(false);
-    let cancelled = false;
-    loadConfig()
-      .then((loadedConfig) => {
-        if (cancelled) return;
-        if (loadedConfig) {
-          applyLoadedConfig(loadedConfig);
-          setHasUnsavedConfigChanges(false);
-        }
-        setConfigReady(true);
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        // 加载失败时仍标记为就绪，避免 UI 卡死
-        // localStorage 数据作为兜底
-        setConfigReady(true);
-        showError(error);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    applyLoadedConfig,
-    batchPayload.length,
-    configLookupKey,
-    loadConfig,
   ]);
 
   useEffect(() => {

@@ -129,11 +129,6 @@ export const useProfitBoardConfig = ({
     [options.site_models],
   );
 
-  const configLookupKey = useMemo(
-    () => JSON.stringify(batchPayload),
-    [batchPayload],
-  );
-
   const configPayload = useMemo(
     () => ({
       batches: batchPayload,
@@ -235,16 +230,12 @@ export const useProfitBoardConfig = ({
     }
   }, []);
 
-  const loadConfig = useCallback(async () => {
-    if (!configLookupKey || configLookupKey === '[]') return;
-    const res = await API.post('/api/profit_board/config/lookup', {
-      batches: batchPayload,
-    });
-    if (!res.data.success) throw new Error(res.data.message || '加载配置失败');
-    const config = res.data.data?.config;
-    if (!config) return null;
-    return config;
-  }, [batchPayload, configLookupKey]);
+  const loadCurrentConfig = useCallback(async () => {
+    const res = await API.get('/api/profit_board/config/current');
+    if (!res.data.success)
+      throw new Error(res.data.message || '加载收益看板配置失败');
+    return res.data.data?.config || null;
+  }, []);
 
   const saveConfig = useCallback(
     async (validationErrors) => {
@@ -330,13 +321,12 @@ export const useProfitBoardConfig = ({
     tagChannelMap,
     localModelMap,
     modelNameOptions,
-    configLookupKey,
     configPayload,
     walletModeEnabled,
     selectedAccount,
     loadBuilderOptions,
     loadUpstreamAccounts,
-    loadConfig,
+    loadCurrentConfig,
     applyLoadedConfig,
     saveConfig,
     resolveSharedSitePreview,
