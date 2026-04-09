@@ -37,23 +37,27 @@ func TestModelRequestRateLimitMemory_AllowsZeroSuccessLimit(t *testing.T) {
 	})
 
 	handler := ModelRequestRateLimit()
+	router := gin.New()
+
+	calledNextCount := 0
+	router.Use(func(c *gin.Context) {
+		c.Set("id", 1)
+		common.SetContextKey(c, constant.ContextKeyUserGroup, "default")
+		c.Next()
+	})
+	router.Use(handler)
+	router.POST("/v1/chat/completions", func(c *gin.Context) {
+		calledNextCount++
+		c.Status(http.StatusOK)
+	})
 
 	for i := 0; i < 3; i++ {
 		recorder := httptest.NewRecorder()
-		ctx, _ := gin.CreateTestContext(recorder)
-		ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-		ctx.Set("id", 1)
-		common.SetContextKey(ctx, constant.ContextKeyUserGroup, "default")
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(recorder, req)
 
-		calledNext := false
-		ctx.HandlerFunc = func(c *gin.Context) {
-			calledNext = true
-			c.Status(http.StatusOK)
-		}
-
-		handler(ctx)
-
-		if !calledNext {
+		if calledNextCount != i+1 {
 			t.Fatalf("request %d should pass when success limit is 0", i+1)
 		}
 		if recorder.Code != http.StatusOK {

@@ -88,7 +88,7 @@ func GetAllChannels(c *gin.Context) {
 	var total int64
 
 	if enableTagMode {
-		tags, err := model.GetPaginatedTags(pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+		tags, err := model.GetPaginatedTagsWithFilters(pageInfo.GetStartIdx(), pageInfo.GetPageSize(), statusFilter, typeFilter)
 		if err != nil {
 			common.SysError("failed to get paginated tags: " + err.Error())
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "获取标签失败，请稍后重试"})
@@ -98,26 +98,13 @@ func GetAllChannels(c *gin.Context) {
 			if tag == nil || *tag == "" {
 				continue
 			}
-			tagChannels, err := model.GetChannelsByTag(*tag, idSort, false)
+			tagChannels, err := model.GetChannelsByTagWithFilters(*tag, idSort, false, statusFilter, typeFilter)
 			if err != nil {
 				continue
 			}
-			filtered := make([]*model.Channel, 0)
-			for _, ch := range tagChannels {
-				if statusFilter == common.ChannelStatusEnabled && ch.Status != common.ChannelStatusEnabled {
-					continue
-				}
-				if statusFilter == 0 && ch.Status == common.ChannelStatusEnabled {
-					continue
-				}
-				if typeFilter >= 0 && ch.Type != typeFilter {
-					continue
-				}
-				filtered = append(filtered, ch)
-			}
-			channelData = append(channelData, filtered...)
+			channelData = append(channelData, tagChannels...)
 		}
-		total, _ = model.CountAllTags()
+		total, _ = model.CountAllTagsWithFilters(statusFilter, typeFilter)
 	} else {
 		baseQuery := model.DB.Model(&model.Channel{})
 		if typeFilter >= 0 {
@@ -394,8 +381,25 @@ func SearchChannels(c *gin.Context) {
 	idSort, _ := strconv.ParseBool(c.Query("id_sort"))
 	enableTagMode, _ := strconv.ParseBool(c.Query("tag_mode"))
 	channelData := make([]*model.Channel, 0)
+	typeParam := c.Query("type")
+	typeFilter := -1
+	if typeParam != "" {
+		if tp, err := strconv.Atoi(typeParam); err == nil {
+			typeFilter = tp
+		}
+	}
+
+	typeCounts, err := model.SearchChannelTypeCounts(keyword, group, modelKeyword, statusFilter)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+
 	if enableTagMode {
-		tags, err := model.SearchTags(keyword, group, modelKeyword, idSort)
+		tags, err := model.SearchTagsWithFilters(keyword, group, modelKeyword, idSort, statusFilter, typeFilter)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
@@ -405,14 +409,14 @@ func SearchChannels(c *gin.Context) {
 		}
 		for _, tag := range tags {
 			if tag != nil && *tag != "" {
-				tagChannel, err := model.GetChannelsByTag(*tag, idSort, false)
+				tagChannel, err := model.GetChannelsByTagWithFilters(*tag, idSort, false, statusFilter, typeFilter)
 				if err == nil {
 					channelData = append(channelData, tagChannel...)
 				}
 			}
 		}
 	} else {
-		channels, err := model.SearchChannels(keyword, group, modelKeyword, idSort)
+		channels, err := model.SearchChannelsWithFilters(keyword, group, modelKeyword, idSort, statusFilter, typeFilter)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
@@ -421,44 +425,6 @@ func SearchChannels(c *gin.Context) {
 			return
 		}
 		channelData = channels
-	}
-
-	if statusFilter == common.ChannelStatusEnabled || statusFilter == 0 {
-		filtered := make([]*model.Channel, 0, len(channelData))
-		for _, ch := range channelData {
-			if statusFilter == common.ChannelStatusEnabled && ch.Status != common.ChannelStatusEnabled {
-				continue
-			}
-			if statusFilter == 0 && ch.Status == common.ChannelStatusEnabled {
-				continue
-			}
-			filtered = append(filtered, ch)
-		}
-		channelData = filtered
-	}
-
-	// calculate type counts for search results
-	typeCounts := make(map[int64]int64)
-	for _, channel := range channelData {
-		typeCounts[int64(channel.Type)]++
-	}
-
-	typeParam := c.Query("type")
-	typeFilter := -1
-	if typeParam != "" {
-		if tp, err := strconv.Atoi(typeParam); err == nil {
-			typeFilter = tp
-		}
-	}
-
-	if typeFilter >= 0 {
-		filtered := make([]*model.Channel, 0, len(channelData))
-		for _, ch := range channelData {
-			if ch.Type == typeFilter {
-				filtered = append(filtered, ch)
-			}
-		}
-		channelData = filtered
 	}
 
 	page, _ := strconv.Atoi(c.DefaultQuery("p", "1"))
