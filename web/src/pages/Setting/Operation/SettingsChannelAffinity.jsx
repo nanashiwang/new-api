@@ -73,7 +73,7 @@ const RULE_TEMPLATES = {
     key_sources: [{ type: 'gjson', path: 'prompt_cache_key' }],
     value_regex: '',
     ttl_seconds: 0,
-    skip_retry_on_failure: false,
+    skip_retry_on_failure: true,
     include_using_group: true,
     include_rule_name: true,
   },
@@ -84,7 +84,7 @@ const RULE_TEMPLATES = {
     key_sources: [{ type: 'gjson', path: 'metadata.user_id' }],
     value_regex: '',
     ttl_seconds: 0,
-    skip_retry_on_failure: false,
+    skip_retry_on_failure: true,
     include_using_group: true,
     include_rule_name: true,
   },
@@ -240,6 +240,25 @@ export default function SettingsChannelAffinity(props) {
       skip_retry_on_failure: !!r.skip_retry_on_failure,
       include_using_group: r.include_using_group ?? true,
       include_rule_name: r.include_rule_name ?? true,
+    };
+  };
+
+  const buildChannelAffinityRulePayload = (values, keySources, id) => {
+    const userAgentInclude = normalizeStringList(values.user_agent_include_text);
+    return {
+      id,
+      name: (values.name || '').trim(),
+      model_regex: normalizeStringList(values.model_regex_text),
+      path_regex: normalizeStringList(values.path_regex_text),
+      key_sources: keySources,
+      value_regex: (values.value_regex || '').trim(),
+      ttl_seconds: Number(values.ttl_seconds || 0),
+      skip_retry_on_failure: !!values.skip_retry_on_failure,
+      include_using_group: !!values.include_using_group,
+      include_rule_name: !!values.include_rule_name,
+      ...(userAgentInclude.length > 0
+        ? { user_agent_include: userAgentInclude }
+        : {}),
     };
   };
 
@@ -451,6 +470,15 @@ export default function SettingsChannelAffinity(props) {
       render: (v) => <Text>{Number(v || 0) || '-'}</Text>,
     },
     {
+      title: t('失败后不重试'),
+      dataIndex: 'skip_retry_on_failure',
+      render: (value) => (
+        <Tag color={value ? 'red' : 'grey'}>
+          {value ? t('是') : t('否')}
+        </Tag>
+      ),
+    },
+    {
       title: t('缓存条目数'),
       render: (_, record) => {
         const name = (record?.name || '').trim();
@@ -579,27 +607,14 @@ export default function SettingsChannelAffinity(props) {
       if (!keySourcesValidation.ok)
         return showError(t(keySourcesValidation.message));
 
-      const userAgentInclude = normalizeStringList(
-        values.user_agent_include_text,
+      const rulePayload = buildChannelAffinityRulePayload(
+        {
+          ...values,
+          model_regex_text: modelRegex.join('\n'),
+        },
+        keySourcesValidation.value,
+        isEdit ? editingRule.id : rules.length,
       );
-
-      const rulePayload = {
-        id: isEdit ? editingRule.id : rules.length,
-        name: (values.name || '').trim(),
-        model_regex: modelRegex,
-        path_regex: normalizeStringList(values.path_regex_text),
-        key_sources: keySourcesValidation.value,
-        value_regex: (values.value_regex || '').trim(),
-        ttl_seconds: Number(values.ttl_seconds || 0),
-        include_using_group: !!values.include_using_group,
-        include_rule_name: !!values.include_rule_name,
-        ...(values.skip_retry_on_failure
-          ? { skip_retry_on_failure: true }
-          : {}),
-        ...(userAgentInclude.length > 0
-          ? { user_agent_include: userAgentInclude }
-          : {}),
-      };
 
       if (!rulePayload.name) return showError(t('名称不能为空'));
 

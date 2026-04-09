@@ -225,3 +225,25 @@ func TestBuildClaudeUsageFromOpenAIUsage_MapsWebSearchRequests(t *testing.T) {
 	require.NotNil(t, usage.ServerToolUse)
 	require.Equal(t, 2, usage.ServerToolUse.WebSearchRequests)
 }
+
+func TestBuildClaudeUsageFromOpenAIUsage_NormalizesCacheCreationSplit(t *testing.T) {
+	usage := buildClaudeUsageFromOpenAIUsage(&dto.Usage{
+		PromptTokens:     12,
+		CompletionTokens: 34,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedCreationTokens: 50,
+		},
+		ClaudeCacheCreation5mTokens: 10,
+		ClaudeCacheCreation1hTokens: 20,
+	})
+	require.NotNil(t, usage)
+	require.NotNil(t, usage.CacheCreation)
+	require.Equal(t, 30, usage.CacheCreation.Ephemeral5mInputTokens)
+	require.Equal(t, 20, usage.CacheCreation.Ephemeral1hInputTokens)
+}
+
+func TestNormalizeCacheCreationSplit_DefaultsRemainderTo5m(t *testing.T) {
+	tokens5m, tokens1h := NormalizeCacheCreationSplit(50, 10, 20)
+	require.Equal(t, 30, tokens5m)
+	require.Equal(t, 20, tokens1h)
+}

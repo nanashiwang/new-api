@@ -1,10 +1,14 @@
 package claude
 
 import (
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/dto"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -174,6 +178,126 @@ func TestFormatClaudeResponseInfo_ContentBlockDelta(t *testing.T) {
 	if claudeInfo.ResponseText.String() != "hello" {
 		t.Errorf("ResponseText = %q, want %q", claudeInfo.ResponseText.String(), "hello")
 	}
+}
+
+func TestBuildOpenAIStyleUsageFromClaudeUsage(t *testing.T) {
+	usage := &dto.Usage{
+		PromptTokens:     100,
+		CompletionTokens: 20,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:         30,
+			CachedCreationTokens: 50,
+		},
+		ClaudeCacheCreation5mTokens: 10,
+		ClaudeCacheCreation1hTokens: 20,
+	}
+
+	openAIUsage := buildOpenAIStyleUsageFromClaudeUsage(usage)
+
+	require.Equal(t, 180, openAIUsage.PromptTokens)
+	require.Equal(t, 180, openAIUsage.InputTokens)
+	require.Equal(t, 200, openAIUsage.TotalTokens)
+	require.Equal(t, 30, openAIUsage.ClaudeCacheCreation5mTokens)
+	require.Equal(t, 20, openAIUsage.ClaudeCacheCreation1hTokens)
+}
+
+func TestBuildOpenAIStyleUsageFromClaudeUsagePreservesCacheCreationRemainder(t *testing.T) {
+	tests := []struct {
+		name                    string
+		cachedCreationTokens    int
+		cacheCreationTokens5m   int
+		cacheCreationTokens1h   int
+		expectedTotalInputToken int
+	}{
+		{
+			name:                    "prefers aggregate when it includes remainder",
+			cachedCreationTokens:    50,
+			cacheCreationTokens5m:   10,
+			cacheCreationTokens1h:   20,
+			expectedTotalInputToken: 180,
+		},
+		{
+			name:                    "falls back to split tokens when aggregate missing",
+			cachedCreationTokens:    0,
+			cacheCreationTokens5m:   10,
+			cacheCreationTokens1h:   20,
+			expectedTotalInputToken: 160,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			usage := &dto.Usage{
+				PromptTokens:     100,
+				CompletionTokens: 20,
+				PromptTokensDetails: dto.InputTokenDetails{
+					CachedTokens:         30,
+					CachedCreationTokens: tt.cachedCreationTokens,
+				},
+				ClaudeCacheCreation5mTokens: tt.cacheCreationTokens5m,
+				ClaudeCacheCreation1hTokens: tt.cacheCreationTokens1h,
+			}
+
+			openAIUsage := buildOpenAIStyleUsageFromClaudeUsage(usage)
+			require.Equal(t, tt.expectedTotalInputToken, openAIUsage.PromptTokens)
+			require.Equal(t, tt.expectedTotalInputToken, openAIUsage.InputTokens)
+		})
+	}
+}
+
+func TestBuildOpenAIStyleUsageFromClaudeUsageDefaultsAggregateCacheCreationTo5m(t *testing.T) {
+	usage := &dto.Usage{
+		PromptTokens:     100,
+		CompletionTokens: 20,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:         30,
+			CachedCreationTokens: 50,
+		},
+	}
+
+	openAIUsage := buildOpenAIStyleUsageFromClaudeUsage(usage)
+
+	require.Equal(t, 50, openAIUsage.ClaudeCacheCreation5mTokens)
+	require.Equal(t, 0, openAIUsage.ClaudeCacheCreation1hTokens)
+}
+
+func TestHandleStreamFinalResponsePreservesCacheFieldsOnIncompleteStream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "claude-3-5-sonnet",
+		},
+		RelayFormat: types.RelayFormatClaude,
+	}
+	info.SetEstimatePromptTokens(120)
+
+	claudeInfo := &ClaudeResponseInfo{
+		ResponseText: strings.Builder{},
+		Usage: &dto.Usage{
+			PromptTokens: 100,
+			PromptTokensDetails: dto.InputTokenDetails{
+				CachedTokens:         30,
+				CachedCreationTokens: 50,
+			},
+			ClaudeCacheCreation5mTokens: 10,
+			ClaudeCacheCreation1hTokens: 20,
+		},
+		Done: false,
+	}
+	claudeInfo.ResponseText.WriteString("hello world from claude stream")
+
+	HandleStreamFinalResponse(ctx, info, claudeInfo)
+
+	require.Equal(t, 100, claudeInfo.Usage.PromptTokens)
+	require.Equal(t, 30, claudeInfo.Usage.PromptTokensDetails.CachedTokens)
+	require.Equal(t, 50, claudeInfo.Usage.PromptTokensDetails.CachedCreationTokens)
+	require.Equal(t, 10, claudeInfo.Usage.ClaudeCacheCreation5mTokens)
+	require.Equal(t, 20, claudeInfo.Usage.ClaudeCacheCreation1hTokens)
+	require.Greater(t, claudeInfo.Usage.CompletionTokens, 0)
+	require.Equal(t, claudeInfo.Usage.PromptTokens+claudeInfo.Usage.CompletionTokens, claudeInfo.Usage.TotalTokens)
 }
 
 func TestRequestOpenAI2ClaudeMessage_AssistantToolCallWithMalformedArguments(t *testing.T) {
