@@ -51,10 +51,31 @@ func (p *RetryParam) ResetRetryNextTry() {
 	p.resetNextTry = true
 }
 
+func (p *RetryParam) getSelectionGroup() string {
+	if p == nil {
+		return ""
+	}
+	if p.Ctx != nil {
+		if autoGroup := common.GetContextKeyString(p.Ctx, constant.ContextKeyAutoGroup); autoGroup != "" {
+			return autoGroup
+		}
+		if usingGroup := common.GetContextKeyString(p.Ctx, constant.ContextKeyUsingGroup); usingGroup != "" && usingGroup != "auto" {
+			return usingGroup
+		}
+	}
+	if p.TokenGroup != "auto" {
+		return p.TokenGroup
+	}
+	return ""
+}
+
 // getCachedTagChannelIDs 查询同 tag 下启用的渠道 ID，结果在本次请求生命周期内缓存，避免重试时重复打库。
 func (p *RetryParam) getCachedTagChannelIDs(tag string, allowedChannels []int) []int {
+	group := p.getSelectionGroup()
+	modelName := p.ModelName
+	cacheKey := tag + "|" + group + "|" + modelName
 	if p.tagChannelCache != nil {
-		if ids, ok := p.tagChannelCache[tag]; ok {
+		if ids, ok := p.tagChannelCache[cacheKey]; ok {
 			return ids
 		}
 	}
@@ -62,10 +83,22 @@ func (p *RetryParam) getCachedTagChannelIDs(tag string, allowedChannels []int) [
 	if err != nil || len(ids) == 0 {
 		return nil
 	}
+	if group != "" && modelName != "" {
+		filtered := make([]int, 0, len(ids))
+		for _, id := range ids {
+			if model.IsChannelEnabledForGroupModel(group, modelName, id) {
+				filtered = append(filtered, id)
+			}
+		}
+		ids = filtered
+		if len(ids) == 0 {
+			return nil
+		}
+	}
 	if p.tagChannelCache == nil {
 		p.tagChannelCache = make(map[string][]int)
 	}
-	p.tagChannelCache[tag] = ids
+	p.tagChannelCache[cacheKey] = ids
 	return ids
 }
 

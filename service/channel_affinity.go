@@ -45,6 +45,7 @@ type channelAffinityMeta struct {
 	TTLSeconds     int
 	RuleName       string
 	SkipRetry      bool
+	AffinityUsed   bool
 	KeySourceType  string
 	KeySourceKey   string
 	KeySourcePath  string
@@ -505,7 +506,7 @@ func ShouldSkipRetryAfterChannelAffinityFailure(c *gin.Context) bool {
 	if !ok {
 		return false
 	}
-	return meta.SkipRetry
+	return meta.AffinityUsed && meta.SkipRetry
 }
 
 func MarkChannelAffinityUsed(c *gin.Context, selectedGroup string, channelID int) {
@@ -516,6 +517,8 @@ func MarkChannelAffinityUsed(c *gin.Context, selectedGroup string, channelID int
 	if !ok {
 		return
 	}
+	meta.AffinityUsed = true
+	setChannelAffinityContext(c, meta)
 	c.Set(ginKeyChannelAffinitySkipRetry, meta.SkipRetry)
 	info := map[string]interface{}{
 		"reason":         meta.RuleName,

@@ -2,11 +2,15 @@ package service
 
 import (
 	"errors"
+	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
@@ -112,7 +116,7 @@ func TestApplyChannelFailureRetryExclusion_UsesTagGroup(t *testing.T) {
 		common.MemoryCacheEnabled = originMemoryCacheEnabled
 	})
 
-	if err := db.AutoMigrate(&model.Channel{}); err != nil {
+	if err := db.AutoMigrate(&model.Channel{}, &model.Ability{}); err != nil {
 		t.Fatalf("migrate db: %v", err)
 	}
 
@@ -120,13 +124,30 @@ func TestApplyChannelFailureRetryExclusion_UsesTagGroup(t *testing.T) {
 	channels := []model.Channel{
 		{Id: 1, Name: "primary", Status: common.ChannelStatusEnabled, Tag: &tag},
 		{Id: 2, Name: "sibling", Status: common.ChannelStatusEnabled, Tag: &tag},
-		{Id: 3, Name: "other", Status: common.ChannelStatusEnabled},
+		{Id: 3, Name: "other-model", Status: common.ChannelStatusEnabled, Tag: &tag},
+		{Id: 4, Name: "other-group", Status: common.ChannelStatusEnabled, Tag: &tag},
 	}
 	if err := db.Create(&channels).Error; err != nil {
 		t.Fatalf("seed channels: %v", err)
 	}
+	abilities := []model.Ability{
+		{Group: "default", Model: "gpt-5.4", ChannelId: 1, Enabled: true},
+		{Group: "default", Model: "gpt-5.4", ChannelId: 2, Enabled: true},
+		{Group: "default", Model: "gpt-4.1", ChannelId: 3, Enabled: true},
+		{Group: "vip", Model: "gpt-5.4", ChannelId: 4, Enabled: true},
+	}
+	if err := db.Create(&abilities).Error; err != nil {
+		t.Fatalf("seed abilities: %v", err)
+	}
 
-	param := &RetryParam{}
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	common.SetContextKey(ctx, constant.ContextKeyUsingGroup, "default")
+	param := &RetryParam{
+		Ctx:        ctx,
+		TokenGroup: "default",
+		ModelName:  "gpt-5.4",
+	}
 	retryErr := types.WithOpenAIError(types.OpenAIError{
 		Message: "No available OpenAI accounts support the requested model: gpt-5.4",
 		Type:    "upstream_error",
@@ -138,8 +159,11 @@ func TestApplyChannelFailureRetryExclusion_UsesTagGroup(t *testing.T) {
 	if len(param.ExcludeChannels) != 2 {
 		t.Fatalf("expected two excluded channels, got %v", param.ExcludeChannels)
 	}
-	if param.ExcludeChannels[0] != 1 || param.ExcludeChannels[1] != 2 {
+	if !slices.Contains(param.ExcludeChannels, 1) || !slices.Contains(param.ExcludeChannels, 2) {
 		t.Fatalf("unexpected excluded channels: %v", param.ExcludeChannels)
+	}
+	if slices.Contains(param.ExcludeChannels, 3) || slices.Contains(param.ExcludeChannels, 4) {
+		t.Fatalf("unexpected sibling channels excluded: %v", param.ExcludeChannels)
 	}
 }
 
