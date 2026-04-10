@@ -120,7 +120,7 @@ func getChannelQuery(group string, model string, retry int, allowedChannels []in
 	return channelQuery, nil
 }
 
-func GetChannel(group string, model string, retry int, allowedChannels []int, excludeChannels []int) (*Channel, error) {
+func GetChannel(group string, model string, retry int, allowedChannels []int, excludeChannels []int, filters ...ChannelFilter) (*Channel, error) {
 	var abilities []Ability
 
 	var err error = nil
@@ -137,6 +137,29 @@ func GetChannel(group string, model string, retry int, allowedChannels []int, ex
 		return nil, err
 	}
 	channel := Channel{}
+	if len(abilities) > 0 {
+		if len(filters) > 0 {
+			filteredAbilities := make([]Ability, 0, len(abilities))
+			for _, ability := range abilities {
+				channel := Channel{}
+				err = DB.First(&channel, "id = ?", ability.ChannelId).Error
+				if err != nil {
+					return nil, err
+				}
+				pass := true
+				for _, filter := range filters {
+					if !filter(&channel) {
+						pass = false
+						break
+					}
+				}
+				if pass {
+					filteredAbilities = append(filteredAbilities, ability)
+				}
+			}
+			abilities = filteredAbilities
+		}
+	}
 	if len(abilities) > 0 {
 		// Randomly choose one
 		weightSum := uint(0)

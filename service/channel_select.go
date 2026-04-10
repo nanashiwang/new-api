@@ -116,6 +116,9 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 	if clientFilter != nil {
 		filters = append(filters, clientFilter)
 	}
+	filters = append(filters, func(ch *model.Channel) bool {
+		return !IsChannelUnavailableForRequest(ch)
+	})
 
 	if param.TokenGroup == "auto" {
 		if len(setting.GetAutoGroups()) == 0 {

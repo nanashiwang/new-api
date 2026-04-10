@@ -10,12 +10,16 @@ import (
 type MonitorSetting struct {
 	AutoTestChannelEnabled bool    `json:"auto_test_channel_enabled"`
 	AutoTestChannelMinutes float64 `json:"auto_test_channel_minutes"`
+	PreDisableWaitEnabled  bool    `json:"pre_disable_wait_enabled"`
+	PreDisableWaitMinutes  float64 `json:"pre_disable_wait_minutes"`
 }
 
 // 默认配置
 var monitorSetting = MonitorSetting{
 	AutoTestChannelEnabled: false,
 	AutoTestChannelMinutes: 10,
+	PreDisableWaitEnabled:  false,
+	PreDisableWaitMinutes:  10,
 }
 
 func init() {

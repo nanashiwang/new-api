@@ -277,6 +277,15 @@ func addUsedChannel(c *gin.Context, channelId int) {
 	c.Set("use_channel", useChannel)
 }
 
+func appendUniqueInt(ids []int, id int) []int {
+	for _, existing := range ids {
+		if existing == id {
+			return ids
+		}
+	}
+	return append(ids, id)
+}
+
 func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
 	if request == nil {
 		return &types.TokenCountMeta{}
@@ -314,22 +323,27 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 			AutoBan: &autoBanInt,
 		}, nil
 	}
-	channel, selectGroup, err := service.CacheGetRandomSatisfiedChannel(retryParam)
+	for {
+		channel, selectGroup, err := service.CacheGetRandomSatisfiedChannel(retryParam)
 
-	info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
+		info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
 
-	if err != nil {
-		return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（retry）: %s", selectGroup, info.OriginModelName, err.Error()), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
-	}
-	if channel == nil {
-		return nil, types.NewError(fmt.Errorf("分组 %s 下模型 %s 的可用渠道不存在（retry）", selectGroup, info.OriginModelName), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
-	}
+		if err != nil {
+			return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（retry）: %s", selectGroup, info.OriginModelName, err.Error()), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		}
+		if channel == nil {
+			return nil, types.NewError(fmt.Errorf("分组 %s 下模型 %s 的可用渠道不存在（retry）", selectGroup, info.OriginModelName), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		}
 
-	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
-	if newAPIError != nil {
-		return nil, newAPIError
+		newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
+		if newAPIError == nil {
+			return channel, nil
+		}
+		if !service.ShouldFallbackAfterSetupError(newAPIError) {
+			return nil, newAPIError
+		}
+		retryParam.ExcludeChannels = appendUniqueInt(retryParam.ExcludeChannels, channel.Id)
 	}
-	return channel, nil
 }
 
 func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
@@ -357,6 +371,14 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 	// 不要在异步协程里从 context 重新读取渠道信息，避免不一致。
 	// 多 Key 的额度类错误只做短时冷却，不做永久禁用。
 	shouldDisable := service.ShouldDisableChannel(channelError.ChannelType, err) && channelError.AutoBan
+	if shouldDisable && !(common.QuotaStabilityEnabled && channelError.IsMultiKey && isQuotaRelated) {
+		if scheduled, scheduleErr := service.SchedulePreDisableWait(channelError, err.ErrorWithStatusCode()); scheduleErr != nil {
+			common.SysError(fmt.Sprintf("schedule channel pre-disable wait failed: channel=%d err=%v", channelError.ChannelId, scheduleErr))
+		} else if scheduled {
+			logger.LogInfo(c, fmt.Sprintf("channel pre-disable wait scheduled: channel=%d", channelError.ChannelId))
+			shouldDisable = false
+		}
+	}
 	if shouldDisable && !(common.QuotaStabilityEnabled && channelError.IsMultiKey && isQuotaRelated) {
 		gopool.Go(func() {
 			service.DisableChannel(channelError, err.ErrorWithStatusCode())

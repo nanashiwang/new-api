@@ -58,13 +58,15 @@ type Channel struct {
 }
 
 type ChannelInfo struct {
-	IsMultiKey             bool                  `json:"is_multi_key"`                        // 是否多Key模式
-	MultiKeySize           int                   `json:"multi_key_size"`                      // 多Key模式下的Key数量
-	MultiKeyStatusList     map[int]int           `json:"multi_key_status_list"`               // key状态列表，key index -> status
-	MultiKeyDisabledReason map[int]string        `json:"multi_key_disabled_reason,omitempty"` // key禁用原因列表，key index -> reason
-	MultiKeyDisabledTime   map[int]int64         `json:"multi_key_disabled_time,omitempty"`   // key禁用时间列表，key index -> time
-	MultiKeyPollingIndex   int                   `json:"multi_key_polling_index"`             // 多Key模式下轮询的key索引
-	MultiKeyMode           constant.MultiKeyMode `json:"multi_key_mode"`
+	IsMultiKey                   bool                  `json:"is_multi_key"`                               // 是否多Key模式
+	MultiKeySize                 int                   `json:"multi_key_size"`                             // 多Key模式下的Key数量
+	MultiKeyStatusList           map[int]int           `json:"multi_key_status_list"`                      // key状态列表，key index -> status
+	MultiKeyDisabledReason       map[int]string        `json:"multi_key_disabled_reason,omitempty"`        // key禁用原因列表，key index -> reason
+	MultiKeyDisabledTime         map[int]int64         `json:"multi_key_disabled_time,omitempty"`          // key禁用时间列表，key index -> time
+	MultiKeyPendingDisableUntil  map[int]int64         `json:"multi_key_pending_disable_until,omitempty"`  // key待禁用确认到期时间
+	MultiKeyPendingDisableReason map[int]string        `json:"multi_key_pending_disable_reason,omitempty"` // key待禁用确认原因
+	MultiKeyPollingIndex         int                   `json:"multi_key_polling_index"`                    // 多Key模式下轮询的key索引
+	MultiKeyMode                 constant.MultiKeyMode `json:"multi_key_mode"`
 }
 
 // Value implements driver.Valuer interface
@@ -138,7 +140,7 @@ func (channel *Channel) GetNextEnabledKeyForRequest(tokenId int, modelName strin
 	// 只收集当前可用的 key（启用且不在冷却）。
 	enabledIdx := make([]int, 0, len(keys))
 	for i := range keys {
-		if getStatus(i) == common.ChannelStatusEnabled && !IsMultiKeyInCooldown(channel.Id, i) {
+		if getStatus(i) == common.ChannelStatusEnabled && !IsMultiKeyInCooldown(channel.Id, i) && !channel.HasPendingDisableKey(i) {
 			enabledIdx = append(enabledIdx, i)
 		}
 	}
@@ -149,7 +151,7 @@ func (channel *Channel) GetNextEnabledKeyForRequest(tokenId int, modelName strin
 	// 命中粘性 key 时优先使用。
 	if common.QuotaStabilityEnabled && tokenId > 0 && common.MultiKeyStickySeconds > 0 {
 		if stickyIdx, ok := GetMultiKeyStickyIndex(tokenId, channel.Id, modelName); ok {
-			if stickyIdx >= 0 && stickyIdx < len(keys) && getStatus(stickyIdx) == common.ChannelStatusEnabled && !IsMultiKeyInCooldown(channel.Id, stickyIdx) {
+			if stickyIdx >= 0 && stickyIdx < len(keys) && getStatus(stickyIdx) == common.ChannelStatusEnabled && !IsMultiKeyInCooldown(channel.Id, stickyIdx) && !channel.HasPendingDisableKey(stickyIdx) {
 				return keys[stickyIdx], stickyIdx, nil
 			}
 		}
@@ -181,7 +183,7 @@ func (channel *Channel) GetNextEnabledKeyForRequest(tokenId int, modelName strin
 		}
 		for i := 0; i < len(keys); i++ {
 			idx := (start + i) % len(keys)
-			if getStatus(idx) == common.ChannelStatusEnabled && !IsMultiKeyInCooldown(channel.Id, idx) {
+			if getStatus(idx) == common.ChannelStatusEnabled && !IsMultiKeyInCooldown(channel.Id, idx) && !channel.HasPendingDisableKey(idx) {
 				channel.ChannelInfo.MultiKeyPollingIndex = (idx + 1) % len(keys)
 				selectedIdx = idx
 				break
@@ -444,6 +446,20 @@ func (channel *Channel) Update() error {
 			for idx := range channel.ChannelInfo.MultiKeyStatusList {
 				if idx >= channel.ChannelInfo.MultiKeySize {
 					delete(channel.ChannelInfo.MultiKeyStatusList, idx)
+				}
+			}
+		}
+		if channel.ChannelInfo.MultiKeyPendingDisableUntil != nil {
+			for idx := range channel.ChannelInfo.MultiKeyPendingDisableUntil {
+				if idx >= channel.ChannelInfo.MultiKeySize {
+					delete(channel.ChannelInfo.MultiKeyPendingDisableUntil, idx)
+				}
+			}
+		}
+		if channel.ChannelInfo.MultiKeyPendingDisableReason != nil {
+			for idx := range channel.ChannelInfo.MultiKeyPendingDisableReason {
+				if idx >= channel.ChannelInfo.MultiKeySize {
+					delete(channel.ChannelInfo.MultiKeyPendingDisableReason, idx)
 				}
 			}
 		}

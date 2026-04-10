@@ -534,7 +534,7 @@ func executeChannelStyleTest(
 	return
 }
 
-func testChannel(channel *model.Channel, testModel string, endpointType string, streamOverride *bool) testResult {
+func testChannel(channel *model.Channel, testModel string, endpointType string, streamOverride *bool, forcedKeyIndex *int) testResult {
 	tik := time.Now()
 	var unsupportedTestChannelTypes = []int{
 		constant.ChannelTypeMidjourney,
@@ -597,7 +597,17 @@ func testChannel(channel *model.Channel, testModel string, endpointType string, 
 	group, _ := model.GetUserGroup(1, false)
 	c.Set("group", group)
 
-	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, execution.modelName)
+	var newAPIError *types.NewAPIError
+	if forcedKeyIndex != nil {
+		key, keyErr := channel.GetKeyByIndex(*forcedKeyIndex)
+		if keyErr != nil {
+			newAPIError = types.NewError(keyErr, types.ErrorCodeChannelNoAvailableKey, types.ErrOptionWithSkipRetry())
+		} else {
+			newAPIError = middleware.SetupContextForSelectedChannelKey(c, channel, execution.modelName, key, *forcedKeyIndex)
+		}
+	} else {
+		newAPIError = middleware.SetupContextForSelectedChannel(c, channel, execution.modelName)
+	}
 	if newAPIError != nil {
 		return testResult{
 			context:     c,
@@ -911,7 +921,7 @@ func TestChannel(c *gin.Context) {
 		streamOverride = common.GetPointer(isStream)
 	}
 	tik := time.Now()
-	result := testChannel(channel, testModel, endpointType, streamOverride)
+	result := testChannel(channel, testModel, endpointType, streamOverride, nil)
 	if result.localErr != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -973,7 +983,11 @@ func testAllChannels(notify bool) error {
 			}
 			isChannelEnabled := channel.Status == common.ChannelStatusEnabled
 			tik := time.Now()
-			result := testChannel(channel, "", "", nil)
+			if channel.HasPendingDisable() || len(channel.GetPendingDisableKeyIndices()) > 0 {
+				time.Sleep(common.RequestInterval)
+				continue
+			}
+			result := testChannel(channel, "", "", nil, nil)
 			tok := time.Now()
 			milliseconds := tok.Sub(tik).Milliseconds()
 
@@ -1028,6 +1042,75 @@ func TestAllChannels(c *gin.Context) {
 
 var autoTestChannelsOnce sync.Once
 
+func resolvePendingDisableFailureReason(result testResult) string {
+	if result.newAPIError != nil {
+		return result.newAPIError.ErrorWithStatusCode()
+	}
+	if result.localErr != nil {
+		return result.localErr.Error()
+	}
+	return "pending disable confirmation failed"
+}
+
+func confirmSingleChannelPendingDisable(channel *model.Channel) {
+	result := testChannel(channel, "", "", nil, nil)
+	if result.newAPIError == nil && result.localErr == nil {
+		if err := model.ClearChannelPreDisable(channel.Id, ""); err != nil {
+			common.SysError(fmt.Sprintf("clear pending disable failed after success: channel=%d err=%v", channel.Id, err))
+		}
+		return
+	}
+	service.DisableChannel(*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, channel.Key, channel.GetAutoBan()), resolvePendingDisableFailureReason(result))
+}
+
+func confirmMultiKeyPendingDisable(channel *model.Channel, keyIndex int) {
+	key, err := channel.GetKeyByIndex(keyIndex)
+	if err != nil {
+		_ = model.ClearChannelPreDisable(channel.Id, "")
+		return
+	}
+	result := testChannel(channel, "", "", nil, common.GetPointer(keyIndex))
+	if result.newAPIError == nil && result.localErr == nil {
+		if err := model.ClearChannelPreDisable(channel.Id, key); err != nil {
+			common.SysError(fmt.Sprintf("clear pending key disable failed after success: channel=%d key_index=%d err=%v", channel.Id, keyIndex, err))
+		}
+		return
+	}
+	service.DisableChannel(*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, key, channel.GetAutoBan()), resolvePendingDisableFailureReason(result))
+}
+
+func processPendingDisableChannels() {
+	channels, err := model.GetAllChannels(0, 0, true, false)
+	if err != nil {
+		common.SysError("load pending disable channels failed: " + err.Error())
+		return
+	}
+	now := time.Now().Unix()
+	for _, channel := range channels {
+		if channel == nil {
+			continue
+		}
+		if channel.Status == common.ChannelStatusManuallyDisabled {
+			_ = model.ClearChannelPreDisable(channel.Id, "")
+			continue
+		}
+		if channel.HasPendingDisable() && channel.GetPendingDisableUntil() <= now {
+			confirmSingleChannelPendingDisable(channel)
+			time.Sleep(common.RequestInterval)
+			continue
+		}
+		for _, keyIndex := range channel.GetPendingDisableKeyIndices() {
+			if channel.ChannelInfo.MultiKeyPendingDisableUntil[keyIndex] > now {
+				continue
+			}
+			confirmMultiKeyPendingDisable(channel, keyIndex)
+			time.Sleep(common.RequestInterval)
+		}
+	}
+}
+
+var autoPendingDisableCheckOnce sync.Once
+
 func AutomaticallyTestChannels() {
 	// 只在Master节点定时测试渠道
 	if !common.IsMasterNode {
@@ -1050,6 +1133,19 @@ func AutomaticallyTestChannels() {
 					break
 				}
 			}
+		}
+	})
+}
+
+func AutomaticallyCheckPendingDisableChannels() {
+	if !common.IsMasterNode {
+		return
+	}
+	autoPendingDisableCheckOnce.Do(func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			processPendingDisableChannels()
 		}
 	})
 }

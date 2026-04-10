@@ -27,6 +27,9 @@ func DisableChannel(channelError types.ChannelError, reason string) {
 		return
 	}
 
+	if err := model.ClearChannelPreDisable(channelError.ChannelId, channelError.UsingKey); err != nil {
+		common.SysError(fmt.Sprintf("clear channel pending disable failed: channel_id=%d err=%v", channelError.ChannelId, err))
+	}
 	success := model.UpdateChannelStatus(channelError.ChannelId, channelError.UsingKey, common.ChannelStatusAutoDisabled, reason)
 	if success {
 		subject := fmt.Sprintf("通道「%s」（#%d）已被禁用", channelError.ChannelName, channelError.ChannelId)
@@ -36,6 +39,9 @@ func DisableChannel(channelError types.ChannelError, reason string) {
 }
 
 func EnableChannel(channelId int, usingKey string, channelName string) {
+	if err := model.ClearChannelPreDisable(channelId, usingKey); err != nil {
+		common.SysError(fmt.Sprintf("clear channel pending disable failed on enable: channel_id=%d err=%v", channelId, err))
+	}
 	success := model.UpdateChannelStatus(channelId, usingKey, common.ChannelStatusEnabled, "")
 	if success {
 		subject := fmt.Sprintf("通道「%s」（#%d）已被启用", channelName, channelId)

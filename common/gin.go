@@ -140,6 +140,13 @@ func SetContextKey(c *gin.Context, key constant.ContextKey, value any) {
 	c.Set(string(key), value)
 }
 
+func DeleteContextKey(c *gin.Context, key constant.ContextKey) {
+	if c == nil || c.Keys == nil {
+		return
+	}
+	delete(c.Keys, string(key))
+}
+
 func GetContextKey(c *gin.Context, key constant.ContextKey) (any, bool) {
 	return c.Get(string(key))
 }

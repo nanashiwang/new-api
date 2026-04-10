@@ -44,6 +44,8 @@ export default function SettingsMonitoring(props) {
       '100-199,300-399,401-407,409-499,500-503,505-523,525-599',
     'monitor_setting.auto_test_channel_enabled': false,
     'monitor_setting.auto_test_channel_minutes': 10,
+    'monitor_setting.pre_disable_wait_enabled': false,
+    'monitor_setting.pre_disable_wait_minutes': 10,
   });
   const refForm = useRef();
   const [inputsRow, setInputsRow] = useState(inputs);
@@ -164,6 +166,22 @@ export default function SettingsMonitoring(props) {
                   }
                 />
               </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Switch
+                  field={'monitor_setting.pre_disable_wait_enabled'}
+                  label={t('启用')}
+                  extraText={t('开启后，渠道命中自动禁用条件时会先等待，再测试一次后决定是否真正禁用')}
+                  size='default'
+                  checkedText='｜'
+                  uncheckedText='〇'
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      'monitor_setting.pre_disable_wait_enabled': value,
+                    })
+                  }
+                />
+              </Col>
             </Row>
             <Row gutter={16}>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
@@ -181,6 +199,24 @@ export default function SettingsMonitoring(props) {
                     setInputs({
                       ...inputs,
                       ChannelDisableThreshold: String(value),
+                    })
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  label={t('禁用前等待时间')}
+                  step={1}
+                  min={1}
+                  suffix={t('分钟')}
+                  disabled={!inputs['monitor_setting.pre_disable_wait_enabled']}
+                  extraText={t('当渠道触发自动禁用条件时，等待这么久后再自动测试一次，失败才真正禁用')}
+                  placeholder={''}
+                  field={'monitor_setting.pre_disable_wait_minutes'}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      'monitor_setting.pre_disable_wait_minutes': parseInt(value),
                     })
                   }
                 />
