@@ -374,13 +374,24 @@ const EditTokenModal = (props) => {
     }
   };
 
+  const getStoredChannelLimitValues = () => {
+    const formValues = formApiRef.current?.getValue('channel_limits');
+    const normalizedFormValues = normalizeChannelLimitValues(
+      Array.isArray(formValues) ? formValues : [],
+    );
+    if (normalizedFormValues.length > 0) {
+      return normalizedFormValues;
+    }
+    return normalizeChannelLimitValues(loadedTokenValuesRef.current?.channel_limits);
+  };
+
   const syncChannelLimitsWithOptions = (optionList, shouldNotify = false) => {
     if (!formApiRef.current) return;
-    const currentValues = formApiRef.current.getValue('channel_limits') || [];
+    const currentValues = getStoredChannelLimitValues();
     const nextValues = alignChannelLimitValues(currentValues, optionList);
-    if (nextValues.length === currentValues.length) return;
+    // 始终重新应用，避免中间请求污染表单值后无法恢复
     applyChannelLimitValues(nextValues, optionList);
-    if (shouldNotify) {
+    if (shouldNotify && nextValues.length < currentValues.length) {
       showInfo(t('已自动移除当前分组或模型限制下不可用的渠道'));
     }
   };
@@ -426,10 +437,7 @@ const EditTokenModal = (props) => {
     if (requestId !== channelRequestRef.current) return [];
     const { success, message, data } = res.data;
     if (success) {
-      const selectedChannelLimits =
-        formApiRef.current?.getValue('channel_limits') ||
-        loadedTokenValuesRef.current?.channel_limits ||
-        [];
+      const selectedChannelLimits = getStoredChannelLimitValues();
       const localChannelOptions = mergePreservedChannelOptions(
         buildChannelOptions(data),
         selectedChannelLimits,
@@ -523,7 +531,18 @@ const EditTokenModal = (props) => {
       loadedTokenValuesRef.current = { ...getInitValues(), ...data };
       applyLoadedTokenValues();
       await loadModels(data.group || '');
-      await loadChannels(data.group || '', data.model_limits || []);
+      const loadedOptions = await loadChannels(
+        data.group || '',
+        data.model_limits || [],
+      );
+      // 渠道选项加载完成后，重新同步 channel_limits 确保回显正确
+      if (
+        Array.isArray(data.channel_limits) &&
+        data.channel_limits.length > 0 &&
+        loadedOptions.length > 0
+      ) {
+        applyChannelLimitValues(data.channel_limits, loadedOptions);
+      }
       setTokenMode(data.package_enabled ? 'package' : 'standard');
     } else {
       showError(message);
@@ -1487,7 +1506,7 @@ const EditTokenModal = (props) => {
                             {(() => {
                               const selectedChannelValues =
                                 sanitizeChannelLimits(
-                                  values.channel_limits || [],
+                                  getStoredChannelLimitValues(),
                                 );
                               const selectedChannelSet = new Set(
                                 selectedChannelValues.map((channelId) =>
