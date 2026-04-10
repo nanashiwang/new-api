@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useEffect, useState, useRef } from 'react';
-import { Button, Col, Form, Row, Spin } from '@douyinfe/semi-ui';
+import { Button, Col, Form, Row, Spin, Switch } from '@douyinfe/semi-ui';
 import {
   compareObjects,
   API,
@@ -210,11 +210,16 @@ export default function SettingsMonitoring(props) {
                 >
                   <div style={{ flex: 1 }}>
                     <Form.InputNumber
-                      label={t('禁用前等待时间')}
+                      label={
+                        <span style={{ whiteSpace: 'nowrap' }}>
+                          {t('禁用前等待时间')}
+                        </span>
+                      }
                       step={1}
                       min={1}
                       suffix={t('分钟')}
                       disabled={!inputs['monitor_setting.pre_disable_wait_enabled']}
+                      extraText={t('触发自动禁用后，会等待并再测试一次')}
                       placeholder={''}
                       field={'monitor_setting.pre_disable_wait_minutes'}
                       onChange={(value) =>
@@ -227,8 +232,8 @@ export default function SettingsMonitoring(props) {
                     />
                   </div>
                   <div style={{ paddingTop: 30 }}>
-                    <Form.Switch
-                      field={'monitor_setting.pre_disable_wait_enabled'}
+                    <Switch
+                      checked={inputs['monitor_setting.pre_disable_wait_enabled']}
                       size='default'
                       checkedText='｜'
                       uncheckedText='〇'
