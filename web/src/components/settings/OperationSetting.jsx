@@ -78,6 +78,9 @@ const OperationSetting = () => {
       '100-199,300-399,401-407,409-499,500-503,505-523,525-599',
     'monitor_setting.auto_test_channel_enabled': false,
     'monitor_setting.auto_test_channel_minutes': 10 /* 签到设置 */,
+    'monitor_setting.pre_disable_wait_enabled': false,
+    'monitor_setting.pre_disable_wait_minutes': 10,
+    /* 签到设置 */
     'checkin_setting.enabled': false,
     'checkin_setting.min_quota': 1000,
     'checkin_setting.max_quota': 10000,

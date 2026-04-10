@@ -26,6 +26,7 @@ import {
   showSuccess,
   showWarning,
   parseHttpStatusCodeRules,
+  toBoolean,
 } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
 import HttpStatusCodeRulesInput from '../../../components/settings/HttpStatusCodeRulesInput';
@@ -112,10 +113,26 @@ export default function SettingsMonitoring(props) {
   }
 
   useEffect(() => {
-    const currentInputs = {};
+    const currentInputs = { ...inputs };
     for (let key in props.options) {
       if (Object.keys(inputs).includes(key)) {
-        currentInputs[key] = props.options[key];
+        if (
+          key === 'AutomaticDisableChannelEnabled' ||
+          key === 'AutomaticEnableChannelEnabled' ||
+          key === 'monitor_setting.auto_test_channel_enabled' ||
+          key === 'monitor_setting.pre_disable_wait_enabled'
+        ) {
+          currentInputs[key] = toBoolean(props.options[key]);
+        } else if (
+          key === 'ChannelDisableThreshold' ||
+          key === 'QuotaRemindThreshold' ||
+          key === 'monitor_setting.auto_test_channel_minutes' ||
+          key === 'monitor_setting.pre_disable_wait_minutes'
+        ) {
+          currentInputs[key] = Number(props.options[key] ?? currentInputs[key]);
+        } else {
+          currentInputs[key] = props.options[key];
+        }
       }
     }
     setInputs(currentInputs);
@@ -166,22 +183,6 @@ export default function SettingsMonitoring(props) {
                   }
                 />
               </Col>
-              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
-                <Form.Switch
-                  field={'monitor_setting.pre_disable_wait_enabled'}
-                  label={t('启用')}
-                  extraText={t('开启后，渠道命中自动禁用条件时会先等待，再测试一次后决定是否真正禁用')}
-                  size='default'
-                  checkedText='｜'
-                  uncheckedText='〇'
-                  onChange={(value) =>
-                    setInputs({
-                      ...inputs,
-                      'monitor_setting.pre_disable_wait_enabled': value,
-                    })
-                  }
-                />
-              </Col>
             </Row>
             <Row gutter={16}>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
@@ -204,22 +205,42 @@ export default function SettingsMonitoring(props) {
                 />
               </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
-                <Form.InputNumber
-                  label={t('禁用前等待时间')}
-                  step={1}
-                  min={1}
-                  suffix={t('分钟')}
-                  disabled={!inputs['monitor_setting.pre_disable_wait_enabled']}
-                  extraText={t('当渠道触发自动禁用条件时，等待这么久后再自动测试一次，失败才真正禁用')}
-                  placeholder={''}
-                  field={'monitor_setting.pre_disable_wait_minutes'}
-                  onChange={(value) =>
-                    setInputs({
-                      ...inputs,
-                      'monitor_setting.pre_disable_wait_minutes': parseInt(value),
-                    })
-                  }
-                />
+                <div
+                  style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}
+                >
+                  <div style={{ flex: 1 }}>
+                    <Form.InputNumber
+                      label={t('禁用前等待时间')}
+                      step={1}
+                      min={1}
+                      suffix={t('分钟')}
+                      disabled={!inputs['monitor_setting.pre_disable_wait_enabled']}
+                      placeholder={''}
+                      field={'monitor_setting.pre_disable_wait_minutes'}
+                      onChange={(value) =>
+                        setInputs({
+                          ...inputs,
+                          'monitor_setting.pre_disable_wait_minutes':
+                            parseInt(value),
+                        })
+                      }
+                    />
+                  </div>
+                  <div style={{ paddingTop: 30 }}>
+                    <Form.Switch
+                      field={'monitor_setting.pre_disable_wait_enabled'}
+                      size='default'
+                      checkedText='｜'
+                      uncheckedText='〇'
+                      onChange={(value) =>
+                        setInputs({
+                          ...inputs,
+                          'monitor_setting.pre_disable_wait_enabled': value,
+                        })
+                      }
+                    />
+                  </div>
+                </div>
               </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.InputNumber
