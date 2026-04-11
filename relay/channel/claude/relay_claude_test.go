@@ -1,13 +1,81 @@
 package claude
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/dto"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestHandleClaudeResponseData_UsesUpstreamStatusCodeForClaudeError(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	info := &relaycommon.RelayInfo{}
+	claudeInfo := &ClaudeResponseInfo{Usage: &dto.Usage{}}
+	resp := &http.Response{StatusCode: http.StatusTooManyRequests}
+	body := []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"rate limited"}}`)
+
+	err := HandleClaudeResponseData(ctx, info, claudeInfo, resp, body)
+	require.NotNil(t, err)
+	assert.Equal(t, http.StatusTooManyRequests, err.StatusCode)
+	assert.Equal(t, "rate_limit_error", err.ToOpenAIError().Type)
+	assert.Equal(t, "rate limited", err.ToOpenAIError().Message)
+}
+
+func TestHandleStreamResponseData_InfersClaudeErrorStatusCode(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	info := &relaycommon.RelayInfo{}
+	claudeInfo := &ClaudeResponseInfo{Usage: &dto.Usage{}}
+
+	err := HandleStreamResponseData(ctx, info, claudeInfo, `{"type":"error","error":{"type":"overloaded_error","message":"overloaded"}}`)
+	require.NotNil(t, err)
+	assert.Equal(t, 529, err.StatusCode)
+	assert.Equal(t, "overloaded_error", err.ToOpenAIError().Type)
+}
+
+func TestHandleStreamResponseData_UsesBadRequestForInvalidRequestError(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	info := &relaycommon.RelayInfo{}
+	claudeInfo := &ClaudeResponseInfo{Usage: &dto.Usage{}}
+
+	err := HandleStreamResponseData(ctx, info, claudeInfo, `{"type":"error","error":{"type":"invalid_request_error","message":"bad input"}}`)
+	require.NotNil(t, err)
+	assert.Equal(t, http.StatusBadRequest, err.StatusCode)
+	assert.Equal(t, "invalid_request_error", err.ToOpenAIError().Type)
+}
+
+func TestHandleStreamResponseData_UnknownClaudeErrorFallsBackToInternalServerError(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	info := &relaycommon.RelayInfo{}
+	claudeInfo := &ClaudeResponseInfo{Usage: &dto.Usage{}}
+
+	err := HandleStreamResponseData(ctx, info, claudeInfo, `{"type":"error","error":{"type":"mystery_error","message":"unknown"}}`)
+	require.NotNil(t, err)
+	assert.Equal(t, http.StatusInternalServerError, err.StatusCode)
+	assert.Equal(t, "mystery_error", err.ToOpenAIError().Type)
+}
+
+func TestHandleStreamResponseData_PrefersHTTPStatusWhenProvided(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	info := &relaycommon.RelayInfo{}
+	claudeInfo := &ClaudeResponseInfo{Usage: &dto.Usage{}}
+
+	err := HandleStreamResponseData(ctx, info, claudeInfo, `{"type":"error","error":{"type":"rate_limit_error","message":"rate limited"}}`, http.StatusTooManyRequests)
+	require.NotNil(t, err)
+	assert.Equal(t, http.StatusTooManyRequests, err.StatusCode)
+	assert.Equal(t, "rate_limit_error", err.ToOpenAIError().Type)
+}
 
 func TestFormatClaudeResponseInfo_MessageStart(t *testing.T) {
 	claudeInfo := &ClaudeResponseInfo{

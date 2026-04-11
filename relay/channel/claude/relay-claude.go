@@ -719,7 +719,7 @@ func FormatClaudeResponseInfo(claudeResponse *dto.ClaudeResponse, oaiResponse *d
 	return true
 }
 
-func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo, data string) *types.NewAPIError {
+func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo, data string, fallbackStatus ...int) *types.NewAPIError {
 	var claudeResponse dto.ClaudeResponse
 	err := common.UnmarshalJsonStr(data, &claudeResponse)
 	if err != nil {
@@ -727,7 +727,13 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		return types.NewError(err, types.ErrorCodeBadResponseBody)
 	}
 	if claudeError := claudeResponse.GetClaudeError(); claudeError != nil && claudeError.Type != "" {
-		return types.WithClaudeError(*claudeError, http.StatusInternalServerError)
+		statusCode := 0
+		if len(fallbackStatus) > 0 {
+			statusCode = fallbackStatus[0]
+		}
+		statusCode = resolveClaudeErrorStatusCode(claudeError, statusCode)
+		logClaudeUpstreamError("stream", claudeError, statusCode)
+		return types.WithClaudeError(*claudeError, statusCode)
 	}
 	if claudeResponse.StopReason != "" {
 		maybeMarkClaudeRefusal(c, claudeResponse.StopReason)
@@ -804,7 +810,7 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 	}
 	var err *types.NewAPIError
 	helper.StreamScannerHandler(c, resp, info, func(data string) bool {
-		err = HandleStreamResponseData(c, info, claudeInfo, data)
+		err = HandleStreamResponseData(c, info, claudeInfo, data, resp.StatusCode)
 		if err != nil {
 			return false
 		}
@@ -825,7 +831,13 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		return types.NewError(err, types.ErrorCodeBadResponseBody)
 	}
 	if claudeError := claudeResponse.GetClaudeError(); claudeError != nil && claudeError.Type != "" {
-		return types.WithClaudeError(*claudeError, http.StatusInternalServerError)
+		statusCode := http.StatusInternalServerError
+		if httpResp != nil {
+			statusCode = httpResp.StatusCode
+		}
+		statusCode = resolveClaudeErrorStatusCode(claudeError, statusCode)
+		logClaudeUpstreamError("non_stream", claudeError, statusCode)
+		return types.WithClaudeError(*claudeError, statusCode)
 	}
 	maybeMarkClaudeRefusal(c, claudeResponse.StopReason)
 	if claudeInfo.Usage == nil {
@@ -859,6 +871,77 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 
 	service.IOCopyBytesGracefully(c, httpResp, responseData)
 	return nil
+}
+
+func resolveClaudeErrorStatusCode(claudeError *types.ClaudeError, fallbackStatus int) int {
+	if fallbackStatus >= 100 && fallbackStatus <= 599 {
+		return fallbackStatus
+	}
+	if claudeError == nil {
+		return http.StatusInternalServerError
+	}
+
+	errorType := strings.ToLower(strings.TrimSpace(claudeError.Type))
+	message := strings.ToLower(strings.TrimSpace(claudeError.Message))
+
+	switch errorType {
+	case "authentication_error":
+		return http.StatusUnauthorized
+	case "permission_error":
+		return http.StatusForbidden
+	case "invalid_request_error":
+		return http.StatusBadRequest
+	case "rate_limit_error":
+		return http.StatusTooManyRequests
+	}
+
+	if containsClaudeErrorHint(message,
+		"overloaded",
+		"overload",
+		"capacity",
+		"too many concurrent",
+		"temporarily unavailable",
+		"service unavailable",
+	) {
+		return 529
+	}
+
+	if errorType == "overloaded_error" {
+		return http.StatusTooManyRequests
+	}
+
+	if containsClaudeErrorHint(message,
+		"rate limit",
+		"rate-limited",
+		"ratelimit",
+		"too many requests",
+	) {
+		return http.StatusTooManyRequests
+	}
+
+	return http.StatusInternalServerError
+}
+
+func containsClaudeErrorHint(message string, hints ...string) bool {
+	for _, hint := range hints {
+		if hint != "" && strings.Contains(message, hint) {
+			return true
+		}
+	}
+	return false
+}
+
+func logClaudeUpstreamError(source string, claudeError *types.ClaudeError, statusCode int) {
+	if !common.DebugEnabled || claudeError == nil {
+		return
+	}
+	common.SysLog(fmt.Sprintf(
+		"claude upstream error detected: source=%s status=%d type=%s message=%s",
+		source,
+		statusCode,
+		claudeError.Type,
+		common.MaskSensitiveInfo(claudeError.Message),
+	))
 }
 
 func ClaudeHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*dto.Usage, *types.NewAPIError) {

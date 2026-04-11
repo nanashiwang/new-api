@@ -18,11 +18,35 @@ func IsRetryableUpstreamQuotaError(err *types.NewAPIError) bool {
 	return IsQuotaRelatedError(err)
 }
 
+func IsTemporaryUpstreamError(err *types.NewAPIError) bool {
+	if err == nil || types.IsSkipRetryError(err) {
+		return false
+	}
+	if types.IsChannelError(err) {
+		return true
+	}
+	if IsQuotaRelatedError(err) || IsChannelModelMismatchError(err) {
+		return false
+	}
+
+	code := err.StatusCode
+	if code < 100 || code > 599 {
+		return true
+	}
+	if code >= 200 && code < 300 {
+		return false
+	}
+	if operation_setting.IsAlwaysSkipRetryCode(err.GetErrorCode()) {
+		return false
+	}
+	return operation_setting.ShouldRetryByStatusCode(code)
+}
+
 func ShouldRetryChannelError(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
 	if openaiErr == nil {
 		return false
 	}
-	if ShouldSkipRetryAfterChannelAffinityFailure(c) {
+	if ShouldSkipRetryAfterChannelAffinityFailure(c, openaiErr) {
 		return false
 	}
 	if types.IsChannelError(openaiErr) {

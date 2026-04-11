@@ -491,22 +491,45 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 	return 0, false
 }
 
-func ShouldSkipRetryAfterChannelAffinityFailure(c *gin.Context) bool {
+func ShouldSkipRetryAfterChannelAffinityFailure(c *gin.Context, errOpt ...*types.NewAPIError) bool {
 	if c == nil {
 		return false
 	}
-	v, ok := c.Get(ginKeyChannelAffinitySkipRetry)
-	if ok {
-		b, ok := v.(bool)
-		if ok {
-			return b
+
+	shouldSkip := false
+	if v, ok := c.Get(ginKeyChannelAffinitySkipRetry); ok {
+		if b, ok := v.(bool); ok {
+			shouldSkip = b
 		}
 	}
 	meta, ok := getChannelAffinityMeta(c)
 	if !ok {
+		return shouldSkip
+	}
+	if !shouldSkip {
+		shouldSkip = meta.AffinityUsed && meta.SkipRetry
+	}
+	if !shouldSkip {
 		return false
 	}
-	return meta.AffinityUsed && meta.SkipRetry
+
+	var err *types.NewAPIError
+	if len(errOpt) > 0 {
+		err = errOpt[0]
+	}
+	if !meta.AffinityUsed || err == nil || !IsTemporaryUpstreamError(err) {
+		return true
+	}
+
+	if common.DebugEnabled {
+		common.SysLog(fmt.Sprintf(
+			"channel affinity retry skip bypassed: rule=%s status=%d error_code=%s",
+			meta.RuleName,
+			err.StatusCode,
+			err.GetErrorCode(),
+		))
+	}
+	return false
 }
 
 func MarkChannelAffinityUsed(c *gin.Context, selectedGroup string, channelID int) {
