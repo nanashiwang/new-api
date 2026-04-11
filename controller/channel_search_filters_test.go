@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -171,4 +172,62 @@ func TestGetAllChannels_TagModeCountsFilteredTags(t *testing.T) {
 	require.True(t, resp.Success)
 	require.Len(t, resp.Data.Items, 2)
 	require.Equal(t, 2, resp.Data.Total)
+}
+
+func TestGetAllChannels_ExposesEffectiveAvailabilityAndPendingDisableState(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupChannelSearchControllerTestDB(t)
+
+	pendingTag := "pending"
+	priority := int64(0)
+	weight := uint(10)
+	pendingUntil := int64(1_800_000_000)
+	channel := &model.Channel{
+		Id:       10,
+		Name:     "pending-claude",
+		Key:      "pending-key",
+		Type:     constant.ChannelTypeAnthropic,
+		Status:   common.ChannelStatusEnabled,
+		Group:    "vip",
+		Models:   "claude-opus-4-6",
+		Tag:      &pendingTag,
+		Priority: &priority,
+		Weight:   &weight,
+	}
+	channel.SetPendingDisable(pendingUntil, "upstream unstable")
+	require.NoError(t, channel.Insert())
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(
+		http.MethodGet,
+		"/api/channel/?p=1&page_size=20",
+		nil,
+	)
+
+	GetAllChannels(ctx)
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	var resp struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Items []struct {
+				ID                          int    `json:"id"`
+				EffectiveAvailable          bool   `json:"effective_available"`
+				PendingDisableUntil         int64  `json:"pending_disable_until"`
+				PendingDisableReason        string `json:"pending_disable_reason"`
+				MultiKeyPendingDisableCount int    `json:"multi_key_pending_disable_count"`
+				MultiKeyCooldownKeyCount    int    `json:"multi_key_cooldown_key_count"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &resp))
+	require.True(t, resp.Success)
+	require.Len(t, resp.Data.Items, 1)
+	require.Equal(t, 10, resp.Data.Items[0].ID)
+	require.False(t, resp.Data.Items[0].EffectiveAvailable)
+	require.Equal(t, pendingUntil, resp.Data.Items[0].PendingDisableUntil)
+	require.Equal(t, "upstream unstable", resp.Data.Items[0].PendingDisableReason)
+	require.Equal(t, 0, resp.Data.Items[0].MultiKeyPendingDisableCount)
+	require.Equal(t, 0, resp.Data.Items[0].MultiKeyCooldownKeyCount)
 }

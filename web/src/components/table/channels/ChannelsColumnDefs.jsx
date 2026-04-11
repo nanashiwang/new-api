@@ -148,7 +148,41 @@ const renderTagType = (t) => {
   );
 };
 
-const renderStatus = (status, channelInfo = undefined, t) => {
+const buildEffectiveAvailabilityMessage = (record, t) => {
+  if (!record) {
+    return '';
+  }
+  const messages = [];
+  if (record.pending_disable_reason) {
+    messages.push(
+      t('待确认禁用原因') + ': ' + record.pending_disable_reason,
+    );
+  }
+  if (record.pending_disable_until) {
+    messages.push(
+      t('待确认截止时间') +
+        ': ' +
+        timestamp2string(record.pending_disable_until),
+    );
+  }
+  if (record.multi_key_pending_disable_count > 0) {
+    messages.push(
+      t('待确认 Key 数') + ': ' + record.multi_key_pending_disable_count,
+    );
+  }
+  if (record.multi_key_cooldown_key_count > 0) {
+    messages.push(
+      t('冷却中的 Key 数') + ': ' + record.multi_key_cooldown_key_count,
+    );
+  }
+  if (messages.length === 0) {
+    return t('当前渠道暂不可被分发选中');
+  }
+  return messages.join('；');
+};
+
+const renderStatus = (status, record = {}, t) => {
+  const channelInfo = record?.channel_info;
   if (channelInfo) {
     if (channelInfo.is_multi_key) {
       let keySize = channelInfo.multi_key_size;
@@ -159,6 +193,15 @@ const renderStatus = (status, channelInfo = undefined, t) => {
       }
       return renderMultiKeyStatus(status, keySize, enabledKeySize, t);
     }
+  }
+  if (status === 1 && record?.effective_available === false) {
+    return (
+      <Tooltip content={buildEffectiveAvailabilityMessage(record, t)}>
+        <Tag color='orange' shape='circle'>
+          {t('已启用（暂不可选）')}
+        </Tag>
+      </Tooltip>
+    );
   }
   switch (status) {
     case 1:
@@ -507,12 +550,12 @@ export const getChannelsColumns = ({
                   t('原因：') + reason + t('，时间：') + timestamp2string(time)
                 }
               >
-                {renderStatus(text, record.channel_info, t)}
+                {renderStatus(text, record, t)}
               </Tooltip>
             </div>
           );
         } else {
-          return renderStatus(text, record.channel_info, t);
+          return renderStatus(text, record, t);
         }
       },
     },

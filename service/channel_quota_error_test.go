@@ -64,8 +64,19 @@ func TestIsChannelModelMismatchError_RequestedModelUnavailable(t *testing.T) {
 		Type:    "upstream_error",
 		Code:    nil,
 	}, 503)
-	if !IsChannelModelMismatchError(err) {
-		t.Fatalf("expected requested-model-unavailable error to be treated as channel mismatch")
+	if IsChannelModelMismatchError(err) {
+		t.Fatalf("did not expect requested-model-unavailable error to be treated as channel mismatch")
+	}
+}
+
+func TestIsUpstreamModelTemporaryUnavailableError_Positive(t *testing.T) {
+	err := types.WithOpenAIError(types.OpenAIError{
+		Message: "No available Claude accounts support the requested model: claude-opus-4-6",
+		Type:    "upstream_error",
+		Code:    nil,
+	}, 503)
+	if !IsUpstreamModelTemporaryUnavailableError(err) {
+		t.Fatalf("expected requested-model-unavailable error to be treated as temporary upstream model unavailability")
 	}
 }
 
@@ -149,10 +160,10 @@ func TestApplyChannelFailureRetryExclusion_UsesTagGroup(t *testing.T) {
 		ModelName:  "gpt-5.4",
 	}
 	retryErr := types.WithOpenAIError(types.OpenAIError{
-		Message: "No available OpenAI accounts support the requested model: gpt-5.4",
-		Type:    "upstream_error",
-		Code:    nil,
-	}, 503)
+		Message: "insufficient quota",
+		Type:    "insufficient_quota",
+		Code:    "insufficient_quota",
+	}, 429)
 
 	ApplyChannelFailureRetryExclusion(param, &channels[0], retryErr)
 
@@ -167,11 +178,54 @@ func TestApplyChannelFailureRetryExclusion_UsesTagGroup(t *testing.T) {
 	}
 }
 
-func TestApplyChannelFailureRetryExclusion_FallsBackToChannelID(t *testing.T) {
+func TestApplyChannelFailureRetryExclusion_TemporaryModelUnavailableFallsBackToChannelID(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+
+	originDB := model.DB
+	originLogDB := model.LOG_DB
+	originMemoryCacheEnabled := common.MemoryCacheEnabled
+	model.DB = db
+	model.LOG_DB = db
+	common.MemoryCacheEnabled = false
+	t.Cleanup(func() {
+		model.DB = originDB
+		model.LOG_DB = originLogDB
+		common.MemoryCacheEnabled = originMemoryCacheEnabled
+	})
+
+	if err := db.AutoMigrate(&model.Channel{}, &model.Ability{}); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+
+	tag := "shared-upstream"
+	channels := []model.Channel{
+		{Id: 7, Name: "primary", Status: common.ChannelStatusEnabled, Tag: &tag},
+		{Id: 8, Name: "sibling", Status: common.ChannelStatusEnabled, Tag: &tag},
+	}
+	if err := db.Create(&channels).Error; err != nil {
+		t.Fatalf("seed channels: %v", err)
+	}
+	abilities := []model.Ability{
+		{Group: "default", Model: "claude-opus-4-6", ChannelId: 7, Enabled: true},
+		{Group: "default", Model: "claude-opus-4-6", ChannelId: 8, Enabled: true},
+	}
+	if err := db.Create(&abilities).Error; err != nil {
+		t.Fatalf("seed abilities: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	common.SetContextKey(ctx, constant.ContextKeyUsingGroup, "default")
 	param := &RetryParam{}
-	channel := &model.Channel{Id: 7, Name: "single"}
+	param.Ctx = ctx
+	param.TokenGroup = "default"
+	param.ModelName = "claude-opus-4-6"
+	channel := &channels[0]
 	retryErr := types.WithOpenAIError(types.OpenAIError{
-		Message: "No available OpenAI accounts support the requested model: gpt-5.4",
+		Message: "No available Claude accounts support the requested model: claude-opus-4-6",
 		Type:    "upstream_error",
 		Code:    nil,
 	}, 503)

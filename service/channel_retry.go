@@ -106,5 +106,5 @@ func shouldExcludeRetryByTag(err *types.NewAPIError) bool {
 	if err == nil {
 		return false
 	}
-	return IsRetryableUpstreamQuotaError(err) || IsRequestedModelUnavailableError(err)
+	return IsRetryableUpstreamQuotaError(err)
 }

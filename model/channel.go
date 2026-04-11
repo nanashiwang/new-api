@@ -55,6 +55,13 @@ type Channel struct {
 
 	// cache info
 	Keys []string `json:"-" gorm:"-"`
+
+	// runtime-only availability metadata for list/detail APIs
+	EffectiveAvailable          bool   `json:"effective_available" gorm:"-"`
+	PendingDisableUntil         int64  `json:"pending_disable_until,omitempty" gorm:"-"`
+	PendingDisableReason        string `json:"pending_disable_reason,omitempty" gorm:"-"`
+	MultiKeyPendingDisableCount int    `json:"multi_key_pending_disable_count,omitempty" gorm:"-"`
+	MultiKeyCooldownKeyCount    int    `json:"multi_key_cooldown_key_count,omitempty" gorm:"-"`
 }
 
 type ChannelInfo struct {
@@ -269,6 +276,82 @@ func (channel *Channel) SaveWithoutKey() error {
 		return errors.New("channel ID is 0")
 	}
 	return DB.Omit("key").Save(channel).Error
+}
+
+func (channel *Channel) getMultiKeyStatus(index int) int {
+	if channel == nil || channel.ChannelInfo.MultiKeyStatusList == nil {
+		return common.ChannelStatusEnabled
+	}
+	if status, ok := channel.ChannelInfo.MultiKeyStatusList[index]; ok {
+		return status
+	}
+	return common.ChannelStatusEnabled
+}
+
+func (channel *Channel) GetMultiKeyCooldownKeyCount() int {
+	if channel == nil || !channel.ChannelInfo.IsMultiKey {
+		return 0
+	}
+	size := channel.ChannelInfo.MultiKeySize
+	if size <= 0 {
+		size = len(channel.GetKeys())
+	}
+	if size <= 0 {
+		return 0
+	}
+	count := 0
+	for i := 0; i < size; i++ {
+		if IsMultiKeyInCooldown(channel.Id, i) {
+			count++
+		}
+	}
+	return count
+}
+
+func (channel *Channel) GetMultiKeyPendingDisableCount() int {
+	if channel == nil || !channel.ChannelInfo.IsMultiKey {
+		return 0
+	}
+	return len(channel.GetPendingDisableKeyIndices())
+}
+
+func (channel *Channel) IsEffectivelyAvailable() bool {
+	if channel == nil || channel.Status != common.ChannelStatusEnabled || channel.HasPendingDisable() {
+		return false
+	}
+	if !channel.ChannelInfo.IsMultiKey {
+		return true
+	}
+
+	size := channel.ChannelInfo.MultiKeySize
+	if size <= 0 {
+		size = len(channel.GetKeys())
+	}
+	if size <= 0 {
+		return false
+	}
+
+	for i := 0; i < size; i++ {
+		if channel.getMultiKeyStatus(i) != common.ChannelStatusEnabled {
+			continue
+		}
+		if channel.HasPendingDisableKey(i) || IsMultiKeyInCooldown(channel.Id, i) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func (channel *Channel) PopulateRuntimeAvailability() {
+	if channel == nil {
+		return
+	}
+	channel.PendingDisableUntil = channel.GetPendingDisableUntil()
+	channel.PendingDisableReason = channel.GetPendingDisableReason()
+	channel.MultiKeyPendingDisableCount = channel.GetMultiKeyPendingDisableCount()
+	channel.MultiKeyCooldownKeyCount = channel.GetMultiKeyCooldownKeyCount()
+	channel.EffectiveAvailable = channel.IsEffectivelyAvailable()
 }
 
 func GetAllChannels(startIdx int, num int, selectAll bool, idSort bool) ([]*Channel, error) {

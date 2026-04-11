@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -213,6 +215,30 @@ func TestDetectErrorFromTestResponseBody_ReturnsOpenAIErrorMessage(t *testing.T)
 	}
 	if !strings.Contains(err.Error(), "upstream boom") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDetectErrorMessageFromJSONBytes_PrefersTopLevelMessageOverGenericErrorString(t *testing.T) {
+	body := []byte(`{"error":"Relay service error","message":"No available Claude accounts support the requested model: claude-opus-4-6"}`)
+	message := detectErrorMessageFromJSONBytes(body)
+	if message != "No available Claude accounts support the requested model: claude-opus-4-6" {
+		t.Fatalf("unexpected message: %s", message)
+	}
+}
+
+func TestResolveChannelTestFailure_PrefersUpstreamMessageAndStatusCode(t *testing.T) {
+	body := []byte(`{"error":"Relay service error","message":"No available Claude accounts support the requested model: claude-opus-4-6"}`)
+	result := testResult{
+		localErr:     errors.New("bad response status code 503, message: Relay service error"),
+		newAPIError:  types.NewOpenAIError(errors.New("bad response status code 503, message: Relay service error"), types.ErrorCodeBadResponseStatusCode, http.StatusServiceUnavailable),
+		responseBody: body,
+	}
+	message, statusCode := resolveChannelTestFailure(result)
+	if statusCode != http.StatusServiceUnavailable {
+		t.Fatalf("unexpected status code: %d", statusCode)
+	}
+	if message != "No available Claude accounts support the requested model: claude-opus-4-6" {
+		t.Fatalf("unexpected message: %s", message)
 	}
 }
 

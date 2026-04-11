@@ -68,6 +68,13 @@ func clearChannelInfo(channel *model.Channel) {
 	}
 }
 
+func populateChannelRuntimeState(channel *model.Channel) {
+	if channel == nil {
+		return
+	}
+	channel.PopulateRuntimeAvailability()
+}
+
 func GetAllChannels(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	channelData := make([]*model.Channel, 0)
@@ -132,6 +139,7 @@ func GetAllChannels(c *gin.Context) {
 	}
 
 	for _, datum := range channelData {
+		populateChannelRuntimeState(datum)
 		clearChannelInfo(datum)
 	}
 
@@ -449,6 +457,7 @@ func SearchChannels(c *gin.Context) {
 	pagedData := channelData[startIdx:endIdx]
 
 	for _, datum := range pagedData {
+		populateChannelRuntimeState(datum)
 		clearChannelInfo(datum)
 	}
 
@@ -476,6 +485,7 @@ func GetChannel(c *gin.Context) {
 		return
 	}
 	if channel != nil {
+		populateChannelRuntimeState(channel)
 		clearChannelInfo(channel)
 	}
 	c.JSON(http.StatusOK, gin.H{

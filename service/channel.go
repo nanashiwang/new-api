@@ -160,9 +160,6 @@ func IsChannelModelMismatchError(err *types.NewAPIError) bool {
 	if err == nil {
 		return false
 	}
-	if IsRequestedModelUnavailableError(err) {
-		return true
-	}
 
 	lowerMessage := strings.ToLower(err.Error())
 	if strings.Contains(lowerMessage, "stream must be set to true") {
@@ -184,7 +181,7 @@ func IsChannelModelMismatchError(err *types.NewAPIError) bool {
 	return false
 }
 
-func IsRequestedModelUnavailableError(err *types.NewAPIError) bool {
+func IsUpstreamModelTemporaryUnavailableError(err *types.NewAPIError) bool {
 	if err == nil {
 		return false
 	}
@@ -192,4 +189,8 @@ func IsRequestedModelUnavailableError(err *types.NewAPIError) bool {
 	lowerMessage := strings.ToLower(err.Error())
 	return strings.Contains(lowerMessage, "no available") &&
 		strings.Contains(lowerMessage, "support the requested model")
+}
+
+func IsRequestedModelUnavailableError(err *types.NewAPIError) bool {
+	return IsUpstreamModelTemporaryUnavailableError(err)
 }

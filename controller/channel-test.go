@@ -451,7 +451,18 @@ func executeChannelStyleTest(
 	if resp != nil {
 		httpResp = resp.(*http.Response)
 		if httpResp.StatusCode != http.StatusOK {
-			err = service.RelayErrorHandler(c.Request.Context(), httpResp, true)
+			responseBody, readErr := io.ReadAll(httpResp.Body)
+			if readErr != nil {
+				result.context = c
+				result.info = relayInfo
+				result.localErr = readErr
+				result.newAPIError = types.NewOpenAIError(readErr, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
+				return
+			}
+			_ = httpResp.Body.Close()
+			result.responseBody = responseBody
+			httpResp.Body = io.NopCloser(bytes.NewReader(responseBody))
+			apiErr := service.RelayErrorHandler(c.Request.Context(), httpResp, true)
 			common.SysError(fmt.Sprintf(
 				"channel test bad response: channel_id=%d name=%s type=%d model=%s endpoint_type=%s status=%d err=%v",
 				channel.Id,
@@ -460,12 +471,18 @@ func executeChannelStyleTest(
 				testModel,
 				endpointType,
 				httpResp.StatusCode,
-				err,
+				apiErr,
 			))
 			result.context = c
 			result.info = relayInfo
-			result.localErr = err
-			result.newAPIError = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+			if apiErr != nil {
+				result.localErr = apiErr.Err
+				result.newAPIError = apiErr
+			} else {
+				err = fmt.Errorf("bad response status code %d", httpResp.StatusCode)
+				result.localErr = err
+				result.newAPIError = types.NewOpenAIError(err, types.ErrorCodeBadResponseStatusCode, httpResp.StatusCode)
+			}
 			return
 		}
 	}
@@ -748,6 +765,9 @@ func detectErrorMessageFromJSONBytes(jsonBytes []byte) string {
 	if message == "" {
 		message = gjson.GetBytes(jsonBytes, "error.error.message").String()
 	}
+	if message == "" {
+		message = gjson.GetBytes(jsonBytes, "message").String()
+	}
 	if message == "" && errVal.Type == gjson.String {
 		message = errVal.String()
 	}
@@ -759,6 +779,24 @@ func detectErrorMessageFromJSONBytes(jsonBytes []byte) string {
 		return "upstream returned error payload"
 	}
 	return message
+}
+
+func resolveChannelTestFailure(result testResult) (string, int) {
+	statusCode := http.StatusInternalServerError
+	if result.newAPIError != nil && result.newAPIError.StatusCode > 0 {
+		statusCode = result.newAPIError.StatusCode
+	}
+	message := summarizeOpenAIStyleError(statusCode, result.responseBody, "")
+	if message != "" {
+		return message, statusCode
+	}
+	if result.newAPIError != nil {
+		return result.newAPIError.Error(), statusCode
+	}
+	if result.localErr != nil {
+		return result.localErr.Error(), statusCode
+	}
+	return "测试失败", statusCode
 }
 
 func buildTestRequest(model string, endpointType string, channel *model.Channel, isStream bool) dto.Request {
@@ -923,10 +961,12 @@ func TestChannel(c *gin.Context) {
 	tik := time.Now()
 	result := testChannel(channel, testModel, endpointType, streamOverride, nil)
 	if result.localErr != nil {
+		message, statusCode := resolveChannelTestFailure(result)
 		c.JSON(http.StatusOK, gin.H{
-			"success": false,
-			"message": result.localErr.Error(),
-			"time":    0.0,
+			"success":     false,
+			"message":     message,
+			"time":        0.0,
+			"status_code": statusCode,
 		})
 		return
 	}
@@ -935,17 +975,20 @@ func TestChannel(c *gin.Context) {
 	go channel.UpdateResponseTime(milliseconds)
 	consumedTime := float64(milliseconds) / 1000.0
 	if result.newAPIError != nil {
+		message, statusCode := resolveChannelTestFailure(result)
 		c.JSON(http.StatusOK, gin.H{
-			"success": false,
-			"message": result.newAPIError.Error(),
-			"time":    consumedTime,
+			"success":     false,
+			"message":     message,
+			"time":        consumedTime,
+			"status_code": statusCode,
 		})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"time":    consumedTime,
+		"success":     true,
+		"message":     "",
+		"time":        consumedTime,
+		"status_code": http.StatusOK,
 	})
 }
 

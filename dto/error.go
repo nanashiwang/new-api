@@ -59,6 +59,9 @@ func (e GeneralErrorResponse) ToMessage() string {
 				return openAIError.Message
 			}
 		case "string":
+			if e.Message != "" {
+				return e.Message
+			}
 			var msg string
 			err := common.Unmarshal(e.Error, &msg)
 			if err == nil && msg != "" {
