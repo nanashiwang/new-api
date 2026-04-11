@@ -577,38 +577,6 @@ type ToolCallStreamState struct {
 	Emitted bool
 }
 
-func cacheCreationTokensForOpenAIUsage(usage *dto.Usage) int {
-	if usage == nil {
-		return 0
-	}
-	splitCacheCreationTokens := usage.ClaudeCacheCreation5mTokens + usage.ClaudeCacheCreation1hTokens
-	if splitCacheCreationTokens == 0 {
-		return usage.PromptTokensDetails.CachedCreationTokens
-	}
-	if usage.PromptTokensDetails.CachedCreationTokens > splitCacheCreationTokens {
-		return usage.PromptTokensDetails.CachedCreationTokens
-	}
-	return splitCacheCreationTokens
-}
-
-func buildOpenAIStyleUsageFromClaudeUsage(usage *dto.Usage) dto.Usage {
-	if usage == nil {
-		return dto.Usage{}
-	}
-	clone := *usage
-	clone.ClaudeCacheCreation5mTokens, clone.ClaudeCacheCreation1hTokens = service.NormalizeCacheCreationSplit(
-		usage.PromptTokensDetails.CachedCreationTokens,
-		usage.ClaudeCacheCreation5mTokens,
-		usage.ClaudeCacheCreation1hTokens,
-	)
-	cacheCreationTokens := cacheCreationTokensForOpenAIUsage(usage)
-	totalInputTokens := usage.PromptTokens + usage.PromptTokensDetails.CachedTokens + cacheCreationTokens
-	clone.PromptTokens = totalInputTokens
-	clone.InputTokens = totalInputTokens
-	clone.TotalTokens = totalInputTokens + usage.CompletionTokens
-	return clone
-}
-
 func buildMessageDeltaPatchUsage(claudeResponse *dto.ClaudeResponse, claudeInfo *ClaudeResponseInfo) *dto.ClaudeUsage {
 	usage := &dto.ClaudeUsage{}
 	if claudeResponse != nil && claudeResponse.Usage != nil {
@@ -628,26 +596,11 @@ func buildMessageDeltaPatchUsage(claudeResponse *dto.ClaudeResponse, claudeInfo 
 	if usage.CacheCreationInputTokens == 0 && claudeInfo.Usage.PromptTokensDetails.CachedCreationTokens > 0 {
 		usage.CacheCreationInputTokens = claudeInfo.Usage.PromptTokensDetails.CachedCreationTokens
 	}
-	cacheCreation5m := 0
-	cacheCreation1h := 0
-	if usage.CacheCreation != nil {
-		cacheCreation5m = usage.CacheCreation.Ephemeral5mInputTokens
-		cacheCreation1h = usage.CacheCreation.Ephemeral1hInputTokens
-	} else {
-		cacheCreation5m = claudeInfo.Usage.ClaudeCacheCreation5mTokens
-		cacheCreation1h = claudeInfo.Usage.ClaudeCacheCreation1hTokens
-	}
-	cacheCreation5m, cacheCreation1h = service.NormalizeCacheCreationSplit(
-		usage.CacheCreationInputTokens,
-		cacheCreation5m,
-		cacheCreation1h,
-	)
-	if usage.CacheCreation == nil && (cacheCreation5m > 0 || cacheCreation1h > 0) {
-		usage.CacheCreation = &dto.ClaudeCacheCreationUsage{}
-	}
-	if usage.CacheCreation != nil {
-		usage.CacheCreation.Ephemeral5mInputTokens = cacheCreation5m
-		usage.CacheCreation.Ephemeral1hInputTokens = cacheCreation1h
+	if usage.CacheCreation == nil && (claudeInfo.Usage.ClaudeCacheCreation5mTokens > 0 || claudeInfo.Usage.ClaudeCacheCreation1hTokens > 0) {
+		usage.CacheCreation = &dto.ClaudeCacheCreationUsage{
+			Ephemeral5mInputTokens: claudeInfo.Usage.ClaudeCacheCreation5mTokens,
+			Ephemeral1hInputTokens: claudeInfo.Usage.ClaudeCacheCreation1hTokens,
+		}
 	}
 	return usage
 }
@@ -824,27 +777,14 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 		if common.DebugEnabled {
 			common.SysLog("claude response usage is not complete, maybe upstream error")
 		}
-		fallback := service.ResponseText2Usage(c, claudeInfo.ResponseText.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
-		if claudeInfo.Usage.CompletionTokens == 0 ||
-			(!claudeInfo.Done && fallback.CompletionTokens > claudeInfo.Usage.CompletionTokens) {
-			claudeInfo.Usage.CompletionTokens = fallback.CompletionTokens
-		}
-		if claudeInfo.Usage.PromptTokens == 0 {
-			claudeInfo.Usage.PromptTokens = fallback.PromptTokens
-		}
-		claudeInfo.Usage.TotalTokens = claudeInfo.Usage.PromptTokens + claudeInfo.Usage.CompletionTokens
+		claudeInfo.Usage = service.ResponseText2Usage(c, claudeInfo.ResponseText.String(), info.UpstreamModelName, claudeInfo.Usage.PromptTokens)
 	}
 
 	if info.RelayFormat == types.RelayFormatClaude {
 		//
 	} else if info.RelayFormat == types.RelayFormatOpenAI {
 		if info.ShouldIncludeUsage {
-			response := helper.GenerateFinalUsageResponse(
-				claudeInfo.ResponseId,
-				claudeInfo.Created,
-				info.UpstreamModelName,
-				buildOpenAIStyleUsageFromClaudeUsage(claudeInfo.Usage),
-			)
+			response := helper.GenerateFinalUsageResponse(claudeInfo.ResponseId, claudeInfo.Created, info.UpstreamModelName, *claudeInfo.Usage)
 			err := helper.ObjectData(c, response)
 			if err != nil {
 				common.SysLog("send final response failed: " + err.Error())
@@ -904,7 +844,7 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	switch info.RelayFormat {
 	case types.RelayFormatOpenAI:
 		openaiResponse := ResponseClaude2OpenAI(&claudeResponse)
-		openaiResponse.Usage = buildOpenAIStyleUsageFromClaudeUsage(claudeInfo.Usage)
+		openaiResponse.Usage = *claudeInfo.Usage
 		responseData, err = json.Marshal(openaiResponse)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeBadResponseBody)
