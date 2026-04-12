@@ -500,11 +500,53 @@ const PricingConfigModal = ({
             }
           >
             {comboConfig.site_mode === 'log_quota' ? (
-              <Banner
-                type='success'
-                closeIcon={null}
-                description={t('智能模式直接读取每条日志的已计算额度（含分组倍率、模型倍率），换算为USD作为本站收入，无需配置模型和价格')}
-              />
+              <div className='space-y-3 rounded-2xl border border-green-500/20 bg-green-500/[0.05] p-3'>
+                <Banner
+                  type='success'
+                  closeIcon={null}
+                  description={t('智能模式直接读取选中模型每条日志的已计算额度（含分组倍率、模型倍率），换算为USD作为本站收入')}
+                />
+                {/* 模型选择 + 一键导入 */}
+                <div>
+                  <div className='mb-1.5 flex items-center justify-between gap-2'>
+                    <Text type='tertiary' size='small'>{t('模型')}</Text>
+                    <Tooltip
+                      content={!scopeHasSelection ? t('请先在上方选择范围') : t('从已选的渠道/标签导入全部模型')}
+                      position='top'
+                    >
+                      <Button
+                        size='small'
+                        theme='light'
+                        type='primary'
+                        icon={<Download size={13} />}
+                        disabled={!scopeHasSelection}
+                        onClick={handleImportFromScope}
+                      >
+                        {t('从已选范围导入')}
+                      </Button>
+                    </Tooltip>
+                  </div>
+                  <Select
+                    multiple
+                    filter
+                    maxTagCount={5}
+                    value={sharedSite.model_names || []}
+                    onChange={(value) =>
+                      setComboConfig((prev) => ({
+                        ...prev,
+                        shared_site: {
+                          ...prev.shared_site,
+                          model_names: value || [],
+                        },
+                      }))
+                    }
+                    optionList={modelNameOptions}
+                    placeholder={t('选择模型')}
+                    emptyContent={t('暂无可用模型')}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+              </div>
             ) : (
               <>
             <MoneyField

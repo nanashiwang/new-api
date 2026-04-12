@@ -2236,9 +2236,21 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		sitePricingSource := ""
 		sitePricingKnown := false
 		if comboPricing.SiteMode == ProfitBoardComboSiteModeLogQuota {
-			configuredSiteRevenueUSD = float64(row.Quota) / common.QuotaPerUnit
-			sitePricingSource = "log_quota"
-			sitePricingKnown = row.Quota > 0
+			logQuotaModelNames := comboPricing.SharedSite.ModelNames
+			logQuotaMatched := len(logQuotaModelNames) == 0
+			if !logQuotaMatched {
+				for _, mn := range logQuotaModelNames {
+					if mn == row.ModelName {
+						logQuotaMatched = true
+						break
+					}
+				}
+			}
+			if logQuotaMatched {
+				configuredSiteRevenueUSD = float64(row.Quota) / common.QuotaPerUnit
+				sitePricingSource = "log_quota"
+				sitePricingKnown = row.Quota > 0
+			}
 		} else if comboPricing.SiteMode == ProfitBoardComboSiteModeSharedSite {
 			sharedSiteConfig := comboPricing.SharedSite
 			configuredSiteRevenueUSD, sitePricingSource, sitePricingKnown = profitBoardSiteModelRevenueUSD(
@@ -2805,9 +2817,21 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 		sitePricingSource := ""
 		sitePricingKnown := false
 		if comboPricing.SiteMode == ProfitBoardComboSiteModeLogQuota {
-			configuredSiteRevenueUSD = float64(row.Quota) / common.QuotaPerUnit
-			sitePricingSource = "log_quota"
-			sitePricingKnown = row.Quota > 0
+			logQuotaModelNames := comboPricing.SharedSite.ModelNames
+			logQuotaMatched := len(logQuotaModelNames) == 0
+			if !logQuotaMatched {
+				for _, mn := range logQuotaModelNames {
+					if mn == row.ModelName {
+						logQuotaMatched = true
+						break
+					}
+				}
+			}
+			if logQuotaMatched {
+				configuredSiteRevenueUSD = float64(row.Quota) / common.QuotaPerUnit
+				sitePricingSource = "log_quota"
+				sitePricingKnown = row.Quota > 0
+			}
 		} else if comboPricing.SiteMode == ProfitBoardComboSiteModeSharedSite {
 			sharedSiteConfig := comboPricing.SharedSite
 			configuredSiteRevenueUSD, sitePricingSource, sitePricingKnown = profitBoardSiteModelRevenueUSD(

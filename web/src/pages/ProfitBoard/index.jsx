@@ -299,11 +299,11 @@ const ProfitBoardPage = () => {
     if (
       comboConfigs.some(
         (item) =>
-          item.site_mode === 'shared_site_model' &&
+          (item.site_mode === 'shared_site_model' || item.site_mode === 'log_quota') &&
           !(item.shared_site?.model_names || []).length,
       )
     ) {
-      errors.push(t('启用了本站模型价格的组合必须至少选择一个模型'));
+      errors.push(t('启用了本站模型价格或智能模式的组合必须至少选择一个模型'));
     }
     if (
       comboConfigs.some((item) => {
@@ -387,10 +387,10 @@ const ProfitBoardPage = () => {
           : (draft.tags || []).length;
       if (!selectedCount) return t('请先选择渠道或标签');
       if (
-        draft.site_mode === 'shared_site_model' &&
+        (draft.site_mode === 'shared_site_model' || draft.site_mode === 'log_quota') &&
         !(draft.shared_site?.model_names || []).length
       ) {
-        return t('启用了本站模型价格的组合必须至少选择一个模型');
+        return t('启用了本站模型价格或智能模式的组合必须至少选择一个模型');
       }
       if (draft.upstream_mode === 'wallet_observer') {
         const accountId = Number(draft.upstream_account_id || 0);
