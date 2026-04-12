@@ -17,56 +17,67 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import React from 'react';
-import { Card, Empty, Spin, Table, Tag, Typography } from '@douyinfe/semi-ui';
+import { Avatar, Card, Empty, Spin, Table, Tag, Typography } from '@douyinfe/semi-ui';
 
 const { Text, Title } = Typography;
 
-const MetricCard = ({ item }) => {
-  const iconColorMap = {
-    configured_site_revenue_usd: 'text-emerald-600 dark:text-emerald-400',
-    upstream_cost_usd: 'text-amber-600 dark:text-amber-400',
-    configured_profit_usd: 'text-sky-600 dark:text-sky-400',
+const cardThemeMap = {
+  configured_site_revenue_usd: {
+    bg: 'bg-emerald-50 dark:bg-emerald-950/30',
+    text: 'text-emerald-600 dark:text-emerald-400',
+    avatarColor: 'green',
+  },
+  upstream_cost_usd: {
+    bg: 'bg-amber-50 dark:bg-amber-950/30',
+    text: 'text-amber-600 dark:text-amber-400',
+    avatarColor: 'amber',
+  },
+  configured_profit_usd: {
+    bg: 'bg-sky-50 dark:bg-sky-950/30',
+    text: 'text-sky-600 dark:text-sky-400',
+    avatarColor: 'blue',
+  },
+};
+
+const MetricCard = ({ item, t }) => {
+  const theme = cardThemeMap[item.key] || {
+    bg: 'bg-blue-50 dark:bg-blue-950/30',
+    text: 'text-blue-600 dark:text-blue-400',
+    avatarColor: 'blue',
   };
-  const bgColorMap = {
-    configured_site_revenue_usd: 'bg-emerald-500/10',
-    upstream_cost_usd: 'bg-amber-500/10',
-    configured_profit_usd: 'bg-sky-500/10',
-  };
-  const iconColor =
-    iconColorMap[item.key] || 'text-blue-600 dark:text-blue-400';
-  const bgColor = bgColorMap[item.key] || 'bg-blue-500/10';
 
   return (
-    <Card
-      key={item.key}
-      bordered={false}
-      bodyStyle={{ padding: 0 }}
-      className='overflow-hidden rounded-xl border border-semi-color-border'
-    >
-      <div className='p-4'>
-        <div className='flex items-start justify-between'>
-          <div className='flex-1'>
-            <Text type='tertiary' size='small'>
-              {item.title}
-            </Text>
-            <div className='mt-3 flex items-baseline gap-2'>
-              <Title
-                heading={2}
-                style={{ margin: 0, fontWeight: 600 }}
-                className={iconColor}
-              >
-                {item.value}
-              </Title>
-            </div>
-          </div>
-          <div
-            className={`flex h-12 w-12 items-center justify-center rounded-xl ${bgColor}`}
-          >
-            <span className={iconColor}>{item.icon}</span>
+    <div className={`rounded-2xl p-5 ${theme.bg}`}>
+      <div className='flex items-start justify-between'>
+        <div className='flex-1'>
+          <Text type='tertiary' size='small'>
+            {item.title}
+          </Text>
+          <div className='mt-2'>
+            <Title
+              heading={1}
+              style={{ margin: 0, fontWeight: 700 }}
+              className={theme.text}
+            >
+              {item.value}
+            </Title>
           </div>
         </div>
+        <Avatar size='small' color={theme.avatarColor} className='shrink-0'>
+          {item.icon}
+        </Avatar>
       </div>
-    </Card>
+      {item.requestCount != null && (
+        <div className='mt-3 flex items-center gap-1.5'>
+          <Text type='tertiary' size='small'>
+            {t('累计请求')}
+          </Text>
+          <Tag color='blue' size='small'>
+            {Number(item.requestCount).toLocaleString()}
+          </Tag>
+        </div>
+      )}
+    </div>
   );
 };
 
@@ -135,7 +146,7 @@ const OverviewPanel = ({
     <div className='space-y-4'>
       <Card
         bordered={false}
-        className='rounded-xl'
+        className='!rounded-2xl'
         title={
           <div className='flex flex-col gap-1 py-1'>
             <Text strong className='text-base'>
@@ -151,7 +162,7 @@ const OverviewPanel = ({
           {overviewReport ? (
             <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-3'>
               {overviewSummaryCards.map((item) => (
-                <MetricCard key={item.key} item={item} />
+                <MetricCard key={item.key} item={item} t={t} />
               ))}
             </div>
           ) : (
@@ -174,7 +185,7 @@ const OverviewPanel = ({
               {t('累计组合对比')}
             </Text>
           }
-          className='rounded-xl'
+          className='!rounded-2xl'
         >
           <Table
             columns={batchColumns}

@@ -120,6 +120,7 @@ const cloneComboDraft = (batch, comboConfig) => ({
 });
 
 const getSiteSummaryText = (comboConfig, t) => {
+  if (comboConfig.site_mode === 'log_quota') return t('智能（按日志额度）');
   if (comboConfig.site_mode !== 'shared_site_model') return t('手动定价');
   const modelCount = comboConfig.shared_site?.model_names?.length || 0;
   if (modelCount === 0) return t('本站模型价格');
@@ -173,6 +174,7 @@ const ProfitBoardPage = () => {
   const [accountsReady, setAccountsReady] = useState(false);
   const [configReady, setConfigReady] = useState(false);
   const serverRestoredRef = useRef(false);
+  const pendingAutoSaveRef = useRef(false);
 
   const configHook = useProfitBoardConfig({
     batchPayload: batchesHook.batchPayload,
@@ -533,6 +535,15 @@ const ProfitBoardPage = () => {
     viewBatchId,
   ]);
 
+  useEffect(() => {
+    if (!pendingAutoSaveRef.current || !configReady) return;
+    pendingAutoSaveRef.current = false;
+    (async () => {
+      const saved = await saveConfig([]);
+      if (saved) setHasUnsavedConfigChanges(false);
+    })();
+  }, [configPayload, configReady, saveConfig]);
+
   const metricOpts = useMemo(() => createMetricOptions(t), [t]);
   const batchSummaryOptions = useMemo(
     () => [
@@ -720,7 +731,7 @@ const ProfitBoardPage = () => {
     [chartSubtitle, modelRows, statusState?.status, t],
   );
 
-  const chartHeight = isMobile ? 320 : 420;
+  const chartHeight = isMobile ? 340 : 480;
   const renderChart = useCallback(
     (chartKey, spec) => (
       <ResponsiveVChart
@@ -801,6 +812,7 @@ const ProfitBoardPage = () => {
                   className='text-emerald-600 dark:text-emerald-400'
                 />
               ),
+              requestCount: overviewReport.summary.request_count,
             },
             {
               key: 'upstream_cost_usd',
@@ -1197,6 +1209,7 @@ const ProfitBoardPage = () => {
           : '组合已添加',
     );
     closeEditor();
+    pendingAutoSaveRef.current = true;
 
     if (walletAccountId > 0) {
       await accountsHook.syncAccount(walletAccountId, {
@@ -1220,7 +1233,7 @@ const ProfitBoardPage = () => {
       Modal.confirm({
         title: t('确认删除'),
         content: t(
-          '删除后将同时移除组合“{{name}}”及其定价配置，且不会自动保存到服务器。',
+          '删除后将同时移除组合”{{name}}”及其定价配置，并自动同步到服务器。',
           { name: batch.name },
         ),
         okText: t('确认删除'),
@@ -1234,6 +1247,7 @@ const ProfitBoardPage = () => {
             prev.filter((item) => item.combo_id !== batch.id),
           );
           setHasUnsavedConfigChanges(true);
+          pendingAutoSaveRef.current = true;
           if (editingBatchId === batch.id) {
             closeEditor();
           }

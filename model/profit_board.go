@@ -39,6 +39,7 @@ const (
 	ProfitBoardSitePricingSiteModel    = "site_model"
 	ProfitBoardComboSiteModeManual     = "manual"
 	ProfitBoardComboSiteModeSharedSite = "shared_site_model"
+	ProfitBoardComboSiteModeLogQuota   = "log_quota"
 )
 
 type ProfitBoardConfig struct {
@@ -737,7 +738,7 @@ func normalizeProfitBoardComboConfigs(batches []ProfitBoardBatch, comboConfigs [
 		config.ComboId = comboID
 		config.SiteMode = strings.ToLower(strings.TrimSpace(config.SiteMode))
 		switch config.SiteMode {
-		case "", ProfitBoardComboSiteModeManual, ProfitBoardComboSiteModeSharedSite:
+		case "", ProfitBoardComboSiteModeManual, ProfitBoardComboSiteModeSharedSite, ProfitBoardComboSiteModeLogQuota:
 		default:
 			config.SiteMode = ProfitBoardComboSiteModeManual
 		}
@@ -828,7 +829,7 @@ func validateProfitBoardComboConfigs(comboConfigs []ProfitBoardComboPricingConfi
 		}
 		seen[comboID] = struct{}{}
 		switch config.SiteMode {
-		case "", ProfitBoardComboSiteModeManual, ProfitBoardComboSiteModeSharedSite:
+		case "", ProfitBoardComboSiteModeManual, ProfitBoardComboSiteModeSharedSite, ProfitBoardComboSiteModeLogQuota:
 		default:
 			return ErrProfitBoardInvalidSitePricingMode
 		}
@@ -2234,7 +2235,11 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		configuredSiteRevenueUSD := 0.0
 		sitePricingSource := ""
 		sitePricingKnown := false
-		if comboPricing.SiteMode == ProfitBoardComboSiteModeSharedSite {
+		if comboPricing.SiteMode == ProfitBoardComboSiteModeLogQuota {
+			configuredSiteRevenueUSD = float64(row.Quota) / common.QuotaPerUnit
+			sitePricingSource = "log_quota"
+			sitePricingKnown = row.Quota > 0
+		} else if comboPricing.SiteMode == ProfitBoardComboSiteModeSharedSite {
 			sharedSiteConfig := comboPricing.SharedSite
 			configuredSiteRevenueUSD, sitePricingSource, sitePricingKnown = profitBoardSiteModelRevenueUSD(
 				row,
@@ -2799,7 +2804,11 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 		configuredSiteRevenueUSD := 0.0
 		sitePricingSource := ""
 		sitePricingKnown := false
-		if comboPricing.SiteMode == ProfitBoardComboSiteModeSharedSite {
+		if comboPricing.SiteMode == ProfitBoardComboSiteModeLogQuota {
+			configuredSiteRevenueUSD = float64(row.Quota) / common.QuotaPerUnit
+			sitePricingSource = "log_quota"
+			sitePricingKnown = row.Quota > 0
+		} else if comboPricing.SiteMode == ProfitBoardComboSiteModeSharedSite {
 			sharedSiteConfig := comboPricing.SharedSite
 			configuredSiteRevenueUSD, sitePricingSource, sitePricingKnown = profitBoardSiteModelRevenueUSD(
 				row,

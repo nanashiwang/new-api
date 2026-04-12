@@ -50,6 +50,7 @@ export const createSitePricingSourceLabelMap = (t) => ({
   site_model_standard: t('读取本站模型原价'),
   site_model_recharge: t('读取本站模型充值价'),
   site_model_missing: t('未命中本站模型'),
+  log_quota: t('按日志额度'),
 });
 
 /** @deprecated Use createSitePricingSourceLabelMap(t) instead */
@@ -61,6 +62,7 @@ export const sitePricingSourceLabelMap = {
   site_model_standard: '读取本站模型原价',
   site_model_recharge: '读取本站模型充值价',
   site_model_missing: '未命中本站模型',
+  log_quota: '按日志额度',
 };
 
 export const createBatchId = () =>
@@ -1203,6 +1205,7 @@ export const createTrendSpec = (rows, metricLabel, status, t) => {
   return {
     type: 'line',
     background: 'transparent',
+    padding: { top: 32, right: 24, bottom: 40, left: 56 },
     data: [{ id: 'trend', values: rows }],
     xField: 'bucket',
     yField: 'value',
@@ -1210,10 +1213,10 @@ export const createTrendSpec = (rows, metricLabel, status, t) => {
     legends: { visible: hasSeries },
     point: {
       visible: true,
-      style: { size: isSparse ? 10 : 5 },
+      style: { size: isSparse ? 12 : 6 },
     },
     line: {
-      style: { curveType: 'monotone', lineWidth: isSparse ? 3 : 2 },
+      style: { curveType: 'monotone', lineWidth: isSparse ? 3.5 : 2.5 },
     },
     label: isSparse
       ? {
@@ -1227,11 +1230,17 @@ export const createTrendSpec = (rows, metricLabel, status, t) => {
       {
         orient: 'bottom',
         type: 'band',
-        label: { visible: true, style: { angle: -18 } },
+        label: { visible: true, style: { angle: -18, fontSize: 12 } },
       },
-      { orient: 'left', nice: true },
+      { orient: 'left', nice: true, label: { style: { fontSize: 12 } } },
     ],
-    title: { visible: true, text: t('收益趋势'), subtext: metricLabel },
+    title: {
+      visible: true,
+      text: t('收益趋势'),
+      subtext: metricLabel,
+      textStyle: { fontSize: 16, fontWeight: 600 },
+      subtextStyle: { fontSize: 12 },
+    },
     tooltip: {
       mark: {
         content: [
@@ -1252,6 +1261,7 @@ export const createTrendSpec = (rows, metricLabel, status, t) => {
 export const createBarSpec = (title, rows, metricLabel, status, t) => ({
   type: 'bar',
   background: 'transparent',
+  padding: { top: 32, right: 24, bottom: 40, left: 56 },
   data: [{ id: 'bar', values: rows }],
   xField: 'label',
   yField: 'value',
@@ -1261,11 +1271,17 @@ export const createBarSpec = (title, rows, metricLabel, status, t) => ({
     {
       orient: 'bottom',
       type: 'band',
-      label: { visible: true, style: { angle: -20 } },
+      label: { visible: true, style: { angle: -20, fontSize: 12 } },
     },
-    { orient: 'left', nice: true },
+    { orient: 'left', nice: true, label: { style: { fontSize: 12 } } },
   ],
-  title: { visible: true, text: title, subtext: metricLabel },
+  title: {
+    visible: true,
+    text: title,
+    subtext: metricLabel,
+    textStyle: { fontSize: 16, fontWeight: 600 },
+    subtextStyle: { fontSize: 12 },
+  },
   tooltip: {
     mark: {
       content: [

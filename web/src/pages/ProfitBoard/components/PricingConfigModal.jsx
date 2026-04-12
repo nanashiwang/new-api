@@ -26,7 +26,6 @@ import {
   Radio,
   Select,
   SideSheet,
-  Switch,
   Tag,
   Tooltip,
   Typography,
@@ -123,9 +122,11 @@ const PricingConfigModal = ({
       ? (comboConfig?.channel_ids || []).length
       : (comboConfig?.tags || []).length;
   const siteModeLabel =
-    comboConfig?.site_mode === 'shared_site_model'
-      ? t('本站模型价格')
-      : t('手动定价');
+    comboConfig?.site_mode === 'log_quota'
+      ? t('智能')
+      : comboConfig?.site_mode === 'shared_site_model'
+        ? t('本站模型价格')
+        : t('手动定价');
   const upstreamAccountLabel =
     accountOptions.find(
       (item) => Number(item.value) === Number(comboConfig?.upstream_account_id || 0),
@@ -351,9 +352,9 @@ const PricingConfigModal = ({
       {comboConfig ? (
         <div className='space-y-4'>
           <Banner
-            type='info'
+            type='success'
             closeIcon={null}
-            description={t('关闭弹窗后，改动只保存在当前浏览器草稿；仍需点击页面顶部"保存配置"才会提交到服务器')}
+            description={t('保存组合后将自动同步到服务器，无需额外手动操作')}
           />
 
           {validationError ? (
@@ -474,9 +475,11 @@ const PricingConfigModal = ({
           <SectionCard
             title={t('收入配置')}
             description={
-              comboConfig.site_mode === 'shared_site_model'
-                ? t('命中本站模型价格时直接读取本地模型价，手动规则只负责补充和兜底')
-                : t('完全按手动规则和固定金额计算本站收入')
+              comboConfig.site_mode === 'log_quota'
+                ? t('智能模式直接读取日志中已计算的额度作为本站收入')
+                : comboConfig.site_mode === 'shared_site_model'
+                  ? t('命中本站模型价格时直接读取本地模型价，手动规则只负责补充和兜底')
+                  : t('完全按手动规则和固定金额计算本站收入')
             }
             aside={
               <Radio.Group
@@ -492,9 +495,18 @@ const PricingConfigModal = ({
               >
                 <Radio value='manual'>{t('手动定价')}</Radio>
                 <Radio value='shared_site_model'>{t('本站模型价格')}</Radio>
+                <Radio value='log_quota'>{t('智能')}</Radio>
               </Radio.Group>
             }
           >
+            {comboConfig.site_mode === 'log_quota' ? (
+              <Banner
+                type='success'
+                closeIcon={null}
+                description={t('智能模式直接读取每条日志的已计算额度（含分组倍率、模型倍率），换算为USD作为本站收入，无需配置模型和价格')}
+              />
+            ) : (
+              <>
             <MoneyField
               label={t('固定总收入')}
               value={comboConfig.site_fixed_total_amount}
@@ -551,8 +563,28 @@ const PricingConfigModal = ({
                   />
                 </div>
 
-                {/* 分组 + 按充值价 */}
+                {/* 定价基准 + 分组 */}
                 <div className='grid grid-cols-2 gap-3'>
+                  <div>
+                    <FieldLabel>{t('定价基准')}</FieldLabel>
+                    <Radio.Group
+                      type='button'
+                      value={sharedSite.use_recharge_price ? 'recharge' : 'standard'}
+                      onChange={(event) =>
+                        setComboConfig((prev) => ({
+                          ...prev,
+                          shared_site: {
+                            ...prev.shared_site,
+                            use_recharge_price: event.target.value === 'recharge',
+                          },
+                        }))
+                      }
+                      size='small'
+                    >
+                      <Radio value='standard'>{t('按套餐价')}</Radio>
+                      <Radio value='recharge'>{t('按充值价')}</Radio>
+                    </Radio.Group>
+                  </div>
                   <div>
                     <FieldLabel>{t('分组')}</FieldLabel>
                     <Select
@@ -576,26 +608,6 @@ const PricingConfigModal = ({
                       size='small'
                       style={{ width: '100%' }}
                     />
-                  </div>
-                  <div className='flex items-end'>
-                    <div className='flex w-full items-center justify-between rounded-xl border border-semi-color-border bg-semi-color-bg-1 px-3 py-2'>
-                      <div>
-                        <Text size='small' strong>{t('按充值价')}</Text>
-                      </div>
-                      <Switch
-                        checked={!!sharedSite.use_recharge_price}
-                        onChange={(checked) =>
-                          setComboConfig((prev) => ({
-                            ...prev,
-                            shared_site: {
-                              ...prev.shared_site,
-                              use_recharge_price: checked,
-                            },
-                          }))
-                        }
-                        size='small'
-                      />
-                    </div>
                   </div>
                 </div>
 
@@ -680,6 +692,8 @@ const PricingConfigModal = ({
               onAdd={(_, field) => addRule(field)}
               t={t}
             />
+              </>
+            )}
           </SectionCard>
 
           {/* 成本配置 */}
