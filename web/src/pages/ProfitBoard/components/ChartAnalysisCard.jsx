@@ -16,23 +16,33 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Banner,
   Button,
   Card,
+  Collapsible,
   DatePicker,
   Empty,
   InputNumber,
   Radio,
   Select,
   Space,
+  Tag,
   Tabs,
   Typography,
 } from '@douyinfe/semi-ui';
-import { BarChart3, RefreshCw, RotateCcw } from 'lucide-react';
+import { BarChart3, ChevronDown, ChevronUp, RefreshCw, RotateCcw, Settings } from 'lucide-react';
 
 const { Text } = Typography;
+
+const DEFAULTS = {
+  analysisMode: 'business_compare',
+  metricKey: 'configured_profit_usd',
+  viewBatchId: 'all',
+  granularity: 'day',
+  channelGroupMode: 'channel',
+};
 
 const ChartAnalysisCard = ({
   analysisMode,
@@ -63,14 +73,23 @@ const ChartAnalysisCard = ({
   trendBucketCount,
   tagAggregationHint,
   validationErrors,
+  onNavigateToConfig,
   t,
 }) => {
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
+
+  const hasNonDefaultFilters =
+    analysisMode !== DEFAULTS.analysisMode ||
+    viewBatchId !== DEFAULTS.viewBatchId ||
+    granularity !== DEFAULTS.granularity ||
+    channelGroupMode !== DEFAULTS.channelGroupMode;
+
   const clearAllFilters = () => {
-    setAnalysisMode('business_compare');
-    setMetricKey('configured_profit_usd');
-    setViewBatchId('all');
-    setGranularity('day');
-    setChannelGroupMode('channel');
+    setAnalysisMode(DEFAULTS.analysisMode);
+    setMetricKey(DEFAULTS.metricKey);
+    setViewBatchId(DEFAULTS.viewBatchId);
+    setGranularity(DEFAULTS.granularity);
+    setChannelGroupMode(DEFAULTS.channelGroupMode);
   };
 
   const datePickerPresets = useMemo(
@@ -130,15 +149,31 @@ const ChartAnalysisCard = ({
       }
     >
       <div className='rounded-lg border border-semi-color-border bg-semi-color-fill-0 p-3'>
-        <div>
-          <DatePicker
-            type='dateTimeRange'
-            value={dateRange}
-            onChange={(value) => setDateRange(value)}
-            presets={datePickerPresets}
-            presetPosition='left'
-            style={{ width: '100%' }}
-          />
+        {/* 第一行: 日期范围 + 高级筛选切换 */}
+        <div className='flex items-center gap-2'>
+          <div className='flex-1'>
+            <DatePicker
+              type='dateTimeRange'
+              value={dateRange}
+              onChange={(value) => setDateRange(value)}
+              presets={datePickerPresets}
+              presetPosition='left'
+              style={{ width: '100%' }}
+            />
+          </div>
+          <Button
+            size='small'
+            theme='borderless'
+            type={hasNonDefaultFilters ? 'primary' : 'tertiary'}
+            icon={filtersExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+            iconPosition='right'
+            onClick={() => setFiltersExpanded((v) => !v)}
+          >
+            {t('筛选')}
+            {hasNonDefaultFilters && !filtersExpanded ? (
+              <Tag color='blue' size='small' className='ml-1'>{t('已调整')}</Tag>
+            ) : null}
+          </Button>
         </div>
 
         {validationErrors.length > 0 ? (
@@ -150,87 +185,90 @@ const ChartAnalysisCard = ({
           />
         ) : null}
 
-        <div className='mt-3 flex flex-wrap items-end gap-3 border-t border-semi-color-border pt-3'>
-          <div className='min-w-[140px]'>
-            <Text type='tertiary' size='small' className='mb-1 block'>
-              {t('分析模式')}
-            </Text>
-            <Select
-              value={analysisMode}
-              onChange={setAnalysisMode}
-              optionList={[
-                { label: t('经营对比'), value: 'business_compare' },
-                { label: t('单指标分析'), value: 'single_metric' },
-              ]}
-              size='small'
-              style={{ width: 140 }}
-            />
-          </div>
-          {analysisMode === 'single_metric' && (
+        {/* 高级筛选区 */}
+        <Collapsible isOpen={filtersExpanded}>
+          <div className='mt-3 flex flex-wrap items-end gap-3 border-t border-semi-color-border pt-3'>
             <div className='min-w-[140px]'>
               <Text type='tertiary' size='small' className='mb-1 block'>
-                {t('指标')}
+                {t('分析模式')}
               </Text>
               <Select
-                value={metricKey}
-                onChange={setMetricKey}
-                optionList={metricOptions.map((item) => ({
-                  label: t(item.label),
-                  value: item.value,
-                }))}
+                value={analysisMode}
+                onChange={setAnalysisMode}
+                optionList={[
+                  { label: t('经营对比'), value: 'business_compare' },
+                  { label: t('单指标分析'), value: 'single_metric' },
+                ]}
                 size='small'
                 style={{ width: 140 }}
               />
             </div>
-          )}
-          <div className='min-w-[130px]'>
-            <Text type='tertiary' size='small' className='mb-1 block'>
-              {t('组合')}
-            </Text>
-            <Select
-              value={viewBatchId}
-              onChange={setViewBatchId}
-              optionList={batchSummaryOptions}
-              size='small'
-              style={{ width: 130 }}
-            />
-          </div>
-          <div className='min-w-[120px]'>
-            <Text type='tertiary' size='small' className='mb-1 block'>
-              {t('粒度')}
-            </Text>
-            <Select
-              value={granularity}
-              onChange={setGranularity}
-              optionList={[
-                { label: t('按小时'), value: 'hour' },
-                { label: t('按天'), value: 'day' },
-                { label: t('按周'), value: 'week' },
-                { label: t('按月'), value: 'month' },
-                { label: t('自定义'), value: 'custom' },
-              ]}
-              size='small'
-              style={{ width: 120 }}
-            />
-          </div>
-          {granularity === 'custom' && (
+            {analysisMode === 'single_metric' && (
+              <div className='min-w-[140px]'>
+                <Text type='tertiary' size='small' className='mb-1 block'>
+                  {t('指标')}
+                </Text>
+                <Select
+                  value={metricKey}
+                  onChange={setMetricKey}
+                  optionList={metricOptions.map((item) => ({
+                    label: t(item.label),
+                    value: item.value,
+                  }))}
+                  size='small'
+                  style={{ width: 140 }}
+                />
+              </div>
+            )}
+            <div className='min-w-[130px]'>
+              <Text type='tertiary' size='small' className='mb-1 block'>
+                {t('组合')}
+              </Text>
+              <Select
+                value={viewBatchId}
+                onChange={setViewBatchId}
+                optionList={batchSummaryOptions}
+                size='small'
+                style={{ width: 130 }}
+              />
+            </div>
             <div className='min-w-[120px]'>
               <Text type='tertiary' size='small' className='mb-1 block'>
-                {t('间隔')}
+                {t('粒度')}
               </Text>
-              <InputNumber
-                min={1}
-                value={customIntervalMinutes}
-                onChange={(value) =>
-                  setCustomIntervalMinutes(Math.max(Number(value || 1), 1))
-                }
-                suffix={t('分钟')}
+              <Select
+                value={granularity}
+                onChange={setGranularity}
+                optionList={[
+                  { label: t('按小时'), value: 'hour' },
+                  { label: t('按天'), value: 'day' },
+                  { label: t('按周'), value: 'week' },
+                  { label: t('按月'), value: 'month' },
+                  { label: t('自定义'), value: 'custom' },
+                ]}
                 size='small'
                 style={{ width: 120 }}
               />
             </div>
-          )}
-        </div>
+            {granularity === 'custom' && (
+              <div className='min-w-[120px]'>
+                <Text type='tertiary' size='small' className='mb-1 block'>
+                  {t('间隔')}
+                </Text>
+                <InputNumber
+                  min={1}
+                  value={customIntervalMinutes}
+                  onChange={(value) =>
+                    setCustomIntervalMinutes(Math.max(Number(value || 1), 1))
+                  }
+                  suffix={t('分钟')}
+                  size='small'
+                  style={{ width: 120 }}
+                />
+              </div>
+            )}
+          </div>
+        </Collapsible>
       </div>
 
       {chartTab === 'channel' ? (
@@ -286,7 +324,19 @@ const ChartAnalysisCard = ({
             )}
           </>
         ) : (
-          <Empty description={t('添加组合并完成加载后会自动生成图表')} />
+          <Empty description={t('添加组合并完成加载后会自动生成图表')}>
+            {onNavigateToConfig ? (
+              <Button
+                type='primary'
+                theme='light'
+                icon={<Settings size={14} />}
+                onClick={onNavigateToConfig}
+                className='mt-2'
+              >
+                {t('前往配置管理')}
+              </Button>
+            ) : null}
+          </Empty>
         )}
       </div>
     </Card>

@@ -16,11 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Button,
   Card,
   Empty,
+  Input,
   Modal,
   Space,
   Tag,
@@ -32,6 +33,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Search,
   Trash2,
   Wallet,
 } from 'lucide-react';
@@ -184,45 +186,57 @@ const AccountCard = ({
           ))}
         </div>
 
-        {resourceMeta.statusBar ? (
-          <div
-            className={`mt-3 flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium ${resourceMeta.statusBar.tone}`}
-          >
-            <AlertTriangle size={13} className='shrink-0' />
-            <span>{resourceMeta.statusBar.text}</span>
-          </div>
-        ) : null}
-
-        <div className='mt-3 text-xs text-semi-color-text-2'>
-          {t('同步')}{' '}
-          <span className='font-medium text-semi-color-text-0'>{syncTime}</span>
-        </div>
-      </div>
-
-      {item.error_message ? (
-        <div className='mx-4 mb-3 flex items-start gap-1.5 rounded-lg bg-red-500/5 px-3 py-1.5 text-xs text-red-600 dark:text-red-300'>
-          <AlertCircle size={12} className='mt-0.5 shrink-0 text-red-500' />
-          <span>{item.error_message}</span>
-        </div>
-      ) : null}
-
-      {(item.status === 'needs_baseline' || item.status === 'failed') && !item.error_message ? (
-        <div className='mx-4 mb-3 flex items-start gap-1.5 rounded-lg bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'>
-          <AlertCircle size={12} className='mt-0.5 shrink-0' />
-          <div>
-            <span>
-              {item.status === 'needs_baseline'
-                ? t('钱包观测模式需要至少 2 次成功同步才能计算成本，请点击同步按钮触发同步')
-                : t('远端同步失败，请检查账户配置或网络连接')}
-            </span>
-            {item.snapshot_count != null && (
-              <div className='mt-1 text-amber-600/70 dark:text-amber-400/70'>
-                {t('当前快照数：{{count}}', { count: item.snapshot_count })}
+        {/* 统一状态行：错误 > 警告 > statusBar > 正常同步时间 */}
+        {item.error_message ? (
+          <div className='mt-3 flex items-start gap-1.5 rounded-lg bg-red-500/5 px-3 py-2 text-xs text-red-600 dark:text-red-300'>
+            <AlertCircle size={12} className='mt-0.5 shrink-0 text-red-500' />
+            <div>
+              <span>{item.error_message}</span>
+              <div className='mt-1 text-red-500/60'>
+                {t('同步')}{' '}
+                <span className='font-medium'>{syncTime}</span>
               </div>
-            )}
+            </div>
           </div>
-        </div>
-      ) : null}
+        ) : (item.status === 'needs_baseline' || item.status === 'failed') ? (
+          <div className='mt-3 flex items-start gap-1.5 rounded-lg bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'>
+            <AlertCircle size={12} className='mt-0.5 shrink-0' />
+            <div>
+              <span>
+                {item.status === 'needs_baseline'
+                  ? t('需要至少 2 次成功同步才能计算成本')
+                  : t('远端同步失败，请检查配置或网络')}
+              </span>
+              {item.snapshot_count != null && (
+                <span className='ml-1 text-amber-600/70 dark:text-amber-400/70'>
+                  {t('(快照 {{count}} 个)', { count: item.snapshot_count })}
+                </span>
+              )}
+              <div className='mt-1 text-amber-600/60 dark:text-amber-400/60'>
+                {t('同步')}{' '}
+                <span className='font-medium'>{syncTime}</span>
+              </div>
+            </div>
+          </div>
+        ) : resourceMeta.statusBar ? (
+          <div
+            className={`mt-3 flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-xs font-medium ${resourceMeta.statusBar.tone}`}
+          >
+            <div className='flex items-center gap-2'>
+              <AlertTriangle size={13} className='shrink-0' />
+              <span>{resourceMeta.statusBar.text}</span>
+            </div>
+            <Text type='tertiary' size='small'>
+              {syncTime}
+            </Text>
+          </div>
+        ) : (
+          <div className='mt-3 text-xs text-semi-color-text-2'>
+            {t('同步')}{' '}
+            <span className='font-medium text-semi-color-text-0'>{syncTime}</span>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
@@ -257,7 +271,20 @@ const UpstreamWalletCard = ({
   sideSheetVisible,
   closeSideSheet,
   t,
-}) => (
+}) => {
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const filteredAccounts = useMemo(() => {
+    if (!searchQuery.trim()) return accounts;
+    const q = searchQuery.trim().toLowerCase();
+    return accounts.filter(
+      (item) =>
+        (item.name || '').toLowerCase().includes(q) ||
+        (item.base_url || '').toLowerCase().includes(q),
+    );
+  }, [accounts, searchQuery]);
+
+  return (
   <Card
     bordered={false}
     className='rounded-xl'
@@ -290,9 +317,20 @@ const UpstreamWalletCard = ({
       </Space>
     }
   >
-    {accounts.length > 0 ? (
-      <div className='grid gap-3 md:grid-cols-2 2xl:grid-cols-3'>
-        {accounts.map((item) => {
+    {filteredAccounts.length > 0 ? (
+      <div className='space-y-3'>
+        {accounts.length > 3 && (
+          <Input
+            prefix={<Search size={14} />}
+            placeholder={t('搜索账户名称或域名')}
+            value={searchQuery}
+            onChange={setSearchQuery}
+            showClear
+            size='small'
+          />
+        )}
+        <div className='grid gap-3 md:grid-cols-2 2xl:grid-cols-3'>
+          {filteredAccounts.map((item) => {
           const statusMeta = getWalletStatusMeta(item.status, t);
           const resourceMeta = buildAccountResourceMetrics(item, status, t);
 
@@ -312,9 +350,14 @@ const UpstreamWalletCard = ({
             />
           );
         })}
+        </div>
       </div>
     ) : (
-      <Empty image={null} description={t('点击右上角新建账户')} />
+      <Empty image={null} description={
+        searchQuery.trim()
+          ? t('没有匹配"{{query}}"的账户', { query: searchQuery.trim() })
+          : t('点击右上角新建账户')
+      } />
     )}
 
     <AccountEditSideSheet
@@ -345,6 +388,7 @@ const UpstreamWalletCard = ({
       t={t}
     />
   </Card>
-);
+  );
+};
 
 export default UpstreamWalletCard;

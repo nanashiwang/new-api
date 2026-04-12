@@ -25,13 +25,13 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { Empty, Modal, Tabs } from '@douyinfe/semi-ui';
+import { Empty, Skeleton, Tabs } from '@douyinfe/semi-ui';
 import { initVChartSemiTheme } from '@visactor/vchart-semi-theme';
 import { BadgeDollarSign, BarChart3, CircleDollarSign } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { CHART_CONFIG } from '../../constants/dashboard.constants';
 import { StatusContext } from '../../context/Status';
-import { showError, showSuccess, timestamp2string } from '../../helpers';
+import { showError, timestamp2string } from '../../helpers';
 import { useIsMobile } from '@/hooks/common/useIsMobile';
 import ChartAnalysisCard from './components/ChartAnalysisCard';
 import ComboManagerCard from './components/ComboManagerCard';
@@ -40,6 +40,7 @@ import PricingConfigModal from './components/PricingConfigModal';
 import ProfitBoardHeader from './components/ProfitBoardHeader';
 import ResponsiveVChart from './components/ResponsiveVChart';
 import UpstreamWalletCard from './components/UpstreamWalletCard';
+import { useComboEditor } from './hooks/useComboEditor';
 import { useProfitBoardBatches } from './hooks/useProfitBoardBatches';
 import { useProfitBoardConfig } from './hooks/useProfitBoardConfig';
 import { useProfitBoardPersist } from './hooks/useProfitBoardPersist';
@@ -48,75 +49,23 @@ import { useUpstreamAccounts } from './hooks/useUpstreamAccounts';
 import {
   aggregateBreakdownRows,
   aggregateChannelRowsByTag,
+  buildBatchOverlapError,
   clampNumber,
   combineBreakdownMetrics,
   combineChannelMetricsByTag,
   combineTimeseriesMetrics,
   createBarSpec,
-  createBatchId,
-  createBatchCreatedAt,
   createDefaultComboPricingConfig,
   createDefaultPricingRule,
   createMetricOptions,
   createPresetRanges,
-  createSuggestedComboName,
   createTrendSpec,
   formatMoney,
   getUpstreamCostSourceLabel,
-  isLikelyAutoComboName,
-  mergeComboDraftWithTemplate,
-  pickDominantComboModes,
-  pickRecommendedUpstreamAccountId,
 } from './utils';
 
 initVChartSemiTheme({
   isWatchingThemeSwitch: true,
-});
-
-const buildBatchOverlapError = (batches, channelMap, tagChannelMap) => {
-  const ownerMap = new Map();
-  for (const batch of batches) {
-    const channelIds =
-      batch.scope_type === 'tag'
-        ? (batch.tags || []).flatMap((tag) => tagChannelMap.get(tag) || [])
-        : batch.channel_ids || [];
-    for (const channelId of Array.from(new Set(channelIds))) {
-      const owner = ownerMap.get(channelId);
-      if (owner && owner !== batch.name) {
-        const channelName =
-          channelMap.get(String(channelId))?.name || `#${channelId}`;
-        return `${channelName} 同时出现在组合"${owner}"和"${batch.name}"中，请拆开后再统计`;
-      }
-      ownerMap.set(channelId, batch.name);
-    }
-  }
-  return '';
-};
-
-const cloneComboDraft = (batch, comboConfig) => ({
-  id: batch.id,
-  name: batch.name || '',
-  scope_type: batch.scope_type || 'channel',
-  channel_ids: [...(batch.channel_ids || [])],
-  tags: [...(batch.tags || [])],
-  created_at: Number(batch.created_at || createBatchCreatedAt()),
-  combo_id: comboConfig.combo_id,
-  site_mode: comboConfig.site_mode,
-  upstream_mode: comboConfig.upstream_mode,
-  cost_source: comboConfig.cost_source || 'manual_only',
-  upstream_account_id: Number(comboConfig.upstream_account_id || 0),
-  shared_site: { ...(comboConfig.shared_site || {}) },
-  site_rules: (comboConfig.site_rules || []).map((rule) =>
-    createDefaultPricingRule(rule),
-  ),
-  upstream_rules: (comboConfig.upstream_rules || []).map((rule) =>
-    createDefaultPricingRule(rule),
-  ),
-  site_fixed_total_amount: clampNumber(comboConfig.site_fixed_total_amount),
-  upstream_fixed_total_amount: clampNumber(
-    comboConfig.upstream_fixed_total_amount,
-  ),
-  remote_observer: { ...(comboConfig.remote_observer || {}) },
 });
 
 const getSiteSummaryText = (comboConfig, t) => {
@@ -161,11 +110,6 @@ const ProfitBoardPage = () => {
   const [comboConfigs, setComboConfigs] = useState(
     restoredState.comboConfigs || [],
   );
-  const [editorDraft, setEditorDraft] = useState(null);
-  const [editorNameAuto, setEditorNameAuto] = useState(false);
-  const [editingBatchId, setEditingBatchId] = useState('');
-  const [editorVisible, setEditorVisible] = useState(false);
-  const [editorValidationError, setEditorValidationError] = useState('');
   const [hasUnsavedConfigChanges, setHasUnsavedConfigChanges] = useState(
     !!restoredState.hasUnsavedConfigChanges,
   );
@@ -238,6 +182,11 @@ const ProfitBoardPage = () => {
     [options.upstream_accounts],
   );
 
+  const duplicateBatchError = useMemo(
+    () => buildBatchOverlapError(batches, channelMap, tagChannelMap),
+    [batches, channelMap, tagChannelMap],
+  );
+
   const resolveComboConfig = useCallback(
     (batchId) =>
       comboConfigs.find((item) => item.combo_id === batchId) ||
@@ -286,11 +235,6 @@ const ProfitBoardPage = () => {
       }),
     );
   }, [batches, siteConfig, upstreamConfig]);
-
-  const duplicateBatchError = useMemo(
-    () => buildBatchOverlapError(batches, channelMap, tagChannelMap),
-    [batches, channelMap, tagChannelMap],
-  );
 
   const validationErrors = useMemo(() => {
     const errors = [];
@@ -378,50 +322,33 @@ const ProfitBoardPage = () => {
     runFullRefresh,
   });
 
-  const buildDraftValidationError = useCallback(
-    (draft) => {
-      if (!draft) return '';
-      const selectedCount =
-        draft.scope_type === 'channel'
-          ? (draft.channel_ids || []).length
-          : (draft.tags || []).length;
-      if (!selectedCount) return t('请先选择渠道或标签');
-      if (
-        (draft.site_mode === 'shared_site_model' || draft.site_mode === 'log_quota') &&
-        !(draft.shared_site?.model_names || []).length
-      ) {
-        return t('启用了本站模型价格或智能模式的组合必须至少选择一个模型');
-      }
-      if (draft.upstream_mode === 'wallet_observer') {
-        const accountId = Number(draft.upstream_account_id || 0);
-        if (accountId <= 0 || !availableAccountIds.has(accountId)) {
-          return t('钱包扣减模式必须绑定一个上游账户');
-        }
-      }
-      const nextBatch = {
-        id: draft.id,
-        name: draft.name?.trim() || t('未命名组合'),
-        scope_type: draft.scope_type,
-        channel_ids:
-          draft.scope_type === 'channel' ? draft.channel_ids || [] : [],
-        tags: draft.scope_type === 'tag' ? draft.tags || [] : [],
-      };
-      return buildBatchOverlapError(
-        [...batches.filter((item) => item.id !== draft.id), nextBatch],
-        channelMap,
-        tagChannelMap,
-      );
-    },
-    [availableAccountIds, batches, channelMap, t, tagChannelMap],
-  );
+  const onConfigChanged = useCallback(() => {
+    setHasUnsavedConfigChanges(true);
+    pendingAutoSaveRef.current = true;
+  }, []);
 
-  useEffect(() => {
-    if (!editorDraft) {
-      setEditorValidationError('');
-      return;
-    }
-    setEditorValidationError(buildDraftValidationError(editorDraft));
-  }, [buildDraftValidationError, editorDraft]);
+  const editorHook = useComboEditor({
+    batches,
+    upsertBatch,
+    removeBatch,
+    comboConfigs,
+    setComboConfigs,
+    availableAccountIds,
+    availableAccounts,
+    channelMap,
+    tagChannelMap,
+    siteConfig,
+    upstreamConfig,
+    builderOptionsReady,
+    setBuilderOptionsReady,
+    loadBuilderOptions,
+    resolveComboConfig,
+    onConfigChanged,
+    syncAccount: accountsHook.syncAccount,
+    t,
+  });
+
+  // --- Initialization effects ---
 
   useEffect(() => {
     let cancelled = false;
@@ -469,7 +396,7 @@ const ProfitBoardPage = () => {
 
   useEffect(() => {
     if (builderOptionsReady) return;
-    if (activeTab !== 'config' && !editorVisible && channelGroupMode !== 'tag') {
+    if (activeTab !== 'config' && !editorHook.editorVisible && channelGroupMode !== 'tag') {
       return;
     }
     let cancelled = false;
@@ -488,7 +415,7 @@ const ProfitBoardPage = () => {
     activeTab,
     builderOptionsReady,
     channelGroupMode,
-    editorVisible,
+    editorHook.editorVisible,
     loadBuilderOptions,
   ]);
 
@@ -543,6 +470,8 @@ const ProfitBoardPage = () => {
       if (saved) setHasUnsavedConfigChanges(false);
     })();
   }, [configPayload, configReady, saveConfig]);
+
+  // --- Derived data for charts ---
 
   const metricOpts = useMemo(() => createMetricOptions(t), [t]);
   const batchSummaryOptions = useMemo(
@@ -794,6 +723,8 @@ const ProfitBoardPage = () => {
     ],
   );
 
+  // --- Summary data ---
+
   const overviewSummaryCards = useMemo(
     () =>
       !overviewReport?.summary
@@ -913,104 +844,6 @@ const ProfitBoardPage = () => {
     [channelMap, t],
   );
 
-  const getEditorSuggestedName = useCallback(
-    (draft) => {
-      const fallbackName = editingBatchId
-        ? draft?.name?.trim() || t('未命名组合')
-        : `组合 ${batches.length + 1}`;
-      return createSuggestedComboName(draft, channelMap, t, fallbackName);
-    },
-    [batches.length, channelMap, editingBatchId, t],
-  );
-
-  const setEditorDraftSmart = useCallback(
-    (updater) => {
-      setEditorDraft((prev) => {
-        const nextValue =
-          typeof updater === 'function' ? updater(prev) : updater;
-        if (!nextValue) return nextValue;
-
-        const nextDraft = { ...nextValue };
-        if (nextDraft.upstream_mode === 'wallet_observer') {
-          const accountId = Number(nextDraft.upstream_account_id || 0);
-          if (
-            (!accountId || !availableAccountIds.has(accountId)) &&
-            availableAccounts.length === 1
-          ) {
-            nextDraft.upstream_account_id = Number(availableAccounts[0].id);
-          }
-        } else {
-          nextDraft.upstream_account_id = 0;
-        }
-
-        if (editorNameAuto) {
-          nextDraft.name = getEditorSuggestedName(nextDraft);
-        }
-
-        return nextDraft;
-      });
-    },
-    [
-      availableAccountIds,
-      availableAccounts,
-      editorNameAuto,
-      getEditorSuggestedName,
-    ],
-  );
-
-  const handleEditorNameChange = useCallback((value) => {
-    setEditorNameAuto(false);
-    setEditorDraft((prev) => (prev ? { ...prev, name: value } : prev));
-  }, []);
-
-  const handleRegenerateEditorName = useCallback(() => {
-    setEditorNameAuto(true);
-    setEditorDraft((prev) =>
-      prev ? { ...prev, name: getEditorSuggestedName(prev) } : prev,
-    );
-  }, [getEditorSuggestedName]);
-
-  const dominantComboModes = useMemo(
-    () =>
-      pickDominantComboModes(
-        comboConfigs,
-        siteConfig?.pricing_mode === 'site_model'
-          ? 'shared_site_model'
-          : 'manual',
-        upstreamConfig?.upstream_mode || 'manual_rules',
-      ),
-    [comboConfigs, siteConfig?.pricing_mode, upstreamConfig?.upstream_mode],
-  );
-
-  const recommendedAccountId = useMemo(
-    () =>
-      pickRecommendedUpstreamAccountId(
-        comboConfigs,
-        availableAccountIds,
-        editingBatchId,
-      ),
-    [availableAccountIds, comboConfigs, editingBatchId],
-  );
-
-  const recommendedAccount = useMemo(
-    () =>
-      availableAccounts.find(
-        (item) => Number(item.id) === Number(recommendedAccountId || 0),
-      ) || null,
-    [availableAccounts, recommendedAccountId],
-  );
-
-  const copyTemplateOptions = useMemo(
-    () =>
-      batches
-        .filter((batch) => batch.id !== editingBatchId)
-        .map((batch) => ({
-          label: batch.name || t('未命名组合'),
-          value: batch.id,
-        })),
-    [batches, editingBatchId, t],
-  );
-
   const generatedAtText =
     reportMatchesCurrentFilters && report?.meta?.generated_at
       ? timestamp2string(report.meta.generated_at)
@@ -1024,239 +857,19 @@ const ProfitBoardPage = () => {
     report?.meta?.site_price_factor_note ||
     '';
 
-  const closeEditor = useCallback(() => {
-    setEditorVisible(false);
-    setEditingBatchId('');
-    setEditorDraft(null);
-    setEditorNameAuto(false);
-    setEditorValidationError('');
-  }, []);
-
-  const openCreateBatchModal = useCallback(async () => {
-    try {
-      if (!builderOptionsReady) {
-        await loadBuilderOptions();
-        setBuilderOptionsReady(true);
-      }
-      const batchId = createBatchId();
-      const defaultBatch = {
-        id: batchId,
-        name: `组合 ${batches.length + 1}`,
-        scope_type: 'channel',
-        channel_ids: [],
-        tags: [],
-        created_at: createBatchCreatedAt(),
+  const batchMetrics = useMemo(() => {
+    const summaries = overviewReport?.batch_summaries;
+    if (!summaries?.length) return null;
+    const map = {};
+    summaries.forEach((s) => {
+      map[s.batch_id] = {
+        revenue: formatMoney(s.configured_site_revenue_usd, statusState?.status),
+        cost: formatMoney(s.upstream_cost_usd, statusState?.status),
+        profit: formatMoney(s.configured_profit_usd, statusState?.status),
       };
-      const defaultComboConfig = createDefaultComboPricingConfig(
-        batchId,
-        siteConfig,
-        siteConfig,
-        upstreamConfig,
-      );
-      const nextDraft = cloneComboDraft(defaultBatch, defaultComboConfig);
-      setEditingBatchId('');
-      setEditorNameAuto(true);
-      setEditorDraft({
-        ...nextDraft,
-        name: createSuggestedComboName(
-          nextDraft,
-          channelMap,
-          t,
-          `组合 ${batches.length + 1}`,
-        ),
-      });
-      setEditorVisible(true);
-    } catch (error) {
-      showError(error);
-    }
-  }, [
-    batches.length,
-    builderOptionsReady,
-    channelMap,
-    loadBuilderOptions,
-    siteConfig,
-    t,
-    upstreamConfig,
-  ]);
-
-  const openEditBatchModal = useCallback(
-    async (batch) => {
-      try {
-        if (!builderOptionsReady) {
-          await loadBuilderOptions();
-          setBuilderOptionsReady(true);
-        }
-        const nextDraft = cloneComboDraft(batch, resolveComboConfig(batch.id));
-        const suggestedName = createSuggestedComboName(
-          nextDraft,
-          channelMap,
-          t,
-          batch.name || t('未命名组合'),
-        );
-        setEditingBatchId(batch.id);
-        setEditorNameAuto(isLikelyAutoComboName(batch.name, suggestedName));
-        setEditorDraft(nextDraft);
-        setEditorVisible(true);
-      } catch (error) {
-        showError(error);
-      }
-    },
-    [builderOptionsReady, channelMap, loadBuilderOptions, resolveComboConfig, t],
-  );
-
-  const handleApplyRecommendedModes = useCallback(() => {
-    setEditorDraftSmart((prev) =>
-      prev
-        ? {
-            ...prev,
-            site_mode: dominantComboModes.site_mode,
-            upstream_mode: dominantComboModes.upstream_mode,
-          }
-        : prev,
-    );
-  }, [
-    dominantComboModes.site_mode,
-    dominantComboModes.upstream_mode,
-    setEditorDraftSmart,
-  ]);
-
-  const handleApplyTemplate = useCallback(
-    (templateBatchId) => {
-      const templateConfig = comboConfigs.find(
-        (item) => item.combo_id === templateBatchId,
-      );
-      if (!templateConfig) return;
-      setEditorDraftSmart((prev) =>
-        mergeComboDraftWithTemplate(prev, templateConfig),
-      );
-    },
-    [comboConfigs, setEditorDraftSmart],
-  );
-
-  const handleApplyRecommendedAccount = useCallback(() => {
-    if (!recommendedAccountId) return;
-    setEditorDraftSmart((prev) =>
-      prev
-        ? {
-            ...prev,
-            upstream_mode: 'wallet_observer',
-            upstream_account_id: Number(recommendedAccountId),
-          }
-        : prev,
-    );
-  }, [recommendedAccountId, setEditorDraftSmart]);
-
-  const handleSaveEditor = useCallback(async () => {
-    const error = buildDraftValidationError(editorDraft);
-    if (error) {
-      setEditorValidationError(error);
-      showError(error);
-      return;
-    }
-    const nextBatch = {
-      id: editorDraft.id,
-      name:
-        editorDraft.name?.trim() ||
-        `组合 ${batches.length + (editingBatchId ? 0 : 1)}`,
-      scope_type: editorDraft.scope_type,
-      channel_ids:
-        editorDraft.scope_type === 'channel'
-          ? editorDraft.channel_ids || []
-          : [],
-      tags: editorDraft.scope_type === 'tag' ? editorDraft.tags || [] : [],
-      created_at: Number(editorDraft.created_at || createBatchCreatedAt()),
-    };
-    const nextComboConfig = {
-      combo_id: nextBatch.id,
-      site_mode: editorDraft.site_mode,
-      upstream_mode: editorDraft.upstream_mode,
-      cost_source: editorDraft.cost_source || 'manual_only',
-      upstream_account_id: Number(editorDraft.upstream_account_id || 0),
-      shared_site: { ...(editorDraft.shared_site || {}) },
-      site_rules: (editorDraft.site_rules || []).map((rule) =>
-        createDefaultPricingRule(rule),
-      ),
-      upstream_rules: (editorDraft.upstream_rules || []).map((rule) =>
-        createDefaultPricingRule(rule),
-      ),
-      site_fixed_total_amount: clampNumber(editorDraft.site_fixed_total_amount),
-      upstream_fixed_total_amount: clampNumber(
-        editorDraft.upstream_fixed_total_amount,
-      ),
-      remote_observer: { ...(editorDraft.remote_observer || {}) },
-    };
-
-    upsertBatch(nextBatch);
-    setComboConfigs((prev) => {
-      const exists = prev.some((item) => item.combo_id === nextBatch.id);
-      if (!exists) return [...prev, nextComboConfig];
-      return prev.map((item) =>
-        item.combo_id === nextBatch.id ? nextComboConfig : item,
-      );
     });
-    setHasUnsavedConfigChanges(true);
-    const walletAccountId =
-      nextComboConfig.upstream_mode === 'wallet_observer'
-        ? Number(nextComboConfig.upstream_account_id || 0)
-        : 0;
-    showSuccess(
-      walletAccountId > 0
-        ? editingBatchId
-          ? '组合已更新，正在同步上游账户'
-          : '组合已添加，正在同步上游账户'
-        : editingBatchId
-          ? '组合已更新'
-          : '组合已添加',
-    );
-    closeEditor();
-    pendingAutoSaveRef.current = true;
-
-    if (walletAccountId > 0) {
-      await accountsHook.syncAccount(walletAccountId, {
-        forceRefresh: true,
-        suppressReadyToast: true,
-        suppressNeedsBaselineToast: true,
-      });
-    }
-  }, [
-    accountsHook.syncAccount,
-    batches.length,
-    buildDraftValidationError,
-    closeEditor,
-    editorDraft,
-    editingBatchId,
-    upsertBatch,
-  ]);
-
-  const handleRemoveBatch = useCallback(
-    (batch) => {
-      Modal.confirm({
-        title: t('确认删除'),
-        content: t(
-          '删除后将同时移除组合”{{name}}”及其定价配置，并自动同步到服务器。',
-          { name: batch.name },
-        ),
-        okText: t('确认删除'),
-        cancelText: t('取消'),
-        okButtonProps: {
-          type: 'danger',
-        },
-        onOk: () => {
-          removeBatch(batch.id);
-          setComboConfigs((prev) =>
-            prev.filter((item) => item.combo_id !== batch.id),
-          );
-          setHasUnsavedConfigChanges(true);
-          pendingAutoSaveRef.current = true;
-          if (editingBatchId === batch.id) {
-            closeEditor();
-          }
-          showSuccess(t('组合已删除'));
-        },
-      });
-    },
-    [closeEditor, editingBatchId, removeBatch, t],
-  );
+    return map;
+  }, [overviewReport?.batch_summaries, statusState?.status]);
 
   const handleSaveConfig = useCallback(async () => {
     const saved = await saveConfig(validationErrors);
@@ -1265,157 +878,19 @@ const ProfitBoardPage = () => {
     }
   }, [saveConfig, validationErrors]);
 
-  const editorSmartSuggestions = useMemo(() => {
-    if (!editorDraft) return null;
+  const handleMoveBatch = useCallback(
+    (index, direction) => {
+      const target = index + direction;
+      if (target < 0 || target >= batches.length) return;
+      const next = [...batches];
+      [next[index], next[target]] = [next[target], next[index]];
+      setBatches(next);
+      onConfigChanged();
+    },
+    [batches, onConfigChanged, setBatches],
+  );
 
-    const suggestedName = getEditorSuggestedName(editorDraft);
-    const currentAccountId = Number(editorDraft.upstream_account_id || 0);
-    const recommendedModeLabel = `${dominantComboModes.site_mode === 'shared_site_model' ? t('本站模型价格') : t('手动定价')} / ${dominantComboModes.upstream_mode === 'wallet_observer' ? t('钱包余额变化') : t('模型单价')}`;
-
-    return {
-      suggestedName,
-      canApplySuggestedName:
-        !!suggestedName &&
-        (!editorNameAuto || (editorDraft.name?.trim() || '') !== suggestedName),
-      copyTemplateOptions,
-      shouldRecommendModes:
-        editorDraft.site_mode !== dominantComboModes.site_mode ||
-        editorDraft.upstream_mode !== dominantComboModes.upstream_mode,
-      recommendedModeLabel,
-      recommendedAccountName: recommendedAccount?.name || '',
-      shouldRecommendAccount:
-        !!recommendedAccount &&
-        (editorDraft.upstream_mode !== 'wallet_observer' ||
-          currentAccountId !== Number(recommendedAccount.id)),
-    };
-  }, [
-    copyTemplateOptions,
-    dominantComboModes.site_mode,
-    dominantComboModes.upstream_mode,
-    editorDraft,
-    editorNameAuto,
-    getEditorSuggestedName,
-    recommendedAccount,
-    t,
-  ]);
-
-  const overviewPanelProps = {
-    overviewQuerying,
-    autoRefreshing,
-    queryReady,
-    overviewReport,
-    overviewSummaryCards,
-    formatMoney,
-    status: statusState?.status,
-    t,
-  };
-
-  const chartAnalysisProps = {
-    analysisMode,
-    setAnalysisMode,
-    metricKey,
-    setMetricKey,
-    metricOptions: metricOpts,
-    viewBatchId,
-    setViewBatchId,
-    batchSummaryOptions,
-    granularity,
-    setGranularity,
-    customIntervalMinutes,
-    setCustomIntervalMinutes,
-    datePresets: createPresetRanges(t),
-    dateRange,
-    setDateRange,
-    runQuery: () => runFullRefresh(),
-    querying: querying || autoRefreshing,
-    chartTab,
-    setChartTab,
-    channelGroupMode,
-    setChannelGroupMode,
-    report,
-    reportMatchesCurrentFilters,
-    queryReady,
-    chartContent,
-    trendBucketCount,
-    tagAggregationHint: tagAggregationMeta.emptyReason,
-    validationErrors,
-    t,
-  };
-
-  const comboManagerProps = {
-    batches,
-    batchDigest,
-    resolveComboConfig,
-    getSiteSummary: (comboConfig) => getSiteSummaryText(comboConfig, t),
-    getUpstreamSummary: (comboConfig) =>
-      getUpstreamSummaryText(comboConfig, options, t),
-    batchValidationError: duplicateBatchError,
-    isMobile,
-    onCreateBatch: openCreateBatchModal,
-    onEditBatch: openEditBatchModal,
-    onRemoveBatch: handleRemoveBatch,
-    t,
-  };
-
-  const walletCardProps = {
-    accounts: accountsHook.accounts,
-    accountDraft: accountsHook.accountDraft,
-    updateAccountDraftField: accountsHook.updateAccountDraftField,
-    normalizeAccountDraftBaseUrl: accountsHook.normalizeAccountDraftBaseUrl,
-    touchAccountDraftField: accountsHook.touchAccountDraftField,
-    accountDraftErrors: accountsHook.accountDraftErrors,
-    accountDraftCanSave: accountsHook.accountDraftCanSave,
-    accountDraftValidation: accountsHook.accountDraftValidation,
-    editingAccountId: accountsHook.editingAccountId,
-    editingAccount: accountsHook.editingAccount,
-    accountTrend: accountsHook.accountTrend,
-    accountTrendLoading: accountsHook.accountTrendLoading,
-    saveAccount: accountsHook.saveAccount,
-    syncAccount: accountsHook.syncAccount,
-    syncAllAccounts: accountsHook.syncAllAccounts,
-    deleteAccount: accountsHook.deleteAccount,
-    savingAccount: accountsHook.savingAccount,
-    syncingAccountId: accountsHook.syncingAccountId,
-    syncingAllAccounts: accountsHook.syncingAllAccounts,
-    deletingAccountId: accountsHook.deletingAccountId,
-    sideSheetVisible: accountsHook.sideSheetVisible,
-    detailSideSheetVisible: accountsHook.detailSideSheetVisible,
-    openCreateSideSheet: accountsHook.openCreateSideSheet,
-    openEditSideSheet: accountsHook.openEditSideSheet,
-    closeSideSheet: accountsHook.closeSideSheet,
-    openDetailSideSheet: accountsHook.openDetailSideSheet,
-    closeDetailSideSheet: accountsHook.closeDetailSideSheet,
-    formatMoney,
-    status: statusState?.status,
-    t,
-  };
-
-  const pricingModalProps = {
-    visible: editorVisible,
-    isEditing: !!editingBatchId,
-    comboConfig: editorDraft,
-    setComboConfig: setEditorDraftSmart,
-    onNameChange: handleEditorNameChange,
-    onRegenerateName: handleRegenerateEditorName,
-    onApplyRecommendedModes: handleApplyRecommendedModes,
-    onApplyTemplate: handleApplyTemplate,
-    onApplyRecommendedAccount: handleApplyRecommendedAccount,
-    smartSuggestions: editorSmartSuggestions,
-    channelOptions,
-    tagOptions,
-    modelNameOptions,
-    options,
-    resolveSharedSitePreview,
-    getModelsByChannelIds,
-    getModelsByTags,
-    isMobile,
-    clampNumber,
-    localModelMap,
-    validationError: editorValidationError,
-    onOk: handleSaveEditor,
-    onCancel: closeEditor,
-    t,
-  };
+  // --- Render ---
 
   return (
     <>
@@ -1440,6 +915,7 @@ const ProfitBoardPage = () => {
         <Tabs
           type='line'
           size='large'
+          keepDOM
           className='profit-board-tabs'
           activeKey={activeTab}
           onChange={setActiveTab}
@@ -1455,9 +931,46 @@ const ProfitBoardPage = () => {
           >
             <div className='mt-3 space-y-3'>
               {accountsLoading && !options.upstream_accounts?.length ? (
-                <Empty description={t('上游账户加载中')} />
+                <div className='space-y-3'>
+                  <Skeleton.Title style={{ width: 200 }} />
+                  <div className='grid gap-4 md:grid-cols-2'>
+                    <Skeleton.Paragraph rows={4} />
+                    <Skeleton.Paragraph rows={4} />
+                  </div>
+                </div>
               ) : (
-                <UpstreamWalletCard {...walletCardProps} />
+                <UpstreamWalletCard
+                  accounts={accountsHook.accounts}
+                  accountDraft={accountsHook.accountDraft}
+                  updateAccountDraftField={accountsHook.updateAccountDraftField}
+                  normalizeAccountDraftBaseUrl={accountsHook.normalizeAccountDraftBaseUrl}
+                  touchAccountDraftField={accountsHook.touchAccountDraftField}
+                  accountDraftErrors={accountsHook.accountDraftErrors}
+                  accountDraftCanSave={accountsHook.accountDraftCanSave}
+                  accountDraftValidation={accountsHook.accountDraftValidation}
+                  editingAccountId={accountsHook.editingAccountId}
+                  editingAccount={accountsHook.editingAccount}
+                  accountTrend={accountsHook.accountTrend}
+                  accountTrendLoading={accountsHook.accountTrendLoading}
+                  saveAccount={accountsHook.saveAccount}
+                  syncAccount={accountsHook.syncAccount}
+                  syncAllAccounts={accountsHook.syncAllAccounts}
+                  deleteAccount={accountsHook.deleteAccount}
+                  savingAccount={accountsHook.savingAccount}
+                  syncingAccountId={accountsHook.syncingAccountId}
+                  syncingAllAccounts={accountsHook.syncingAllAccounts}
+                  deletingAccountId={accountsHook.deletingAccountId}
+                  sideSheetVisible={accountsHook.sideSheetVisible}
+                  detailSideSheetVisible={accountsHook.detailSideSheetVisible}
+                  openCreateSideSheet={accountsHook.openCreateSideSheet}
+                  openEditSideSheet={accountsHook.openEditSideSheet}
+                  closeSideSheet={accountsHook.closeSideSheet}
+                  openDetailSideSheet={accountsHook.openDetailSideSheet}
+                  closeDetailSideSheet={accountsHook.closeDetailSideSheet}
+                  formatMoney={formatMoney}
+                  status={statusState?.status}
+                  t={t}
+                />
               )}
             </div>
           </Tabs.TabPane>
@@ -1471,8 +984,53 @@ const ProfitBoardPage = () => {
             itemKey='analysis'
           >
             <div className='mt-3 space-y-3'>
-              <OverviewPanel {...overviewPanelProps} />
-              <ChartAnalysisCard {...chartAnalysisProps} />
+              <OverviewPanel
+                overviewQuerying={overviewQuerying}
+                autoRefreshing={autoRefreshing}
+                queryReady={queryReady}
+                overviewReport={overviewReport}
+                overviewSummaryCards={overviewSummaryCards}
+                formatMoney={formatMoney}
+                status={statusState?.status}
+                timeseries={report?.timeseries}
+                onMetricClick={(metricKey) => {
+                  setAnalysisMode('single_metric');
+                  setMetricKey(metricKey);
+                }}
+                t={t}
+              />
+              <ChartAnalysisCard
+                analysisMode={analysisMode}
+                setAnalysisMode={setAnalysisMode}
+                metricKey={metricKey}
+                setMetricKey={setMetricKey}
+                metricOptions={metricOpts}
+                viewBatchId={viewBatchId}
+                setViewBatchId={setViewBatchId}
+                batchSummaryOptions={batchSummaryOptions}
+                granularity={granularity}
+                setGranularity={setGranularity}
+                customIntervalMinutes={customIntervalMinutes}
+                setCustomIntervalMinutes={setCustomIntervalMinutes}
+                datePresets={createPresetRanges(t)}
+                dateRange={dateRange}
+                setDateRange={setDateRange}
+                runQuery={() => runFullRefresh()}
+                querying={querying || autoRefreshing}
+                chartTab={chartTab}
+                setChartTab={setChartTab}
+                channelGroupMode={channelGroupMode}
+                setChannelGroupMode={setChannelGroupMode}
+                report={report}
+                reportMatchesCurrentFilters={reportMatchesCurrentFilters}
+                queryReady={queryReady}
+                chartContent={chartContent}
+                trendBucketCount={trendBucketCount}
+                tagAggregationHint={tagAggregationMeta.emptyReason}
+                validationErrors={validationErrors}
+                onNavigateToConfig={() => setActiveTab('config')}
+                t={t}
+              />
             </div>
           </Tabs.TabPane>
           <Tabs.TabPane
@@ -1486,16 +1044,60 @@ const ProfitBoardPage = () => {
           >
             <div className='mt-3 space-y-3'>
               {builderLoading && !builderOptionsReady ? (
-                <Empty description={t('配置选项加载中')} />
+                <div className='space-y-3'>
+                  <Skeleton.Title style={{ width: 200 }} />
+                  <Skeleton.Paragraph rows={3} />
+                </div>
               ) : (
-                <ComboManagerCard {...comboManagerProps} />
+                <ComboManagerCard
+                  batches={batches}
+                  batchDigest={batchDigest}
+                  resolveComboConfig={resolveComboConfig}
+                  getSiteSummary={(comboConfig) => getSiteSummaryText(comboConfig, t)}
+                  getUpstreamSummary={(comboConfig) =>
+                    getUpstreamSummaryText(comboConfig, options, t)
+                  }
+                  batchValidationError={duplicateBatchError}
+                  batchMetrics={batchMetrics}
+                  isMobile={isMobile}
+                  onCreateBatch={editorHook.openCreateBatchModal}
+                  onEditBatch={editorHook.openEditBatchModal}
+                  onRemoveBatch={editorHook.handleRemoveBatch}
+                  onMoveBatch={handleMoveBatch}
+                  t={t}
+                />
               )}
             </div>
           </Tabs.TabPane>
         </Tabs>
       </div>
 
-      <PricingConfigModal {...pricingModalProps} />
+      <PricingConfigModal
+        visible={editorHook.editorVisible}
+        isEditing={!!editorHook.editingBatchId}
+        comboConfig={editorHook.editorDraft}
+        setComboConfig={editorHook.setEditorDraftSmart}
+        onNameChange={editorHook.handleEditorNameChange}
+        onRegenerateName={editorHook.handleRegenerateEditorName}
+        onApplyRecommendedModes={editorHook.handleApplyRecommendedModes}
+        onApplyTemplate={editorHook.handleApplyTemplate}
+        onApplyRecommendedAccount={editorHook.handleApplyRecommendedAccount}
+        smartSuggestions={editorHook.editorSmartSuggestions}
+        channelOptions={channelOptions}
+        tagOptions={tagOptions}
+        modelNameOptions={modelNameOptions}
+        options={options}
+        resolveSharedSitePreview={resolveSharedSitePreview}
+        getModelsByChannelIds={getModelsByChannelIds}
+        getModelsByTags={getModelsByTags}
+        isMobile={isMobile}
+        clampNumber={clampNumber}
+        localModelMap={localModelMap}
+        validationError={editorHook.editorValidationError}
+        onOk={editorHook.handleSaveEditor}
+        onCancel={editorHook.closeEditor}
+        t={t}
+      />
     </>
   );
 };

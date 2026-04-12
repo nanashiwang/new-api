@@ -16,10 +16,39 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Avatar, Card, Empty, Spin, Table, Tag, Typography } from '@douyinfe/semi-ui';
 
 const { Text, Title } = Typography;
+
+const Sparkline = ({ data, color = '#6366f1', width = 80, height = 24 }) => {
+  if (!data || data.length < 2) return null;
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  const range = max - min || 1;
+  const points = data.map(
+    (v, i) =>
+      `${(i / (data.length - 1)) * width},${height - ((v - min) / range) * (height - 2) - 1}`,
+  );
+  return (
+    <svg width={width} height={height} className='shrink-0 opacity-60'>
+      <polyline
+        fill='none'
+        stroke={color}
+        strokeWidth='1.5'
+        strokeLinecap='round'
+        strokeLinejoin='round'
+        points={points.join(' ')}
+      />
+    </svg>
+  );
+};
+
+const sparklineColorMap = {
+  configured_site_revenue_usd: '#059669',
+  upstream_cost_usd: '#d97706',
+  configured_profit_usd: '#0284c7',
+};
 
 const cardThemeMap = {
   configured_site_revenue_usd: {
@@ -39,7 +68,7 @@ const cardThemeMap = {
   },
 };
 
-const MetricCard = ({ item, t }) => {
+const MetricCard = ({ item, onClick, sparklineData, t }) => {
   const theme = cardThemeMap[item.key] || {
     bg: 'bg-blue-50 dark:bg-blue-950/30',
     text: 'text-blue-600 dark:text-blue-400',
@@ -47,7 +76,12 @@ const MetricCard = ({ item, t }) => {
   };
 
   return (
-    <div className={`rounded-2xl p-5 ${theme.bg}`}>
+    <div
+      className={`rounded-2xl p-5 ${theme.bg} ${onClick ? 'cursor-pointer transition-shadow hover:shadow-md' : ''}`}
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+    >
       <div className='flex items-start justify-between'>
         <div className='flex-1'>
           <Text type='tertiary' size='small'>
@@ -63,9 +97,15 @@ const MetricCard = ({ item, t }) => {
             </Title>
           </div>
         </div>
-        <Avatar size='small' color={theme.avatarColor} className='shrink-0'>
-          {item.icon}
-        </Avatar>
+        <div className='flex flex-col items-end gap-2'>
+          <Avatar size='small' color={theme.avatarColor} className='shrink-0'>
+            {item.icon}
+          </Avatar>
+          <Sparkline
+            data={sparklineData}
+            color={sparklineColorMap[item.key] || '#6366f1'}
+          />
+        </div>
       </div>
       {item.requestCount != null && (
         <div className='mt-3 flex items-center gap-1.5'>
@@ -89,8 +129,36 @@ const OverviewPanel = ({
   overviewSummaryCards,
   formatMoney,
   status,
+  timeseries,
+  onMetricClick,
   t,
 }) => {
+  // 从 timeseries 提取每个指标的 sparkline 数据（聚合全部 batch）
+  const sparklineMap = useMemo(() => {
+    if (!timeseries?.length) return {};
+    const bucketMap = new Map();
+    timeseries.forEach((row) => {
+      const existing = bucketMap.get(row.bucket);
+      if (!existing) {
+        bucketMap.set(row.bucket, { ...row });
+      } else {
+        existing.configured_site_revenue_usd =
+          (existing.configured_site_revenue_usd || 0) + (row.configured_site_revenue_usd || 0);
+        existing.upstream_cost_usd =
+          (existing.upstream_cost_usd || 0) + (row.upstream_cost_usd || 0);
+        existing.configured_profit_usd =
+          (existing.configured_profit_usd || 0) + (row.configured_profit_usd || 0);
+      }
+    });
+    const sorted = Array.from(bucketMap.values()).sort((a, b) =>
+      a.bucket < b.bucket ? -1 : 1,
+    );
+    return {
+      configured_site_revenue_usd: sorted.map((r) => r.configured_site_revenue_usd || 0),
+      upstream_cost_usd: sorted.map((r) => r.upstream_cost_usd || 0),
+      configured_profit_usd: sorted.map((r) => r.configured_profit_usd || 0),
+    };
+  }, [timeseries]);
   const batchColumns = [
     {
       title: t('组合名称'),
@@ -162,7 +230,13 @@ const OverviewPanel = ({
           {overviewReport ? (
             <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-3'>
               {overviewSummaryCards.map((item) => (
-                <MetricCard key={item.key} item={item} t={t} />
+                <MetricCard
+                  key={item.key}
+                  item={item}
+                  onClick={onMetricClick ? () => onMetricClick(item.key) : undefined}
+                  sparklineData={sparklineMap[item.key]}
+                  t={t}
+                />
               ))}
             </div>
           ) : (
@@ -191,7 +265,11 @@ const OverviewPanel = ({
             columns={batchColumns}
             dataSource={overviewReport.batch_summaries}
             rowKey='batch_id'
-            pagination={false}
+            pagination={
+              overviewReport.batch_summaries.length > 10
+                ? { pageSize: 10, showSizeChanger: false }
+                : false
+            }
             size='small'
             scroll={{ x: 'max-content' }}
           />

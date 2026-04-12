@@ -26,12 +26,13 @@ import {
   Radio,
   Select,
   SideSheet,
+  Steps,
   Tag,
-  Tooltip,
   Typography,
 } from '@douyinfe/semi-ui';
-import { ChevronDown, Download, Pencil } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Pencil } from 'lucide-react';
 import PricingRuleList from './PricingRuleList';
+import ModelSelectorSection from './ModelSelectorSection';
 import { getUpstreamCostSourceLabel } from '../utils';
 
 const { Text, Title } = Typography;
@@ -106,6 +107,14 @@ const PricingConfigModal = ({
 }) => {
   const sharedSite = comboConfig?.shared_site || {};
   const [editingCell, setEditingCell] = useState(null);
+  const [currentStep, setCurrentStep] = useState(0);
+
+  // 当 visible 变化时重置步骤
+  const prevVisibleRef = React.useRef(visible);
+  if (visible !== prevVisibleRef.current) {
+    prevVisibleRef.current = visible;
+    if (visible) setCurrentStep(0);
+  }
   const availableAccounts = (options?.upstream_accounts || []).filter(
     (item) => item.enabled !== false,
   );
@@ -166,6 +175,18 @@ const PricingConfigModal = ({
         },
       ],
     }));
+
+  const handleModelNamesChange = useCallback(
+    (value) =>
+      setComboConfig((prev) => ({
+        ...prev,
+        shared_site: {
+          ...prev.shared_site,
+          model_names: value || [],
+        },
+      })),
+    [setComboConfig],
+  );
 
   const handleImportFromScope = useCallback(() => {
     const models =
@@ -330,12 +351,47 @@ const PricingConfigModal = ({
     [editingCell, siteRuleMap, handlePreviewCellEdit],
   );
 
+  const STEP_LABELS = useMemo(
+    () => [t('基础信息'), t('收入配置'), t('成本配置')],
+    [t],
+  );
+
+  const stepValidationError = useMemo(() => {
+    if (currentStep === 0) {
+      if (!scopeHasSelection) return t('请先选择渠道或标签');
+    }
+    return '';
+  }, [currentStep, scopeHasSelection, t]);
+
   const footer = (
-    <div className='flex items-center justify-end gap-2'>
+    <div className='flex items-center justify-between gap-2'>
       <Button onClick={onCancel}>{t('取消')}</Button>
-      <Button theme='solid' type='primary' onClick={onOk}>
-        {isEditing ? t('保存组合') : t('创建组合')}
-      </Button>
+      <div className='flex items-center gap-2'>
+        {currentStep > 0 && (
+          <Button
+            icon={<ChevronLeft size={14} />}
+            onClick={() => setCurrentStep((s) => s - 1)}
+          >
+            {t('上一步')}
+          </Button>
+        )}
+        {currentStep < 2 ? (
+          <Button
+            theme='solid'
+            type='primary'
+            icon={<ChevronRight size={14} />}
+            iconPosition='right'
+            disabled={!!stepValidationError}
+            onClick={() => setCurrentStep((s) => s + 1)}
+          >
+            {t('下一步')}
+          </Button>
+        ) : (
+          <Button theme='solid' type='primary' onClick={onOk}>
+            {isEditing ? t('保存组合') : t('创建组合')}
+          </Button>
+        )}
+      </div>
     </div>
   );
 
@@ -365,6 +421,21 @@ const PricingConfigModal = ({
             />
           ) : null}
 
+          {stepValidationError && currentStep < 2 ? (
+            <Banner
+              type='warning'
+              closeIcon={null}
+              description={stepValidationError}
+            />
+          ) : null}
+
+          {/* 步骤条 */}
+          <Steps current={currentStep} onChange={setCurrentStep} size='small'>
+            <Steps.Step title={STEP_LABELS[0]} />
+            <Steps.Step title={STEP_LABELS[1]} />
+            <Steps.Step title={STEP_LABELS[2]} />
+          </Steps>
+
           {/* 摘要行 */}
           <div className='grid grid-cols-2 gap-2'>
             <div className='rounded-lg border border-semi-color-border bg-semi-color-fill-0 px-2.5 py-1.5'>
@@ -383,7 +454,8 @@ const PricingConfigModal = ({
             </div>
           </div>
 
-          {/* 基础信息 */}
+          {/* Step 0: 基础信息 */}
+          {currentStep === 0 && (
           <SectionCard
             title={t('基础信息')}
             description={t('先定义组合范围，再决定后续收入和成本怎么计算')}
@@ -470,8 +542,10 @@ const PricingConfigModal = ({
               </div>
             </div>
           </SectionCard>
+          )}
 
-          {/* 收入配置 */}
+          {/* Step 1: 收入配置 */}
+          {currentStep === 1 && (
           <SectionCard
             title={t('收入配置')}
             description={
@@ -506,46 +580,14 @@ const PricingConfigModal = ({
                   closeIcon={null}
                   description={t('智能模式直接读取选中模型每条日志的已计算额度（含分组倍率、模型倍率），换算为USD作为本站收入')}
                 />
-                {/* 模型选择 + 一键导入 */}
-                <div>
-                  <div className='mb-1.5 flex items-center justify-between gap-2'>
-                    <Text type='tertiary' size='small'>{t('模型')}</Text>
-                    <Tooltip
-                      content={!scopeHasSelection ? t('请先在上方选择范围') : t('从已选的渠道/标签导入全部模型')}
-                      position='top'
-                    >
-                      <Button
-                        size='small'
-                        theme='light'
-                        type='primary'
-                        icon={<Download size={13} />}
-                        disabled={!scopeHasSelection}
-                        onClick={handleImportFromScope}
-                      >
-                        {t('从已选范围导入')}
-                      </Button>
-                    </Tooltip>
-                  </div>
-                  <Select
-                    multiple
-                    filter
-                    maxTagCount={5}
-                    value={sharedSite.model_names || []}
-                    onChange={(value) =>
-                      setComboConfig((prev) => ({
-                        ...prev,
-                        shared_site: {
-                          ...prev.shared_site,
-                          model_names: value || [],
-                        },
-                      }))
-                    }
-                    optionList={modelNameOptions}
-                    placeholder={t('选择模型')}
-                    emptyContent={t('暂无可用模型')}
-                    style={{ width: '100%' }}
-                  />
-                </div>
+                <ModelSelectorSection
+                  modelNames={sharedSite.model_names || []}
+                  onModelNamesChange={handleModelNamesChange}
+                  modelNameOptions={modelNameOptions}
+                  scopeHasSelection={scopeHasSelection}
+                  onImportFromScope={handleImportFromScope}
+                  t={t}
+                />
               </div>
             ) : (
               <>
@@ -564,46 +606,14 @@ const PricingConfigModal = ({
 
             {comboConfig.site_mode === 'shared_site_model' ? (
               <div className='space-y-3 rounded-2xl border border-blue-500/20 bg-blue-500/[0.05] p-3'>
-                {/* 模型选择 + 一键导入 */}
-                <div>
-                  <div className='mb-1.5 flex items-center justify-between gap-2'>
-                    <Text type='tertiary' size='small'>{t('模型')}</Text>
-                    <Tooltip
-                      content={!scopeHasSelection ? t('请先在上方选择范围') : t('从已选的渠道/标签导入全部模型')}
-                      position='top'
-                    >
-                      <Button
-                        size='small'
-                        theme='light'
-                        type='primary'
-                        icon={<Download size={13} />}
-                        disabled={!scopeHasSelection}
-                        onClick={handleImportFromScope}
-                      >
-                        {t('从已选范围导入')}
-                      </Button>
-                    </Tooltip>
-                  </div>
-                  <Select
-                    multiple
-                    filter
-                    maxTagCount={5}
-                    value={sharedSite.model_names || []}
-                    onChange={(value) =>
-                      setComboConfig((prev) => ({
-                        ...prev,
-                        shared_site: {
-                          ...prev.shared_site,
-                          model_names: value || [],
-                        },
-                      }))
-                    }
-                    optionList={modelNameOptions}
-                    placeholder={t('选择模型')}
-                    emptyContent={t('暂无可用模型')}
-                    style={{ width: '100%' }}
-                  />
-                </div>
+                <ModelSelectorSection
+                  modelNames={sharedSite.model_names || []}
+                  onModelNamesChange={handleModelNamesChange}
+                  modelNameOptions={modelNameOptions}
+                  scopeHasSelection={scopeHasSelection}
+                  onImportFromScope={handleImportFromScope}
+                  t={t}
+                />
 
                 {/* 定价基准 + 分组 */}
                 <div className='grid grid-cols-2 gap-3'>
@@ -737,8 +747,10 @@ const PricingConfigModal = ({
               </>
             )}
           </SectionCard>
+          )}
 
-          {/* 成本配置 */}
+          {/* Step 2: 成本配置 */}
+          {currentStep === 2 && (
           <SectionCard
             title={t('成本配置')}
             description={
@@ -860,6 +872,7 @@ const PricingConfigModal = ({
               </>
             )}
           </SectionCard>
+          )}
         </div>
       ) : (
         <div className='py-8 text-center'>

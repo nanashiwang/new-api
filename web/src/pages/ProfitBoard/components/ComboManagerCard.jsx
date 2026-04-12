@@ -8,7 +8,7 @@ import {
   Tag,
   Typography,
 } from '@douyinfe/semi-ui';
-import { Layers3, Pencil, Plus, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Layers3, Pencil, Plus, Trash2 } from 'lucide-react';
 
 const { Text } = Typography;
 
@@ -28,10 +28,12 @@ const ComboManagerCard = ({
   getSiteSummary,
   getUpstreamSummary,
   batchValidationError,
+  batchMetrics,
   isMobile,
   onCreateBatch,
   onEditBatch,
   onRemoveBatch,
+  onMoveBatch,
   t,
 }) => (
   <Card
@@ -59,7 +61,7 @@ const ComboManagerCard = ({
             </Text>
           </div>
           <div className='space-y-3'>
-            {batches.map((batch) => {
+            {batches.map((batch, batchIndex) => {
               const comboConfig = resolveComboConfig(batch.id);
               return (
                 <div
@@ -100,9 +102,53 @@ const ComboManagerCard = ({
                           value={getUpstreamSummary(comboConfig)}
                         />
                       </div>
+                      {batchMetrics?.[batch.id] && (
+                        <div className='mt-2 flex flex-wrap gap-x-4 gap-y-1 px-1 text-xs'>
+                          <span>
+                            <span className='text-semi-color-text-2'>{t('收入')}</span>{' '}
+                            <span className='font-medium text-emerald-600 dark:text-emerald-400'>
+                              {batchMetrics[batch.id].revenue}
+                            </span>
+                          </span>
+                          <span>
+                            <span className='text-semi-color-text-2'>{t('成本')}</span>{' '}
+                            <span className='font-medium text-amber-600 dark:text-amber-400'>
+                              {batchMetrics[batch.id].cost}
+                            </span>
+                          </span>
+                          <span>
+                            <span className='text-semi-color-text-2'>{t('利润')}</span>{' '}
+                            <span className='font-medium text-sky-600 dark:text-sky-400'>
+                              {batchMetrics[batch.id].profit}
+                            </span>
+                          </span>
+                        </div>
+                      )}
                     </div>
 
                     <Space className='shrink-0'>
+                      {onMoveBatch && batches.length > 1 && (
+                        <>
+                          <Button
+                            icon={<ArrowUp size={14} />}
+                            size='small'
+                            type='tertiary'
+                            theme='borderless'
+                            disabled={batchIndex === 0}
+                            onClick={() => onMoveBatch(batchIndex, -1)}
+                            aria-label={t('上移')}
+                          />
+                          <Button
+                            icon={<ArrowDown size={14} />}
+                            size='small'
+                            type='tertiary'
+                            theme='borderless'
+                            disabled={batchIndex === batches.length - 1}
+                            onClick={() => onMoveBatch(batchIndex, 1)}
+                            aria-label={t('下移')}
+                          />
+                        </>
+                      )}
                       <Button
                         icon={<Pencil size={14} />}
                         size='small'

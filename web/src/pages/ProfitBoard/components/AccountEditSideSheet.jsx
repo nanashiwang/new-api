@@ -28,6 +28,7 @@ import {
   Typography,
 } from '@douyinfe/semi-ui';
 import { Save, Trash2 } from 'lucide-react';
+import { useIsMobile } from '@/hooks/common/useIsMobile';
 import { getUpstreamAccountSuggestedName } from '../utils';
 
 const { Text, Title } = Typography;
@@ -80,6 +81,7 @@ const AccountEditSideSheet = ({
   t,
 }) => {
   const isEditing = !!accountDraft.id;
+  const isMobile = useIsMobile();
   const preparedDraft = accountDraftValidation?.prepared || accountDraft;
   const displayMode = preparedDraft.resource_display_mode || 'both';
   const suggestedName = getUpstreamAccountSuggestedName(accountDraft.base_url);
@@ -103,7 +105,7 @@ const AccountEditSideSheet = ({
       visible={visible}
       onCancel={onClose}
       title={isEditing ? t('编辑账户') : t('新建账户')}
-      width={520}
+      width={isMobile ? '100%' : 520}
       footer={
         <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
           <Text

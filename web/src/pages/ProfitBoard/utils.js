@@ -1339,3 +1339,23 @@ export const createAccountUsageTrendSpec = (rows, status, t) => ({
     },
   },
 });
+
+export const buildBatchOverlapError = (batches, channelMap, tagChannelMap) => {
+  const ownerMap = new Map();
+  for (const batch of batches) {
+    const channelIds =
+      batch.scope_type === 'tag'
+        ? (batch.tags || []).flatMap((tag) => tagChannelMap.get(tag) || [])
+        : batch.channel_ids || [];
+    for (const channelId of Array.from(new Set(channelIds))) {
+      const owner = ownerMap.get(channelId);
+      if (owner && owner !== batch.name) {
+        const channelName =
+          channelMap.get(String(channelId))?.name || `#${channelId}`;
+        return `${channelName} 同时出现在组合"${owner}"和"${batch.name}"中，请拆开后再统计`;
+      }
+      ownerMap.set(channelId, batch.name);
+    }
+  }
+  return '';
+};

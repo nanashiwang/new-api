@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import React from 'react';
 import { Empty, SideSheet, Spin, Tag, Typography } from '@douyinfe/semi-ui';
+import { useIsMobile } from '@/hooks/common/useIsMobile';
 import dayjs from 'dayjs';
 import {
   formatUpstreamExpiryDate,
@@ -98,6 +99,7 @@ const AccountDetailSideSheet = ({
   t,
 }) => {
   const subscriptions = accountTrend?.subscriptions || [];
+  const isMobile = useIsMobile();
   const summaryTones = getAccountResourceSummaryTones(account);
   const domainLabel = getUpstreamAccountSuggestedName(account?.base_url);
   const resourceDisplayMode = normalizeUpstreamAccountResourceDisplayMode(
@@ -112,7 +114,7 @@ const AccountDetailSideSheet = ({
     <SideSheet
       visible={visible}
       onCancel={onClose}
-      width={720}
+      width={isMobile ? '100%' : 720}
       title={account?.name || t('账户详情')}
     >
       <Spin spinning={accountTrendLoading}>
