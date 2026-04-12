@@ -521,7 +521,8 @@ func fetchProfitBoardRemoteObserver(remoteConfig ProfitBoardRemoteObserverConfig
 	if err := profitBoardRemoteRequest(client, remoteConfig, "/api/status", &statusData); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(statusData.QN) != "new-api" {
+	qn := strings.TrimSpace(statusData.QN)
+	if qn != "new-api" && !(qn == "" && statusData.QuotaPerUnit > 0) {
 		return nil, ErrProfitBoardRemoteNotNewAPI
 	}
 
@@ -531,9 +532,8 @@ func fetchProfitBoardRemoteObserver(remoteConfig ProfitBoardRemoteObserverConfig
 	}
 
 	subData := profitBoardRemoteSubscriptionSelfData{}
-	if err := profitBoardRemoteRequest(client, remoteConfig, "/api/subscription/self", &subData); err != nil {
-		return nil, err
-	}
+	// subscription 端点在部分 new-api 改编版中不存在，失败时降级为空
+	_ = profitBoardRemoteRequest(client, remoteConfig, "/api/subscription/self", &subData)
 
 	subscriptions := make([]ProfitBoardRemoteSubscriptionSnapshot, 0, len(subData.Subscriptions))
 	for _, item := range subData.Subscriptions {
