@@ -30,7 +30,7 @@ import {
   Tag,
   Typography,
 } from '@douyinfe/semi-ui';
-import { ChevronDown, ChevronLeft, ChevronRight, Pencil } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Pencil } from 'lucide-react';
 import PricingRuleList from './PricingRuleList';
 import ModelSelectorSection from './ModelSelectorSection';
 import { getUpstreamCostSourceLabel } from '../utils';
@@ -108,12 +108,13 @@ const PricingConfigModal = ({
   const sharedSite = comboConfig?.shared_site || {};
   const [editingCell, setEditingCell] = useState(null);
   const [currentStep, setCurrentStep] = useState(0);
+  const [stepTouched, setStepTouched] = useState(false);
 
   // 当 visible 变化时重置步骤
   const prevVisibleRef = React.useRef(visible);
   if (visible !== prevVisibleRef.current) {
     prevVisibleRef.current = visible;
-    if (visible) setCurrentStep(0);
+    if (visible) { setCurrentStep(0); setStepTouched(false); }
   }
   const availableAccounts = (options?.upstream_accounts || []).filter(
     (item) => item.enabled !== false,
@@ -370,7 +371,7 @@ const PricingConfigModal = ({
         {currentStep > 0 && (
           <Button
             icon={<ChevronLeft size={14} />}
-            onClick={() => setCurrentStep((s) => s - 1)}
+            onClick={() => { setStepTouched(false); setCurrentStep((s) => s - 1); }}
           >
             {t('上一步')}
           </Button>
@@ -381,8 +382,11 @@ const PricingConfigModal = ({
             type='primary'
             icon={<ChevronRight size={14} />}
             iconPosition='right'
-            disabled={!!stepValidationError}
-            onClick={() => setCurrentStep((s) => s + 1)}
+            onClick={() => {
+              if (stepValidationError) { setStepTouched(true); return; }
+              setStepTouched(false);
+              setCurrentStep((s) => s + 1);
+            }}
           >
             {t('下一步')}
           </Button>
@@ -407,11 +411,10 @@ const PricingConfigModal = ({
     >
       {comboConfig ? (
         <div className='space-y-4'>
-          <Banner
-            type='success'
-            closeIcon={null}
-            description={t('保存组合后将自动同步到服务器，无需额外手动操作')}
-          />
+          <div className='flex items-center gap-1.5 rounded-lg border border-semi-color-border bg-semi-color-fill-0 px-3 py-2 text-xs text-semi-color-text-2'>
+            <CheckCircle2 size={13} className='shrink-0 text-green-500' />
+            <span>{t('保存组合后将自动同步到服务器，无需额外手动操作')}</span>
+          </div>
 
           {validationError ? (
             <Banner
@@ -421,7 +424,7 @@ const PricingConfigModal = ({
             />
           ) : null}
 
-          {stepValidationError && currentStep < 2 ? (
+          {stepTouched && stepValidationError && currentStep < 2 ? (
             <Banner
               type='warning'
               closeIcon={null}
