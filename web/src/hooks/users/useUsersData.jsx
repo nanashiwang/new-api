@@ -17,11 +17,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import { useRef, useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { API, showError, showSuccess } from '../../helpers';
-import { ITEMS_PER_PAGE } from '../../constants';
 import { useTableCompactMode } from '../common/useTableCompactMode';
+import { usePaginatedList } from '../common/usePaginatedList';
 
 const DEFAULT_ADVANCED_FILTERS = {
   searchRole: '',
@@ -66,19 +66,29 @@ export const useUsersData = () => {
   const { t } = useTranslation();
   const [compactMode, setCompactMode] = useTableCompactMode('users');
 
+  // 分页/加载/搜索/选择/竞态控制（共用基础状态）
+  const {
+    loading,
+    setLoading,
+    activePage,
+    setActivePage,
+    pageSize,
+    setPageSize,
+    searching,
+    setSearching,
+    selectedKeys,
+    setSelectedKeys,
+    nextRequestId,
+    isLatestRequest,
+  } = usePaginatedList();
+
   // 状态管理
   const [users, setUsers] = useState([]);
-  const [selectedKeys, setSelectedKeys] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [activePage, setActivePage] = useState(1);
-  const [pageSize, setPageSize] = useState(ITEMS_PER_PAGE);
-  const [searching, setSearching] = useState(false);
   const [groupOptions, setGroupOptions] = useState([]);
   const [userCount, setUserCount] = useState(0);
   const [advancedFilters, setAdvancedFilters] = useState(
     getInitialAdvancedFilters,
   );
-  const requestCounter = useRef(0);
 
   // 弹窗状态
   const [showAddUser, setShowAddUser] = useState(false);
@@ -167,7 +177,7 @@ export const useUsersData = () => {
     idSortOrder = '',
     balanceSortOrder = '',
   ) => {
-    const reqId = ++requestCounter.current;
+    const reqId = nextRequestId();
     setLoading(true);
     try {
       const params = {
@@ -181,7 +191,7 @@ export const useUsersData = () => {
         params.balance_sort_order = balanceSortOrder;
       }
       const res = await API.get('/api/user/', { params });
-      if (reqId !== requestCounter.current) {
+      if (!isLatestRequest(reqId)) {
         return;
       }
       const { success, message, data } = res.data;
@@ -194,12 +204,11 @@ export const useUsersData = () => {
         showError(message);
       }
     } catch (error) {
-      // 网络/后端报错时始终退出 loading，避免转圈不止。
-      if (reqId === requestCounter.current) {
+      if (isLatestRequest(reqId)) {
         showError(error?.message || t('请求失败'));
       }
     } finally {
-      if (reqId === requestCounter.current) {
+      if (isLatestRequest(reqId)) {
         setLoading(false);
       }
     }
@@ -265,7 +274,7 @@ export const useUsersData = () => {
     }
     // 搜索分支也必须控制 loading 状态：
     // 首次加载可能因已保存的高级筛选进入该分支，loading 必须重置为 false。
-    const reqId = ++requestCounter.current;
+    const reqId = nextRequestId();
     setLoading(true);
     setSearching(true);
     try {
@@ -336,7 +345,7 @@ export const useUsersData = () => {
         params.used_balance_max = resolvedAdvanced.searchUsedBalanceMax;
       }
       const res = await API.get('/api/user/search', { params });
-      if (reqId !== requestCounter.current) {
+      if (!isLatestRequest(reqId)) {
         return;
       }
       const { success, message, data } = res.data;
@@ -349,11 +358,11 @@ export const useUsersData = () => {
         showError(message);
       }
     } catch (error) {
-      if (reqId === requestCounter.current) {
+      if (isLatestRequest(reqId)) {
         showError(error?.message || t('请求失败'));
       }
     } finally {
-      if (reqId === requestCounter.current) {
+      if (isLatestRequest(reqId)) {
         setSearching(false);
         setLoading(false);
       }

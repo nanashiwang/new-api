@@ -27,24 +27,36 @@ import {
   showSuccess,
   encodeToBase64,
 } from '../../helpers';
-import { ITEMS_PER_PAGE } from '../../constants';
 import { useTableCompactMode } from '../common/useTableCompactMode';
+import { usePaginatedList } from '../common/usePaginatedList';
 
 export const useTokensData = (openFluentNotification) => {
   const { t } = useTranslation();
 
+  // 分页/加载/搜索/选择/竞态控制（共用基础状态）
+  const {
+    loading,
+    setLoading,
+    activePage,
+    setActivePage,
+    pageSize,
+    setPageSize,
+    searching,
+    setSearching,
+    selectedKeys,
+    setSelectedKeys,
+    nextRequestId,
+    isLatestRequest,
+  } = usePaginatedList();
+
   // 基础状态
   const [tokens, setTokens] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [activePage, setActivePage] = useState(1);
+
   const [tokenCount, setTokenCount] = useState(0);
-  const [pageSize, setPageSize] = useState(ITEMS_PER_PAGE);
-  const [searching, setSearching] = useState(false);
   const [searchMode, setSearchMode] = useState(false); // whether current list is search-result view
   const [groupOptions, setGroupOptions] = useState([]);
 
-  // 选择状态
-  const [selectedKeys, setSelectedKeys] = useState([]);
+  // 选择状态（由 usePaginatedList 提供 selectedKeys/setSelectedKeys）
 
   // 编辑状态
   const [showEdit, setShowEdit] = useState(false);
@@ -52,7 +64,7 @@ export const useTokensData = (openFluentNotification) => {
     id: undefined,
   });
   const clearEditingTokenTimerRef = useRef(null);
-  const requestCounter = useRef(0);
+  // requestCounter 由 usePaginatedList 提供，通过 nextRequestId / isLatestRequest 使用
 
   // UI 状态
   const [compactMode, setCompactMode] = useTableCompactMode('tokens');
@@ -176,7 +188,7 @@ export const useTokensData = (openFluentNotification) => {
 
   // 加载 Token 列表
   const loadTokens = async (page = 1, size = pageSize) => {
-    const reqId = ++requestCounter.current;
+    const reqId = nextRequestId();
     setLoading(true);
     setSearchMode(false);
     const res = await API.get('/api/token/', {
@@ -185,7 +197,7 @@ export const useTokensData = (openFluentNotification) => {
         size,
       },
     });
-    if (reqId !== requestCounter.current) {
+    if (!isLatestRequest(reqId)) {
       return;
     }
     const { success, message, data } = res.data;
@@ -194,7 +206,7 @@ export const useTokensData = (openFluentNotification) => {
     } else {
       showError(message);
     }
-    if (reqId === requestCounter.current) {
+    if (isLatestRequest(reqId)) {
       setLoading(false);
     }
   };
@@ -311,7 +323,7 @@ export const useTokensData = (openFluentNotification) => {
       await loadTokens(normalizedPage, normalizedSize);
       return;
     }
-    const reqId = ++requestCounter.current;
+    const reqId = nextRequestId();
     setSearching(true);
     // 通过 params 构造查询，避免手写 URL 拼接与转义遗漏。
     const params = {
@@ -354,7 +366,7 @@ export const useTokensData = (openFluentNotification) => {
       params.used_balance_max = searchUsedBalanceMax;
     }
     const res = await API.get('/api/token/search', { params });
-    if (reqId !== requestCounter.current) {
+    if (!isLatestRequest(reqId)) {
       return;
     }
     const { success, message, data } = res.data;
@@ -364,7 +376,7 @@ export const useTokensData = (openFluentNotification) => {
     } else {
       showError(message);
     }
-    if (reqId === requestCounter.current) {
+    if (isLatestRequest(reqId)) {
       setSearching(false);
     }
   };

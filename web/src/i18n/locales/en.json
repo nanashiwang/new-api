@@ -3447,6 +3447,10 @@
     "已启用官方价格覆盖": "Official price override enabled",
     "当前正在覆盖官方默认补全倍率 {{ratio}}，保存后按你的自定义价格生效。": "You are overriding the official default completion ratio {{ratio}}. After saving, your custom price will take effect.",
     "页面渲染出错，请刷新页面重试": "An error occurred while rendering the page. Please refresh and try again.",
-    "刷新页面": "Reload Page"
+    "刷新页面": "Reload Page",
+    "错误：请求次数过多，请稍后再试！": "Error: Too many requests, please try again later!",
+    "错误：服务器内部错误，请联系管理员！": "Error: Internal server error, please contact the administrator!",
+    "本站仅作演示之用，无服务端！": "This site is for demonstration only, no backend!",
+    "错误：{{message}}": "Error: {{message}}"
   }
 }
