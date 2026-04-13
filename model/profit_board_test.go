@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,33 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
+
+func decodeProfitBoardJSONMap(t *testing.T, value any) map[string]any {
+	t.Helper()
+
+	raw, err := common.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal value: %v", err)
+	}
+
+	decoded := map[string]any{}
+	if err := common.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode value: %v", err)
+	}
+	return decoded
+}
+
+func requireProfitBoardFloat(t *testing.T, value any, expected float64, field string) {
+	t.Helper()
+
+	actual, ok := value.(float64)
+	if !ok {
+		t.Fatalf("field %s is not a number: %#v", field, value)
+	}
+	if math.Abs(actual-expected) > 0.000001 {
+		t.Fatalf("unexpected %s: got %.6f want %.6f", field, actual, expected)
+	}
+}
 
 func setupProfitBoardTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
@@ -1920,6 +1948,243 @@ func TestProfitBoardFixedTotalsApplyOnceFromBatchCreatedAt(t *testing.T) {
 	if len(report.Timeseries) != 1 || report.Timeseries[0].ConfiguredSiteRevenueUSD != 1.2 || report.Timeseries[0].UpstreamCostUSD != 0.2 {
 		t.Fatalf("unexpected report fixed total timeseries: %+v", report.Timeseries)
 	}
+}
+
+func TestGetLatestProfitBoardConfigPreservesComboExchangeRates(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	batches := []ProfitBoardBatch{{
+		Id:         "batch-1",
+		Name:       "组合 1",
+		ScopeType:  ProfitBoardScopeChannel,
+		ChannelIDs: []int{1},
+		CreatedAt:  common.GetTimestamp() - 60,
+	}}
+	selectionBytes, err := common.Marshal(batches)
+	if err != nil {
+		t.Fatalf("marshal batches: %v", err)
+	}
+
+	record := ProfitBoardConfig{
+		SelectionType:      ProfitBoardScopeBatch,
+		SelectionSignature: "profit-board:test:exchange-rates",
+		SelectionValues:    string(selectionBytes),
+		UpstreamConfig:     `{"cost_source":"manual_only"}`,
+		SiteConfig: `{
+			"legacy_site":{"pricing_mode":"manual"},
+			"combo_configs":[
+				{
+					"combo_id":"batch-1",
+					"site_exchange_rate":0.89,
+					"upstream_exchange_rate":1.5
+				}
+			]
+		}`,
+		CreatedAt: common.GetTimestamp(),
+		UpdatedAt: common.GetTimestamp(),
+	}
+	if err := db.Create(&record).Error; err != nil {
+		t.Fatalf("create config: %v", err)
+	}
+
+	payload, _, err := GetLatestProfitBoardConfig()
+	if err != nil {
+		t.Fatalf("GetLatestProfitBoardConfig: %v", err)
+	}
+	if payload == nil {
+		t.Fatal("expected payload, got nil")
+	}
+
+	decoded := decodeProfitBoardJSONMap(t, payload)
+	comboConfigs, ok := decoded["combo_configs"].([]any)
+	if !ok || len(comboConfigs) != 1 {
+		t.Fatalf("unexpected combo_configs: %#v", decoded["combo_configs"])
+	}
+	combo, ok := comboConfigs[0].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected combo config: %#v", comboConfigs[0])
+	}
+	requireProfitBoardFloat(t, combo["site_exchange_rate"], 0.89, "site_exchange_rate")
+	requireProfitBoardFloat(t, combo["upstream_exchange_rate"], 1.5, "upstream_exchange_rate")
+}
+
+func TestProfitBoardReportIncludesConfiguredCNYMetrics(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	originQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 1000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originQuotaPerUnit
+	})
+
+	channel := Channel{Id: 1, Name: "alpha", Status: common.ChannelStatusEnabled}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+
+	now := common.GetTimestamp()
+	logRow := Log{
+		Id:               1,
+		Type:             LogTypeConsume,
+		CreatedAt:        now - 30,
+		ChannelId:        1,
+		ModelName:        "gpt-4.1",
+		PromptTokens:     1000,
+		CompletionTokens: 0,
+		Quota:            5,
+	}
+	if err := db.Create(&logRow).Error; err != nil {
+		t.Fatalf("seed log: %v", err)
+	}
+
+	batches := []ProfitBoardBatch{{
+		Id:         "batch-1",
+		Name:       "组合 1",
+		ScopeType:  ProfitBoardScopeChannel,
+		ChannelIDs: []int{1},
+		CreatedAt:  now - 120,
+	}}
+	selectionBytes, err := common.Marshal(batches)
+	if err != nil {
+		t.Fatalf("marshal batches: %v", err)
+	}
+
+	record := ProfitBoardConfig{
+		SelectionType:      ProfitBoardScopeBatch,
+		SelectionSignature: "profit-board:test:cny-report",
+		SelectionValues:    string(selectionBytes),
+		UpstreamConfig:     `{"cost_source":"manual_only"}`,
+		SiteConfig: `{
+			"legacy_site":{"pricing_mode":"manual"},
+			"combo_configs":[
+				{
+					"combo_id":"batch-1",
+					"site_rules":[{"is_default":true,"input_price":5}],
+					"upstream_rules":[{"is_default":true,"input_price":2}],
+					"site_exchange_rate":0.89,
+					"upstream_exchange_rate":1.5
+				}
+			]
+		}`,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := db.Create(&record).Error; err != nil {
+		t.Fatalf("create config: %v", err)
+	}
+
+	payload, _, err := GetLatestProfitBoardConfig()
+	if err != nil {
+		t.Fatalf("GetLatestProfitBoardConfig: %v", err)
+	}
+	if payload == nil {
+		t.Fatal("expected payload, got nil")
+	}
+
+	overview, err := GenerateProfitBoardOverview(*payload)
+	if err != nil {
+		t.Fatalf("GenerateProfitBoardOverview: %v", err)
+	}
+	overviewJSON := decodeProfitBoardJSONMap(t, overview)
+	overviewSummary, ok := overviewJSON["summary"].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected overview summary: %#v", overviewJSON["summary"])
+	}
+	requireProfitBoardFloat(t, overviewSummary["configured_site_revenue_cny"], 0.00445, "overview configured_site_revenue_cny")
+	requireProfitBoardFloat(t, overviewSummary["upstream_cost_cny"], 0.003, "overview upstream_cost_cny")
+	requireProfitBoardFloat(t, overviewSummary["configured_profit_cny"], 0.00145, "overview configured_profit_cny")
+
+	report, err := GenerateProfitBoardReport(ProfitBoardQuery{
+		Batches:         payload.Batches,
+		SharedSite:      payload.SharedSite,
+		ComboConfigs:    payload.ComboConfigs,
+		ExcludedUserIDs: payload.ExcludedUserIDs,
+		Upstream:        payload.Upstream,
+		Site:            payload.Site,
+		StartTimestamp:  now - 300,
+		EndTimestamp:    now,
+		Granularity:     "day",
+		IncludeDetails:  true,
+	})
+	if err != nil {
+		t.Fatalf("GenerateProfitBoardReport: %v", err)
+	}
+
+	reportJSON := decodeProfitBoardJSONMap(t, report)
+	reportSummary, ok := reportJSON["summary"].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected report summary: %#v", reportJSON["summary"])
+	}
+	requireProfitBoardFloat(t, reportSummary["configured_site_revenue_cny"], 0.00445, "report configured_site_revenue_cny")
+	requireProfitBoardFloat(t, reportSummary["upstream_cost_cny"], 0.003, "report upstream_cost_cny")
+	requireProfitBoardFloat(t, reportSummary["configured_profit_cny"], 0.00145, "report configured_profit_cny")
+
+	timeseries, ok := reportJSON["timeseries"].([]any)
+	if !ok || len(timeseries) != 1 {
+		t.Fatalf("unexpected timeseries: %#v", reportJSON["timeseries"])
+	}
+	point, ok := timeseries[0].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected timeseries point: %#v", timeseries[0])
+	}
+	requireProfitBoardFloat(t, point["configured_site_revenue_cny"], 0.00445, "timeseries configured_site_revenue_cny")
+	requireProfitBoardFloat(t, point["upstream_cost_cny"], 0.003, "timeseries upstream_cost_cny")
+	requireProfitBoardFloat(t, point["configured_profit_cny"], 0.00145, "timeseries configured_profit_cny")
+
+	channelBreakdown, ok := reportJSON["channel_breakdown"].([]any)
+	if !ok || len(channelBreakdown) != 1 {
+		t.Fatalf("unexpected channel_breakdown: %#v", reportJSON["channel_breakdown"])
+	}
+	channelRow, ok := channelBreakdown[0].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected channel row: %#v", channelBreakdown[0])
+	}
+	requireProfitBoardFloat(t, channelRow["configured_site_revenue_cny"], 0.00445, "channel configured_site_revenue_cny")
+	requireProfitBoardFloat(t, channelRow["upstream_cost_cny"], 0.003, "channel upstream_cost_cny")
+	requireProfitBoardFloat(t, channelRow["configured_profit_cny"], 0.00145, "channel configured_profit_cny")
+
+	modelBreakdown, ok := reportJSON["model_breakdown"].([]any)
+	if !ok || len(modelBreakdown) != 1 {
+		t.Fatalf("unexpected model_breakdown: %#v", reportJSON["model_breakdown"])
+	}
+	modelRow, ok := modelBreakdown[0].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected model row: %#v", modelBreakdown[0])
+	}
+	requireProfitBoardFloat(t, modelRow["configured_site_revenue_cny"], 0.00445, "model configured_site_revenue_cny")
+	requireProfitBoardFloat(t, modelRow["upstream_cost_cny"], 0.003, "model upstream_cost_cny")
+	requireProfitBoardFloat(t, modelRow["configured_profit_cny"], 0.00145, "model configured_profit_cny")
+
+	detailPage, err := QueryProfitBoardDetails(ProfitBoardDetailQuery{
+		ProfitBoardQuery: ProfitBoardQuery{
+			Batches:         payload.Batches,
+			SharedSite:      payload.SharedSite,
+			ComboConfigs:    payload.ComboConfigs,
+			ExcludedUserIDs: payload.ExcludedUserIDs,
+			Upstream:        payload.Upstream,
+			Site:            payload.Site,
+			StartTimestamp:  now - 300,
+			EndTimestamp:    now,
+			Granularity:     "day",
+		},
+		Page:     1,
+		PageSize: 20,
+	})
+	if err != nil {
+		t.Fatalf("QueryProfitBoardDetails: %v", err)
+	}
+	detailJSON := decodeProfitBoardJSONMap(t, detailPage)
+	detailRows, ok := detailJSON["rows"].([]any)
+	if !ok || len(detailRows) != 1 {
+		t.Fatalf("unexpected detail rows: %#v", detailJSON["rows"])
+	}
+	detailRow, ok := detailRows[0].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected detail row: %#v", detailRows[0])
+	}
+	requireProfitBoardFloat(t, detailRow["configured_site_revenue_cny"], 0.00445, "detail configured_site_revenue_cny")
+	requireProfitBoardFloat(t, detailRow["upstream_cost_cny"], 0.003, "detail upstream_cost_cny")
+	requireProfitBoardFloat(t, detailRow["configured_profit_cny"], 0.00145, "detail configured_profit_cny")
 }
 
 func TestQueryProfitBoardDetailsSupportsTagFilter(t *testing.T) {

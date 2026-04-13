@@ -22,18 +22,28 @@ export const STORAGE_KEY = 'profit-board:state';
 export const REPORT_CACHE_KEY = 'profit-board:report';
 export const PROFIT_BOARD_CACHE_VERSION = 1;
 export const DETAIL_LIMIT = 600;
+export const BOARD_METRIC_KEYS = [
+  'configured_profit_cny',
+  'configured_site_revenue_cny',
+  'upstream_cost_cny',
+];
+export const BOARD_METRIC_USD_KEY_MAP = {
+  configured_profit_cny: 'configured_profit_usd',
+  configured_site_revenue_cny: 'configured_site_revenue_usd',
+  upstream_cost_cny: 'upstream_cost_usd',
+};
 
 export const createMetricOptions = (t) => [
-  { value: 'configured_profit_usd', label: t('利润') },
-  { value: 'configured_site_revenue_usd', label: t('本站配置收入') },
-  { value: 'upstream_cost_usd', label: t('上游费用') },
+  { value: 'configured_profit_cny', label: t('利润') },
+  { value: 'configured_site_revenue_cny', label: t('本站配置收入') },
+  { value: 'upstream_cost_cny', label: t('上游费用') },
 ];
 
 /** @deprecated Use createMetricOptions(t) instead */
 export const metricOptions = [
-  { value: 'configured_profit_usd', label: '利润' },
-  { value: 'configured_site_revenue_usd', label: '本站配置收入' },
-  { value: 'upstream_cost_usd', label: '上游费用' },
+  { value: 'configured_profit_cny', label: '利润' },
+  { value: 'configured_site_revenue_cny', label: '本站配置收入' },
+  { value: 'upstream_cost_cny', label: '上游费用' },
 ];
 
 export const createSitePricingSourceLabelMap = (t) => ({
@@ -44,6 +54,7 @@ export const createSitePricingSourceLabelMap = (t) => ({
   manual_fallback: t('手动价格回退'),
   site_model_standard: t('读取本站模型原价'),
   site_model_recharge: t('读取本站模型充值价'),
+  site_model_package: t('读取本站模型套餐价'),
   site_model_missing: t('未命中本站模型'),
   log_quota: t('按日志额度'),
 });
@@ -57,12 +68,73 @@ export const sitePricingSourceLabelMap = {
   manual_fallback: '手动价格回退',
   site_model_standard: '读取本站模型原价',
   site_model_recharge: '读取本站模型充值价',
+  site_model_package: '读取本站模型套餐价',
   site_model_missing: '未命中本站模型',
   log_quota: '按日志额度',
 };
 
 export const createBatchId = () =>
   `batch-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+export const normalizeSubscriptionPlans = (items) => {
+  if (!Array.isArray(items)) return [];
+  return items.map((item) => item?.plan || item).filter(Boolean);
+};
+
+export const computePackageEffectiveRate = (plan, quotaPerUnit, usdExchangeRate) => {
+  const totalAmount = Number(plan?.total_amount || 0);
+  if (!plan || totalAmount <= 0) return null;
+
+  const quotaPerResetUSD = totalAmount / quotaPerUnit;
+
+  let durationSeconds = 0;
+  switch (plan.duration_unit) {
+    case 'year':  durationSeconds = plan.duration_value * 365 * 86400; break;
+    case 'month': durationSeconds = plan.duration_value * 30 * 86400; break;
+    case 'day':   durationSeconds = plan.duration_value * 86400; break;
+    case 'hour':  durationSeconds = plan.duration_value * 3600; break;
+    case 'custom': durationSeconds = plan.custom_seconds || 0; break;
+  }
+
+  let totalQuotaUSD;
+  if (plan.quota_reset_period === 'never' || !plan.quota_reset_period) {
+    totalQuotaUSD = quotaPerResetUSD;
+  } else {
+    let resetSeconds;
+    switch (plan.quota_reset_period) {
+      case 'daily':   resetSeconds = 86400; break;
+      case 'weekly':  resetSeconds = 7 * 86400; break;
+      case 'monthly': resetSeconds = 30 * 86400; break;
+      case 'custom':  resetSeconds = plan.quota_reset_custom_seconds || durationSeconds; break;
+      default:        resetSeconds = durationSeconds; break;
+    }
+    const numPeriods = resetSeconds > 0 ? Math.max(1, Math.floor(durationSeconds / resetSeconds)) : 1;
+    totalQuotaUSD = quotaPerResetUSD * numPeriods;
+  }
+
+  if (totalQuotaUSD <= 0) return null;
+
+  let planPriceCNY = Number(plan?.price_amount || 0);
+  if (plan.currency === 'USD' || !plan.currency) {
+    planPriceCNY *= usdExchangeRate;
+  }
+
+  return planPriceCNY / totalQuotaUSD;
+};
+
+export const pickBestValuePlan = (plans, quotaPerUnit, usdExchangeRate) => {
+  if (!Array.isArray(plans) || plans.length === 0) return null;
+  let bestPlan = null;
+  let bestRate = Infinity;
+  for (const plan of plans) {
+    const rate = computePackageEffectiveRate(plan, quotaPerUnit, usdExchangeRate);
+    if (rate != null && rate < bestRate) {
+      bestRate = rate;
+      bestPlan = plan;
+    }
+  }
+  return bestPlan || plans[0];
+};
 
 export const clampNumber = (value) => {
   const next = Number(value || 0);
@@ -93,12 +165,14 @@ export const createDefaultSiteConfig = () => ({
   model_names: [],
   group: '',
   use_recharge_price: false,
+  plan_id: 0,
 });
 
 export const createDefaultSharedSiteConfig = (overrides = {}) => ({
   model_names: [],
   group: '',
   use_recharge_price: false,
+  plan_id: 0,
   ...overrides,
 });
 
@@ -146,6 +220,8 @@ export const createDefaultComboPricingConfig = (
     upstream_account_id: walletMode
       ? Number(legacyUpstream?.upstream_account_id || 0)
       : 0,
+    site_exchange_rate: 1,
+    upstream_exchange_rate: 1,
     shared_site: createDefaultSharedSiteConfig({
       model_names: sharedSite?.model_names || legacySite?.model_names || [],
       group: sharedSite?.group || legacySite?.group || '',
@@ -153,6 +229,7 @@ export const createDefaultComboPricingConfig = (
         typeof sharedSite?.use_recharge_price === 'boolean'
           ? sharedSite.use_recharge_price
           : !!legacySite?.use_recharge_price,
+      plan_id: sharedSite?.plan_id || legacySite?.plan_id || 0,
     }),
     site_rules: [
       createDefaultPricingRule({
@@ -805,7 +882,7 @@ export const createDefaultState = () => {
     compareMode: 'none',
     comparePeriod: 'previous',
     compareDateRange: [],
-    metricKey: 'configured_profit_usd',
+    metricKey: 'configured_profit_cny',
     analysisMode: 'business_compare',
     viewBatchId: 'all',
     comboConfigs: [],
@@ -920,6 +997,10 @@ export const normalizeRestoredState = (state) => {
       ...createDefaultRemoteObserverConfig(),
       ...(item?.remote_observer || {}),
     },
+    site_exchange_rate: clampPositiveNumber(item?.site_exchange_rate || 1),
+    upstream_exchange_rate: clampPositiveNumber(
+      item?.upstream_exchange_rate || 1,
+    ),
   }));
   next.excludedUserIDs = Array.isArray(next.excludedUserIDs)
     ? Array.from(
@@ -930,13 +1011,14 @@ export const normalizeRestoredState = (state) => {
         ),
       ).sort((left, right) => left - right)
     : [];
-  if (
-    !['configured_profit_usd', 'configured_site_revenue_usd', 'upstream_cost_usd'].includes(
-      next.metricKey,
-    )
-  ) {
-    next.metricKey = defaults.metricKey;
+  if (next.metricKey === 'configured_profit_usd') {
+    next.metricKey = 'configured_profit_cny';
+  } else if (next.metricKey === 'configured_site_revenue_usd') {
+    next.metricKey = 'configured_site_revenue_cny';
+  } else if (next.metricKey === 'upstream_cost_usd') {
+    next.metricKey = 'upstream_cost_cny';
   }
+  if (!BOARD_METRIC_KEYS.includes(next.metricKey)) next.metricKey = defaults.metricKey;
   next.viewBatchId = next.viewBatchId || 'all';
   next.lastQueryKey = next.lastQueryKey || '';
   next.analysisMode = next.analysisMode || 'business_compare';
@@ -976,6 +1058,26 @@ export const formatMoney = (value, status, digits = 3) => {
   const { symbol, rate } = getDisplayCurrency(status);
   return `${symbol}${(amount * rate).toFixed(digits)}`;
 };
+
+export const clampPositiveNumber = (value, fallback = 1) => {
+  const next = Number(value);
+  if (!Number.isFinite(next) || next <= 0) return fallback;
+  return next;
+};
+
+export const formatBoardCNY = (value, digits = 3) =>
+  `¥${Number(value || 0).toFixed(digits)}`;
+
+export const formatBoardUSD = (value, digits = 3) =>
+  `$${Number(value || 0).toFixed(digits)}`;
+
+export const formatBoardMetricPair = (cnyValue, usdValue, digits = 3) => ({
+  primary: formatBoardCNY(cnyValue, digits),
+  secondary: formatBoardUSD(usdValue, digits),
+});
+
+export const formatBoardExchangeRate = (rate, digits = 3) =>
+  `1$=${clampPositiveNumber(rate).toFixed(digits)}￥`;
 
 export const createPresetRanges = (t) => {
   const now = dayjs();
@@ -1225,7 +1327,7 @@ export const combineChannelMetricsByTag = (
     .slice(0, 24);
 };
 
-export const createTrendSpec = (rows, metricLabel, status, t) => {
+export const createTrendSpec = (rows, metricLabel, t) => {
   const isSparse = rows.length <= 3;
   const hasSeries = rows.some((item) => item.series);
   return {
@@ -1248,7 +1350,7 @@ export const createTrendSpec = (rows, metricLabel, status, t) => {
       ? {
           visible: true,
           position: 'top',
-          formatter: (datum) => formatMoney(datum.value, status),
+          formatter: (datum) => formatBoardCNY(datum.value),
           style: { fontSize: 12 },
         }
       : { visible: false },
@@ -1276,7 +1378,7 @@ export const createTrendSpec = (rows, metricLabel, status, t) => {
             : []),
           {
             key: metricLabel,
-            value: (datum) => formatMoney(datum.value, status),
+            value: (datum) => formatBoardCNY(datum.value),
           },
         ],
       },
@@ -1284,7 +1386,7 @@ export const createTrendSpec = (rows, metricLabel, status, t) => {
   };
 };
 
-export const createBarSpec = (title, rows, metricLabel, status, t) => ({
+export const createBarSpec = (title, rows, metricLabel, t) => ({
   type: 'bar',
   background: 'transparent',
   padding: { top: 32, right: 24, bottom: 40, left: 56 },
@@ -1317,7 +1419,7 @@ export const createBarSpec = (title, rows, metricLabel, status, t) => ({
           : []),
         {
           key: metricLabel,
-          value: (datum) => formatMoney(datum.value, status),
+          value: (datum) => formatBoardCNY(datum.value),
         },
       ],
     },

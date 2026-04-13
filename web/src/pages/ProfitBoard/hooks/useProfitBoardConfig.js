@@ -18,10 +18,13 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useCallback, useMemo, useState } from 'react';
 import { API, showError, showSuccess } from '../../../helpers';
+import { getQuotaPerUnit } from '../../../helpers/quota';
 import {
   clampNumber,
+  computePackageEffectiveRate,
   createDefaultComboPricingConfig,
   createDefaultPricingRule,
+  normalizeSubscriptionPlans,
 } from '../utils';
 
 export const useProfitBoardConfig = ({
@@ -30,6 +33,7 @@ export const useProfitBoardConfig = ({
   setComboConfigs,
   restoredState,
   rechargePriceFactor = 1,
+  usdExchangeRate = 0,
 }) => {
   const [builderLoading, setBuilderLoading] = useState(false);
   const [accountsLoading, setAccountsLoading] = useState(false);
@@ -50,6 +54,7 @@ export const useProfitBoardConfig = ({
   const [upstreamConfig, setUpstreamConfig] = useState(
     restoredState.upstreamConfig || {},
   );
+  const [subscriptionPlans, setSubscriptionPlans] = useState([]);
 
   const channelOptions = useMemo(
     () =>
@@ -140,6 +145,7 @@ export const useProfitBoardConfig = ({
         model_names: siteConfig.model_names || [],
         group: siteConfig.group || '',
         use_recharge_price: !!siteConfig.use_recharge_price,
+        plan_id: siteConfig.plan_id || 0,
       },
       combo_configs: comboConfigs,
       excluded_user_ids: excludedUserIDs,
@@ -223,6 +229,19 @@ export const useProfitBoardConfig = ({
     } finally {
       setBuilderLoading(false);
     }
+    // 非阻塞加载套餐列表
+    loadSubscriptionPlans();
+  }, []);
+
+  const loadSubscriptionPlans = useCallback(async () => {
+    try {
+      const res = await API.get('/api/subscription/plans');
+      if (res.data?.success) {
+        setSubscriptionPlans(normalizeSubscriptionPlans(res.data.data));
+      }
+    } catch {
+      // 未登录或接口不可用，静默忽略
+    }
   }, []);
 
   const loadUpstreamAccounts = useCallback(async () => {
@@ -294,9 +313,27 @@ export const useProfitBoardConfig = ({
           cache_read_price: 0,
           cache_creation_price: 0,
         };
-      const factor = currentSharedSite.use_recharge_price
-        ? rechargePriceFactor
-        : 1;
+      let factor;
+      if (currentSharedSite.use_recharge_price) {
+        factor = rechargePriceFactor;
+      } else if (currentSharedSite.plan_id > 0 && usdExchangeRate > 0) {
+        const plan = subscriptionPlans.find(
+          (p) => Number(p.id) === Number(currentSharedSite.plan_id),
+        );
+        if (plan) {
+          const quotaPerUnit = getQuotaPerUnit();
+          const effectiveRate = computePackageEffectiveRate(
+            plan,
+            quotaPerUnit,
+            usdExchangeRate,
+          );
+          factor = effectiveRate != null ? effectiveRate / usdExchangeRate : 1;
+        } else {
+          factor = 1;
+        }
+      } else {
+        factor = 1;
+      }
       const baseInput = clampNumber(model.model_ratio) * 2 * factor;
       return {
         input_price: baseInput,
@@ -313,7 +350,7 @@ export const useProfitBoardConfig = ({
           : 0,
       };
     },
-    [localModelMap, rechargePriceFactor],
+    [localModelMap, rechargePriceFactor, subscriptionPlans, usdExchangeRate],
   );
 
   return {
@@ -344,5 +381,6 @@ export const useProfitBoardConfig = ({
     resolveSharedSitePreview,
     getModelsByChannelIds,
     getModelsByTags,
+    subscriptionPlans,
   };
 };

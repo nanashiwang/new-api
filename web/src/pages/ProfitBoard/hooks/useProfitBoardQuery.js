@@ -43,7 +43,7 @@ export const useProfitBoardQuery = ({
     restoredState.channelGroupMode || 'channel',
   );
   const [metricKey, setMetricKey] = useState(
-    restoredState.metricKey || 'configured_profit_usd',
+    restoredState.metricKey || 'configured_profit_cny',
   );
   const [analysisMode, setAnalysisMode] = useState(
     restoredState.analysisMode || 'business_compare',

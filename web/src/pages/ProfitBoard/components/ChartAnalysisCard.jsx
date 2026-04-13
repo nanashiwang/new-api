@@ -38,7 +38,7 @@ const { Text } = Typography;
 
 const DEFAULTS = {
   analysisMode: 'business_compare',
-  metricKey: 'configured_profit_usd',
+  metricKey: 'configured_profit_cny',
   viewBatchId: 'all',
   granularity: 'day',
   channelGroupMode: 'channel',

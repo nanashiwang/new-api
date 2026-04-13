@@ -46,6 +46,8 @@ const cloneComboDraft = (batch, comboConfig) => ({
   upstream_mode: comboConfig.upstream_mode,
   cost_source: 'manual_only',
   upstream_account_id: Number(comboConfig.upstream_account_id || 0),
+  site_exchange_rate: Number(comboConfig.site_exchange_rate || 1),
+  upstream_exchange_rate: Number(comboConfig.upstream_exchange_rate || 1),
   shared_site: { ...(comboConfig.shared_site || {}) },
   site_rules: (comboConfig.site_rules || []).map((rule) =>
     createDefaultPricingRule(rule),
@@ -382,6 +384,8 @@ export const useComboEditor = ({
       upstream_mode: editorDraft.upstream_mode,
       cost_source: 'manual_only',
       upstream_account_id: Number(editorDraft.upstream_account_id || 0),
+      site_exchange_rate: clampNumber(editorDraft.site_exchange_rate) || 1,
+      upstream_exchange_rate: clampNumber(editorDraft.upstream_exchange_rate) || 1,
       shared_site: { ...(editorDraft.shared_site || {}) },
       site_rules: (editorDraft.site_rules || []).map((rule) =>
         createDefaultPricingRule(rule),

@@ -61,6 +61,8 @@ import {
   createMetricOptions,
   createPresetRanges,
   createTrendSpec,
+  formatBoardExchangeRate,
+  formatBoardMetricPair,
   formatMoney,
   getUpstreamCostSourceLabel,
   normalizeBatchForState,
@@ -71,23 +73,27 @@ initVChartSemiTheme({
 });
 
 const getSiteSummaryText = (comboConfig, t) => {
-  if (comboConfig.site_mode === 'log_quota') return t('智能（按日志额度）');
-  if (comboConfig.site_mode !== 'shared_site_model') return t('手动定价');
+  const rateText = formatBoardExchangeRate(comboConfig.site_exchange_rate);
+  if (comboConfig.site_mode === 'log_quota')
+    return `${t('智能（按日志额度）')} · ${rateText}`;
+  if (comboConfig.site_mode !== 'shared_site_model')
+    return `${t('手动定价')} · ${rateText}`;
   const modelCount = comboConfig.shared_site?.model_names?.length || 0;
-  if (modelCount === 0) return t('本站模型价格');
-  return t('本站模型价格 · {{count}} 个模型', { count: modelCount });
+  if (modelCount === 0) return `${t('本站模型价格')} · ${rateText}`;
+  return `${t('本站模型价格 · {{count}} 个模型', { count: modelCount })} · ${rateText}`;
 };
 
 const getUpstreamSummaryText = (comboConfig, options, t) => {
+  const rateText = formatBoardExchangeRate(comboConfig.upstream_exchange_rate);
   if (comboConfig.upstream_mode !== 'wallet_observer') {
-    return getUpstreamCostSourceLabel('manual_only', t);
+    return `${getUpstreamCostSourceLabel('manual_only', t)} · ${rateText}`;
   }
   const account = (options?.upstream_accounts || []).find(
     (item) => item.id === Number(comboConfig.upstream_account_id || 0),
   );
   return account
-    ? t('按钱包余额变化 · {{name}}', { name: account.name })
-    : t('按钱包余额变化');
+    ? `${t('按钱包余额变化 · {{name}}', { name: account.name })} · ${rateText}`
+    : `${t('按钱包余额变化')} · ${rateText}`;
 };
 
 const normalizeServerBatchState = (batch, index, fallbackCreatedAt = 0) => {
@@ -143,6 +149,7 @@ const ProfitBoardPage = () => {
     setComboConfigs,
     restoredState,
     rechargePriceFactor,
+    usdExchangeRate: statusState?.status?.usd_exchange_rate || 0,
   });
 
   const { batches, setBatches, batchPayload, upsertBatch, removeBatch } =
@@ -173,6 +180,7 @@ const ProfitBoardPage = () => {
     resolveSharedSitePreview,
     getModelsByChannelIds,
     getModelsByTags,
+    subscriptionPlans,
   } = configHook;
 
   const tagOptions = useMemo(
@@ -538,9 +546,9 @@ const ProfitBoardPage = () => {
   );
   const businessMetrics = useMemo(
     () => [
-      { key: 'configured_site_revenue_usd', label: t('本站配置收入') },
-      { key: 'upstream_cost_usd', label: t('上游费用') },
-      { key: 'configured_profit_usd', label: t('利润') },
+      { key: 'configured_site_revenue_cny', label: t('本站配置收入') },
+      { key: 'upstream_cost_cny', label: t('上游费用') },
+      { key: 'configured_profit_cny', label: t('利润') },
     ],
     [t],
   );
@@ -678,8 +686,8 @@ const ProfitBoardPage = () => {
   ]);
 
   const trendSpec = useMemo(
-    () => createTrendSpec(trendRows, chartSubtitle, statusState?.status, t),
-    [chartSubtitle, statusState?.status, t, trendRows],
+    () => createTrendSpec(trendRows, chartSubtitle, t),
+    [chartSubtitle, t, trendRows],
   );
   const channelSpec = useMemo(
     () =>
@@ -687,10 +695,9 @@ const ProfitBoardPage = () => {
         channelGroupMode === 'tag' ? t('标签分布') : t('渠道分布'),
         channelRows,
         chartSubtitle,
-        statusState?.status,
         t,
       ),
-    [channelGroupMode, channelRows, chartSubtitle, statusState?.status, t],
+    [channelGroupMode, channelRows, chartSubtitle, t],
   );
   const modelSpec = useMemo(
     () =>
@@ -698,10 +705,9 @@ const ProfitBoardPage = () => {
         t('模型分布'),
         modelRows,
         chartSubtitle,
-        statusState?.status,
         t,
       ),
-    [chartSubtitle, modelRows, statusState?.status, t],
+    [chartSubtitle, modelRows, t],
   );
 
   const chartHeight = isMobile ? 340 : 480;
@@ -775,11 +781,11 @@ const ProfitBoardPage = () => {
         ? []
         : [
             {
-              key: 'configured_site_revenue_usd',
+              key: 'configured_site_revenue_cny',
               title: t('本站配置收入'),
-              value: formatMoney(
+              ...formatBoardMetricPair(
+                overviewReport.summary.configured_site_revenue_cny,
                 overviewReport.summary.configured_site_revenue_usd,
-                statusState?.status,
               ),
               icon: (
                 <CircleDollarSign
@@ -790,11 +796,11 @@ const ProfitBoardPage = () => {
               requestCount: overviewReport.summary.request_count,
             },
             {
-              key: 'upstream_cost_usd',
+              key: 'upstream_cost_cny',
               title: t('上游费用'),
-              value: formatMoney(
+              ...formatBoardMetricPair(
+                overviewReport.summary.upstream_cost_cny,
                 overviewReport.summary.upstream_cost_usd,
-                statusState?.status,
               ),
               icon: (
                 <BadgeDollarSign
@@ -804,11 +810,11 @@ const ProfitBoardPage = () => {
               ),
             },
             {
-              key: 'configured_profit_usd',
+              key: 'configured_profit_cny',
               title: t('利润'),
-              value: formatMoney(
+              ...formatBoardMetricPair(
+                overviewReport.summary.configured_profit_cny,
                 overviewReport.summary.configured_profit_usd,
-                statusState?.status,
               ),
               icon: (
                 <BarChart3
@@ -818,7 +824,7 @@ const ProfitBoardPage = () => {
               ),
             },
           ],
-    [overviewReport?.summary, statusState?.status, t],
+    [overviewReport?.summary, t],
   );
 
   const statusSummary = useMemo(() => {
@@ -907,16 +913,19 @@ const ProfitBoardPage = () => {
     const map = {};
     summaries.forEach((s) => {
       map[s.batch_id] = {
-        revenue: formatMoney(
+        revenue: formatBoardMetricPair(
+          s.configured_site_revenue_cny,
           s.configured_site_revenue_usd,
-          statusState?.status,
         ),
-        cost: formatMoney(s.upstream_cost_usd, statusState?.status),
-        profit: formatMoney(s.configured_profit_usd, statusState?.status),
+        cost: formatBoardMetricPair(s.upstream_cost_cny, s.upstream_cost_usd),
+        profit: formatBoardMetricPair(
+          s.configured_profit_cny,
+          s.configured_profit_usd,
+        ),
       };
     });
     return map;
-  }, [overviewReport?.batch_summaries, statusState?.status]);
+  }, [overviewReport?.batch_summaries]);
 
   const handleSaveConfig = useCallback(async () => {
     const saved = await saveConfig(validationErrors);
@@ -1158,6 +1167,8 @@ const ProfitBoardPage = () => {
         isMobile={isMobile}
         clampNumber={clampNumber}
         localModelMap={localModelMap}
+        subscriptionPlans={subscriptionPlans}
+        usdExchangeRate={statusState?.status?.usd_exchange_rate || 0}
         validationError={editorHook.editorValidationError}
         onOk={editorHook.handleSaveEditor}
         onCancel={editorHook.closeEditor}

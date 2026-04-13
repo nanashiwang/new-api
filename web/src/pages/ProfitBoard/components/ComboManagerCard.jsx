@@ -106,20 +106,35 @@ const ComboManagerCard = ({
                         <div className='mt-2 flex flex-wrap gap-x-4 gap-y-1 px-1 text-xs'>
                           <span>
                             <span className='text-semi-color-text-2'>{t('收入')}</span>{' '}
-                            <span className='font-medium text-emerald-600 dark:text-emerald-400'>
-                              {batchMetrics[batch.id].revenue}
+                            <span className='inline-flex flex-col align-top'>
+                              <span className='font-medium text-emerald-600 dark:text-emerald-400'>
+                                {batchMetrics[batch.id].revenue.primary}
+                              </span>
+                              <span className='text-semi-color-text-2'>
+                                {batchMetrics[batch.id].revenue.secondary}
+                              </span>
                             </span>
                           </span>
                           <span>
                             <span className='text-semi-color-text-2'>{t('成本')}</span>{' '}
-                            <span className='font-medium text-amber-600 dark:text-amber-400'>
-                              {batchMetrics[batch.id].cost}
+                            <span className='inline-flex flex-col align-top'>
+                              <span className='font-medium text-amber-600 dark:text-amber-400'>
+                                {batchMetrics[batch.id].cost.primary}
+                              </span>
+                              <span className='text-semi-color-text-2'>
+                                {batchMetrics[batch.id].cost.secondary}
+                              </span>
                             </span>
                           </span>
                           <span>
                             <span className='text-semi-color-text-2'>{t('利润')}</span>{' '}
-                            <span className='font-medium text-sky-600 dark:text-sky-400'>
-                              {batchMetrics[batch.id].profit}
+                            <span className='inline-flex flex-col align-top'>
+                              <span className='font-medium text-sky-600 dark:text-sky-400'>
+                                {batchMetrics[batch.id].profit.primary}
+                              </span>
+                              <span className='text-semi-color-text-2'>
+                                {batchMetrics[batch.id].profit.secondary}
+                              </span>
                             </span>
                           </span>
                         </div>

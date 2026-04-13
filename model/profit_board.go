@@ -82,6 +82,7 @@ type ProfitBoardTokenPricingConfig struct {
 	ModelNames         []string `json:"model_names,omitempty"`
 	Group              string   `json:"group,omitempty"`
 	UseRechargePrice   bool     `json:"use_recharge_price,omitempty"`
+	PlanID             int      `json:"plan_id,omitempty"`
 }
 
 type ProfitBoardModelPricingRule struct {
@@ -98,6 +99,7 @@ type ProfitBoardSharedSitePricingConfig struct {
 	ModelNames       []string `json:"model_names,omitempty"`
 	Group            string   `json:"group,omitempty"`
 	UseRechargePrice bool     `json:"use_recharge_price,omitempty"`
+	PlanID           int      `json:"plan_id,omitempty"`
 }
 
 type ProfitBoardComboPricingConfig struct {
@@ -106,6 +108,8 @@ type ProfitBoardComboPricingConfig struct {
 	UpstreamMode             string                             `json:"upstream_mode,omitempty"`
 	CostSource               string                             `json:"cost_source,omitempty"`
 	UpstreamAccountID        int                                `json:"upstream_account_id,omitempty"`
+	SiteExchangeRate         float64                            `json:"site_exchange_rate"`
+	UpstreamExchangeRate     float64                            `json:"upstream_exchange_rate"`
 	SharedSite               ProfitBoardSharedSitePricingConfig `json:"shared_site,omitempty"`
 	SiteRules                []ProfitBoardModelPricingRule      `json:"site_rules,omitempty"`
 	UpstreamRules            []ProfitBoardModelPricingRule      `json:"upstream_rules,omitempty"`
@@ -264,9 +268,12 @@ type ProfitBoardSummary struct {
 	RequestCount                 int     `json:"request_count"`
 	ActualSiteRevenueUSD         float64 `json:"actual_site_revenue_usd"`
 	ConfiguredSiteRevenueUSD     float64 `json:"configured_site_revenue_usd"`
+	ConfiguredSiteRevenueCNY     float64 `json:"configured_site_revenue_cny"`
 	UpstreamCostUSD              float64 `json:"upstream_cost_usd"`
+	UpstreamCostCNY              float64 `json:"upstream_cost_cny"`
 	RemoteObservedCostUSD        float64 `json:"remote_observed_cost_usd"`
 	ConfiguredProfitUSD          float64 `json:"configured_profit_usd"`
+	ConfiguredProfitCNY          float64 `json:"configured_profit_cny"`
 	ActualProfitUSD              float64 `json:"actual_profit_usd"`
 	KnownUpstreamCostCount       int     `json:"known_upstream_cost_count"`
 	MissingUpstreamCostCount     int     `json:"missing_upstream_cost_count"`
@@ -285,9 +292,12 @@ type ProfitBoardTimeseriesPoint struct {
 	RequestCount             int     `json:"request_count"`
 	ActualSiteRevenueUSD     float64 `json:"actual_site_revenue_usd"`
 	ConfiguredSiteRevenueUSD float64 `json:"configured_site_revenue_usd"`
+	ConfiguredSiteRevenueCNY float64 `json:"configured_site_revenue_cny"`
 	UpstreamCostUSD          float64 `json:"upstream_cost_usd"`
+	UpstreamCostCNY          float64 `json:"upstream_cost_cny"`
 	RemoteObservedCostUSD    float64 `json:"remote_observed_cost_usd"`
 	ConfiguredProfitUSD      float64 `json:"configured_profit_usd"`
+	ConfiguredProfitCNY      float64 `json:"configured_profit_cny"`
 	ActualProfitUSD          float64 `json:"actual_profit_usd"`
 	KnownUpstreamCostCount   int     `json:"known_upstream_cost_count"`
 	MissingUpstreamCostCount int     `json:"missing_upstream_cost_count"`
@@ -303,8 +313,11 @@ type ProfitBoardBreakdownItem struct {
 	RequestCount             int     `json:"request_count"`
 	ActualSiteRevenueUSD     float64 `json:"actual_site_revenue_usd"`
 	ConfiguredSiteRevenueUSD float64 `json:"configured_site_revenue_usd"`
+	ConfiguredSiteRevenueCNY float64 `json:"configured_site_revenue_cny"`
 	UpstreamCostUSD          float64 `json:"upstream_cost_usd"`
+	UpstreamCostCNY          float64 `json:"upstream_cost_cny"`
 	ConfiguredProfitUSD      float64 `json:"configured_profit_usd"`
+	ConfiguredProfitCNY      float64 `json:"configured_profit_cny"`
 	ActualProfitUSD          float64 `json:"actual_profit_usd"`
 	KnownUpstreamCostCount   int     `json:"known_upstream_cost_count"`
 	MissingUpstreamCostCount int     `json:"missing_upstream_cost_count"`
@@ -326,8 +339,11 @@ type ProfitBoardDetailRow struct {
 	CacheCreationTokens      int     `json:"cache_creation_tokens"`
 	ActualSiteRevenueUSD     float64 `json:"actual_site_revenue_usd"`
 	ConfiguredSiteRevenueUSD float64 `json:"configured_site_revenue_usd"`
+	ConfiguredSiteRevenueCNY float64 `json:"configured_site_revenue_cny"`
 	UpstreamCostUSD          float64 `json:"upstream_cost_usd"`
+	UpstreamCostCNY          float64 `json:"upstream_cost_cny"`
 	ConfiguredProfitUSD      float64 `json:"configured_profit_usd"`
+	ConfiguredProfitCNY      float64 `json:"configured_profit_cny"`
 	ActualProfitUSD          float64 `json:"actual_profit_usd"`
 	ConfiguredActualDeltaUSD float64 `json:"configured_actual_delta_usd"`
 	UpstreamCostKnown        bool    `json:"upstream_cost_known"`
@@ -442,6 +458,8 @@ type profitBoardResolvedComboPricing struct {
 	UpstreamMode             string
 	CostSource               string
 	UpstreamAccountID        int
+	SiteExchangeRate         float64
+	UpstreamExchangeRate     float64
 	SharedSite               ProfitBoardSharedSitePricingConfig
 	SiteRules                []ProfitBoardModelPricingRule
 	UpstreamRules            []ProfitBoardModelPricingRule
@@ -458,32 +476,34 @@ type profitBoardPersistedSiteConfig struct {
 
 // Sentinel errors for i18n translation
 var (
-	ErrProfitBoardNoChannel                = errors.New("profit_board:no_channel")
-	ErrProfitBoardNoTag                    = errors.New("profit_board:no_tag")
-	ErrProfitBoardInvalidScopeType         = errors.New("profit_board:invalid_scope_type")
-	ErrProfitBoardRuleMustSpecifyModel     = errors.New("profit_board:rule_must_specify_model")
-	ErrProfitBoardRuleOnlyOneDefault       = errors.New("profit_board:rule_only_one_default")
-	ErrProfitBoardRuleNonNegative          = errors.New("profit_board:rule_non_negative")
-	ErrProfitBoardComboMissingId           = errors.New("profit_board:combo_missing_id")
-	ErrProfitBoardComboDuplicate           = errors.New("profit_board:combo_duplicate")
-	ErrProfitBoardInvalidSitePricingMode   = errors.New("profit_board:invalid_site_pricing_mode")
-	ErrProfitBoardComboSiteNonNegative     = errors.New("profit_board:combo_site_non_negative")
-	ErrProfitBoardComboUpstreamNonNegative = errors.New("profit_board:combo_upstream_non_negative")
-	ErrProfitBoardNoBatch                  = errors.New("profit_board:no_batch")
-	ErrProfitBoardBatchDuplicate           = errors.New("profit_board:batch_duplicate")
-	ErrProfitBoardPriceNonNegative         = errors.New("profit_board:price_non_negative")
-	ErrProfitBoardInvalidCostSource        = errors.New("profit_board:invalid_cost_source")
-	ErrProfitBoardInvalidUpstreamMode      = errors.New("profit_board:invalid_upstream_mode")
-	ErrProfitBoardWalletRequireAccount     = errors.New("profit_board:wallet_require_account")
-	ErrProfitBoardInvalidSiteSource        = errors.New("profit_board:invalid_site_source")
-	ErrProfitBoardAccountInUse             = errors.New("profit_board:account_in_use")
-	ErrProfitBoardEndBeforeStart           = errors.New("profit_board:end_before_start")
-	ErrProfitBoardCustomGranularityMin     = errors.New("profit_board:custom_granularity_min")
-	ErrProfitBoardCustomGranularityMax     = errors.New("profit_board:custom_granularity_max")
-	ErrProfitBoardInvalidGranularity       = errors.New("profit_board:invalid_granularity")
-	ErrProfitBoardChannelNotExist          = errors.New("profit_board:channel_not_exist")
-	ErrProfitBoardTagNoChannel             = errors.New("profit_board:tag_no_channel")
-	ErrProfitBoardChannelDuplicateBatch    = errors.New("profit_board:channel_duplicate_batch")
+	ErrProfitBoardNoChannel                 = errors.New("profit_board:no_channel")
+	ErrProfitBoardNoTag                     = errors.New("profit_board:no_tag")
+	ErrProfitBoardInvalidScopeType          = errors.New("profit_board:invalid_scope_type")
+	ErrProfitBoardRuleMustSpecifyModel      = errors.New("profit_board:rule_must_specify_model")
+	ErrProfitBoardRuleOnlyOneDefault        = errors.New("profit_board:rule_only_one_default")
+	ErrProfitBoardRuleNonNegative           = errors.New("profit_board:rule_non_negative")
+	ErrProfitBoardComboMissingId            = errors.New("profit_board:combo_missing_id")
+	ErrProfitBoardComboDuplicate            = errors.New("profit_board:combo_duplicate")
+	ErrProfitBoardInvalidSitePricingMode    = errors.New("profit_board:invalid_site_pricing_mode")
+	ErrProfitBoardComboSiteNonNegative      = errors.New("profit_board:combo_site_non_negative")
+	ErrProfitBoardComboUpstreamNonNegative  = errors.New("profit_board:combo_upstream_non_negative")
+	ErrProfitBoardComboSiteExchangeRate     = errors.New("profit_board:combo_site_exchange_rate")
+	ErrProfitBoardComboUpstreamExchangeRate = errors.New("profit_board:combo_upstream_exchange_rate")
+	ErrProfitBoardNoBatch                   = errors.New("profit_board:no_batch")
+	ErrProfitBoardBatchDuplicate            = errors.New("profit_board:batch_duplicate")
+	ErrProfitBoardPriceNonNegative          = errors.New("profit_board:price_non_negative")
+	ErrProfitBoardInvalidCostSource         = errors.New("profit_board:invalid_cost_source")
+	ErrProfitBoardInvalidUpstreamMode       = errors.New("profit_board:invalid_upstream_mode")
+	ErrProfitBoardWalletRequireAccount      = errors.New("profit_board:wallet_require_account")
+	ErrProfitBoardInvalidSiteSource         = errors.New("profit_board:invalid_site_source")
+	ErrProfitBoardAccountInUse              = errors.New("profit_board:account_in_use")
+	ErrProfitBoardEndBeforeStart            = errors.New("profit_board:end_before_start")
+	ErrProfitBoardCustomGranularityMin      = errors.New("profit_board:custom_granularity_min")
+	ErrProfitBoardCustomGranularityMax      = errors.New("profit_board:custom_granularity_max")
+	ErrProfitBoardInvalidGranularity        = errors.New("profit_board:invalid_granularity")
+	ErrProfitBoardChannelNotExist           = errors.New("profit_board:channel_not_exist")
+	ErrProfitBoardTagNoChannel              = errors.New("profit_board:tag_no_channel")
+	ErrProfitBoardChannelDuplicateBatch     = errors.New("profit_board:channel_duplicate_batch")
 )
 
 var (
@@ -744,6 +764,19 @@ func normalizeProfitBoardSharedSiteConfig(config ProfitBoardSharedSitePricingCon
 	if !config.UseRechargePrice {
 		config.UseRechargePrice = legacySite.UseRechargePrice
 	}
+	if config.PlanID == 0 && legacySite.PlanID > 0 {
+		config.PlanID = legacySite.PlanID
+	}
+	// 互斥：充值价和套餐价不能同时启用
+	if config.UseRechargePrice && config.PlanID > 0 {
+		config.PlanID = 0
+	}
+	// 验证套餐存在
+	if config.PlanID > 0 {
+		if plan, err := GetSubscriptionPlanById(config.PlanID); err != nil || plan == nil {
+			config.PlanID = 0
+		}
+	}
 	seen := make(map[string]struct{}, len(config.ModelNames))
 	modelNames := make([]string, 0, len(config.ModelNames))
 	for _, modelName := range config.ModelNames {
@@ -765,7 +798,7 @@ func normalizeProfitBoardSharedSiteConfig(config ProfitBoardSharedSitePricingCon
 }
 
 func profitBoardSharedSiteConfigEmpty(config ProfitBoardSharedSitePricingConfig) bool {
-	return len(config.ModelNames) == 0 && strings.TrimSpace(config.Group) == "" && !config.UseRechargePrice
+	return len(config.ModelNames) == 0 && strings.TrimSpace(config.Group) == "" && !config.UseRechargePrice && config.PlanID == 0
 }
 
 func defaultProfitBoardComboSiteMode(sharedSite ProfitBoardSharedSitePricingConfig, legacySite ProfitBoardTokenPricingConfig) string {
@@ -812,6 +845,8 @@ func normalizeProfitBoardComboConfigs(batches []ProfitBoardBatch, comboConfigs [
 		} else if config.UpstreamAccountID <= 0 {
 			config.UpstreamAccountID = legacyUpstream.UpstreamAccountID
 		}
+		config.SiteExchangeRate = normalizeProfitBoardExchangeRate(config.SiteExchangeRate)
+		config.UpstreamExchangeRate = normalizeProfitBoardExchangeRate(config.UpstreamExchangeRate)
 		if profitBoardSharedSiteConfigEmpty(config.SharedSite) {
 			config.SharedSite = normalizeProfitBoardSharedSiteConfig(sharedSite, legacySite)
 		} else {
@@ -835,6 +870,8 @@ func normalizeProfitBoardComboConfigs(batches []ProfitBoardBatch, comboConfigs [
 				UpstreamMode:             legacyUpstream.UpstreamMode,
 				CostSource:               legacyCostSource,
 				UpstreamAccountID:        legacyUpstream.UpstreamAccountID,
+				SiteExchangeRate:         1,
+				UpstreamExchangeRate:     1,
 				SharedSite:               normalizeProfitBoardSharedSiteConfig(sharedSite, legacySite),
 				SiteRules:                normalizeProfitBoardModelPricingRules(nil, legacySite),
 				UpstreamRules:            normalizeProfitBoardModelPricingRules(nil, legacyUpstream),
@@ -860,6 +897,8 @@ func normalizeProfitBoardComboConfigs(batches []ProfitBoardBatch, comboConfigs [
 		} else if config.UpstreamAccountID <= 0 {
 			config.UpstreamAccountID = legacyUpstream.UpstreamAccountID
 		}
+		config.SiteExchangeRate = normalizeProfitBoardExchangeRate(config.SiteExchangeRate)
+		config.UpstreamExchangeRate = normalizeProfitBoardExchangeRate(config.UpstreamExchangeRate)
 		if profitBoardSharedSiteConfigEmpty(config.SharedSite) {
 			config.SharedSite = normalizeProfitBoardSharedSiteConfig(sharedSite, legacySite)
 		}
@@ -908,6 +947,12 @@ func validateProfitBoardComboConfigs(comboConfigs []ProfitBoardComboPricingConfi
 		}
 		if math.IsNaN(config.UpstreamFixedTotalAmount) || math.IsInf(config.UpstreamFixedTotalAmount, 0) || config.UpstreamFixedTotalAmount < 0 {
 			return ErrProfitBoardComboUpstreamNonNegative
+		}
+		if !validateProfitBoardExchangeRate(config.SiteExchangeRate) {
+			return ErrProfitBoardComboSiteExchangeRate
+		}
+		if !validateProfitBoardExchangeRate(config.UpstreamExchangeRate) {
+			return ErrProfitBoardComboUpstreamExchangeRate
 		}
 		if err := validateProfitBoardRemoteObserverConfig(config.RemoteObserver); err != nil {
 			return err
@@ -1872,10 +1917,16 @@ func profitBoardSiteModelRevenueUSD(
 	if !ok {
 		return 0, "", false
 	}
-	priceFactor := profitBoardPriceFactor(config.UseRechargePrice)
+	var priceFactor float64
 	source := "site_model_standard"
 	if config.UseRechargePrice {
+		priceFactor = profitBoardPriceFactor(true)
 		source = "site_model_recharge"
+	} else if config.PlanID > 0 {
+		priceFactor = profitBoardPlanPriceFactor(config.PlanID)
+		source = "site_model_package"
+	} else {
+		priceFactor = 1
 	}
 	if pricing.QuotaType == 1 {
 		return pricing.ModelPrice*groupRatio*priceFactor + config.FixedAmount, source, true
@@ -2032,6 +2083,8 @@ func resolveProfitBoardComboPricingMap(query ProfitBoardQuery, batches []ProfitB
 			UpstreamMode:             query.Upstream.UpstreamMode,
 			CostSource:               normalizeProfitBoardCostSource(query.Upstream.CostSource),
 			UpstreamAccountID:        query.Upstream.UpstreamAccountID,
+			SiteExchangeRate:         1,
+			UpstreamExchangeRate:     1,
 			SharedSite:               normalizeProfitBoardSharedSiteConfig(query.SharedSite, query.Site),
 			SiteRules:                normalizeProfitBoardModelPricingRules(nil, query.Site),
 			UpstreamRules:            normalizeProfitBoardModelPricingRules(nil, query.Upstream),
@@ -2057,6 +2110,8 @@ func resolveProfitBoardComboPricingMap(query ProfitBoardQuery, batches []ProfitB
 		} else if config.UpstreamAccountID > 0 {
 			current.UpstreamAccountID = config.UpstreamAccountID
 		}
+		current.SiteExchangeRate = normalizeProfitBoardExchangeRate(config.SiteExchangeRate)
+		current.UpstreamExchangeRate = normalizeProfitBoardExchangeRate(config.UpstreamExchangeRate)
 		if !profitBoardSharedSiteConfigEmpty(config.SharedSite) {
 			current.SharedSite = normalizeProfitBoardSharedSiteConfig(
 				config.SharedSite,
@@ -2084,6 +2139,9 @@ func profitBoardHasSharedSiteMode(comboPricingMap map[string]profitBoardResolved
 func profitBoardSharedSiteMeta(comboPricingMap map[string]profitBoardResolvedComboPricing) (bool, float64, string) {
 	sharedCount := 0
 	useRechargeCount := 0
+	usePlanCount := 0
+	planID := 0
+	samePlan := true
 	for _, config := range comboPricingMap {
 		if config.SiteMode != ProfitBoardComboSiteModeSharedSite {
 			continue
@@ -2091,12 +2149,19 @@ func profitBoardSharedSiteMeta(comboPricingMap map[string]profitBoardResolvedCom
 		sharedCount++
 		if config.SharedSite.UseRechargePrice {
 			useRechargeCount++
+		} else if config.SharedSite.PlanID > 0 {
+			usePlanCount++
+			if planID == 0 {
+				planID = config.SharedSite.PlanID
+			} else if planID != config.SharedSite.PlanID {
+				samePlan = false
+			}
 		}
 	}
 	if sharedCount == 0 {
 		return false, 0, ""
 	}
-	if useRechargeCount == 0 {
+	if useRechargeCount == 0 && usePlanCount == 0 {
 		factor, note := profitBoardPriceFactorMeta(false)
 		return false, factor, note
 	}
@@ -2104,7 +2169,11 @@ func profitBoardSharedSiteMeta(comboPricingMap map[string]profitBoardResolvedCom
 		factor, note := profitBoardPriceFactorMeta(true)
 		return true, factor, note
 	}
-	return false, 0, "不同组合使用了不同的本站价格口径：部分按原价，部分按充值价"
+	if usePlanCount == sharedCount && samePlan {
+		factor, note := profitBoardPlanPriceFactorMeta(planID)
+		return false, factor, note
+	}
+	return false, 0, "不同组合使用了不同的本站价格口径：部分按原价/套餐价/充值价"
 }
 
 func buildProfitBoardReportCacheKey(query ProfitBoardQuery) string {
@@ -2380,6 +2449,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 					ModelNames:       sharedSiteConfig.ModelNames,
 					Group:            sharedSiteConfig.Group,
 					UseRechargePrice: sharedSiteConfig.UseRechargePrice,
+					PlanID:           sharedSiteConfig.PlanID,
 				},
 				pricingMap,
 				groupRatios,
@@ -2426,6 +2496,14 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 				comboPricing.UpstreamFixedTotalAmount,
 			)
 		}
+		configuredSiteRevenueCNY := 0.0
+		if sitePricingKnown {
+			configuredSiteRevenueCNY = profitBoardConfiguredSiteRevenueCNY(configuredSiteRevenueUSD, comboPricing)
+		}
+		upstreamCostCNY := 0.0
+		if !isWalletCombo && upstreamCostKnown {
+			upstreamCostCNY = profitBoardConfiguredUpstreamCostCNY(upstreamCostUSD, comboPricing)
+		}
 
 		report.Summary.RequestCount++
 		batchSummary.RequestCount++
@@ -2445,7 +2523,9 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 				report.Summary.KnownUpstreamCostCount++
 				batchSummary.KnownUpstreamCostCount++
 				report.Summary.UpstreamCostUSD += upstreamCostUSD
+				report.Summary.UpstreamCostCNY += upstreamCostCNY
 				batchSummary.UpstreamCostUSD += upstreamCostUSD
+				batchSummary.UpstreamCostCNY += upstreamCostCNY
 				switch upstreamCostSource {
 				case "returned_cost":
 					report.Summary.ReturnedCostCount++
@@ -2464,19 +2544,28 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		batchSummary.ActualSiteRevenueUSD += actualSiteRevenueUSD
 		if sitePricingKnown {
 			report.Summary.ConfiguredSiteRevenueUSD += configuredSiteRevenueUSD
+			report.Summary.ConfiguredSiteRevenueCNY += configuredSiteRevenueCNY
 			batchSummary.ConfiguredSiteRevenueUSD += configuredSiteRevenueUSD
+			batchSummary.ConfiguredSiteRevenueCNY += configuredSiteRevenueCNY
 		}
 
 		configuredProfitUSD := 0.0
+		configuredProfitCNY := 0.0
 		actualProfitUSD := 0.0
 		if isWalletCombo && sitePricingKnown {
 			configuredProfitUSD = configuredSiteRevenueUSD
+			configuredProfitCNY = profitBoardConfiguredProfitCNY(configuredSiteRevenueUSD, 0, comboPricing)
 			report.Summary.ConfiguredProfitUSD += configuredProfitUSD
+			report.Summary.ConfiguredProfitCNY += configuredProfitCNY
 			batchSummary.ConfiguredProfitUSD += configuredProfitUSD
+			batchSummary.ConfiguredProfitCNY += configuredProfitCNY
 		} else if upstreamCostKnown && sitePricingKnown {
 			configuredProfitUSD = configuredSiteRevenueUSD - upstreamCostUSD
+			configuredProfitCNY = profitBoardConfiguredProfitCNY(configuredSiteRevenueUSD, upstreamCostUSD, comboPricing)
 			report.Summary.ConfiguredProfitUSD += configuredProfitUSD
+			report.Summary.ConfiguredProfitCNY += configuredProfitCNY
 			batchSummary.ConfiguredProfitUSD += configuredProfitUSD
+			batchSummary.ConfiguredProfitCNY += configuredProfitCNY
 		}
 		if isWalletCombo {
 			actualProfitUSD = actualSiteRevenueUSD
@@ -2512,11 +2601,13 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		}
 		if sitePricingKnown {
 			point.ConfiguredSiteRevenueUSD += configuredSiteRevenueUSD
+			point.ConfiguredSiteRevenueCNY += configuredSiteRevenueCNY
 		}
 		if isWalletCombo {
 			point.ActualProfitUSD += actualProfitUSD
 		} else if upstreamCostKnown {
 			point.UpstreamCostUSD += upstreamCostUSD
+			point.UpstreamCostCNY += upstreamCostCNY
 			point.KnownUpstreamCostCount++
 			point.ActualProfitUSD += actualProfitUSD
 		} else {
@@ -2530,8 +2621,10 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		}
 		if isWalletCombo && sitePricingKnown {
 			point.ConfiguredProfitUSD += configuredProfitUSD
+			point.ConfiguredProfitCNY += configuredProfitCNY
 		} else if upstreamCostKnown && sitePricingKnown {
 			point.ConfiguredProfitUSD += configuredProfitUSD
+			point.ConfiguredProfitCNY += configuredProfitCNY
 		}
 
 		channelLabel := channelNameMap[row.ChannelId]
@@ -2553,11 +2646,13 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		channelItem.ActualSiteRevenueUSD += actualSiteRevenueUSD
 		if sitePricingKnown {
 			channelItem.ConfiguredSiteRevenueUSD += configuredSiteRevenueUSD
+			channelItem.ConfiguredSiteRevenueCNY += configuredSiteRevenueCNY
 		}
 		if isWalletCombo {
 			channelItem.ActualProfitUSD += actualProfitUSD
 		} else if upstreamCostKnown {
 			channelItem.UpstreamCostUSD += upstreamCostUSD
+			channelItem.UpstreamCostCNY += upstreamCostCNY
 			channelItem.KnownUpstreamCostCount++
 			channelItem.ActualProfitUSD += actualProfitUSD
 		} else {
@@ -2565,8 +2660,10 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		}
 		if isWalletCombo && sitePricingKnown {
 			channelItem.ConfiguredProfitUSD += configuredProfitUSD
+			channelItem.ConfiguredProfitCNY += configuredProfitCNY
 		} else if upstreamCostKnown && sitePricingKnown {
 			channelItem.ConfiguredProfitUSD += configuredProfitUSD
+			channelItem.ConfiguredProfitCNY += configuredProfitCNY
 		}
 
 		modelKey := batch.Id + "|" + row.ModelName
@@ -2584,11 +2681,13 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		modelItem.ActualSiteRevenueUSD += actualSiteRevenueUSD
 		if sitePricingKnown {
 			modelItem.ConfiguredSiteRevenueUSD += configuredSiteRevenueUSD
+			modelItem.ConfiguredSiteRevenueCNY += configuredSiteRevenueCNY
 		}
 		if isWalletCombo {
 			modelItem.ActualProfitUSD += actualProfitUSD
 		} else if upstreamCostKnown {
 			modelItem.UpstreamCostUSD += upstreamCostUSD
+			modelItem.UpstreamCostCNY += upstreamCostCNY
 			modelItem.KnownUpstreamCostCount++
 			modelItem.ActualProfitUSD += actualProfitUSD
 		} else {
@@ -2596,8 +2695,10 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		}
 		if isWalletCombo && sitePricingKnown {
 			modelItem.ConfiguredProfitUSD += configuredProfitUSD
+			modelItem.ConfiguredProfitCNY += configuredProfitCNY
 		} else if upstreamCostKnown && sitePricingKnown {
 			modelItem.ConfiguredProfitUSD += configuredProfitUSD
+			modelItem.ConfiguredProfitCNY += configuredProfitCNY
 		}
 
 		if normalizedQuery.IncludeDetails {
@@ -2617,8 +2718,11 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 				CacheCreationTokens:      prepared.CacheCreationTokens,
 				ActualSiteRevenueUSD:     roundProfitBoardAmount(actualSiteRevenueUSD),
 				ConfiguredSiteRevenueUSD: roundProfitBoardAmount(configuredSiteRevenueUSD),
+				ConfiguredSiteRevenueCNY: roundProfitBoardAmount(configuredSiteRevenueCNY),
 				UpstreamCostUSD:          roundProfitBoardAmount(upstreamCostUSD),
+				UpstreamCostCNY:          roundProfitBoardAmount(upstreamCostCNY),
 				ConfiguredProfitUSD:      roundProfitBoardAmount(configuredProfitUSD),
+				ConfiguredProfitCNY:      roundProfitBoardAmount(configuredProfitCNY),
 				ActualProfitUSD:          roundProfitBoardAmount(actualProfitUSD),
 				ConfiguredActualDeltaUSD: roundProfitBoardAmount(configuredSiteRevenueUSD - actualSiteRevenueUSD),
 				UpstreamCostKnown:        upstreamCostKnown,
@@ -2671,6 +2775,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		current.ConfiguredProfitUSD = roundProfitBoardAmount(current.ConfiguredProfitUSD)
 		current.ActualProfitUSD = roundProfitBoardAmount(current.ActualProfitUSD)
 		current.ConfiguredProfitCoverageRate = roundProfitBoardAmount(current.ConfiguredProfitCoverageRate)
+		roundProfitBoardConfiguredMetrics(&current.ProfitBoardSummary)
 		report.BatchSummaries = append(report.BatchSummaries, current)
 	}
 
@@ -2683,6 +2788,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		current.RemoteObservedCostUSD = roundProfitBoardAmount(current.RemoteObservedCostUSD)
 		current.ConfiguredProfitUSD = roundProfitBoardAmount(current.ConfiguredProfitUSD)
 		current.ActualProfitUSD = roundProfitBoardAmount(current.ActualProfitUSD)
+		roundProfitBoardConfiguredTimeseriesMetrics(&current)
 		report.Timeseries = append(report.Timeseries, current)
 	}
 	sort.Slice(report.Timeseries, func(i, j int) bool {
@@ -2700,6 +2806,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		current.UpstreamCostUSD = roundProfitBoardAmount(current.UpstreamCostUSD)
 		current.ConfiguredProfitUSD = roundProfitBoardAmount(current.ConfiguredProfitUSD)
 		current.ActualProfitUSD = roundProfitBoardAmount(current.ActualProfitUSD)
+		roundProfitBoardConfiguredBreakdownMetrics(&current)
 		report.ChannelBreakdown = append(report.ChannelBreakdown, current)
 	}
 	sort.Slice(report.ChannelBreakdown, func(i, j int) bool {
@@ -2720,6 +2827,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		current.UpstreamCostUSD = roundProfitBoardAmount(current.UpstreamCostUSD)
 		current.ConfiguredProfitUSD = roundProfitBoardAmount(current.ConfiguredProfitUSD)
 		current.ActualProfitUSD = roundProfitBoardAmount(current.ActualProfitUSD)
+		roundProfitBoardConfiguredBreakdownMetrics(&current)
 		report.ModelBreakdown = append(report.ModelBreakdown, current)
 	}
 	sort.Slice(report.ModelBreakdown, func(i, j int) bool {
@@ -2746,6 +2854,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		applyProfitBoardObservedWalletCost(
 			report,
 			accountWalletAggregates[accountID],
+			comboPricingMap,
 			resolvedBatches,
 			comboIDs,
 			normalizedQuery.Granularity,
@@ -2759,6 +2868,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		report.BatchSummaries[index].RemoteObservedCostUSD = roundProfitBoardAmount(report.BatchSummaries[index].RemoteObservedCostUSD)
 		report.BatchSummaries[index].ConfiguredProfitUSD = roundProfitBoardAmount(report.BatchSummaries[index].ConfiguredProfitUSD)
 		report.BatchSummaries[index].ActualProfitUSD = roundProfitBoardAmount(report.BatchSummaries[index].ActualProfitUSD)
+		roundProfitBoardConfiguredMetrics(&report.BatchSummaries[index].ProfitBoardSummary)
 	}
 	for index := range report.Timeseries {
 		report.Timeseries[index].ActualSiteRevenueUSD = roundProfitBoardAmount(report.Timeseries[index].ActualSiteRevenueUSD)
@@ -2767,6 +2877,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		report.Timeseries[index].RemoteObservedCostUSD = roundProfitBoardAmount(report.Timeseries[index].RemoteObservedCostUSD)
 		report.Timeseries[index].ConfiguredProfitUSD = roundProfitBoardAmount(report.Timeseries[index].ConfiguredProfitUSD)
 		report.Timeseries[index].ActualProfitUSD = roundProfitBoardAmount(report.Timeseries[index].ActualProfitUSD)
+		roundProfitBoardConfiguredTimeseriesMetrics(&report.Timeseries[index])
 	}
 	for index := range report.ChannelBreakdown {
 		report.ChannelBreakdown[index].ActualSiteRevenueUSD = roundProfitBoardAmount(report.ChannelBreakdown[index].ActualSiteRevenueUSD)
@@ -2774,6 +2885,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		report.ChannelBreakdown[index].UpstreamCostUSD = roundProfitBoardAmount(report.ChannelBreakdown[index].UpstreamCostUSD)
 		report.ChannelBreakdown[index].ConfiguredProfitUSD = roundProfitBoardAmount(report.ChannelBreakdown[index].ConfiguredProfitUSD)
 		report.ChannelBreakdown[index].ActualProfitUSD = roundProfitBoardAmount(report.ChannelBreakdown[index].ActualProfitUSD)
+		roundProfitBoardConfiguredBreakdownMetrics(&report.ChannelBreakdown[index])
 	}
 	for index := range report.ModelBreakdown {
 		report.ModelBreakdown[index].ActualSiteRevenueUSD = roundProfitBoardAmount(report.ModelBreakdown[index].ActualSiteRevenueUSD)
@@ -2781,6 +2893,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		report.ModelBreakdown[index].UpstreamCostUSD = roundProfitBoardAmount(report.ModelBreakdown[index].UpstreamCostUSD)
 		report.ModelBreakdown[index].ConfiguredProfitUSD = roundProfitBoardAmount(report.ModelBreakdown[index].ConfiguredProfitUSD)
 		report.ModelBreakdown[index].ActualProfitUSD = roundProfitBoardAmount(report.ModelBreakdown[index].ActualProfitUSD)
+		roundProfitBoardConfiguredBreakdownMetrics(&report.ModelBreakdown[index])
 	}
 
 	sort.Slice(report.DetailRows, func(i, j int) bool {
@@ -2801,6 +2914,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 	report.Summary.ConfiguredProfitUSD = roundProfitBoardAmount(report.Summary.ConfiguredProfitUSD)
 	report.Summary.ActualProfitUSD = roundProfitBoardAmount(report.Summary.ActualProfitUSD)
 	report.Summary.ConfiguredProfitCoverageRate = roundProfitBoardAmount(report.Summary.ConfiguredProfitCoverageRate)
+	roundProfitBoardConfiguredMetrics(&report.Summary)
 	report.Meta.LatestLogId = latestLogId
 	report.Meta.LatestLogCreatedAt = latestLogCreatedAt
 	walletSnapshotWatermark, watermarkErr := buildProfitBoardWalletSnapshotWatermark(comboPricingMap)
@@ -2978,6 +3092,7 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 					ModelNames:       sharedSiteConfig.ModelNames,
 					Group:            sharedSiteConfig.Group,
 					UseRechargePrice: sharedSiteConfig.UseRechargePrice,
+					PlanID:           sharedSiteConfig.PlanID,
 				},
 				pricingMap,
 				groupRatios,
@@ -3024,6 +3139,14 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 				comboPricing.UpstreamFixedTotalAmount,
 			)
 		}
+		configuredSiteRevenueCNY := 0.0
+		if sitePricingKnown {
+			configuredSiteRevenueCNY = profitBoardConfiguredSiteRevenueCNY(configuredSiteRevenueUSD, comboPricing)
+		}
+		upstreamCostCNY := 0.0
+		if !isWalletCombo && upstreamCostKnown {
+			upstreamCostCNY = profitBoardConfiguredUpstreamCostCNY(upstreamCostUSD, comboPricing)
+		}
 
 		report.Summary.RequestCount++
 		batchSummary.RequestCount++
@@ -3043,7 +3166,9 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 				report.Summary.KnownUpstreamCostCount++
 				batchSummary.KnownUpstreamCostCount++
 				report.Summary.UpstreamCostUSD += upstreamCostUSD
+				report.Summary.UpstreamCostCNY += upstreamCostCNY
 				batchSummary.UpstreamCostUSD += upstreamCostUSD
+				batchSummary.UpstreamCostCNY += upstreamCostCNY
 				switch upstreamCostSource {
 				case "returned_cost":
 					report.Summary.ReturnedCostCount++
@@ -3062,16 +3187,24 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 		batchSummary.ActualSiteRevenueUSD += actualSiteRevenueUSD
 		if sitePricingKnown {
 			report.Summary.ConfiguredSiteRevenueUSD += configuredSiteRevenueUSD
+			report.Summary.ConfiguredSiteRevenueCNY += configuredSiteRevenueCNY
 			batchSummary.ConfiguredSiteRevenueUSD += configuredSiteRevenueUSD
+			batchSummary.ConfiguredSiteRevenueCNY += configuredSiteRevenueCNY
 		}
 		if isWalletCombo && sitePricingKnown {
 			configuredProfitUSD := configuredSiteRevenueUSD
+			configuredProfitCNY := profitBoardConfiguredProfitCNY(configuredSiteRevenueUSD, 0, comboPricing)
 			report.Summary.ConfiguredProfitUSD += configuredProfitUSD
+			report.Summary.ConfiguredProfitCNY += configuredProfitCNY
 			batchSummary.ConfiguredProfitUSD += configuredProfitUSD
+			batchSummary.ConfiguredProfitCNY += configuredProfitCNY
 		} else if upstreamCostKnown && sitePricingKnown {
 			configuredProfitUSD := configuredSiteRevenueUSD - upstreamCostUSD
+			configuredProfitCNY := profitBoardConfiguredProfitCNY(configuredSiteRevenueUSD, upstreamCostUSD, comboPricing)
 			report.Summary.ConfiguredProfitUSD += configuredProfitUSD
+			report.Summary.ConfiguredProfitCNY += configuredProfitCNY
 			batchSummary.ConfiguredProfitUSD += configuredProfitUSD
+			batchSummary.ConfiguredProfitCNY += configuredProfitCNY
 		}
 		if isWalletCombo {
 			actualProfitUSD := actualSiteRevenueUSD
@@ -3117,6 +3250,7 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 		summary.RemoteObservedCostUSD = roundProfitBoardAmount(summary.RemoteObservedCostUSD)
 		summary.ConfiguredProfitUSD = roundProfitBoardAmount(summary.ConfiguredProfitUSD)
 		summary.ActualProfitUSD = roundProfitBoardAmount(summary.ActualProfitUSD)
+		roundProfitBoardConfiguredMetrics(&summary.ProfitBoardSummary)
 		report.BatchSummaries = append(report.BatchSummaries, *summary)
 	}
 	sort.Slice(report.BatchSummaries, func(i, j int) bool {
@@ -3126,6 +3260,7 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 		applyProfitBoardObservedWalletCost(
 			report,
 			accountWalletAggregates[accountID],
+			comboPricingMap,
 			resolvedBatches,
 			comboIDs,
 			"day",
@@ -3170,6 +3305,7 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 	report.Summary.ConfiguredProfitUSD = roundProfitBoardAmount(report.Summary.ConfiguredProfitUSD)
 	report.Summary.ActualProfitUSD = roundProfitBoardAmount(report.Summary.ActualProfitUSD)
 	report.Summary.ConfiguredProfitCoverageRate = roundProfitBoardAmount(report.Summary.ConfiguredProfitCoverageRate)
+	roundProfitBoardConfiguredMetrics(&report.Summary)
 	report.Timeseries = nil
 	report.Meta.LatestLogId = latestLogId
 	report.Meta.LatestLogCreatedAt = latestLogCreatedAt

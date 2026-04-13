@@ -33,7 +33,8 @@ import {
 import { CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Pencil } from 'lucide-react';
 import PricingRuleList from './PricingRuleList';
 import ModelSelectorSection from './ModelSelectorSection';
-import { getUpstreamCostSourceLabel } from '../utils';
+import { getUpstreamCostSourceLabel, pickBestValuePlan } from '../utils';
+import { getQuotaPerUnit } from '../../../helpers/quota';
 
 const { Text, Title } = Typography;
 
@@ -79,6 +80,28 @@ const MoneyField = ({ label, value, onChange, helper, t }) => (
   </div>
 );
 
+const ExchangeRateField = ({ label, value, onChange, helper, t }) => (
+  <div className='rounded-xl border border-semi-color-border bg-semi-color-fill-0 p-3'>
+    <FieldLabel>{label}</FieldLabel>
+    <div className='flex items-center gap-2'>
+      <Text type='tertiary' size='small'>
+        {t('1$ =')}
+      </Text>
+      <InputNumber
+        min={0.000001}
+        value={value || 1}
+        onChange={onChange}
+        suffix='￥'
+        size='small'
+        style={{ width: '100%' }}
+      />
+    </div>
+    <Text type='tertiary' size='small' className='mt-1.5 block'>
+      {helper}
+    </Text>
+  </div>
+);
+
 const PricingConfigModal = ({
   visible,
   isEditing,
@@ -100,6 +123,8 @@ const PricingConfigModal = ({
   isMobile,
   clampNumber,
   localModelMap,
+  subscriptionPlans = [],
+  usdExchangeRate = 0,
   validationError,
   onOk,
   onCancel,
@@ -576,12 +601,24 @@ const PricingConfigModal = ({
               </Radio.Group>
             }
           >
+            <ExchangeRateField
+              label={t('收入汇率')}
+              value={comboConfig.site_exchange_rate}
+              onChange={(value) =>
+                setComboConfig((prev) => ({
+                  ...prev,
+                  site_exchange_rate: Math.max(Number(value || 1), 0.000001),
+                }))
+              }
+              helper={t('只影响收益看板里的人民币展示和利润换算；原始收入录入口径仍按 USD 保存')}
+              t={t}
+            />
             {comboConfig.site_mode === 'log_quota' ? (
               <div className='space-y-3 rounded-2xl border border-green-500/20 bg-green-500/[0.05] p-3'>
                 <Banner
                   type='success'
                   closeIcon={null}
-                  description={t('智能模式直接读取选中模型每条日志的已计算额度（含分组倍率、模型倍率），换算为USD作为本站收入')}
+                  description={t('智能模式直接读取选中模型每条日志的已计算额度（含分组倍率、模型倍率），先按 USD 统计，再按当前组合收入汇率换算为 ￥ 展示')}
                 />
                 <ModelSelectorSection
                   modelNames={sharedSite.model_names || []}
@@ -618,22 +655,40 @@ const PricingConfigModal = ({
                   t={t}
                 />
 
-                {/* 定价基准 + 分组 */}
+                {/* 定价基准 + 套餐/分组 */}
                 <div className='grid grid-cols-2 gap-3'>
                   <div>
                     <FieldLabel>{t('定价基准')}</FieldLabel>
                     <Radio.Group
                       type='button'
                       value={sharedSite.use_recharge_price ? 'recharge' : 'standard'}
-                      onChange={(event) =>
-                        setComboConfig((prev) => ({
-                          ...prev,
-                          shared_site: {
-                            ...prev.shared_site,
-                            use_recharge_price: event.target.value === 'recharge',
-                          },
-                        }))
-                      }
+                      onChange={(event) => {
+                        const isRecharge = event.target.value === 'recharge';
+                        setComboConfig((prev) => {
+                          const next = {
+                            ...prev,
+                            shared_site: {
+                              ...prev.shared_site,
+                              use_recharge_price: isRecharge,
+                            },
+                          };
+                          if (!isRecharge) {
+                            // 切换到按套餐价：自动选最优套餐
+                            const availablePlans = (subscriptionPlans || []).filter(
+                              (p) => Number(p.total_amount || 0) > 0,
+                            );
+                            const best = pickBestValuePlan(
+                              availablePlans,
+                              getQuotaPerUnit(),
+                              usdExchangeRate,
+                            );
+                            next.shared_site.plan_id = best?.id || 0;
+                          } else {
+                            next.shared_site.plan_id = 0;
+                          }
+                          return next;
+                        });
+                      }}
                       size='small'
                     >
                       <Radio value='standard'>{t('按套餐价')}</Radio>
@@ -641,28 +696,62 @@ const PricingConfigModal = ({
                     </Radio.Group>
                   </div>
                   <div>
-                    <FieldLabel>{t('分组')}</FieldLabel>
-                    <Select
-                      value={sharedSite.group || ''}
-                      onChange={(value) =>
-                        setComboConfig((prev) => ({
-                          ...prev,
-                          shared_site: {
-                            ...prev.shared_site,
-                            group: value,
-                          },
-                        }))
-                      }
-                      optionList={[
-                        { label: t('自动最低'), value: '' },
-                        ...((options?.groups || []).map((item) => ({
-                          label: item,
-                          value: item,
-                        })) || []),
-                      ]}
-                      size='small'
-                      style={{ width: '100%' }}
-                    />
+                    {sharedSite.use_recharge_price ? (
+                      <>
+                        <FieldLabel>{t('分组')}</FieldLabel>
+                        <Select
+                          value={sharedSite.group || ''}
+                          onChange={(value) =>
+                            setComboConfig((prev) => ({
+                              ...prev,
+                              shared_site: {
+                                ...prev.shared_site,
+                                group: value,
+                              },
+                            }))
+                          }
+                          optionList={[
+                            { label: t('自动最低'), value: '' },
+                            ...((options?.groups || []).map((item) => ({
+                              label: item,
+                              value: item,
+                            })) || []),
+                          ]}
+                          size='small'
+                          style={{ width: '100%' }}
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <FieldLabel>{t('套餐')}</FieldLabel>
+                        <Select
+                          value={sharedSite.plan_id || undefined}
+                          onChange={(value) =>
+                            setComboConfig((prev) => ({
+                              ...prev,
+                              shared_site: {
+                                ...prev.shared_site,
+                                plan_id: value || 0,
+                              },
+                            }))
+                          }
+                          placeholder={
+                            (subscriptionPlans || []).some((p) => Number(p.total_amount || 0) > 0)
+                              ? t('选择套餐')
+                              : t('暂无可用套餐')
+                          }
+                          disabled={!(subscriptionPlans || []).some((p) => Number(p.total_amount || 0) > 0)}
+                          optionList={(subscriptionPlans || [])
+                            .filter((p) => Number(p.total_amount || 0) > 0)
+                            .map((p) => ({
+                              value: p.id,
+                              label: `${p.title} - ¥${p.price_amount}`,
+                            }))}
+                          size='small'
+                          style={{ width: '100%' }}
+                        />
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -792,6 +881,21 @@ const PricingConfigModal = ({
                 }))
               }
               helper={t('会额外计入组合成本，再按请求量均摊')}
+              t={t}
+            />
+            <ExchangeRateField
+              label={t('成本汇率')}
+              value={comboConfig.upstream_exchange_rate}
+              onChange={(value) =>
+                setComboConfig((prev) => ({
+                  ...prev,
+                  upstream_exchange_rate: Math.max(
+                    Number(value || 1),
+                    0.000001,
+                  ),
+                }))
+              }
+              helper={t('只影响收益看板里的人民币展示和利润换算；原始成本录入口径仍按 USD 保存')}
               t={t}
             />
 

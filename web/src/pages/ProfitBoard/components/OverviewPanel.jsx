@@ -21,6 +21,15 @@ import { Avatar, Card, Empty, Spin, Table, Tag, Typography } from '@douyinfe/sem
 
 const { Text, Title } = Typography;
 
+const MetricValuePair = ({ primary, secondary, className = '' }) => (
+  <div className={className}>
+    <div>{primary}</div>
+    <Text type='tertiary' size='small'>
+      {secondary}
+    </Text>
+  </div>
+);
+
 const Sparkline = ({ data, color = '#6366f1', width = 80, height = 24 }) => {
   if (!data || data.length < 2) return null;
   const min = Math.min(...data);
@@ -45,23 +54,23 @@ const Sparkline = ({ data, color = '#6366f1', width = 80, height = 24 }) => {
 };
 
 const sparklineColorMap = {
-  configured_site_revenue_usd: '#059669',
-  upstream_cost_usd: '#d97706',
-  configured_profit_usd: '#0284c7',
+  configured_site_revenue_cny: '#059669',
+  upstream_cost_cny: '#d97706',
+  configured_profit_cny: '#0284c7',
 };
 
 const cardThemeMap = {
-  configured_site_revenue_usd: {
+  configured_site_revenue_cny: {
     bg: 'bg-emerald-50 dark:bg-emerald-950/30',
     text: 'text-emerald-600 dark:text-emerald-400',
     avatarColor: 'green',
   },
-  upstream_cost_usd: {
+  upstream_cost_cny: {
     bg: 'bg-amber-50 dark:bg-amber-950/30',
     text: 'text-amber-600 dark:text-amber-400',
     avatarColor: 'amber',
   },
-  configured_profit_usd: {
+  configured_profit_cny: {
     bg: 'bg-sky-50 dark:bg-sky-950/30',
     text: 'text-sky-600 dark:text-sky-400',
     avatarColor: 'blue',
@@ -93,8 +102,13 @@ const MetricCard = ({ item, onClick, sparklineData, t }) => {
               style={{ margin: 0, fontWeight: 700 }}
               className={theme.text}
             >
-              {item.value}
+              {item.primary}
             </Title>
+            {item.secondary ? (
+              <Text type='tertiary' size='small'>
+                {item.secondary}
+              </Text>
+            ) : null}
           </div>
         </div>
         <div className='flex flex-col items-end gap-2'>
@@ -127,8 +141,6 @@ const OverviewPanel = ({
   queryReady,
   overviewReport,
   overviewSummaryCards,
-  formatMoney,
-  status,
   timeseries,
   onMetricClick,
   t,
@@ -142,21 +154,21 @@ const OverviewPanel = ({
       if (!existing) {
         bucketMap.set(row.bucket, { ...row });
       } else {
-        existing.configured_site_revenue_usd =
-          (existing.configured_site_revenue_usd || 0) + (row.configured_site_revenue_usd || 0);
-        existing.upstream_cost_usd =
-          (existing.upstream_cost_usd || 0) + (row.upstream_cost_usd || 0);
-        existing.configured_profit_usd =
-          (existing.configured_profit_usd || 0) + (row.configured_profit_usd || 0);
+        existing.configured_site_revenue_cny =
+          (existing.configured_site_revenue_cny || 0) + (row.configured_site_revenue_cny || 0);
+        existing.upstream_cost_cny =
+          (existing.upstream_cost_cny || 0) + (row.upstream_cost_cny || 0);
+        existing.configured_profit_cny =
+          (existing.configured_profit_cny || 0) + (row.configured_profit_cny || 0);
       }
     });
     const sorted = Array.from(bucketMap.values()).sort((a, b) =>
       a.bucket < b.bucket ? -1 : 1,
     );
     return {
-      configured_site_revenue_usd: sorted.map((r) => r.configured_site_revenue_usd || 0),
-      upstream_cost_usd: sorted.map((r) => r.upstream_cost_usd || 0),
-      configured_profit_usd: sorted.map((r) => r.configured_profit_usd || 0),
+      configured_site_revenue_cny: sorted.map((r) => r.configured_site_revenue_cny || 0),
+      upstream_cost_cny: sorted.map((r) => r.upstream_cost_cny || 0),
+      configured_profit_cny: sorted.map((r) => r.configured_profit_cny || 0),
     };
   }, [timeseries]);
   const batchColumns = [
@@ -177,32 +189,38 @@ const OverviewPanel = ({
     },
     {
       title: t('本站配置收入'),
-      dataIndex: 'configured_site_revenue_usd',
-      key: 'configured_site_revenue_usd',
-      render: (val) => (
-        <span className='text-emerald-600 dark:text-emerald-400'>
-          {formatMoney(val, status)}
-        </span>
+      dataIndex: 'configured_site_revenue_cny',
+      key: 'configured_site_revenue_cny',
+      render: (val, record) => (
+        <MetricValuePair
+          primary={`¥${Number(val || 0).toFixed(3)}`}
+          secondary={`$${Number(record?.configured_site_revenue_usd || 0).toFixed(3)}`}
+          className='text-emerald-600 dark:text-emerald-400'
+        />
       ),
     },
     {
       title: t('上游费用'),
-      dataIndex: 'upstream_cost_usd',
-      key: 'upstream_cost_usd',
-      render: (val) => (
-        <span className='text-amber-600 dark:text-amber-400'>
-          {formatMoney(val, status)}
-        </span>
+      dataIndex: 'upstream_cost_cny',
+      key: 'upstream_cost_cny',
+      render: (val, record) => (
+        <MetricValuePair
+          primary={`¥${Number(val || 0).toFixed(3)}`}
+          secondary={`$${Number(record?.upstream_cost_usd || 0).toFixed(3)}`}
+          className='text-amber-600 dark:text-amber-400'
+        />
       ),
     },
     {
       title: t('利润'),
-      dataIndex: 'configured_profit_usd',
-      key: 'configured_profit_usd',
-      render: (val) => (
-        <span className='text-sky-600 dark:text-sky-400'>
-          {formatMoney(val, status)}
-        </span>
+      dataIndex: 'configured_profit_cny',
+      key: 'configured_profit_cny',
+      render: (val, record) => (
+        <MetricValuePair
+          primary={`¥${Number(val || 0).toFixed(3)}`}
+          secondary={`$${Number(record?.configured_profit_usd || 0).toFixed(3)}`}
+          className='text-sky-600 dark:text-sky-400'
+        />
       ),
     },
   ];
