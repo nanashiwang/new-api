@@ -118,6 +118,47 @@ func TestSaveProfitBoardConfigUsesStableSignature(t *testing.T) {
 	}
 }
 
+func TestSaveProfitBoardConfigAssignsBatchCreatedAtWhenMissing(t *testing.T) {
+	setupProfitBoardTestDB(t)
+
+	before := common.GetTimestamp()
+	saved, _, err := SaveProfitBoardConfig(ProfitBoardConfigPayload{
+		Batches: []ProfitBoardBatch{{
+			Id:         "batch-created-at",
+			Name:       "组合起点",
+			ScopeType:  ProfitBoardScopeChannel,
+			ChannelIDs: []int{1},
+		}},
+		Upstream: ProfitBoardTokenPricingConfig{
+			CostSource: ProfitBoardCostSourceManualOnly,
+		},
+		Site: ProfitBoardTokenPricingConfig{
+			PricingMode: ProfitBoardSitePricingManual,
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveProfitBoardConfig: %v", err)
+	}
+	if len(saved.Batches) != 1 {
+		t.Fatalf("expected one saved batch, got %+v", saved.Batches)
+	}
+	if saved.Batches[0].CreatedAt < before {
+		t.Fatalf("expected created_at >= %d, got %+v", before, saved.Batches)
+	}
+
+	record := ProfitBoardConfig{}
+	if err := DB.First(&record).Error; err != nil {
+		t.Fatalf("load record: %v", err)
+	}
+	loadedBatches := parseProfitBoardConfigBatches(record.SelectionValues)
+	if len(loadedBatches) != 1 {
+		t.Fatalf("expected one persisted batch, got %+v", loadedBatches)
+	}
+	if loadedBatches[0].CreatedAt != saved.Batches[0].CreatedAt {
+		t.Fatalf("expected persisted created_at %d, got %+v", saved.Batches[0].CreatedAt, loadedBatches)
+	}
+}
+
 func TestGetProfitBoardConfigRemapsComboConfigToCurrentBatchID(t *testing.T) {
 	setupProfitBoardTestDB(t)
 

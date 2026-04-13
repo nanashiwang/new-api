@@ -62,6 +62,7 @@ import {
   createTrendSpec,
   formatMoney,
   getUpstreamCostSourceLabel,
+  normalizeBatchForState,
 } from './utils';
 
 initVChartSemiTheme({
@@ -89,6 +90,24 @@ const getUpstreamSummaryText = (comboConfig, options, t) => {
   return account
     ? t('按钱包余额变化 · {{name}}', { name: account.name })
     : t('按钱包余额变化');
+};
+
+const normalizeServerBatchState = (batch, index, fallbackCreatedAt = 0) => {
+  const normalized = normalizeBatchForState(
+    {
+      id: batch?.id || '',
+      name: batch?.name || '',
+      scope_type: batch?.scope_type || 'channel',
+      channel_ids: (batch?.channel_ids || []).map(Number).filter(Boolean),
+      tags: batch?.tags || [],
+      created_at: Number(batch?.created_at || fallbackCreatedAt || 0),
+    },
+    index,
+  );
+  return {
+    ...normalized,
+    channel_ids: (normalized.channel_ids || []).map(Number).filter(Boolean),
+  };
 };
 
 const ProfitBoardPage = () => {
@@ -128,7 +147,8 @@ const ProfitBoardPage = () => {
     rechargePriceFactor,
   });
 
-  const { batches, setBatches, batchPayload, upsertBatch, removeBatch } = batchesHook;
+  const { batches, setBatches, batchPayload, upsertBatch, removeBatch } =
+    batchesHook;
 
   const {
     builderLoading,
@@ -243,7 +263,8 @@ const ProfitBoardPage = () => {
     if (
       comboConfigs.some(
         (item) =>
-          (item.site_mode === 'shared_site_model' || item.site_mode === 'log_quota') &&
+          (item.site_mode === 'shared_site_model' ||
+            item.site_mode === 'log_quota') &&
           !(item.shared_site?.model_names || []).length,
       )
     ) {
@@ -368,19 +389,37 @@ const ProfitBoardPage = () => {
           const serverConfig = await loadCurrentConfig();
           if (cancelled) return;
           if (serverConfig) {
-            const serverBatches = (serverConfig.batches || []).map((batch) => ({
-              id: batch.id || '',
-              name: batch.name || '',
-              scope_type: batch.scope_type || 'channel',
-              channel_ids: (batch.channel_ids || []).map(Number).filter(Boolean),
-              tags: batch.tags || [],
-              created_at: Number(batch.created_at || 0),
-            }));
+            const restoredBatchCreatedAtMap = new Map(
+              (restoredState.batches || []).map((batch) => [
+                batch.id,
+                Number(batch.created_at || 0),
+              ]),
+            );
+            let migratedLegacyBatchCreatedAt = false;
+            const serverBatches = (serverConfig.batches || []).map(
+              (batch, index) => {
+                const rawCreatedAt = Number(batch?.created_at || 0);
+                const restoredCreatedAt = Number(
+                  restoredBatchCreatedAtMap.get(batch?.id || '') || 0,
+                );
+                if (rawCreatedAt <= 0) {
+                  migratedLegacyBatchCreatedAt = true;
+                }
+                return normalizeServerBatchState(
+                  batch,
+                  index,
+                  rawCreatedAt > 0 ? rawCreatedAt : restoredCreatedAt,
+                );
+              },
+            );
             if (serverBatches.length > 0) {
               setBatches(serverBatches);
             }
             applyLoadedConfig(serverConfig);
-            setHasUnsavedConfigChanges(false);
+            setHasUnsavedConfigChanges(migratedLegacyBatchCreatedAt);
+            if (migratedLegacyBatchCreatedAt) {
+              pendingAutoSaveRef.current = true;
+            }
           }
         } catch (error) {
           if (!cancelled) showError(error);
@@ -392,11 +431,21 @@ const ProfitBoardPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [applyLoadedConfig, loadCurrentConfig, loadUpstreamAccounts, setBatches]);
+  }, [
+    applyLoadedConfig,
+    loadCurrentConfig,
+    loadUpstreamAccounts,
+    restoredState.batches,
+    setBatches,
+  ]);
 
   useEffect(() => {
     if (builderOptionsReady) return;
-    if (activeTab !== 'config' && !editorHook.editorVisible && channelGroupMode !== 'tag') {
+    if (
+      activeTab !== 'config' &&
+      !editorHook.editorVisible &&
+      channelGroupMode !== 'tag'
+    ) {
       return;
     }
     let cancelled = false;
@@ -863,7 +912,10 @@ const ProfitBoardPage = () => {
     const map = {};
     summaries.forEach((s) => {
       map[s.batch_id] = {
-        revenue: formatMoney(s.configured_site_revenue_usd, statusState?.status),
+        revenue: formatMoney(
+          s.configured_site_revenue_usd,
+          statusState?.status,
+        ),
         cost: formatMoney(s.upstream_cost_usd, statusState?.status),
         profit: formatMoney(s.configured_profit_usd, statusState?.status),
       };
@@ -943,7 +995,9 @@ const ProfitBoardPage = () => {
                   accounts={accountsHook.accounts}
                   accountDraft={accountsHook.accountDraft}
                   updateAccountDraftField={accountsHook.updateAccountDraftField}
-                  normalizeAccountDraftBaseUrl={accountsHook.normalizeAccountDraftBaseUrl}
+                  normalizeAccountDraftBaseUrl={
+                    accountsHook.normalizeAccountDraftBaseUrl
+                  }
                   touchAccountDraftField={accountsHook.touchAccountDraftField}
                   accountDraftErrors={accountsHook.accountDraftErrors}
                   accountDraftCanSave={accountsHook.accountDraftCanSave}
@@ -1053,7 +1107,9 @@ const ProfitBoardPage = () => {
                   batches={batches}
                   batchDigest={batchDigest}
                   resolveComboConfig={resolveComboConfig}
-                  getSiteSummary={(comboConfig) => getSiteSummaryText(comboConfig, t)}
+                  getSiteSummary={(comboConfig) =>
+                    getSiteSummaryText(comboConfig, t)
+                  }
                   getUpstreamSummary={(comboConfig) =>
                     getUpstreamSummaryText(comboConfig, options, t)
                   }

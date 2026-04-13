@@ -892,6 +892,24 @@ func normalizeProfitBoardBatch(batch ProfitBoardBatch, index int) (ProfitBoardBa
 	}, signature, nil
 }
 
+func fillProfitBoardBatchCreatedAt(batches []ProfitBoardBatch, fallbackTimestamp int64) []ProfitBoardBatch {
+	if len(batches) == 0 {
+		return batches
+	}
+	if fallbackTimestamp <= 0 {
+		fallbackTimestamp = common.GetTimestamp()
+	}
+	filled := make([]ProfitBoardBatch, 0, len(batches))
+	for _, batch := range batches {
+		current := batch
+		if current.CreatedAt <= 0 {
+			current.CreatedAt = fallbackTimestamp
+		}
+		filled = append(filled, current)
+	}
+	return filled
+}
+
 func buildProfitBoardBatchSetSignature(batchSignatures []string) string {
 	if len(batchSignatures) == 1 {
 		return batchSignatures[0]
@@ -1165,10 +1183,13 @@ func GetProfitBoardConfig(batches []ProfitBoardBatch, selection ProfitBoardSelec
 }
 
 func SaveProfitBoardConfig(payload ProfitBoardConfigPayload) (*ProfitBoardConfigPayload, string, error) {
+	now := common.GetTimestamp()
 	normalized, signature, selectionType, err := normalizeProfitBoardBatches(payload.Batches, payload.Selection)
 	if err != nil {
 		return nil, "", err
 	}
+	normalized = fillProfitBoardBatchCreatedAt(normalized, now)
+	payload.Batches = normalized
 	payload.Upstream = normalizeProfitBoardPricingConfig(payload.Upstream, false)
 	payload.Site = normalizeProfitBoardPricingConfig(payload.Site, true)
 	payload.SharedSite = normalizeProfitBoardSharedSiteConfig(payload.SharedSite, payload.Site)
@@ -1207,7 +1228,6 @@ func SaveProfitBoardConfig(payload ProfitBoardConfigPayload) (*ProfitBoardConfig
 		return nil, "", err
 	}
 
-	now := common.GetTimestamp()
 	record := &ProfitBoardConfig{}
 	if err := DB.Where("selection_signature = ?", signature).First(record).Error; err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
