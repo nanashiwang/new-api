@@ -21,6 +21,7 @@ import { API, showError, showSuccess } from '../../../helpers';
 import { getQuotaPerUnit } from '../../../helpers/quota';
 import {
   clampNumber,
+  clampPositiveNumber,
   computePackageEffectiveRate,
   createDefaultComboPricingConfig,
   createDefaultPricingRule,
@@ -190,6 +191,11 @@ export const useProfitBoardConfig = ({
         ),
         upstream_rules: (item.upstream_rules || []).map((rule) =>
           createDefaultPricingRule(rule),
+        ),
+        site_exchange_rate: clampPositiveNumber(item?.site_exchange_rate, 1),
+        upstream_exchange_rate: clampPositiveNumber(
+          item?.upstream_exchange_rate,
+          1,
         ),
       })),
     }),

@@ -354,6 +354,14 @@ export const mergeComboDraftWithTemplate = (draft, templateConfig) => {
     site_mode: templateConfig.site_mode || draft.site_mode,
     upstream_mode: templateConfig.upstream_mode || draft.upstream_mode,
     upstream_account_id: Number(templateConfig.upstream_account_id || 0),
+    site_exchange_rate: clampPositiveNumber(
+      templateConfig.site_exchange_rate,
+      1,
+    ),
+    upstream_exchange_rate: clampPositiveNumber(
+      templateConfig.upstream_exchange_rate,
+      1,
+    ),
     shared_site: createDefaultSharedSiteConfig({
       ...(templateConfig.shared_site || {}),
     }),
