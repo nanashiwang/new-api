@@ -186,11 +186,42 @@ func IsUpstreamModelTemporaryUnavailableError(err *types.NewAPIError) bool {
 		return false
 	}
 
-	lowerMessage := strings.ToLower(err.Error())
+	lowerMessage := normalizeUpstreamErrorMessage(err)
 	return strings.Contains(lowerMessage, "no available") &&
 		strings.Contains(lowerMessage, "support the requested model")
 }
 
 func IsRequestedModelUnavailableError(err *types.NewAPIError) bool {
 	return IsUpstreamModelTemporaryUnavailableError(err)
+}
+
+func IsRetryableSpecialBadRequestError(err *types.NewAPIError) bool {
+	if err == nil || err.StatusCode != http.StatusBadRequest {
+		return false
+	}
+
+	if IsRequestedModelUnavailableError(err) {
+		return true
+	}
+
+	lowerMessage := normalizeUpstreamErrorMessage(err)
+	return strings.Contains(lowerMessage, "an error occurred while processing your request") &&
+		strings.Contains(lowerMessage, "you can retry your request") &&
+		strings.Contains(lowerMessage, "help.openai.com") &&
+		strings.Contains(lowerMessage, "please include the request id")
+}
+
+func normalizeUpstreamErrorMessage(err *types.NewAPIError) string {
+	if err == nil {
+		return ""
+	}
+
+	message := strings.TrimSpace(err.Error())
+	if message == "" {
+		message = strings.TrimSpace(err.ToOpenAIError().Message)
+	}
+	if message == "" {
+		return ""
+	}
+	return strings.ToLower(strings.Join(strings.Fields(message), " "))
 }

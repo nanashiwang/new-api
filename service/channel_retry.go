@@ -28,6 +28,9 @@ func IsTemporaryUpstreamError(err *types.NewAPIError) bool {
 	if IsQuotaRelatedError(err) || IsChannelModelMismatchError(err) {
 		return false
 	}
+	if IsRetryableSpecialBadRequestError(err) {
+		return true
+	}
 
 	code := err.StatusCode
 	if code < 100 || code > 599 {
@@ -66,6 +69,9 @@ func ShouldRetryChannelError(c *gin.Context, openaiErr *types.NewAPIError, retry
 		return false
 	}
 	if code < 100 || code > 599 {
+		return true
+	}
+	if IsRetryableSpecialBadRequestError(openaiErr) {
 		return true
 	}
 	if operation_setting.IsAlwaysSkipRetryCode(openaiErr.GetErrorCode()) {

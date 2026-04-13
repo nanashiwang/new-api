@@ -62,6 +62,28 @@ func TestShouldSkipRetryAfterChannelAffinityFailure_TemporaryUpstreamErrorAllows
 	}
 }
 
+func TestShouldSkipRetryAfterChannelAffinityFailure_SpecialBadRequestAllowsRetry(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	setChannelAffinityContext(ctx, channelAffinityMeta{
+		CacheKey:   "test:rule:default:key",
+		TTLSeconds: 300,
+		RuleName:   "claude code trace",
+		SkipRetry:  true,
+	})
+	MarkChannelAffinityUsed(ctx, "default", 123)
+
+	err := types.WithOpenAIError(types.OpenAIError{
+		Message: "An error occurred while processing your request. You can retry your request, or contact us through\nour help center at help.openai.com if the error persists. Please include the request ID 780e874b-",
+		Type:    "upstream_error",
+		Code:    nil,
+	}, 400)
+
+	if ShouldSkipRetryAfterChannelAffinityFailure(ctx, err) {
+		t.Fatal("expected special retryable 400 to bypass affinity skip-retry")
+	}
+}
+
 func TestShouldSkipRetryAfterChannelAffinityFailure_InvalidRequestStillSkipsRetry(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)

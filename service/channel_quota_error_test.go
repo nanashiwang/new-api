@@ -15,6 +15,51 @@ import (
 	"gorm.io/gorm"
 )
 
+func TestShouldRetryChannelError_RequestedModelUnavailableBadRequest(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+
+	err := types.WithOpenAIError(types.OpenAIError{
+		Message: "run error: 400 No available OpenAI accounts support the requested model: gpt-5.4",
+		Type:    "upstream_error",
+		Code:    nil,
+	}, 400)
+
+	if !ShouldRetryChannelError(ctx, err, 1) {
+		t.Fatalf("expected requested-model-unavailable 400 to be retryable")
+	}
+}
+
+func TestShouldRetryChannelError_GenericProcessingBadRequest(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+
+	err := types.WithOpenAIError(types.OpenAIError{
+		Message: "An error occurred while processing your request. You can retry your request, or contact us through\nour help center at help.openai.com if the error persists. Please include the request ID 780e874b-",
+		Type:    "upstream_error",
+		Code:    nil,
+	}, 400)
+
+	if !ShouldRetryChannelError(ctx, err, 1) {
+		t.Fatalf("expected upstream processing 400 to be retryable")
+	}
+}
+
+func TestShouldRetryChannelError_GenericBadRequestRemainsNonRetryable(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+
+	err := types.WithOpenAIError(types.OpenAIError{
+		Message: "Invalid request",
+		Type:    "invalid_request_error",
+		Code:    "invalid_request_error",
+	}, 400)
+
+	if ShouldRetryChannelError(ctx, err, 1) {
+		t.Fatalf("did not expect generic 400 to be retryable")
+	}
+}
+
 func TestIsQuotaRelatedErrorByCode(t *testing.T) {
 	err := types.NewError(errors.New("insufficient"), types.ErrorCodeInsufficientUserQuota)
 	if !IsQuotaRelatedError(err) {
@@ -77,6 +122,18 @@ func TestIsUpstreamModelTemporaryUnavailableError_Positive(t *testing.T) {
 	}, 503)
 	if !IsUpstreamModelTemporaryUnavailableError(err) {
 		t.Fatalf("expected requested-model-unavailable error to be treated as temporary upstream model unavailability")
+	}
+}
+
+func TestIsTemporaryUpstreamError_GenericProcessingBadRequest(t *testing.T) {
+	err := types.WithOpenAIError(types.OpenAIError{
+		Message: "An error occurred while processing your request. You can retry your request, or contact us through\nour help center at help.openai.com if the error persists. Please include the request ID 780e874b-",
+		Type:    "upstream_error",
+		Code:    nil,
+	}, 400)
+
+	if !IsTemporaryUpstreamError(err) {
+		t.Fatalf("expected upstream processing 400 to be treated as temporary")
 	}
 }
 
