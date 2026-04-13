@@ -333,7 +333,7 @@ export const useProfitBoardConfig = ({
             quotaPerUnit,
             usdExchangeRate,
           );
-          factor = effectiveRate != null ? effectiveRate / usdExchangeRate : 1;
+          factor = effectiveRate != null ? effectiveRate : 1;
         } else {
           factor = 1;
         }
