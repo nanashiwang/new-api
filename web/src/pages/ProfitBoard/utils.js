@@ -125,6 +125,12 @@ export const createDefaultRemoteObserverConfig = () => ({
   access_token_masked: '',
 });
 
+const hasLegacyPricingSeed = (config) =>
+  clampNumber(config?.input_price) > 0 ||
+  clampNumber(config?.output_price) > 0 ||
+  clampNumber(config?.cache_read_price) > 0 ||
+  clampNumber(config?.cache_creation_price) > 0;
+
 export const createDefaultComboPricingConfig = (
   comboId,
   sharedSite,
@@ -140,7 +146,7 @@ export const createDefaultComboPricingConfig = (
         ? 'shared_site_model'
         : 'manual',
     upstream_mode: walletMode ? 'wallet_observer' : 'manual_rules',
-    cost_source: legacyUpstream?.cost_source || 'manual_only',
+    cost_source: 'manual_only',
     upstream_account_id: walletMode
       ? Number(legacyUpstream?.upstream_account_id || 0)
       : 0,
@@ -161,15 +167,19 @@ export const createDefaultComboPricingConfig = (
         cache_creation_price: clampNumber(legacySite?.cache_creation_price),
       }),
     ],
-    upstream_rules: [
-      createDefaultPricingRule({
-        is_default: true,
-        input_price: clampNumber(legacyUpstream?.input_price),
-        output_price: clampNumber(legacyUpstream?.output_price),
-        cache_read_price: clampNumber(legacyUpstream?.cache_read_price),
-        cache_creation_price: clampNumber(legacyUpstream?.cache_creation_price),
-      }),
-    ],
+    upstream_rules: hasLegacyPricingSeed(legacyUpstream)
+      ? [
+          createDefaultPricingRule({
+            is_default: true,
+            input_price: clampNumber(legacyUpstream?.input_price),
+            output_price: clampNumber(legacyUpstream?.output_price),
+            cache_read_price: clampNumber(legacyUpstream?.cache_read_price),
+            cache_creation_price: clampNumber(
+              legacyUpstream?.cache_creation_price,
+            ),
+          }),
+        ]
+      : [],
     site_fixed_total_amount: clampNumber(legacySite?.fixed_total_amount),
     upstream_fixed_total_amount: clampNumber(
       legacyUpstream?.fixed_total_amount,
@@ -267,6 +277,7 @@ export const mergeComboDraftWithTemplate = (draft, templateConfig) => {
 
   return {
     ...draft,
+    cost_source: 'manual_only',
     site_mode: templateConfig.site_mode || draft.site_mode,
     upstream_mode: templateConfig.upstream_mode || draft.upstream_mode,
     upstream_account_id: Number(templateConfig.upstream_account_id || 0),
@@ -879,6 +890,7 @@ export const normalizeRestoredState = (state) => {
   next.upstreamConfig = {
     ...createDefaultUpstreamConfig(),
     ...(next.upstreamConfig || {}),
+    cost_source: 'manual_only',
     upstream_mode: next.upstreamConfig?.upstream_mode || 'manual_rules',
     fixed_amount: 0,
   };
@@ -899,6 +911,7 @@ export const normalizeRestoredState = (state) => {
       next.upstreamConfig,
     ),
     ...item,
+    cost_source: 'manual_only',
     shared_site: createDefaultSharedSiteConfig(item?.shared_site || {}),
     site_rules: (item?.site_rules || []).map((rule) =>
       createDefaultPricingRule(rule),

@@ -35,10 +35,7 @@ const getSiteSummary = (comboConfig, t) => {
 
 const getUpstreamSummary = (comboConfig, options, t) => {
   if (comboConfig.upstream_mode !== 'wallet_observer') {
-    return getUpstreamCostSourceLabel(
-      comboConfig.cost_source || 'manual_only',
-      t,
-    );
+    return getUpstreamCostSourceLabel('manual_only', t);
   }
   const account = (options?.upstream_accounts || []).find(
     (item) => item.id === Number(comboConfig.upstream_account_id || 0),

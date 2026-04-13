@@ -612,6 +612,9 @@ func clampProfitBoardNumber(value float64) float64 {
 }
 
 func normalizeProfitBoardModelPricingRules(rules []ProfitBoardModelPricingRule, legacyFallback ProfitBoardTokenPricingConfig) []ProfitBoardModelPricingRule {
+	if rules == nil {
+		return profitBoardLegacyRuleFromTokenConfig(legacyFallback)
+	}
 	normalized := make([]ProfitBoardModelPricingRule, 0, len(rules)+1)
 	seen := make(map[string]struct{}, len(rules))
 	defaultAdded := false
@@ -649,9 +652,6 @@ func normalizeProfitBoardModelPricingRules(rules []ProfitBoardModelPricingRule, 
 			CacheReadPrice:     clampProfitBoardNumber(rule.CacheReadPrice),
 			CacheCreationPrice: clampProfitBoardNumber(rule.CacheCreationPrice),
 		})
-	}
-	if len(normalized) == 0 {
-		return profitBoardLegacyRuleFromTokenConfig(legacyFallback)
 	}
 	return normalized
 }
@@ -1900,6 +1900,7 @@ func profitBoardUpstreamCostUSD(
 	cacheCreationTokens int,
 	costSource string,
 	rules []ProfitBoardModelPricingRule,
+	fixedTotalAmount float64,
 ) (float64, string, bool) {
 	hasReturnedCost := other.UpstreamCostReported || other.UpstreamCost > 0
 	if hasReturnedCost && other.UpstreamCost >= 0 {
@@ -1910,6 +1911,9 @@ func profitBoardUpstreamCostUSD(
 
 	if costSource == ProfitBoardCostSourceReturnedOnly {
 		return 0, "returned_cost_missing", false
+	}
+	if costSource == ProfitBoardCostSourceManualOnly && len(rules) == 0 && fixedTotalAmount > 0 {
+		return 0, "manual_fixed_total_only", true
 	}
 
 	rule, usedDefault, ok := profitBoardFindManualRule(row.ModelName, rules)
@@ -2326,6 +2330,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 				prepared.CacheCreationTokens,
 				comboPricing.CostSource,
 				comboPricing.UpstreamRules,
+				comboPricing.UpstreamFixedTotalAmount,
 			)
 		}
 
@@ -2349,7 +2354,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 				case "returned_cost":
 					report.Summary.ReturnedCostCount++
 					batchSummary.ReturnedCostCount++
-				case "manual_rule", "manual_default":
+				case "manual_rule", "manual_default", "manual_fixed_total_only":
 					report.Summary.ManualCostCount++
 					batchSummary.ManualCostCount++
 				}
@@ -2537,7 +2542,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		report.Summary.ConfiguredProfitCoverageRate = float64(knownOrWalletCount) / float64(report.Summary.RequestCount)
 	}
 	if report.Summary.MissingUpstreamCostCount > 0 {
-		report.Warnings = append(report.Warnings, "部分日志没有上游返回费用，当前统计已按你的上游费用策略回退或标记为未知")
+		report.Warnings = append(report.Warnings, "部分日志未命中上游成本配置，已按可用规则回退，仍无法确定的记为未知")
 	}
 	if report.Summary.MissingSitePricingCount > 0 {
 		report.Warnings = append(report.Warnings, "部分日志没有命中本站模型定价，已按手动价格或零值处理")
@@ -2907,6 +2912,7 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 				prepared.CacheCreationTokens,
 				comboPricing.CostSource,
 				comboPricing.UpstreamRules,
+				comboPricing.UpstreamFixedTotalAmount,
 			)
 		}
 
@@ -2930,7 +2936,7 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 				case "returned_cost":
 					report.Summary.ReturnedCostCount++
 					batchSummary.ReturnedCostCount++
-				case "manual_rule", "manual_default":
+				case "manual_rule", "manual_default", "manual_fixed_total_only":
 					report.Summary.ManualCostCount++
 					batchSummary.ManualCostCount++
 				}
@@ -3033,7 +3039,7 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 		report.Summary.ConfiguredProfitCoverageRate = float64(knownOrWalletCount) / float64(report.Summary.RequestCount)
 	}
 	if report.Summary.MissingUpstreamCostCount > 0 {
-		report.Warnings = append(report.Warnings, "累计总览中部分日志没有上游返回费用，当前已按你的上游费用策略回退或标记为未知")
+		report.Warnings = append(report.Warnings, "累计总览中部分日志未命中上游成本配置，已按可用规则回退，仍无法确定的记为未知")
 	}
 	if report.Summary.MissingSitePricingCount > 0 {
 		report.Warnings = append(report.Warnings, "累计总览中部分日志没有命中本站模型定价，已按手动价格或零值处理")

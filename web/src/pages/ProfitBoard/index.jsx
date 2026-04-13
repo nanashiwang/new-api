@@ -79,10 +79,7 @@ const getSiteSummaryText = (comboConfig, t) => {
 
 const getUpstreamSummaryText = (comboConfig, options, t) => {
   if (comboConfig.upstream_mode !== 'wallet_observer') {
-    return getUpstreamCostSourceLabel(
-      comboConfig.cost_source || 'manual_only',
-      t,
-    );
+    return getUpstreamCostSourceLabel('manual_only', t);
   }
   const account = (options?.upstream_accounts || []).find(
     (item) => item.id === Number(comboConfig.upstream_account_id || 0),
@@ -235,6 +232,7 @@ const ProfitBoardPage = () => {
           ...fallback,
           ...(existing || {}),
           combo_id: batch.id,
+          cost_source: 'manual_only',
           shared_site: {
             ...fallback.shared_site,
             ...(existing?.shared_site || {}),

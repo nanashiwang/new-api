@@ -162,6 +162,7 @@ export const useProfitBoardConfig = ({
       },
       upstreamConfig: {
         ...(config.upstream || {}),
+        cost_source: 'manual_only',
       },
       comboConfigs: (config.combo_configs || []).map((item) => ({
         ...createDefaultComboPricingConfig(
@@ -171,6 +172,7 @@ export const useProfitBoardConfig = ({
           config.upstream,
         ),
         ...item,
+        cost_source: 'manual_only',
         site_rules: (item.site_rules || []).map((rule) =>
           createDefaultPricingRule(rule),
         ),

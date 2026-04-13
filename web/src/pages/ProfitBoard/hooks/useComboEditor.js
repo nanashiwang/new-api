@@ -44,7 +44,7 @@ const cloneComboDraft = (batch, comboConfig) => ({
   combo_id: comboConfig.combo_id,
   site_mode: comboConfig.site_mode,
   upstream_mode: comboConfig.upstream_mode,
-  cost_source: comboConfig.cost_source || 'manual_only',
+  cost_source: 'manual_only',
   upstream_account_id: Number(comboConfig.upstream_account_id || 0),
   shared_site: { ...(comboConfig.shared_site || {}) },
   site_rules: (comboConfig.site_rules || []).map((rule) =>
@@ -380,7 +380,7 @@ export const useComboEditor = ({
       combo_id: nextBatch.id,
       site_mode: editorDraft.site_mode,
       upstream_mode: editorDraft.upstream_mode,
-      cost_source: editorDraft.cost_source || 'manual_only',
+      cost_source: 'manual_only',
       upstream_account_id: Number(editorDraft.upstream_account_id || 0),
       shared_site: { ...(editorDraft.shared_site || {}) },
       site_rules: (editorDraft.site_rules || []).map((rule) =>
