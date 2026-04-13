@@ -308,6 +308,7 @@ const ProfitBoardPage = () => {
     validationErrors,
     persistReportCache,
     queryReady,
+    activeTab,
   });
 
   const {

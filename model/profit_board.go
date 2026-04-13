@@ -508,8 +508,12 @@ var (
 )
 
 var (
-	profitBoardReportCacheOnce sync.Once
-	profitBoardReportCache     *cachex.HybridCache[ProfitBoardReport]
+	profitBoardReportCacheOnce       sync.Once
+	profitBoardReportCache           *cachex.HybridCache[ProfitBoardReport]
+	profitBoardOverviewCacheOnce     sync.Once
+	profitBoardOverviewCache         *cachex.HybridCache[ProfitBoardReport]
+	profitBoardOverviewStaleCacheOnce sync.Once
+	profitBoardOverviewStaleCache     *cachex.HybridCache[ProfitBoardReport]
 )
 
 func profitBoardReportCacheTTL() time.Duration {
@@ -547,6 +551,48 @@ func getProfitBoardReportCache() *cachex.HybridCache[ProfitBoardReport] {
 		})
 	})
 	return profitBoardReportCache
+}
+
+func getProfitBoardOverviewCache() *cachex.HybridCache[ProfitBoardReport] {
+	profitBoardOverviewCacheOnce.Do(func() {
+		ttl := profitBoardReportCacheTTL()
+		profitBoardOverviewCache = cachex.NewHybridCache[ProfitBoardReport](cachex.HybridCacheConfig[ProfitBoardReport]{
+			Namespace: cachex.Namespace("profit_board_overview:v1"),
+			Redis:     common.RDB,
+			RedisEnabled: func() bool {
+				return common.RedisEnabled && common.RDB != nil
+			},
+			RedisCodec: cachex.JSONCodec[ProfitBoardReport]{},
+			Memory: func() *hot.HotCache[string, ProfitBoardReport] {
+				return hot.NewHotCache[string, ProfitBoardReport](hot.LRU, profitBoardReportCacheCapacity()).
+					WithTTL(ttl).
+					WithJanitor().
+					Build()
+			},
+		})
+	})
+	return profitBoardOverviewCache
+}
+
+func getProfitBoardOverviewStaleCache() *cachex.HybridCache[ProfitBoardReport] {
+	profitBoardOverviewStaleCacheOnce.Do(func() {
+		staleTTL := 10 * time.Minute
+		profitBoardOverviewStaleCache = cachex.NewHybridCache[ProfitBoardReport](cachex.HybridCacheConfig[ProfitBoardReport]{
+			Namespace: cachex.Namespace("profit_board_overview_stale:v1"),
+			Redis:     common.RDB,
+			RedisEnabled: func() bool {
+				return common.RedisEnabled && common.RDB != nil
+			},
+			RedisCodec: cachex.JSONCodec[ProfitBoardReport]{},
+			Memory: func() *hot.HotCache[string, ProfitBoardReport] {
+				return hot.NewHotCache[string, ProfitBoardReport](hot.LRU, profitBoardReportCacheCapacity()).
+					WithTTL(staleTTL).
+					WithJanitor().
+					Build()
+			},
+		})
+	})
+	return profitBoardOverviewStaleCache
 }
 
 func normalizeProfitBoardSelection(selection ProfitBoardSelection) (ProfitBoardSelection, string, error) {
@@ -1793,6 +1839,73 @@ func buildProfitBoardBucket(timestamp int64, granularity string, customIntervalM
 	}
 }
 
+func profitBoardLatestLogIdForChannels(channelIDs []int) int {
+	if len(channelIDs) == 0 {
+		return 0
+	}
+	var maxId int
+	LOG_DB.Table("logs").
+		Select("COALESCE(MAX(id), 0)").
+		Where("type = ?", LogTypeConsume).
+		Where("channel_id IN ?", channelIDs).
+		Scan(&maxId)
+	return maxId
+}
+
+func rebucketProfitBoardTimeseries(report *ProfitBoardReport, granularity string, customIntervalMinutes int) {
+	if granularity == "hour" && customIntervalMinutes == 0 {
+		return
+	}
+	if len(report.Timeseries) == 0 {
+		return
+	}
+	merged := make(map[string]*ProfitBoardTimeseriesPoint)
+	for i := range report.Timeseries {
+		point := &report.Timeseries[i]
+		newTimestamp, newLabel := buildProfitBoardBucket(point.BucketTimestamp, granularity, customIntervalMinutes)
+		key := fmt.Sprintf("%s:%d", point.BatchId, newTimestamp)
+		existing, ok := merged[key]
+		if !ok {
+			cp := *point
+			cp.Bucket = newLabel
+			cp.BucketTimestamp = newTimestamp
+			merged[key] = &cp
+			continue
+		}
+		existing.RequestCount += point.RequestCount
+		existing.ActualSiteRevenueUSD += point.ActualSiteRevenueUSD
+		existing.ConfiguredSiteRevenueUSD += point.ConfiguredSiteRevenueUSD
+		existing.ConfiguredSiteRevenueCNY += point.ConfiguredSiteRevenueCNY
+		existing.UpstreamCostUSD += point.UpstreamCostUSD
+		existing.UpstreamCostCNY += point.UpstreamCostCNY
+		existing.RemoteObservedCostUSD += point.RemoteObservedCostUSD
+		existing.ConfiguredProfitUSD += point.ConfiguredProfitUSD
+		existing.ConfiguredProfitCNY += point.ConfiguredProfitCNY
+		existing.ActualProfitUSD += point.ActualProfitUSD
+		existing.KnownUpstreamCostCount += point.KnownUpstreamCostCount
+		existing.MissingUpstreamCostCount += point.MissingUpstreamCostCount
+		existing.SiteModelMatchCount += point.SiteModelMatchCount
+		existing.MissingSitePricingCount += point.MissingSitePricingCount
+	}
+	result := make([]ProfitBoardTimeseriesPoint, 0, len(merged))
+	for _, point := range merged {
+		point.ActualSiteRevenueUSD = roundProfitBoardAmount(point.ActualSiteRevenueUSD)
+		point.ConfiguredSiteRevenueUSD = roundProfitBoardAmount(point.ConfiguredSiteRevenueUSD)
+		point.UpstreamCostUSD = roundProfitBoardAmount(point.UpstreamCostUSD)
+		point.RemoteObservedCostUSD = roundProfitBoardAmount(point.RemoteObservedCostUSD)
+		point.ConfiguredProfitUSD = roundProfitBoardAmount(point.ConfiguredProfitUSD)
+		point.ActualProfitUSD = roundProfitBoardAmount(point.ActualProfitUSD)
+		result = append(result, *point)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].BucketTimestamp == result[j].BucketTimestamp {
+			return result[i].BatchName < result[j].BatchName
+		}
+		return result[i].BucketTimestamp < result[j].BucketTimestamp
+	})
+	report.Timeseries = result
+}
+
 func collectProfitBoardChannelIDs(batches []ProfitBoardBatchInfo) []int {
 	ids := make([]int, 0)
 	seen := make(map[int]struct{})
@@ -2187,27 +2300,57 @@ func buildProfitBoardReportCacheKey(query ProfitBoardQuery) string {
 		return ""
 	}
 	payloadBytes, err := common.Marshal(struct {
-		Batches               []ProfitBoardBatch                 `json:"batches"`
-		SharedSite            ProfitBoardSharedSitePricingConfig `json:"shared_site"`
-		ComboConfigs          []ProfitBoardComboPricingConfig    `json:"combo_configs"`
-		StartTimestamp        int64                              `json:"start_timestamp"`
-		EndTimestamp          int64                              `json:"end_timestamp"`
-		Granularity           string                             `json:"granularity"`
-		CustomIntervalMinutes int                                `json:"custom_interval_minutes"`
+		Batches        []ProfitBoardBatch                 `json:"batches"`
+		SharedSite     ProfitBoardSharedSitePricingConfig `json:"shared_site"`
+		ComboConfigs   []ProfitBoardComboPricingConfig    `json:"combo_configs"`
+		StartTimestamp int64                              `json:"start_timestamp"`
+		EndTimestamp   int64                              `json:"end_timestamp"`
 	}{
-		Batches:               query.Batches,
-		SharedSite:            query.SharedSite,
-		ComboConfigs:          query.ComboConfigs,
-		StartTimestamp:        query.StartTimestamp,
-		EndTimestamp:          query.EndTimestamp,
-		Granularity:           query.Granularity,
-		CustomIntervalMinutes: query.CustomIntervalMinutes,
+		Batches:        query.Batches,
+		SharedSite:     query.SharedSite,
+		ComboConfigs:   query.ComboConfigs,
+		StartTimestamp: query.StartTimestamp,
+		EndTimestamp:   query.EndTimestamp,
 	})
 	if err != nil {
 		return ""
 	}
 	hash := sha1.Sum(payloadBytes)
 	return hex.EncodeToString(hash[:])
+}
+
+func buildProfitBoardOverviewCacheKey(payload ProfitBoardConfigPayload) string {
+	if profitBoardHasEnabledRemoteObserver(payload.ComboConfigs) {
+		return ""
+	}
+	query := ProfitBoardQuery{
+		Batches:      payload.Batches,
+		SharedSite:   payload.SharedSite,
+		ComboConfigs: payload.ComboConfigs,
+	}
+	if profitBoardHasWalletObserverCombo(resolveProfitBoardComboPricingMap(query, nil)) {
+		return ""
+	}
+	payloadBytes, err := common.Marshal(struct {
+		Batches         []ProfitBoardBatch                 `json:"batches"`
+		SharedSite      ProfitBoardSharedSitePricingConfig `json:"shared_site"`
+		ComboConfigs    []ProfitBoardComboPricingConfig    `json:"combo_configs"`
+		ExcludedUserIDs []int                              `json:"excluded_user_ids"`
+		Upstream        ProfitBoardTokenPricingConfig      `json:"upstream"`
+		Site            ProfitBoardTokenPricingConfig      `json:"site"`
+	}{
+		Batches:         payload.Batches,
+		SharedSite:      payload.SharedSite,
+		ComboConfigs:    payload.ComboConfigs,
+		ExcludedUserIDs: payload.ExcludedUserIDs,
+		Upstream:        payload.Upstream,
+		Site:            payload.Site,
+	})
+	if err != nil {
+		return ""
+	}
+	hash := sha1.Sum(payloadBytes)
+	return "overview:" + hex.EncodeToString(hash[:])
 }
 
 func iterateProfitBoardRows(query ProfitBoardQuery, batches []ProfitBoardBatchInfo, callback func(prepared profitBoardPreparedRow) error) error {
@@ -2297,14 +2440,21 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		return nil, err
 	}
 
+	requestedGranularity := normalizedQuery.Granularity
+	requestedCustomInterval := normalizedQuery.CustomIntervalMinutes
+
 	if !normalizedQuery.IncludeDetails {
 		cacheKey := buildProfitBoardReportCacheKey(normalizedQuery)
 		if cacheKey != "" {
 			if cached, found, cacheErr := getProfitBoardReportCache().Get(cacheKey); cacheErr == nil && found {
+				rebucketProfitBoardTimeseries(&cached, requestedGranularity, requestedCustomInterval)
 				return &cached, nil
 			}
 		}
 	}
+
+	normalizedQuery.Granularity = "hour"
+	normalizedQuery.CustomIntervalMinutes = 0
 
 	resolvedBatches, err := resolveProfitBoardBatches(normalizedQuery.Batches)
 	if err != nil {
@@ -2936,6 +3086,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 			_ = getProfitBoardReportCache().SetWithTTL(cacheKey, *report, profitBoardReportCacheTTL())
 		}
 	}
+	rebucketProfitBoardTimeseries(report, requestedGranularity, requestedCustomInterval)
 	return report, nil
 }
 
@@ -2957,6 +3108,24 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 	}
 	if err := validateProfitBoardComboConfigs(payload.ComboConfigs); err != nil {
 		return nil, err
+	}
+
+	overviewCacheKey := buildProfitBoardOverviewCacheKey(payload)
+	if overviewCacheKey != "" {
+		if cached, found, cacheErr := getProfitBoardOverviewCache().Get(overviewCacheKey); cacheErr == nil && found {
+			return &cached, nil
+		}
+		if stale, found, cacheErr := getProfitBoardOverviewStaleCache().Get(overviewCacheKey); cacheErr == nil && found {
+			resolvedForCheck, resolveErr := resolveProfitBoardBatches(normalizedBatches)
+			if resolveErr == nil {
+				channelIDs := collectProfitBoardChannelIDs(resolvedForCheck)
+				currentMaxId := profitBoardLatestLogIdForChannels(channelIDs)
+				if currentMaxId > 0 && currentMaxId == stale.Meta.LatestLogId {
+					_ = getProfitBoardOverviewCache().SetWithTTL(overviewCacheKey, stale, profitBoardReportCacheTTL())
+					return &stale, nil
+				}
+			}
+		}
 	}
 
 	resolvedBatches, err := resolveProfitBoardBatches(normalizedBatches)
@@ -3323,6 +3492,10 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 		walletSnapshotWatermark,
 	)
 	report.Warnings = uniqueProfitBoardWarnings(report.Warnings)
+	if overviewCacheKey != "" {
+		_ = getProfitBoardOverviewCache().SetWithTTL(overviewCacheKey, *report, profitBoardReportCacheTTL())
+		_ = getProfitBoardOverviewStaleCache().SetWithTTL(overviewCacheKey, *report, 10*time.Minute)
+	}
 	return report, nil
 }
 

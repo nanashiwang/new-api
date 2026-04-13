@@ -28,6 +28,7 @@ export const useProfitBoardQuery = ({
   validationErrors,
   persistReportCache,
   queryReady,
+  activeTab,
 }) => {
   const [querying, setQuerying] = useState(false);
   const [overviewQuerying, setOverviewQuerying] = useState(false);
@@ -299,10 +300,13 @@ export const useProfitBoardQuery = ({
     scheduledAutoQueryKeyRef.current = currentQueryKey;
     autoRefreshTimerRef.current = window.setTimeout(async () => {
       const expectedQueryKey = scheduledAutoQueryKeyRef.current;
-      await runFullRefresh({
-        expectedQueryKey,
-        showValidationError: false,
-      });
+      await runOverviewQuery({ expectedQueryKey });
+      if (activeTab === 'analysis') {
+        await runQuery({
+          expectedQueryKey,
+          showValidationError: false,
+        });
+      }
       if (scheduledAutoQueryKeyRef.current === expectedQueryKey) {
         setAutoRefreshing(false);
       }
@@ -314,7 +318,7 @@ export const useProfitBoardQuery = ({
         autoRefreshTimerRef.current = null;
       }
     };
-  }, [currentQueryKey, queryReady, runFullRefresh, validationErrors.length]);
+  }, [activeTab, currentQueryKey, queryReady, runOverviewQuery, runQuery, validationErrors.length]);
 
   return {
     querying,
