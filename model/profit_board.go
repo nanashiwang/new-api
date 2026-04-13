@@ -251,6 +251,7 @@ type ProfitBoardOptions struct {
 	Channels         []ProfitBoardChannelOption         `json:"channels"`
 	Tags             []string                           `json:"tags"`
 	Groups           []string                           `json:"groups"`
+	GroupRatios      map[string]float64                 `json:"group_ratios,omitempty"`
 	LocalModels      []ProfitBoardLocalModelOption      `json:"local_models"`
 	SiteModels       []string                           `json:"site_models"`
 	AdminUsers       []ProfitBoardAdminUserOption       `json:"admin_users"`
@@ -1461,12 +1462,14 @@ func GetProfitBoardOptions() (*ProfitBoardOptions, error) {
 		}
 	}
 
-	groupNames := make([]string, 0)
-	for groupName := range ratio_setting.GetGroupRatioCopy() {
+	groupRatios := ratio_setting.GetGroupRatioCopy()
+	groupNames := make([]string, 0, len(groupRatios))
+	for groupName := range groupRatios {
 		groupNames = append(groupNames, groupName)
 	}
 	sort.Strings(groupNames)
 	options.Groups = groupNames
+	options.GroupRatios = groupRatios
 
 	localModels := GetPricing()
 	options.LocalModels = make([]ProfitBoardLocalModelOption, 0, len(localModels))

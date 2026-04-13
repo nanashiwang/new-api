@@ -656,7 +656,7 @@ const PricingConfigModal = ({
                 />
 
                 {/* 定价基准 + 套餐/分组 */}
-                <div className='grid grid-cols-2 gap-3'>
+                <div className={`grid gap-3 ${sharedSite.use_recharge_price ? 'grid-cols-2' : 'grid-cols-3'}`}>
                   <div>
                     <FieldLabel>{t('定价基准')}</FieldLabel>
                     <Radio.Group
@@ -695,63 +695,60 @@ const PricingConfigModal = ({
                       <Radio value='recharge'>{t('按充值价')}</Radio>
                     </Radio.Group>
                   </div>
+                  {!sharedSite.use_recharge_price && (
+                    <div>
+                      <FieldLabel>{t('套餐')}</FieldLabel>
+                      <Select
+                        value={sharedSite.plan_id || undefined}
+                        onChange={(value) =>
+                          setComboConfig((prev) => ({
+                            ...prev,
+                            shared_site: {
+                              ...prev.shared_site,
+                              plan_id: value || 0,
+                            },
+                          }))
+                        }
+                        placeholder={
+                          (subscriptionPlans || []).some((p) => Number(p.total_amount || 0) > 0)
+                            ? t('选择套餐')
+                            : t('暂无可用套餐')
+                        }
+                        disabled={!(subscriptionPlans || []).some((p) => Number(p.total_amount || 0) > 0)}
+                        optionList={(subscriptionPlans || [])
+                          .filter((p) => Number(p.total_amount || 0) > 0)
+                          .map((p) => ({
+                            value: p.id,
+                            label: `${p.title} - ¥${p.price_amount}`,
+                          }))}
+                        size='small'
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                  )}
                   <div>
-                    {sharedSite.use_recharge_price ? (
-                      <>
-                        <FieldLabel>{t('分组')}</FieldLabel>
-                        <Select
-                          value={sharedSite.group || ''}
-                          onChange={(value) =>
-                            setComboConfig((prev) => ({
-                              ...prev,
-                              shared_site: {
-                                ...prev.shared_site,
-                                group: value,
-                              },
-                            }))
-                          }
-                          optionList={[
-                            { label: t('自动最低'), value: '' },
-                            ...((options?.groups || []).map((item) => ({
-                              label: item,
-                              value: item,
-                            })) || []),
-                          ]}
-                          size='small'
-                          style={{ width: '100%' }}
-                        />
-                      </>
-                    ) : (
-                      <>
-                        <FieldLabel>{t('套餐')}</FieldLabel>
-                        <Select
-                          value={sharedSite.plan_id || undefined}
-                          onChange={(value) =>
-                            setComboConfig((prev) => ({
-                              ...prev,
-                              shared_site: {
-                                ...prev.shared_site,
-                                plan_id: value || 0,
-                              },
-                            }))
-                          }
-                          placeholder={
-                            (subscriptionPlans || []).some((p) => Number(p.total_amount || 0) > 0)
-                              ? t('选择套餐')
-                              : t('暂无可用套餐')
-                          }
-                          disabled={!(subscriptionPlans || []).some((p) => Number(p.total_amount || 0) > 0)}
-                          optionList={(subscriptionPlans || [])
-                            .filter((p) => Number(p.total_amount || 0) > 0)
-                            .map((p) => ({
-                              value: p.id,
-                              label: `${p.title} - ¥${p.price_amount}`,
-                            }))}
-                          size='small'
-                          style={{ width: '100%' }}
-                        />
-                      </>
-                    )}
+                    <FieldLabel>{t('分组')}</FieldLabel>
+                    <Select
+                      value={sharedSite.group || ''}
+                      onChange={(value) =>
+                        setComboConfig((prev) => ({
+                          ...prev,
+                          shared_site: {
+                            ...prev.shared_site,
+                            group: value,
+                          },
+                        }))
+                      }
+                      optionList={[
+                        { label: t('自动最低'), value: '' },
+                        ...((options?.groups || []).map((item) => ({
+                          label: item,
+                          value: item,
+                        })) || []),
+                      ]}
+                      size='small'
+                      style={{ width: '100%' }}
+                    />
                   </div>
                 </div>
 

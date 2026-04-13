@@ -301,6 +301,11 @@ export const useProfitBoardConfig = ({
     [applyLoadedConfig, configPayload],
   );
 
+  const groupRatioMap = useMemo(
+    () => options.group_ratios || {},
+    [options.group_ratios],
+  );
+
   const resolveSharedSitePreview = useCallback(
     (sharedSiteConfig, modelName) => {
       const model = localModelMap.get(modelName);
@@ -319,6 +324,25 @@ export const useProfitBoardConfig = ({
           cache_read_price: 0,
           cache_creation_price: 0,
         };
+
+      // 分组倍率：选了具体分组用该倍率，否则从 enable_groups 取最低
+      let usedGroupRatio = 1;
+      const selectedGroup = currentSharedSite.group || '';
+      if (selectedGroup) {
+        usedGroupRatio = groupRatioMap[selectedGroup] ?? 1;
+      } else if (Array.isArray(model.enable_groups) && model.enable_groups.length > 0) {
+        let minRatio = Infinity;
+        for (const g of model.enable_groups) {
+          const r = groupRatioMap[g];
+          if (r !== undefined && r < minRatio) {
+            minRatio = r;
+          }
+        }
+        if (minRatio < Infinity) {
+          usedGroupRatio = minRatio;
+        }
+      }
+
       let factor;
       if (currentSharedSite.use_recharge_price) {
         factor = rechargePriceFactor;
@@ -340,13 +364,14 @@ export const useProfitBoardConfig = ({
       } else {
         factor = 1;
       }
-      const baseInput = clampNumber(model.model_ratio) * 2 * factor;
+      const baseInput = clampNumber(model.model_ratio) * 2 * usedGroupRatio * factor;
       return {
         input_price: baseInput,
         output_price:
           clampNumber(model.model_ratio) *
           clampNumber(model.completion_ratio) *
           2 *
+          usedGroupRatio *
           factor,
         cache_read_price: model.supports_cache_read
           ? baseInput * clampNumber(model.cache_ratio)
@@ -356,7 +381,7 @@ export const useProfitBoardConfig = ({
           : 0,
       };
     },
-    [localModelMap, rechargePriceFactor, subscriptionPlans, usdExchangeRate],
+    [groupRatioMap, localModelMap, rechargePriceFactor, subscriptionPlans, usdExchangeRate],
   );
 
   return {
