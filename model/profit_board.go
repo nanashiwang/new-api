@@ -197,12 +197,13 @@ type ProfitBoardUpstreamAccountTrend struct {
 }
 
 type ProfitBoardConfigPayload struct {
-	Batches      []ProfitBoardBatch                 `json:"batches,omitempty"`
-	Selection    ProfitBoardSelection               `json:"selection,omitempty"`
-	SharedSite   ProfitBoardSharedSitePricingConfig `json:"shared_site,omitempty"`
-	ComboConfigs []ProfitBoardComboPricingConfig    `json:"combo_configs,omitempty"`
-	Upstream     ProfitBoardTokenPricingConfig      `json:"upstream"`
-	Site         ProfitBoardTokenPricingConfig      `json:"site"`
+	Batches         []ProfitBoardBatch                 `json:"batches,omitempty"`
+	Selection       ProfitBoardSelection               `json:"selection,omitempty"`
+	SharedSite      ProfitBoardSharedSitePricingConfig `json:"shared_site,omitempty"`
+	ComboConfigs    []ProfitBoardComboPricingConfig    `json:"combo_configs,omitempty"`
+	ExcludedUserIDs []int                              `json:"excluded_user_ids,omitempty"`
+	Upstream        ProfitBoardTokenPricingConfig      `json:"upstream"`
+	Site            ProfitBoardTokenPricingConfig      `json:"site"`
 }
 
 type ProfitBoardQuery struct {
@@ -210,6 +211,7 @@ type ProfitBoardQuery struct {
 	Selection             ProfitBoardSelection               `json:"selection,omitempty"`
 	SharedSite            ProfitBoardSharedSitePricingConfig `json:"shared_site,omitempty"`
 	ComboConfigs          []ProfitBoardComboPricingConfig    `json:"combo_configs,omitempty"`
+	ExcludedUserIDs       []int                              `json:"excluded_user_ids,omitempty"`
 	Upstream              ProfitBoardTokenPricingConfig      `json:"upstream"`
 	Site                  ProfitBoardTokenPricingConfig      `json:"site"`
 	StartTimestamp        int64                              `json:"start_timestamp"`
@@ -247,7 +249,15 @@ type ProfitBoardOptions struct {
 	Groups           []string                           `json:"groups"`
 	LocalModels      []ProfitBoardLocalModelOption      `json:"local_models"`
 	SiteModels       []string                           `json:"site_models"`
+	AdminUsers       []ProfitBoardAdminUserOption       `json:"admin_users"`
 	UpstreamAccounts []ProfitBoardUpstreamAccountOption `json:"upstream_accounts"`
+}
+
+type ProfitBoardAdminUserOption struct {
+	Id          int    `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	Role        int    `json:"role"`
 }
 
 type ProfitBoardSummary struct {
@@ -415,6 +425,7 @@ type profitBoardOtherInfo struct {
 
 type profitBoardLogRow struct {
 	Id               int    `gorm:"column:id"`
+	UserId           int    `gorm:"column:user_id"`
 	CreatedAt        int64  `gorm:"column:created_at"`
 	RequestId        string `gorm:"column:request_id"`
 	ChannelId        int    `gorm:"column:channel_id"`
@@ -439,9 +450,10 @@ type profitBoardResolvedComboPricing struct {
 }
 
 type profitBoardPersistedSiteConfig struct {
-	LegacySite   ProfitBoardTokenPricingConfig      `json:"legacy_site"`
-	SharedSite   ProfitBoardSharedSitePricingConfig `json:"shared_site,omitempty"`
-	ComboConfigs []ProfitBoardComboPricingConfig    `json:"combo_configs,omitempty"`
+	LegacySite      ProfitBoardTokenPricingConfig      `json:"legacy_site"`
+	SharedSite      ProfitBoardSharedSitePricingConfig `json:"shared_site,omitempty"`
+	ComboConfigs    []ProfitBoardComboPricingConfig    `json:"combo_configs,omitempty"`
+	ExcludedUserIDs []int                              `json:"excluded_user_ids,omitempty"`
 }
 
 // Sentinel errors for i18n translation
@@ -569,6 +581,45 @@ func normalizeProfitBoardSelection(selection ProfitBoardSelection) (ProfitBoardS
 	default:
 		return ProfitBoardSelection{}, "", ErrProfitBoardInvalidScopeType
 	}
+}
+
+func normalizeProfitBoardExcludedUserIDs(userIDs []int) []int {
+	if len(userIDs) == 0 {
+		return nil
+	}
+	seen := make(map[int]struct{}, len(userIDs))
+	normalized := make([]int, 0, len(userIDs))
+	for _, userID := range userIDs {
+		if userID <= 0 {
+			continue
+		}
+		if _, ok := seen[userID]; ok {
+			continue
+		}
+		seen[userID] = struct{}{}
+		normalized = append(normalized, userID)
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	sort.Ints(normalized)
+	return normalized
+}
+
+func profitBoardExcludedUserSet(userIDs []int) map[int]struct{} {
+	if len(userIDs) == 0 {
+		return nil
+	}
+	userSet := make(map[int]struct{}, len(userIDs))
+	for _, userID := range userIDs {
+		if userID > 0 {
+			userSet[userID] = struct{}{}
+		}
+	}
+	if len(userSet) == 0 {
+		return nil
+	}
+	return userSet
 }
 
 func profitBoardLegacyBatches(selection ProfitBoardSelection) []ProfitBoardBatch {
@@ -1117,8 +1168,9 @@ func GetProfitBoardConfig(batches []ProfitBoardBatch, selection ProfitBoardSelec
 	if err := DB.Where("selection_signature = ?", signature).First(config).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			payload := &ProfitBoardConfigPayload{
-				Batches:    normalized,
-				SharedSite: normalizeProfitBoardSharedSiteConfig(ProfitBoardSharedSitePricingConfig{}, defaultSite),
+				Batches:         normalized,
+				SharedSite:      normalizeProfitBoardSharedSiteConfig(ProfitBoardSharedSitePricingConfig{}, defaultSite),
+				ExcludedUserIDs: nil,
 				ComboConfigs: normalizeProfitBoardComboConfigs(
 					normalized,
 					nil,
@@ -1153,11 +1205,13 @@ func GetProfitBoardConfig(batches []ProfitBoardBatch, selection ProfitBoardSelec
 	if err := common.UnmarshalJsonStr(config.SiteConfig, &persistedSite); err == nil &&
 		(len(persistedSite.ComboConfigs) > 0 ||
 			len(persistedSite.SharedSite.ModelNames) > 0 ||
+			len(persistedSite.ExcludedUserIDs) > 0 ||
 			persistedSite.LegacySite.PricingMode != "" ||
 			persistedSite.LegacySite.Group != "" ||
 			len(persistedSite.LegacySite.ModelNames) > 0) {
 		payload.Site = normalizeProfitBoardPricingConfig(persistedSite.LegacySite, true)
 		payload.SharedSite = normalizeProfitBoardSharedSiteConfig(persistedSite.SharedSite, payload.Site)
+		payload.ExcludedUserIDs = normalizeProfitBoardExcludedUserIDs(persistedSite.ExcludedUserIDs)
 		payload.ComboConfigs = normalizeProfitBoardComboConfigs(
 			payload.Batches,
 			remapProfitBoardComboConfigsByBatchSelection(
@@ -1173,6 +1227,7 @@ func GetProfitBoardConfig(batches []ProfitBoardBatch, selection ProfitBoardSelec
 		_ = common.UnmarshalJsonStr(config.SiteConfig, &payload.Site)
 		payload.Site = normalizeProfitBoardPricingConfig(payload.Site, true)
 		payload.SharedSite = normalizeProfitBoardSharedSiteConfig(ProfitBoardSharedSitePricingConfig{}, payload.Site)
+		payload.ExcludedUserIDs = nil
 		payload.ComboConfigs = normalizeProfitBoardComboConfigs(payload.Batches, nil, payload.SharedSite, payload.Site, payload.Upstream)
 	}
 	if err := migrateProfitBoardLegacyWalletAccount(payload); err != nil {
@@ -1193,6 +1248,7 @@ func SaveProfitBoardConfig(payload ProfitBoardConfigPayload) (*ProfitBoardConfig
 	payload.Upstream = normalizeProfitBoardPricingConfig(payload.Upstream, false)
 	payload.Site = normalizeProfitBoardPricingConfig(payload.Site, true)
 	payload.SharedSite = normalizeProfitBoardSharedSiteConfig(payload.SharedSite, payload.Site)
+	payload.ExcludedUserIDs = normalizeProfitBoardExcludedUserIDs(payload.ExcludedUserIDs)
 	payload.ComboConfigs = normalizeProfitBoardComboConfigs(normalized, payload.ComboConfigs, payload.SharedSite, payload.Site, payload.Upstream)
 	if err := migrateProfitBoardLegacyWalletAccount(&payload); err != nil {
 		return nil, "", err
@@ -1220,9 +1276,10 @@ func SaveProfitBoardConfig(payload ProfitBoardConfigPayload) (*ProfitBoardConfig
 		return nil, "", err
 	}
 	siteBytes, err := common.Marshal(profitBoardPersistedSiteConfig{
-		LegacySite:   payload.Site,
-		SharedSite:   payload.SharedSite,
-		ComboConfigs: payload.ComboConfigs,
+		LegacySite:      payload.Site,
+		SharedSite:      payload.SharedSite,
+		ComboConfigs:    payload.ComboConfigs,
+		ExcludedUserIDs: payload.ExcludedUserIDs,
 	})
 	if err != nil {
 		return nil, "", err
@@ -1257,11 +1314,12 @@ func SaveProfitBoardConfig(payload ProfitBoardConfigPayload) (*ProfitBoardConfig
 	}
 
 	return &ProfitBoardConfigPayload{
-		Batches:      normalized,
-		SharedSite:   payload.SharedSite,
-		ComboConfigs: stripProfitBoardRemoteObserverSecrets(payload.ComboConfigs),
-		Upstream:     payload.Upstream,
-		Site:         payload.Site,
+		Batches:         normalized,
+		SharedSite:      payload.SharedSite,
+		ComboConfigs:    stripProfitBoardRemoteObserverSecrets(payload.ComboConfigs),
+		ExcludedUserIDs: payload.ExcludedUserIDs,
+		Upstream:        payload.Upstream,
+		Site:            payload.Site,
 	}, signature, nil
 }
 
@@ -1296,11 +1354,13 @@ func GetLatestProfitBoardConfig() (*ProfitBoardConfigPayload, string, error) {
 	if err := common.UnmarshalJsonStr(record.SiteConfig, &persistedSite); err == nil &&
 		(len(persistedSite.ComboConfigs) > 0 ||
 			len(persistedSite.SharedSite.ModelNames) > 0 ||
+			len(persistedSite.ExcludedUserIDs) > 0 ||
 			persistedSite.LegacySite.PricingMode != "" ||
 			persistedSite.LegacySite.Group != "" ||
 			len(persistedSite.LegacySite.ModelNames) > 0) {
 		payload.Site = normalizeProfitBoardPricingConfig(persistedSite.LegacySite, true)
 		payload.SharedSite = normalizeProfitBoardSharedSiteConfig(persistedSite.SharedSite, payload.Site)
+		payload.ExcludedUserIDs = normalizeProfitBoardExcludedUserIDs(persistedSite.ExcludedUserIDs)
 		payload.ComboConfigs = normalizeProfitBoardComboConfigs(
 			payload.Batches,
 			remapProfitBoardComboConfigsByBatchSelection(
@@ -1316,6 +1376,7 @@ func GetLatestProfitBoardConfig() (*ProfitBoardConfigPayload, string, error) {
 		_ = common.UnmarshalJsonStr(record.SiteConfig, &payload.Site)
 		payload.Site = normalizeProfitBoardPricingConfig(payload.Site, true)
 		payload.SharedSite = normalizeProfitBoardSharedSiteConfig(ProfitBoardSharedSitePricingConfig{}, payload.Site)
+		payload.ExcludedUserIDs = nil
 		payload.ComboConfigs = normalizeProfitBoardComboConfigs(payload.Batches, nil, payload.SharedSite, payload.Site, payload.Upstream)
 	}
 	if err := migrateProfitBoardLegacyWalletAccount(payload); err != nil {
@@ -1382,6 +1443,17 @@ func GetProfitBoardOptions() (*ProfitBoardOptions, error) {
 		return options.LocalModels[i].ModelName < options.LocalModels[j].ModelName
 	})
 	options.SiteModels = collectProfitBoardSiteModels()
+
+	adminUsers := make([]ProfitBoardAdminUserOption, 0)
+	if err := DB.Model(&User{}).
+		Select("id, username, display_name, role").
+		Where("role >= ?", common.RoleAdminUser).
+		Order("role desc, id asc").
+		Scan(&adminUsers).Error; err != nil {
+		return nil, err
+	}
+	options.AdminUsers = adminUsers
+
 	upstreamAccounts, err := GetProfitBoardUpstreamAccountOptions()
 	if err != nil {
 		return nil, err
@@ -1431,6 +1503,7 @@ func normalizeProfitBoardQuery(query ProfitBoardQuery) (ProfitBoardQuery, string
 	query.Upstream = normalizeProfitBoardPricingConfig(query.Upstream, false)
 	query.Site = normalizeProfitBoardPricingConfig(query.Site, true)
 	query.SharedSite = normalizeProfitBoardSharedSiteConfig(query.SharedSite, query.Site)
+	query.ExcludedUserIDs = normalizeProfitBoardExcludedUserIDs(query.ExcludedUserIDs)
 	query.ComboConfigs = normalizeProfitBoardComboConfigs(normalizedBatches, query.ComboConfigs, query.SharedSite, query.Site, query.Upstream)
 	query.ComboConfigs = hydrateProfitBoardRemoteObserverSecrets(signature, query.ComboConfigs)
 	if err := validateProfitBoardPricingConfig(query.Upstream, false); err != nil {
@@ -1936,6 +2009,20 @@ type profitBoardPreparedRow struct {
 	CacheCreationTokens int
 }
 
+type profitBoardSiteRevenueAllocation struct {
+	EligibleBatchRequestCount   map[string]int
+	EligibleChannelRequestCount map[string]int
+	EligibleModelRequestCount   map[string]int
+}
+
+func newProfitBoardSiteRevenueAllocation() profitBoardSiteRevenueAllocation {
+	return profitBoardSiteRevenueAllocation{
+		EligibleBatchRequestCount:   make(map[string]int),
+		EligibleChannelRequestCount: make(map[string]int),
+		EligibleModelRequestCount:   make(map[string]int),
+	}
+}
+
 func resolveProfitBoardComboPricingMap(query ProfitBoardQuery, batches []ProfitBoardBatchInfo) map[string]profitBoardResolvedComboPricing {
 	configMap := make(map[string]profitBoardResolvedComboPricing, len(batches))
 	for _, batch := range batches {
@@ -2066,7 +2153,7 @@ func iterateProfitBoardRows(query ProfitBoardQuery, batches []ProfitBoardBatchIn
 	comboPricingMap := resolveProfitBoardComboPricingMap(query, batches)
 
 	tx := LOG_DB.Table("logs").
-		Select("id, created_at, request_id, channel_id, model_name, quota, prompt_tokens, completion_tokens, other").
+		Select("id, user_id, created_at, request_id, channel_id, model_name, quota, prompt_tokens, completion_tokens, other").
 		Where("type = ?", LogTypeConsume).
 		Where("channel_id IN ?", channelIDs)
 	if query.StartTimestamp > 0 {
@@ -2158,7 +2245,9 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 	}
 	groupRatios := ratio_setting.GetGroupRatioCopy()
 	comboPricingMap := resolveProfitBoardComboPricingMap(normalizedQuery, resolvedBatches)
+	excludedUserSet := profitBoardExcludedUserSet(normalizedQuery.ExcludedUserIDs)
 	siteUseRechargePrice, sitePriceFactor, sitePriceFactorNote := profitBoardSharedSiteMeta(comboPricingMap)
+	siteRevenueAllocation := newProfitBoardSiteRevenueAllocation()
 
 	report := &ProfitBoardReport{
 		Signature:      signature,
@@ -2255,11 +2344,15 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 			latestLogCreatedAt = row.CreatedAt
 		}
 		actualSiteRevenueUSD := float64(row.Quota) / common.QuotaPerUnit
+		_, excludedFromRevenue := excludedUserSet[row.UserId]
 		comboPricing := prepared.ComboPricing
 		configuredSiteRevenueUSD := 0.0
 		sitePricingSource := ""
 		sitePricingKnown := false
-		if comboPricing.SiteMode == ProfitBoardComboSiteModeLogQuota {
+		if excludedFromRevenue {
+			sitePricingSource = "excluded_user"
+			sitePricingKnown = true
+		} else if comboPricing.SiteMode == ProfitBoardComboSiteModeLogQuota {
 			logQuotaModelNames := comboPricing.SharedSite.ModelNames
 			logQuotaMatched := len(logQuotaModelNames) == 0
 			if !logQuotaMatched {
@@ -2336,6 +2429,9 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 
 		report.Summary.RequestCount++
 		batchSummary.RequestCount++
+		if !excludedFromRevenue {
+			siteRevenueAllocation.EligibleBatchRequestCount[batch.Id]++
+		}
 		if sitePricingKnown && strings.HasPrefix(sitePricingSource, "site_model_") {
 			report.Summary.SiteModelMatchCount++
 			batchSummary.SiteModelMatchCount++
@@ -2410,6 +2506,10 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		}
 		point.RequestCount++
 		point.ActualSiteRevenueUSD += actualSiteRevenueUSD
+		if !excludedFromRevenue {
+			siteRevenueAllocation.EligibleChannelRequestCount[batch.Id+"|"+strconv.Itoa(row.ChannelId)]++
+			siteRevenueAllocation.EligibleModelRequestCount[batch.Id+"|"+row.ModelName]++
+		}
 		if sitePricingKnown {
 			point.ConfiguredSiteRevenueUSD += configuredSiteRevenueUSD
 		}
@@ -2635,6 +2735,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 	applyProfitBoardComboFixedTotals(
 		report,
 		comboPricingMap,
+		siteRevenueAllocation,
 		resolvedBatches,
 		normalizedQuery.StartTimestamp,
 		normalizedQuery.EndTimestamp,
@@ -2729,6 +2830,7 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 	payload.Upstream = normalizeProfitBoardPricingConfig(payload.Upstream, false)
 	payload.Site = normalizeProfitBoardPricingConfig(payload.Site, true)
 	payload.SharedSite = normalizeProfitBoardSharedSiteConfig(payload.SharedSite, payload.Site)
+	payload.ExcludedUserIDs = normalizeProfitBoardExcludedUserIDs(payload.ExcludedUserIDs)
 	payload.ComboConfigs = normalizeProfitBoardComboConfigs(normalizedBatches, payload.ComboConfigs, payload.SharedSite, payload.Site, payload.Upstream)
 	if err := validateProfitBoardPricingConfig(payload.Upstream, false); err != nil {
 		return nil, err
@@ -2750,14 +2852,17 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 	}
 	groupRatios := ratio_setting.GetGroupRatioCopy()
 	query := ProfitBoardQuery{
-		Batches:      normalizedBatches,
-		SharedSite:   payload.SharedSite,
-		ComboConfigs: payload.ComboConfigs,
-		Upstream:     payload.Upstream,
-		Site:         payload.Site,
+		Batches:         normalizedBatches,
+		SharedSite:      payload.SharedSite,
+		ComboConfigs:    payload.ComboConfigs,
+		ExcludedUserIDs: payload.ExcludedUserIDs,
+		Upstream:        payload.Upstream,
+		Site:            payload.Site,
 	}
 	comboPricingMap := resolveProfitBoardComboPricingMap(query, resolvedBatches)
+	excludedUserSet := profitBoardExcludedUserSet(payload.ExcludedUserIDs)
 	siteUseRechargePrice, sitePriceFactor, sitePriceFactorNote := profitBoardSharedSiteMeta(comboPricingMap)
+	siteRevenueAllocation := newProfitBoardSiteRevenueAllocation()
 
 	report := &ProfitBoardReport{
 		Signature:      signature,
@@ -2837,11 +2942,15 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 		}
 
 		actualSiteRevenueUSD := float64(row.Quota) / common.QuotaPerUnit
+		_, excludedFromRevenue := excludedUserSet[row.UserId]
 		comboPricing := prepared.ComboPricing
 		configuredSiteRevenueUSD := 0.0
 		sitePricingSource := ""
 		sitePricingKnown := false
-		if comboPricing.SiteMode == ProfitBoardComboSiteModeLogQuota {
+		if excludedFromRevenue {
+			sitePricingSource = "excluded_user"
+			sitePricingKnown = true
+		} else if comboPricing.SiteMode == ProfitBoardComboSiteModeLogQuota {
 			logQuotaModelNames := comboPricing.SharedSite.ModelNames
 			logQuotaMatched := len(logQuotaModelNames) == 0
 			if !logQuotaMatched {
@@ -2918,6 +3027,9 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 
 		report.Summary.RequestCount++
 		batchSummary.RequestCount++
+		if !excludedFromRevenue {
+			siteRevenueAllocation.EligibleBatchRequestCount[prepared.Batch.Id]++
+		}
 		if sitePricingKnown && strings.HasPrefix(sitePricingSource, "site_model_") {
 			report.Summary.SiteModelMatchCount++
 			batchSummary.SiteModelMatchCount++
@@ -3023,6 +3135,7 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 	applyProfitBoardComboFixedTotals(
 		report,
 		comboPricingMap,
+		siteRevenueAllocation,
 		resolvedBatches,
 		0,
 		common.GetTimestamp(),
@@ -3081,6 +3194,8 @@ func GenerateProfitBoardReport(query ProfitBoardQuery) (*ProfitBoardReport, erro
 
 func profitBoardSitePricingSourceLabel(source string) string {
 	switch source {
+	case "excluded_user":
+		return "排除收入"
 	case "manual", "manual_rule":
 		return "手动价格"
 	case "manual_default":

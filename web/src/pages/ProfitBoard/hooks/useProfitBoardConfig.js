@@ -40,9 +40,13 @@ export const useProfitBoardConfig = ({
     groups: [],
     local_models: [],
     site_models: [],
+    admin_users: [],
     upstream_accounts: [],
   });
   const [siteConfig, setSiteConfig] = useState(restoredState.siteConfig || {});
+  const [excludedUserIDs, setExcludedUserIDs] = useState(
+    restoredState.excludedUserIDs || [],
+  );
   const [upstreamConfig, setUpstreamConfig] = useState(
     restoredState.upstreamConfig || {},
   );
@@ -138,10 +142,11 @@ export const useProfitBoardConfig = ({
         use_recharge_price: !!siteConfig.use_recharge_price,
       },
       combo_configs: comboConfigs,
+      excluded_user_ids: excludedUserIDs,
       upstream: { ...upstreamConfig, fixed_amount: 0 },
       site: { ...siteConfig, fixed_amount: 0 },
     }),
-    [batchPayload, comboConfigs, siteConfig, upstreamConfig],
+    [batchPayload, comboConfigs, excludedUserIDs, siteConfig, upstreamConfig],
   );
 
   const walletModeEnabled = upstreamConfig.upstream_mode === 'wallet_observer';
@@ -160,6 +165,7 @@ export const useProfitBoardConfig = ({
         ...(config.shared_site || {}),
         model_names: config.shared_site?.model_names || [],
       },
+      excludedUserIDs: (config.excluded_user_ids || []).map(Number).filter(Boolean),
       upstreamConfig: {
         ...(config.upstream || {}),
         cost_source: 'manual_only',
@@ -190,6 +196,7 @@ export const useProfitBoardConfig = ({
       const next = normalizeLoadedConfig(config);
       // 直接替换，不做合并——服务器数据为最终来源
       setSiteConfig(next.siteConfig);
+      setExcludedUserIDs(next.excludedUserIDs);
       setUpstreamConfig(next.upstreamConfig);
       setComboConfigs(next.comboConfigs);
     },
@@ -209,6 +216,7 @@ export const useProfitBoardConfig = ({
           groups: [],
           local_models: [],
           site_models: [],
+          admin_users: [],
           upstream_accounts: [],
         },
       );
@@ -315,6 +323,8 @@ export const useProfitBoardConfig = ({
     options,
     siteConfig,
     setSiteConfig,
+    excludedUserIDs,
+    setExcludedUserIDs,
     upstreamConfig,
     setUpstreamConfig,
     channelOptions,

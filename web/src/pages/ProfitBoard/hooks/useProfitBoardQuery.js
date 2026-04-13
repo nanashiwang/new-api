@@ -77,6 +77,7 @@ export const useProfitBoardQuery = ({
         batches: batchPayload,
         shared_site: configPayload.shared_site,
         combo_configs: configPayload.combo_configs,
+        excluded_user_ids: configPayload.excluded_user_ids,
         upstream: configPayload.upstream,
         site: configPayload.site,
         start_timestamp: Math.floor(

@@ -35,6 +35,7 @@ import { showError, timestamp2string } from '../../helpers';
 import { useIsMobile } from '@/hooks/common/useIsMobile';
 import ChartAnalysisCard from './components/ChartAnalysisCard';
 import ComboManagerCard from './components/ComboManagerCard';
+import ExcludedAdminUsersCard from './components/ExcludedAdminUsersCard';
 import OverviewPanel from './components/OverviewPanel';
 import PricingConfigModal from './components/PricingConfigModal';
 import ProfitBoardHeader from './components/ProfitBoardHeader';
@@ -153,6 +154,8 @@ const ProfitBoardPage = () => {
     saving,
     options,
     siteConfig,
+    excludedUserIDs,
+    setExcludedUserIDs,
     upstreamConfig,
     setUpstreamConfig,
     channelOptions,
@@ -484,6 +487,7 @@ const ProfitBoardPage = () => {
       analysisMode,
       viewBatchId,
       comboConfigs,
+      excludedUserIDs,
       upstreamConfig,
       siteConfig,
       lastQueryKey,
@@ -499,6 +503,7 @@ const ProfitBoardPage = () => {
     comboConfigs,
     customIntervalMinutes,
     dateRange,
+    excludedUserIDs,
     granularity,
     hasUnsavedConfigChanges,
     metricKey,
@@ -581,11 +586,7 @@ const ProfitBoardPage = () => {
   }, [options.channels, t]);
 
   const channelRows = useMemo(() => {
-    if (
-      !report ||
-      (analysisMode === 'single_metric' &&
-        metricKey === 'remote_observed_cost_usd')
-    ) {
+    if (!report) {
       return [];
     }
     if (analysisMode === 'business_compare') {
@@ -628,11 +629,7 @@ const ProfitBoardPage = () => {
   ]);
 
   const modelRows = useMemo(() => {
-    if (
-      !report ||
-      (analysisMode === 'single_metric' &&
-        metricKey === 'remote_observed_cost_usd')
-    ) {
+    if (!report) {
       return [];
     }
     return analysisMode === 'business_compare'
@@ -928,6 +925,12 @@ const ProfitBoardPage = () => {
     }
   }, [saveConfig, validationErrors]);
 
+  const handleExcludedUserIDsChange = useCallback((nextIDs) => {
+    setExcludedUserIDs(nextIDs);
+    setHasUnsavedConfigChanges(true);
+    pendingAutoSaveRef.current = true;
+  }, [setExcludedUserIDs]);
+
   const handleMoveBatch = useCallback(
     (index, direction) => {
       const target = index + direction;
@@ -1101,25 +1104,33 @@ const ProfitBoardPage = () => {
                   <Skeleton.Paragraph rows={3} />
                 </div>
               ) : (
-                <ComboManagerCard
-                  batches={batches}
-                  batchDigest={batchDigest}
-                  resolveComboConfig={resolveComboConfig}
-                  getSiteSummary={(comboConfig) =>
-                    getSiteSummaryText(comboConfig, t)
-                  }
-                  getUpstreamSummary={(comboConfig) =>
-                    getUpstreamSummaryText(comboConfig, options, t)
-                  }
-                  batchValidationError={duplicateBatchError}
-                  batchMetrics={batchMetrics}
-                  isMobile={isMobile}
-                  onCreateBatch={editorHook.openCreateBatchModal}
-                  onEditBatch={editorHook.openEditBatchModal}
-                  onRemoveBatch={editorHook.handleRemoveBatch}
-                  onMoveBatch={handleMoveBatch}
-                  t={t}
-                />
+                <>
+                  <ExcludedAdminUsersCard
+                    adminUsers={options.admin_users || []}
+                    excludedUserIDs={excludedUserIDs}
+                    onChange={handleExcludedUserIDsChange}
+                    t={t}
+                  />
+                  <ComboManagerCard
+                    batches={batches}
+                    batchDigest={batchDigest}
+                    resolveComboConfig={resolveComboConfig}
+                    getSiteSummary={(comboConfig) =>
+                      getSiteSummaryText(comboConfig, t)
+                    }
+                    getUpstreamSummary={(comboConfig) =>
+                      getUpstreamSummaryText(comboConfig, options, t)
+                    }
+                    batchValidationError={duplicateBatchError}
+                    batchMetrics={batchMetrics}
+                    isMobile={isMobile}
+                    onCreateBatch={editorHook.openCreateBatchModal}
+                    onEditBatch={editorHook.openEditBatchModal}
+                    onRemoveBatch={editorHook.handleRemoveBatch}
+                    onMoveBatch={handleMoveBatch}
+                    t={t}
+                  />
+                </>
               )}
             </div>
           </Tabs.TabPane>

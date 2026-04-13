@@ -25,24 +25,19 @@ export const DETAIL_LIMIT = 600;
 
 export const createMetricOptions = (t) => [
   { value: 'configured_profit_usd', label: t('利润') },
-  { value: 'actual_profit_usd', label: t('实际利润') },
-  { value: 'actual_site_revenue_usd', label: t('本站实际收入') },
   { value: 'configured_site_revenue_usd', label: t('本站配置收入') },
   { value: 'upstream_cost_usd', label: t('上游费用') },
-  { value: 'remote_observed_cost_usd', label: t('上游实际消耗') },
 ];
 
 /** @deprecated Use createMetricOptions(t) instead */
 export const metricOptions = [
   { value: 'configured_profit_usd', label: '利润' },
-  { value: 'actual_profit_usd', label: '实际利润' },
-  { value: 'actual_site_revenue_usd', label: '本站实际收入' },
   { value: 'configured_site_revenue_usd', label: '本站配置收入' },
   { value: 'upstream_cost_usd', label: '上游费用' },
-  { value: 'remote_observed_cost_usd', label: '上游实际消耗' },
 ];
 
 export const createSitePricingSourceLabelMap = (t) => ({
+  excluded_user: t('排除收入'),
   manual: t('手动价格'),
   manual_rule: t('手动价格'),
   manual_default: t('手动默认规则'),
@@ -55,6 +50,7 @@ export const createSitePricingSourceLabelMap = (t) => ({
 
 /** @deprecated Use createSitePricingSourceLabelMap(t) instead */
 export const sitePricingSourceLabelMap = {
+  excluded_user: '排除收入',
   manual: '手动价格',
   manual_rule: '手动价格',
   manual_default: '手动默认规则',
@@ -813,6 +809,7 @@ export const createDefaultState = () => {
     analysisMode: 'business_compare',
     viewBatchId: 'all',
     comboConfigs: [],
+    excludedUserIDs: [],
     upstreamConfig: createDefaultUpstreamConfig(),
     siteConfig: createDefaultSiteConfig(),
     lastQueryKey: '',
@@ -924,6 +921,22 @@ export const normalizeRestoredState = (state) => {
       ...(item?.remote_observer || {}),
     },
   }));
+  next.excludedUserIDs = Array.isArray(next.excludedUserIDs)
+    ? Array.from(
+        new Set(
+          next.excludedUserIDs
+            .map((item) => Number(item))
+            .filter((item) => Number.isInteger(item) && item > 0),
+        ),
+      ).sort((left, right) => left - right)
+    : [];
+  if (
+    !['configured_profit_usd', 'configured_site_revenue_usd', 'upstream_cost_usd'].includes(
+      next.metricKey,
+    )
+  ) {
+    next.metricKey = defaults.metricKey;
+  }
   next.viewBatchId = next.viewBatchId || 'all';
   next.lastQueryKey = next.lastQueryKey || '';
   next.analysisMode = next.analysisMode || 'business_compare';

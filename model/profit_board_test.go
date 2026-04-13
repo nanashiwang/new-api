@@ -41,10 +41,134 @@ func setupProfitBoardTestDB(t *testing.T) *gorm.DB {
 		initCol()
 	})
 
-	if err := db.AutoMigrate(&Channel{}, &Log{}, &Ability{}, &Model{}, &Vendor{}, &ProfitBoardConfig{}, &ProfitBoardUpstreamAccount{}, &ProfitBoardRemoteSnapshot{}); err != nil {
+	if err := db.AutoMigrate(&User{}, &Channel{}, &Log{}, &Ability{}, &Model{}, &Vendor{}, &ProfitBoardConfig{}, &ProfitBoardUpstreamAccount{}, &ProfitBoardRemoteSnapshot{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db
+}
+
+func TestGetProfitBoardOptionsIncludesAdminUsers(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	users := []User{
+		{Id: 1, Username: "admin-user", DisplayName: "Admin User", Role: common.RoleAdminUser, Status: common.UserStatusEnabled, AffCode: "pb-admin-user"},
+		{Id: 2, Username: "root-user", DisplayName: "Root User", Role: common.RoleRootUser, Status: common.UserStatusEnabled, AffCode: "pb-root-user"},
+		{Id: 3, Username: "common-user", DisplayName: "Common User", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "pb-common-user"},
+	}
+	for _, user := range users {
+		if err := db.Create(&user).Error; err != nil {
+			t.Fatalf("seed user: %v", err)
+		}
+	}
+
+	options, err := GetProfitBoardOptions()
+	if err != nil {
+		t.Fatalf("GetProfitBoardOptions: %v", err)
+	}
+
+	if len(options.AdminUsers) != 2 {
+		t.Fatalf("expected 2 admin users, got %+v", options.AdminUsers)
+	}
+	if options.AdminUsers[0].Id != 2 || options.AdminUsers[1].Id != 1 {
+		t.Fatalf("unexpected admin users order: %+v", options.AdminUsers)
+	}
+}
+
+func TestProfitBoardExcludedUsersSkipConfiguredRevenueAndKeepUpstreamCost(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	originQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 1000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originQuotaPerUnit
+	})
+
+	users := []User{
+		{Id: 1, Username: "admin-user", DisplayName: "Admin User", Role: common.RoleAdminUser, Status: common.UserStatusEnabled, AffCode: "pb-excluded-admin"},
+		{Id: 2, Username: "common-user", DisplayName: "Common User", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "pb-excluded-common"},
+	}
+	for _, user := range users {
+		if err := db.Create(&user).Error; err != nil {
+			t.Fatalf("seed user: %v", err)
+		}
+	}
+
+	channel := Channel{Id: 1, Name: "alpha", Status: common.ChannelStatusEnabled}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+
+	now := common.GetTimestamp()
+	logs := []Log{
+		{Id: 1, UserId: 1, Username: "admin-user", Type: LogTypeConsume, CreatedAt: now - 120, ChannelId: 1, ModelName: "gpt-4.1", PromptTokens: 1000, CompletionTokens: 0, Quota: 5},
+		{Id: 2, UserId: 2, Username: "common-user", Type: LogTypeConsume, CreatedAt: now - 60, ChannelId: 1, ModelName: "gpt-4.1", PromptTokens: 1000, CompletionTokens: 0, Quota: 5},
+	}
+	for _, logRow := range logs {
+		if err := db.Create(&logRow).Error; err != nil {
+			t.Fatalf("seed log: %v", err)
+		}
+	}
+
+	batches := []ProfitBoardBatch{{
+		Id:         "batch-1",
+		Name:       "组合 1",
+		ScopeType:  ProfitBoardScopeChannel,
+		ChannelIDs: []int{1},
+		CreatedAt:  now - 300,
+	}}
+	comboConfigs := []ProfitBoardComboPricingConfig{{
+		ComboId:              "batch-1",
+		SiteRules:            []ProfitBoardModelPricingRule{{IsDefault: true, InputPrice: 5}},
+		UpstreamRules:        []ProfitBoardModelPricingRule{{IsDefault: true, InputPrice: 2}},
+		SiteFixedTotalAmount: 0.2,
+	}}
+	upstreamConfig := ProfitBoardTokenPricingConfig{
+		CostSource: ProfitBoardCostSourceManualOnly,
+	}
+	siteConfig := ProfitBoardTokenPricingConfig{
+		PricingMode: ProfitBoardSitePricingManual,
+	}
+
+	report, err := GenerateProfitBoardReport(ProfitBoardQuery{
+		Batches:         batches,
+		ComboConfigs:    comboConfigs,
+		ExcludedUserIDs: []int{1},
+		Upstream:        upstreamConfig,
+		Site:            siteConfig,
+		StartTimestamp:  now - 300,
+		EndTimestamp:    now,
+		Granularity:     "day",
+	})
+	if err != nil {
+		t.Fatalf("GenerateProfitBoardReport: %v", err)
+	}
+
+	if report.Summary.RequestCount != 2 {
+		t.Fatalf("unexpected request count: %+v", report.Summary)
+	}
+	if report.Summary.ConfiguredSiteRevenueUSD != 0.205 {
+		t.Fatalf("expected excluded admin revenue to be skipped, got %+v", report.Summary)
+	}
+	if report.Summary.UpstreamCostUSD != 0.004 {
+		t.Fatalf("expected upstream cost kept for both requests, got %+v", report.Summary)
+	}
+	if report.Summary.ConfiguredProfitUSD != 0.201 {
+		t.Fatalf("unexpected configured profit: %+v", report.Summary)
+	}
+
+	overview, err := GenerateProfitBoardOverview(ProfitBoardConfigPayload{
+		Batches:         batches,
+		ComboConfigs:    comboConfigs,
+		ExcludedUserIDs: []int{1},
+		Upstream:        upstreamConfig,
+		Site:            siteConfig,
+	})
+	if err != nil {
+		t.Fatalf("GenerateProfitBoardOverview: %v", err)
+	}
+	if overview.Summary.ConfiguredSiteRevenueUSD != 0.205 || overview.Summary.UpstreamCostUSD != 0.004 || overview.Summary.ConfiguredProfitUSD != 0.201 {
+		t.Fatalf("unexpected overview summary: %+v", overview.Summary)
+	}
 }
 
 func seedProfitBoardRemoteSnapshot(t *testing.T, selectionSignature string, comboID string, config ProfitBoardRemoteObserverConfig, syncedAt int64, walletQuota int64, walletUsedQuota int64, subscriptions []ProfitBoardRemoteSubscriptionSnapshot) {
@@ -1693,10 +1817,10 @@ func TestProfitBoardManualOnlyEmptyUpstreamRulesUseOnlyFixedTotal(t *testing.T) 
 	}
 
 	report, err := GenerateProfitBoardReport(ProfitBoardQuery{
-		Batches:      batches,
-		ComboConfigs: comboConfigs,
-		Upstream:     upstreamConfig,
-		Site:         siteConfig,
+		Batches:        batches,
+		ComboConfigs:   comboConfigs,
+		Upstream:       upstreamConfig,
+		Site:           siteConfig,
 		StartTimestamp: now - 300,
 		EndTimestamp:   now,
 		Granularity:    "day",

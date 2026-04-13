@@ -1,6 +1,6 @@
 package model
 
-func applyProfitBoardComboFixedTotals(report *ProfitBoardReport, comboPricingMap map[string]profitBoardResolvedComboPricing, batches []ProfitBoardBatchInfo, startTimestamp int64, endTimestamp int64, granularity string, customIntervalMinutes int) {
+func applyProfitBoardComboFixedTotals(report *ProfitBoardReport, comboPricingMap map[string]profitBoardResolvedComboPricing, allocation profitBoardSiteRevenueAllocation, batches []ProfitBoardBatchInfo, startTimestamp int64, endTimestamp int64, granularity string, customIntervalMinutes int) {
 	if report == nil {
 		return
 	}
@@ -22,11 +22,16 @@ func applyProfitBoardComboFixedTotals(report *ProfitBoardReport, comboPricingMap
 		if !profitBoardTimestampInRange(createdAt, startTimestamp, endTimestamp) {
 			continue
 		}
-		totalSiteFixed += comboPricing.SiteFixedTotalAmount
+		eligibleBatchRequests := allocation.EligibleBatchRequestCount[batchSummary.BatchId]
+		shouldApplySiteFixed := eligibleBatchRequests > 0 || batchSummary.RequestCount == 0
+		if shouldApplySiteFixed {
+			totalSiteFixed += comboPricing.SiteFixedTotalAmount
+			batchSummary.ConfiguredSiteRevenueUSD += comboPricing.SiteFixedTotalAmount
+			batchSummary.ConfiguredProfitUSD += comboPricing.SiteFixedTotalAmount
+		}
 		totalUpstreamFixed += comboPricing.UpstreamFixedTotalAmount
-		batchSummary.ConfiguredSiteRevenueUSD += comboPricing.SiteFixedTotalAmount
 		batchSummary.UpstreamCostUSD += comboPricing.UpstreamFixedTotalAmount
-		batchSummary.ConfiguredProfitUSD += comboPricing.SiteFixedTotalAmount - comboPricing.UpstreamFixedTotalAmount
+		batchSummary.ConfiguredProfitUSD -= comboPricing.UpstreamFixedTotalAmount
 		batchSummary.ActualProfitUSD -= comboPricing.UpstreamFixedTotalAmount
 	}
 
@@ -38,21 +43,26 @@ func applyProfitBoardComboFixedTotals(report *ProfitBoardReport, comboPricingMap
 		}
 		bucketTimestamp, bucketLabel := buildProfitBoardBucket(createdAt, granularity, customIntervalMinutes)
 		point := getOrCreateProfitBoardTimeseriesPoint(report, batch.Id, batch.Name, bucketTimestamp, bucketLabel)
-		point.ConfiguredSiteRevenueUSD += comboPricing.SiteFixedTotalAmount
+		if allocation.EligibleBatchRequestCount[batch.Id] > 0 || batchRequestCount[batch.Id] == 0 {
+			point.ConfiguredSiteRevenueUSD += comboPricing.SiteFixedTotalAmount
+			point.ConfiguredProfitUSD += comboPricing.SiteFixedTotalAmount
+		}
 		point.UpstreamCostUSD += comboPricing.UpstreamFixedTotalAmount
-		point.ConfiguredProfitUSD += comboPricing.SiteFixedTotalAmount - comboPricing.UpstreamFixedTotalAmount
+		point.ConfiguredProfitUSD -= comboPricing.UpstreamFixedTotalAmount
 		point.ActualProfitUSD -= comboPricing.UpstreamFixedTotalAmount
 	}
 
 	for index := range report.ChannelBreakdown {
 		item := &report.ChannelBreakdown[index]
 		totalRequests := batchRequestCount[item.BatchId]
+		eligibleRequests := allocation.EligibleChannelRequestCount[item.BatchId+"|"+item.Key]
+		eligibleBatchRequests := allocation.EligibleBatchRequestCount[item.BatchId]
 		comboPricing := comboPricingMap[item.BatchId]
 		createdAt := batchCreatedAt[item.BatchId]
 		if !profitBoardTimestampInRange(createdAt, startTimestamp, endTimestamp) {
 			continue
 		}
-		siteShare := profitBoardFixedAllocationShare(comboPricing.SiteFixedTotalAmount, totalRequests, item.RequestCount)
+		siteShare := profitBoardFixedAllocationShare(comboPricing.SiteFixedTotalAmount, eligibleBatchRequests, eligibleRequests)
 		upstreamShare := profitBoardFixedAllocationShare(comboPricing.UpstreamFixedTotalAmount, totalRequests, item.RequestCount)
 		item.ConfiguredSiteRevenueUSD += siteShare
 		item.UpstreamCostUSD += upstreamShare
@@ -63,12 +73,14 @@ func applyProfitBoardComboFixedTotals(report *ProfitBoardReport, comboPricingMap
 	for index := range report.ModelBreakdown {
 		item := &report.ModelBreakdown[index]
 		totalRequests := batchRequestCount[item.BatchId]
+		eligibleRequests := allocation.EligibleModelRequestCount[item.BatchId+"|"+item.Key]
+		eligibleBatchRequests := allocation.EligibleBatchRequestCount[item.BatchId]
 		comboPricing := comboPricingMap[item.BatchId]
 		createdAt := batchCreatedAt[item.BatchId]
 		if !profitBoardTimestampInRange(createdAt, startTimestamp, endTimestamp) {
 			continue
 		}
-		siteShare := profitBoardFixedAllocationShare(comboPricing.SiteFixedTotalAmount, totalRequests, item.RequestCount)
+		siteShare := profitBoardFixedAllocationShare(comboPricing.SiteFixedTotalAmount, eligibleBatchRequests, eligibleRequests)
 		upstreamShare := profitBoardFixedAllocationShare(comboPricing.UpstreamFixedTotalAmount, totalRequests, item.RequestCount)
 		item.ConfiguredSiteRevenueUSD += siteShare
 		item.UpstreamCostUSD += upstreamShare
@@ -80,6 +92,7 @@ func applyProfitBoardComboFixedTotals(report *ProfitBoardReport, comboPricingMap
 	report.Meta.UpstreamFixedTotalAmount = roundProfitBoardAmount(totalUpstreamFixed)
 	report.Summary.ConfiguredSiteRevenueUSD += totalSiteFixed
 	report.Summary.UpstreamCostUSD += totalUpstreamFixed
-	report.Summary.ConfiguredProfitUSD += totalSiteFixed - totalUpstreamFixed
+	report.Summary.ConfiguredProfitUSD += totalSiteFixed
+	report.Summary.ConfiguredProfitUSD -= totalUpstreamFixed
 	report.Summary.ActualProfitUSD -= totalUpstreamFixed
 }
