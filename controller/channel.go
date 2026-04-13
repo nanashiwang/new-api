@@ -828,6 +828,7 @@ type ChannelTag struct {
 	NewTag                   *string  `json:"new_tag"`
 	Priority                 *int64   `json:"priority"`
 	Weight                   *uint    `json:"weight"`
+	AutoBan                  *int     `json:"auto_ban"`
 	ModelMapping             *string  `json:"model_mapping"`
 	Models                   *string  `json:"models"`
 	Groups                   *string  `json:"groups"`
@@ -922,6 +923,13 @@ func EditTagChannels(c *gin.Context) {
 		}
 		channelTag.HeaderOverride = common.GetPointer[string](trimmed)
 	}
+	if channelTag.AutoBan != nil && *channelTag.AutoBan != 0 && *channelTag.AutoBan != 1 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "自动禁用参数无效",
+		})
+		return
+	}
 	// Validate client restriction mode
 	if channelTag.ClientRestrictionMode != nil {
 		channelTag.ClientRestrictionClients = dto.NormalizeClientRestrictionClients(channelTag.ClientRestrictionClients)
@@ -937,7 +945,7 @@ func EditTagChannels(c *gin.Context) {
 			return
 		}
 	}
-	err = model.EditChannelByTag(channelTag.Tag, channelTag.NewTag, channelTag.ModelMapping, channelTag.Models, channelTag.Groups, channelTag.Priority, channelTag.Weight, channelTag.ParamOverride, channelTag.HeaderOverride)
+	err = model.EditChannelByTag(channelTag.Tag, channelTag.NewTag, channelTag.ModelMapping, channelTag.Models, channelTag.Groups, channelTag.Priority, channelTag.Weight, channelTag.AutoBan, channelTag.ParamOverride, channelTag.HeaderOverride)
 	if err != nil {
 		common.ApiError(c, err)
 		return

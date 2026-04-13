@@ -68,6 +68,7 @@ const EditTagModal = (props) => {
   const originInputs = {
     tag: '',
     new_tag: null,
+    auto_ban: null,
     model_mapping: null,
     groups: [],
     models: [],
@@ -250,6 +251,13 @@ const EditTagModal = (props) => {
       data.header_override = trimmedHeaderOverride;
     }
     data.new_tag = formVals.new_tag;
+    if (
+      formVals.auto_ban !== undefined &&
+      formVals.auto_ban !== null &&
+      formVals.auto_ban !== ''
+    ) {
+      data.auto_ban = Number(formVals.auto_ban);
+    }
     // Handle client restriction
     if (
       formVals.client_restriction_mode !== undefined &&
@@ -276,6 +284,7 @@ const EditTagModal = (props) => {
       data.groups === undefined &&
       data.models === undefined &&
       data.new_tag === undefined &&
+      data.auto_ban === undefined &&
       data.param_override === undefined &&
       data.header_override === undefined &&
       data.client_restriction_mode === undefined
@@ -470,6 +479,20 @@ const EditTagModal = (props) => {
                     label={t('标签名称')}
                     placeholder={t('请输入新标签，留空则解散标签')}
                     onChange={(value) => handleInputChange('new_tag', value)}
+                  />
+
+                  <Form.Select
+                    field='auto_ban'
+                    label={t('是否自动禁用')}
+                    placeholder={t('不更改')}
+                    optionList={[
+                      { label: t('开启'), value: '1' },
+                      { label: t('关闭'), value: '0' },
+                    ]}
+                    onChange={(value) => handleInputChange('auto_ban', value)}
+                    extraText={t(
+                      '设置后会批量修改该标签下所有渠道的自动禁用开关，留空则不更改',
+                    )}
                   />
                 </div>
               </Card>

@@ -176,3 +176,88 @@ func TestUpdateChannelClientRestrictionByTag_MergesExistingSettings(t *testing.T
 		t.Fatalf("expected old-tag channel unchanged, got %#v", updated[3].Setting)
 	}
 }
+
+func TestEditChannelByTag_UpdatesAutoBanWhenProvided(t *testing.T) {
+	db := setupChannelBatchTestDB(t)
+
+	autoBanOn := 1
+	autoBanOff := 0
+	channels := []Channel{
+		{Id: 21, Name: "tag-1", Key: "key-21", Tag: common.GetPointer[string]("target-tag"), AutoBan: &autoBanOn},
+		{Id: 22, Name: "tag-2", Key: "key-22", Tag: common.GetPointer[string]("target-tag"), AutoBan: &autoBanOn},
+		{Id: 23, Name: "other", Key: "key-23", Tag: common.GetPointer[string]("other-tag"), AutoBan: &autoBanOn},
+	}
+	if err := db.Create(&channels).Error; err != nil {
+		t.Fatalf("seed channels: %v", err)
+	}
+
+	if err := EditChannelByTag("target-tag", nil, nil, nil, nil, nil, nil, &autoBanOff, nil, nil); err != nil {
+		t.Fatalf("EditChannelByTag disable auto ban: %v", err)
+	}
+
+	updated, err := GetChannelsByIds([]int{21, 22, 23})
+	if err != nil {
+		t.Fatalf("GetChannelsByIds: %v", err)
+	}
+
+	for _, channel := range updated {
+		switch channel.Id {
+		case 21, 22:
+			if channel.AutoBan == nil || *channel.AutoBan != autoBanOff {
+				t.Fatalf("expected channel %d auto_ban=%d, got %#v", channel.Id, autoBanOff, channel.AutoBan)
+			}
+		case 23:
+			if channel.AutoBan == nil || *channel.AutoBan != autoBanOn {
+				t.Fatalf("expected other tag channel unchanged, got %#v", channel.AutoBan)
+			}
+		}
+	}
+
+	if err := EditChannelByTag("target-tag", nil, nil, nil, nil, nil, nil, &autoBanOn, nil, nil); err != nil {
+		t.Fatalf("EditChannelByTag enable auto ban: %v", err)
+	}
+
+	updated, err = GetChannelsByIds([]int{21, 22})
+	if err != nil {
+		t.Fatalf("GetChannelsByIds after enable: %v", err)
+	}
+	for _, channel := range updated {
+		if channel.AutoBan == nil || *channel.AutoBan != autoBanOn {
+			t.Fatalf("expected channel %d auto_ban restored to %d, got %#v", channel.Id, autoBanOn, channel.AutoBan)
+		}
+	}
+}
+
+func TestEditChannelByTag_LeavesAutoBanUnchangedWhenNil(t *testing.T) {
+	db := setupChannelBatchTestDB(t)
+
+	autoBanOn := 1
+	autoBanOff := 0
+	channels := []Channel{
+		{Id: 31, Name: "tag-1", Key: "key-31", Tag: common.GetPointer[string]("target-tag"), AutoBan: &autoBanOn},
+		{Id: 32, Name: "tag-2", Key: "key-32", Tag: common.GetPointer[string]("target-tag"), AutoBan: &autoBanOff},
+	}
+	if err := db.Create(&channels).Error; err != nil {
+		t.Fatalf("seed channels: %v", err)
+	}
+
+	priority := int64(99)
+	if err := EditChannelByTag("target-tag", nil, nil, nil, nil, &priority, nil, nil, nil, nil); err != nil {
+		t.Fatalf("EditChannelByTag with nil auto ban: %v", err)
+	}
+
+	updated, err := GetChannelsByIds([]int{31, 32})
+	if err != nil {
+		t.Fatalf("GetChannelsByIds: %v", err)
+	}
+
+	if updated[0].AutoBan == nil || *updated[0].AutoBan != autoBanOn {
+		t.Fatalf("expected channel 31 auto_ban unchanged, got %#v", updated[0].AutoBan)
+	}
+	if updated[1].AutoBan == nil || *updated[1].AutoBan != autoBanOff {
+		t.Fatalf("expected channel 32 auto_ban unchanged, got %#v", updated[1].AutoBan)
+	}
+	if updated[0].Priority == nil || *updated[0].Priority != priority {
+		t.Fatalf("expected unrelated update to still apply, got %#v", updated[0].Priority)
+	}
+}
