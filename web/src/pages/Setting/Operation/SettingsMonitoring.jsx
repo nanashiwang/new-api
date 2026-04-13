@@ -206,45 +206,47 @@ export default function SettingsMonitoring(props) {
               </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <div
-                  style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'flex-start',
+                    gap: 8,
+                    width: '100%',
+                  }}
                 >
-                  <div style={{ flex: 1 }}>
-                    <Form.InputNumber
-                      label={
-                        <span style={{ whiteSpace: 'nowrap' }}>
-                          {t('禁用前等待时间')}
-                        </span>
-                      }
-                      step={1}
-                      min={1}
-                      suffix={t('分钟')}
-                      disabled={!inputs['monitor_setting.pre_disable_wait_enabled']}
-                      extraText={t('触发自动禁用后，会等待并再测试一次')}
-                      placeholder={''}
-                      field={'monitor_setting.pre_disable_wait_minutes'}
-                      onChange={(value) =>
-                        setInputs({
-                          ...inputs,
-                          'monitor_setting.pre_disable_wait_minutes':
-                            parseInt(value),
-                        })
-                      }
-                    />
-                  </div>
-                  <div style={{ paddingTop: 30 }}>
-                    <Switch
-                      checked={inputs['monitor_setting.pre_disable_wait_enabled']}
-                      size='default'
-                      checkedText='｜'
-                      uncheckedText='〇'
-                      onChange={(value) =>
-                        setInputs({
-                          ...inputs,
-                          'monitor_setting.pre_disable_wait_enabled': value,
-                        })
-                      }
-                    />
-                  </div>
+                  <Form.InputNumber
+                    label={
+                      <span style={{ whiteSpace: 'nowrap' }}>
+                        {t('禁用前等待时间')}
+                      </span>
+                    }
+                    step={1}
+                    min={1}
+                    suffix={t('分钟')}
+                    disabled={!inputs['monitor_setting.pre_disable_wait_enabled']}
+                    extraText={t('触发自动禁用后，会等待并再测试一次')}
+                    placeholder={''}
+                    field={'monitor_setting.pre_disable_wait_minutes'}
+                    onChange={(value) =>
+                      setInputs({
+                        ...inputs,
+                        'monitor_setting.pre_disable_wait_minutes':
+                          parseInt(value),
+                      })
+                    }
+                  />
+                  <Switch
+                    checked={inputs['monitor_setting.pre_disable_wait_enabled']}
+                    size='default'
+                    checkedText='｜'
+                    uncheckedText='〇'
+                    onChange={(value) =>
+                      setInputs({
+                        ...inputs,
+                        'monitor_setting.pre_disable_wait_enabled': value,
+                      })
+                    }
+                  />
                 </div>
               </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
