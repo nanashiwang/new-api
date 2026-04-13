@@ -148,11 +148,12 @@ const ExcludedAdminUsersCard = ({
           multiple
           remote
           filter={false}
+          searchPosition='dropdown'
           maxTagCount={3}
           loading={searching}
           value={(excludedUserIDs || []).map((item) => String(item))}
           optionList={optionList}
-          placeholder={t('选择要排除收入的用户，支持搜索 ID 或用户名')}
+          placeholder={t('选择要排除收入的用户')}
           style={{ width: '100%' }}
           onSearch={handleSearch}
           onChange={handleChange}
