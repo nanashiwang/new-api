@@ -254,15 +254,23 @@ type ProfitBoardOptions struct {
 	GroupRatios      map[string]float64                 `json:"group_ratios,omitempty"`
 	LocalModels      []ProfitBoardLocalModelOption      `json:"local_models"`
 	SiteModels       []string                           `json:"site_models"`
-	AdminUsers       []ProfitBoardAdminUserOption       `json:"admin_users"`
+	AdminUsers       []ProfitBoardUserOption       `json:"admin_users"`
 	UpstreamAccounts []ProfitBoardUpstreamAccountOption `json:"upstream_accounts"`
 }
 
-type ProfitBoardAdminUserOption struct {
+type ProfitBoardUserOption struct {
 	Id          int    `json:"id"`
 	Username    string `json:"username"`
 	DisplayName string `json:"display_name"`
 	Role        int    `json:"role"`
+}
+
+type ProfitBoardUserOptionQuery struct {
+	RoleGroup string
+	Keyword   string
+	IDs       []int
+	Offset    int
+	Limit     int
 }
 
 type ProfitBoardSummary struct {
@@ -1566,7 +1574,7 @@ func GetProfitBoardOptions() (*ProfitBoardOptions, error) {
 	})
 	options.SiteModels = collectProfitBoardSiteModels()
 
-	adminUsers := make([]ProfitBoardAdminUserOption, 0)
+	adminUsers := make([]ProfitBoardUserOption, 0)
 	if err := DB.Model(&User{}).
 		Select("id, username, display_name, role").
 		Where("role >= ?", common.RoleAdminUser).
@@ -1585,6 +1593,64 @@ func GetProfitBoardOptions() (*ProfitBoardOptions, error) {
 	return options, nil
 }
 
+func GetProfitBoardUserOptions(params ProfitBoardUserOptionQuery) ([]ProfitBoardUserOption, int64, error) {
+	query := DB.Model(&User{}).
+		Select("id, username, display_name, role")
+
+	switch strings.ToLower(strings.TrimSpace(params.RoleGroup)) {
+	case "admin":
+		query = query.Where("role >= ?", common.RoleAdminUser)
+	case "common":
+		query = query.Where("role = ?", common.RoleCommonUser)
+	}
+
+	if len(params.IDs) > 0 {
+		query = query.Where("id IN ?", params.IDs)
+	}
+
+	keyword := strings.TrimSpace(params.Keyword)
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		if keywordInt, err := strconv.Atoi(keyword); err == nil {
+			query = query.Where(
+				"id = ? OR username LIKE ? OR display_name LIKE ?",
+				keywordInt,
+				like,
+				like,
+			)
+		} else {
+			query = query.Where(
+				"username LIKE ? OR display_name LIKE ?",
+				like,
+				like,
+			)
+		}
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	order := "id desc"
+	if strings.EqualFold(strings.TrimSpace(params.RoleGroup), "admin") {
+		order = "role desc, id asc"
+	}
+	query = query.Order(order)
+
+	if params.Offset > 0 {
+		query = query.Offset(params.Offset)
+	}
+	if params.Limit > 0 {
+		query = query.Limit(params.Limit)
+	}
+
+	users := make([]ProfitBoardUserOption, 0)
+	if err := query.Scan(&users).Error; err != nil {
+		return nil, 0, err
+	}
+	return users, total, nil
+}
 func collectProfitBoardSiteModels() []string {
 	seen := make(map[string]struct{})
 	modelNames := make([]string, 0)

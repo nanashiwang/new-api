@@ -129,6 +129,31 @@ func GetProfitBoardOptions(c *gin.Context) {
 	common.ApiSuccess(c, options)
 }
 
+func GetProfitBoardUserOptions(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	if strings.TrimSpace(c.Query("page_size")) == "" &&
+		strings.TrimSpace(c.Query("ps")) == "" &&
+		strings.TrimSpace(c.Query("size")) == "" {
+		pageInfo.PageSize = 100
+	}
+
+	users, total, err := model.GetProfitBoardUserOptions(model.ProfitBoardUserOptionQuery{
+		RoleGroup: c.Query("role_group"),
+		Keyword:   c.Query("keyword"),
+		IDs:       parseProfitBoardIntList(c.Query("ids")),
+		Offset:    pageInfo.GetStartIdx(),
+		Limit:     pageInfo.GetPageSize(),
+	})
+	if err != nil {
+		profitBoardApiError(c, err)
+		return
+	}
+
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(users)
+	common.ApiSuccess(c, pageInfo)
+}
+
 func GetLatestProfitBoardConfig(c *gin.Context) {
 	config, signature, err := model.GetLatestProfitBoardConfig()
 	if err != nil {

@@ -16,14 +16,72 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { Card, Select, Typography } from '@douyinfe/semi-ui';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Card, TreeSelect, Typography } from '@douyinfe/semi-ui';
 import { API } from '../../../helpers';
 
 const { Text } = Typography;
 
-const formatUserLabel = (user) =>
-  `${user.display_name || user.username || `#${user.id}`} · ${user.username}`;
+const GROUP_ADMIN = 'profit-board-admin-users';
+const GROUP_COMMON = 'profit-board-common-users';
+const ADMIN_ROLE_THRESHOLD = 10;
+const DEFAULT_EXPANDED_KEYS = [GROUP_ADMIN];
+
+const isAdminUser = (user) => Number(user?.role || 0) >= ADMIN_ROLE_THRESHOLD;
+
+const formatUserLabel = (user) => {
+  const id = Number(user?.id || 0);
+  const username = String(user?.username || '').trim();
+  const displayName = String(user?.display_name || '').trim();
+  const primary = displayName || username || `#${id}`;
+
+  if (displayName && username && displayName !== username) {
+    return `${displayName} · ${username} (#${id})`;
+  }
+  if (username) {
+    return `${primary} · #${id}`;
+  }
+  return primary;
+};
+
+const mergeUsers = (...lists) => {
+  const map = new Map();
+  lists.flat().forEach((user) => {
+    const id = Number(user?.id || 0);
+    if (!id || map.has(id)) return;
+    map.set(id, user);
+  });
+  return Array.from(map.values());
+};
+
+const groupUsersByRole = (users = []) => {
+  const admin = [];
+  const common = [];
+  users.forEach((user) => {
+    if (isAdminUser(user)) {
+      admin.push(user);
+      return;
+    }
+    common.push(user);
+  });
+  return { admin, common };
+};
+
+const buildUserNode = (user) => ({
+  key: `user-${user.id}`,
+  value: String(user.id),
+  label: formatUserLabel(user),
+  isLeaf: true,
+});
+
+const buildGroupNode = (key, label, users = [], disabled = false) => ({
+  key,
+  value: key,
+  label,
+  disabled,
+  isLeaf: false,
+  children: users.map(buildUserNode),
+});
 
 const ExcludedAdminUsersCard = ({
   adminUsers,
@@ -31,108 +89,250 @@ const ExcludedAdminUsersCard = ({
   onChange,
   t,
 }) => {
-  const [searchResults, setSearchResults] = useState([]);
+  const [commonUsers, setCommonUsers] = useState([]);
+  const [commonUsersLoaded, setCommonUsersLoaded] = useState(false);
+  const [commonUsersLoading, setCommonUsersLoading] = useState(false);
   const [searching, setSearching] = useState(false);
   const [searchKeyword, setSearchKeyword] = useState('');
-  const debounceRef = useRef(null);
-  // 缓存搜索选中的普通用户信息，避免选中后只显示 ID
-  const [selectedUserCache, setSelectedUserCache] = useState(new Map());
+  const [searchResults, setSearchResults] = useState({ admin: [], common: [] });
+  const [expandedKeys, setExpandedKeys] = useState(DEFAULT_EXPANDED_KEYS);
+  const [userCache, setUserCache] = useState({});
+  const searchTimerRef = useRef(null);
+  const searchRequestRef = useRef(0);
 
-  const doSearch = useCallback(async (keyword) => {
-    if (!keyword.trim()) {
-      setSearchResults([]);
-      setSearching(false);
-      return;
-    }
-    setSearching(true);
-    try {
-      const res = await API.get(
-        `/api/user/search?keyword=${encodeURIComponent(keyword.trim())}`,
-      );
-      if (res.data?.success && Array.isArray(res.data.data?.data)) {
-        setSearchResults(res.data.data.data);
-      } else {
-        setSearchResults([]);
-      }
-    } catch {
-      setSearchResults([]);
-    } finally {
-      setSearching(false);
-    }
+  const cacheUsers = useCallback((users = []) => {
+    if (!Array.isArray(users) || users.length === 0) return;
+    setUserCache((prev) => {
+      const next = { ...prev };
+      users.forEach((user) => {
+        const id = Number(user?.id || 0);
+        if (!id) return;
+        next[id] = user;
+      });
+      return next;
+    });
   }, []);
+
+  const fetchUsers = useCallback(async (params) => {
+    const res = await API.get('/api/profit_board/user_options', { params });
+    if (!res.data?.success) {
+      throw new Error(res.data?.message || '加载用户选项失败');
+    }
+    return res.data?.data?.items || [];
+  }, []);
+
+  const loadCommonUsers = useCallback(async () => {
+    if (commonUsersLoaded || commonUsersLoading) return;
+    setCommonUsersLoading(true);
+    try {
+      const users = await fetchUsers({
+        role_group: 'common',
+        page_size: 100,
+      });
+      cacheUsers(users);
+      setCommonUsers(users);
+      setCommonUsersLoaded(true);
+    } catch (error) {
+      setCommonUsers([]);
+      throw error;
+    } finally {
+      setCommonUsersLoading(false);
+    }
+  }, [cacheUsers, commonUsersLoaded, commonUsersLoading, fetchUsers]);
+
+  useEffect(() => {
+    const ids = (excludedUserIDs || [])
+      .map((item) => Number(item))
+      .filter((item) => Number.isInteger(item) && item > 0)
+      .filter((item) => !userCache[item]);
+    if (!ids.length) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const users = await fetchUsers({
+          ids: ids.join(','),
+          page_size: Math.min(Math.max(ids.length, 1), 100),
+        });
+        if (cancelled) return;
+        cacheUsers(users);
+      } catch {
+        // 保持静默，未回填时仍允许显示占位 ID
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cacheUsers, excludedUserIDs, fetchUsers, userCache]);
+
+  useEffect(() => {
+    return () => {
+      if (searchTimerRef.current) {
+        clearTimeout(searchTimerRef.current);
+      }
+    };
+  }, []);
+
+  const selectedUsers = useMemo(
+    () =>
+      (excludedUserIDs || [])
+        .map((id) => userCache[Number(id)])
+        .filter(Boolean),
+    [excludedUserIDs, userCache],
+  );
+
+  const selectedCommonUsers = useMemo(
+    () => selectedUsers.filter((user) => !isAdminUser(user)),
+    [selectedUsers],
+  );
+
+  const defaultCommonUsers = useMemo(
+    () => mergeUsers(selectedCommonUsers, commonUsers),
+    [commonUsers, selectedCommonUsers],
+  );
+
+  const treeData = useMemo(() => {
+    const keyword = searchKeyword.trim();
+    if (keyword) {
+      const matchedGroups = [];
+      if (searchResults.admin.length) {
+        matchedGroups.push(
+          buildGroupNode(
+            GROUP_ADMIN,
+            t('管理员'),
+            searchResults.admin,
+            true,
+          ),
+        );
+      }
+      if (searchResults.common.length) {
+        matchedGroups.push(
+          buildGroupNode(
+            GROUP_COMMON,
+            t('普通用户'),
+            searchResults.common,
+            true,
+          ),
+        );
+      }
+      return matchedGroups;
+    }
+
+    return [
+      buildGroupNode(
+        GROUP_ADMIN,
+        t('管理员'),
+        adminUsers || [],
+        true,
+      ),
+      buildGroupNode(
+        GROUP_COMMON,
+        commonUsersLoaded ? t('普通用户') : t('普通用户（展开加载）'),
+        defaultCommonUsers,
+        true,
+      ),
+    ];
+  }, [
+    adminUsers,
+    commonUsersLoaded,
+    defaultCommonUsers,
+    searchKeyword,
+    searchResults.admin,
+    searchResults.common,
+    t,
+  ]);
+
+  const handleLoadData = useCallback(
+    async (treeNode) => {
+      if (searchKeyword.trim()) return;
+      if (treeNode?.key !== GROUP_COMMON) return;
+      await loadCommonUsers();
+    },
+    [loadCommonUsers, searchKeyword],
+  );
+
+  const handleExpand = useCallback(
+    (nextExpandedKeys) => {
+      setExpandedKeys(nextExpandedKeys);
+    },
+    [],
+  );
 
   const handleSearch = useCallback(
     (keyword) => {
       setSearchKeyword(keyword);
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      if (!keyword.trim()) {
-        setSearchResults([]);
+      if (searchTimerRef.current) {
+        clearTimeout(searchTimerRef.current);
+      }
+
+      const trimmedKeyword = keyword.trim();
+      if (!trimmedKeyword) {
+        searchRequestRef.current += 1;
         setSearching(false);
+        setSearchResults({ admin: [], common: [] });
+        setExpandedKeys(DEFAULT_EXPANDED_KEYS);
         return;
       }
+
       setSearching(true);
-      debounceRef.current = setTimeout(() => doSearch(keyword), 300);
+      const requestID = searchRequestRef.current + 1;
+      searchRequestRef.current = requestID;
+      searchTimerRef.current = setTimeout(async () => {
+        try {
+          const users = await fetchUsers({
+            role_group: 'all',
+            keyword: trimmedKeyword,
+            page_size: 100,
+          });
+          if (searchRequestRef.current !== requestID) return;
+          cacheUsers(users);
+          const grouped = groupUsersByRole(users);
+          setSearchResults(grouped);
+          const nextExpandedKeys = [];
+          if (grouped.admin.length) nextExpandedKeys.push(GROUP_ADMIN);
+          if (grouped.common.length) nextExpandedKeys.push(GROUP_COMMON);
+          setExpandedKeys(
+            nextExpandedKeys.length
+              ? nextExpandedKeys
+              : [GROUP_ADMIN, GROUP_COMMON],
+          );
+        } catch {
+          if (searchRequestRef.current !== requestID) return;
+          setSearchResults({ admin: [], common: [] });
+          setExpandedKeys([GROUP_ADMIN, GROUP_COMMON]);
+        } finally {
+          if (searchRequestRef.current === requestID) {
+            setSearching(false);
+          }
+        }
+      }, 300);
     },
-    [doSearch],
+    [cacheUsers, fetchUsers],
   );
-
-  const optionList = useMemo(() => {
-    const hasSearch = searchKeyword.trim().length > 0;
-
-    if (hasSearch) {
-      // 搜索模式：只展示搜索结果
-      return searchResults.map((user) => ({
-        label: formatUserLabel(user),
-        value: String(user.id),
-      }));
-    }
-
-    // 默认模式：展示管理员 + 已选非管理员用户
-    const adminIdSet = new Set(
-      (adminUsers || []).map((u) => String(u.id)),
-    );
-    const options = (adminUsers || []).map((user) => ({
-      label: formatUserLabel(user),
-      value: String(user.id),
-    }));
-
-    // 已选但不在管理员列表中的用户
-    (excludedUserIDs || []).forEach((userID) => {
-      const value = String(userID);
-      if (!adminIdSet.has(value)) {
-        const cached = selectedUserCache.get(value);
-        options.push({
-          label: cached || t('用户 #{{id}}', { id: userID }),
-          value,
-        });
-      }
-    });
-
-    return options;
-  }, [adminUsers, excludedUserIDs, searchKeyword, searchResults, selectedUserCache, t]);
 
   const handleChange = useCallback(
     (value) => {
-      // 缓存新选中用户的 label 信息
-      const newCache = new Map(selectedUserCache);
-      (value || []).forEach((v) => {
-        if (!newCache.has(v)) {
-          const opt = optionList.find((o) => o.value === v);
-          if (opt) newCache.set(v, opt.label);
-        }
-      });
-      setSelectedUserCache(newCache);
-      setSearchKeyword('');
-      setSearchResults([]);
-
-      onChange(
-        (value || [])
-          .map((item) => Number(item))
-          .filter((item) => Number.isInteger(item) && item > 0),
-      );
+      const nextIDs = (Array.isArray(value) ? value : [value])
+        .map((item) => Number(item))
+        .filter((item) => Number.isInteger(item) && item > 0);
+      onChange(nextIDs);
     },
-    [onChange, optionList, selectedUserCache],
+    [onChange],
   );
+
+  const value = useMemo(
+    () => (excludedUserIDs || []).map((item) => String(item)),
+    [excludedUserIDs],
+  );
+
+  const emptyContent = searchKeyword.trim()
+    ? searching
+      ? t('搜索中…')
+      : t('未找到匹配用户')
+    : commonUsersLoading
+      ? t('普通用户加载中…')
+      : t('展开普通用户，或输入 ID / 用户名 / 昵称搜索');
 
   return (
     <Card
@@ -144,26 +344,26 @@ const ExcludedAdminUsersCard = ({
         <Text type='tertiary' size='small'>
           {t('选中的用户请求不计入本站配置收入，但上游费用和利润仍继续统计')}
         </Text>
-        <Select
+        <Text type='tertiary' size='small'>
+          {t('支持按 ID / 用户名 / 昵称搜索管理员和普通用户；普通用户默认收拢')}
+        </Text>
+        <TreeSelect
           multiple
-          remote
-          filter={false}
+          leafOnly
+          filterTreeNode={() => true}
           searchPosition='dropdown'
           maxTagCount={3}
-          loading={searching}
-          value={(excludedUserIDs || []).map((item) => String(item))}
-          optionList={optionList}
+          value={value}
+          treeData={treeData}
+          expandedKeys={expandedKeys}
           placeholder={t('选择要排除收入的用户')}
+          searchPlaceholder={t('搜 ID / 用户名 / 昵称')}
+          emptyContent={emptyContent}
           style={{ width: '100%' }}
-          onSearch={handleSearch}
           onChange={handleChange}
-          emptyContent={
-            searchKeyword.trim()
-              ? searching
-                ? t('搜索中…')
-                : t('未找到匹配用户')
-              : t('输入 ID 或用户名搜索更多用户')
-          }
+          onExpand={handleExpand}
+          onSearch={handleSearch}
+          loadData={handleLoadData}
         />
       </div>
     </Card>
