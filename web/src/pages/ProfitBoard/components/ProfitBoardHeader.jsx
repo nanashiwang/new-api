@@ -33,6 +33,7 @@ import {
   RefreshCw,
   Save,
 } from 'lucide-react';
+import { groupWarningDetailsByScope } from '../utils';
 
 const { Text, Title } = Typography;
 const WARNING_DETAIL_DEFAULT_LIMIT = 10;
@@ -159,19 +160,21 @@ const ProfitBoardHeader = ({
             {allMessages.map((msg, idx) => {
               const messageKey = msg.key || `${msg.type}-${idx}-${msg.text}`;
               const detailItems = Array.isArray(msg.details) ? msg.details : [];
-              const hasDetails = msg.type === 'warning' && detailItems.length > 0;
+              const groupedDetails =
+                msg.type === 'warning' ? groupWarningDetailsByScope(detailItems) : [];
+              const hasDetails = msg.type === 'warning' && groupedDetails.length > 0;
               const detailExpanded = !!expandedWarningKeys[messageKey];
               const showAllDetails = !!expandedWarningMore[messageKey];
               const overflowDetailCount = Math.max(
                 0,
-                detailItems.length - WARNING_DETAIL_DEFAULT_LIMIT,
+                groupedDetails.length - WARNING_DETAIL_DEFAULT_LIMIT,
               );
               const visibleDetails = showAllDetails
-                ? detailItems
-                : detailItems.slice(0, WARNING_DETAIL_DEFAULT_LIMIT);
+                ? groupedDetails
+                : groupedDetails.slice(0, WARNING_DETAIL_DEFAULT_LIMIT);
               const hiddenDetailCount = Math.max(
                 0,
-                detailItems.length - visibleDetails.length,
+                groupedDetails.length - visibleDetails.length,
               );
 
               return (
@@ -229,39 +232,61 @@ const ProfitBoardHeader = ({
                       <div className='mt-2 space-y-2 pl-5'>
                         {visibleDetails.map((detail, detailIdx) => (
                           <div
-                            key={`${messageKey}-${detail.scope_type || 'scope'}-${
-                              detail.scope_value || detail.scope_label || detailIdx
-                            }-${detail.model_name || detailIdx}`}
-                            className='flex items-center justify-between gap-3 rounded-md border border-semi-color-border bg-white px-3 py-2'
+                            key={`${messageKey}-${detail.scopeKey || detailIdx}`}
+                            className='rounded-md border border-semi-color-border bg-white px-3 py-3'
                           >
-                            <div className='min-w-0 space-y-1'>
-                              <div className='flex flex-wrap items-center gap-2'>
+                            <div className='flex items-start justify-between gap-3'>
+                              <div className='min-w-0 space-y-2'>
+                                <div className='flex flex-wrap items-center gap-2'>
+                                  <Tag
+                                    color={detail.scopeType === 'tag' ? 'blue' : 'grey'}
+                                    size='small'
+                                  >
+                                    {detail.scopeType === 'tag'
+                                      ? t('标签')
+                                      : t('渠道')}
+                                  </Tag>
+                                  <Text strong className='break-all'>
+                                    {detail.scopeLabel}
+                                  </Text>
+                                  {detail.displayHint ? (
+                                    <Text type='tertiary' size='small'>
+                                      {detail.displayHint}
+                                    </Text>
+                                  ) : null}
+                                </div>
+                                <div className='space-y-1.5'>
+                                  {detail.models.map((model) => (
+                                    <div
+                                      key={`${detail.scopeKey}-${model.modelName || 'model'}`}
+                                      className='flex items-center justify-between gap-3 rounded-md bg-semi-color-fill-0 px-2.5 py-1.5'
+                                    >
+                                      <div className='flex min-w-0 items-center gap-2'>
+                                        <Tag color='grey' size='small'>
+                                          {t('模型')}
+                                        </Tag>
+                                        <Text type='tertiary' size='small' className='break-all'>
+                                          {model.modelName}
+                                        </Text>
+                                      </div>
+                                      <Text type='tertiary' size='small'>
+                                        {t('{{count}} 次', { count: model.count })}
+                                      </Text>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                              <div className='shrink-0 text-right'>
                                 <Tag
-                                  color={
-                                    detail.scope_type === 'tag' ? 'blue' : 'grey'
-                                  }
+                                  color='orange'
+                                  shape='circle'
                                   size='small'
                                 >
-                                  {detail.scope_type === 'tag'
-                                    ? t('标签')
-                                    : t('渠道')}
+                                  {t('未命中')}
                                 </Tag>
-                                <Text strong className='break-all'>
-                                  {detail.scope_label}
-                                </Text>
-                              </div>
-                              <div className='flex flex-wrap items-center gap-2'>
-                                <Tag color='grey' size='small'>
-                                  {t('模型')}
-                                </Tag>
-                                <Text type='tertiary' size='small'>
-                                  {detail.model_name}
-                                </Text>
-                              </div>
-                            </div>
-                            <div className='shrink-0 text-right'>
-                              <Text strong>{detail.count}</Text>
-                              <div>
+                                <div className='mt-1'>
+                                  <Text strong>{detail.totalCount}</Text>
+                                </div>
                                 <Text type='tertiary' size='small'>
                                   {t('次未命中')}
                                 </Text>

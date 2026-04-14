@@ -1204,6 +1204,9 @@ func TestBuildProfitBoardUpstreamAccountStateUsesWalletSnapshotKey(t *testing.T)
 	if !options[0].LowBalanceAlert || options[0].LowBalanceThresholdUSD != 0.9 {
 		t.Fatalf("unexpected low balance state: %+v", options[0])
 	}
+	if options[0].PeriodUsedUSD != 0 || options[0].ObservedCostUSD != 0 {
+		t.Fatalf("expected lightweight account options to skip observed aggregate: %+v", options[0])
+	}
 }
 
 func TestGetProfitBoardUpstreamAccountTrendUsesPeriodUsedUSD(t *testing.T) {

@@ -57,6 +57,7 @@ export const useProfitBoardQuery = ({
   const [lastQueryKey, setLastQueryKey] = useState(
     cachedBundle?.queryKey || restoredState.lastQueryKey || '',
   );
+  const [lastOverviewKey, setLastOverviewKey] = useState('');
   const [autoRefreshMode, setAutoRefreshMode] = useState(
     restoredState.autoRefreshMode || false,
   );
@@ -67,8 +68,10 @@ export const useProfitBoardQuery = ({
     cachedBundle?.activityWatermark || '',
   );
   const activeQueryKeyRef = useRef('');
+  const activeOverviewKeyRef = useRef('');
   const autoRefreshTimerRef = useRef(null);
   const scheduledAutoQueryKeyRef = useRef('');
+  const scheduledAutoOverviewKeyRef = useRef('');
   const overviewRequestIdRef = useRef(0);
   const queryRequestIdRef = useRef(0);
 
@@ -90,13 +93,30 @@ export const useProfitBoardQuery = ({
         granularity,
         custom_interval_minutes:
           granularity === 'custom' ? customIntervalMinutes : 0,
-      }),
+    }),
     [batchPayload, configPayload, customIntervalMinutes, dateRange, granularity],
+  );
+
+  const overviewConfigKey = useMemo(
+    () =>
+      buildQueryKey({
+        batches: batchPayload,
+        shared_site: configPayload.shared_site,
+        combo_configs: configPayload.combo_configs,
+        excluded_user_ids: configPayload.excluded_user_ids,
+        upstream: configPayload.upstream,
+        site: configPayload.site,
+      }),
+    [batchPayload, configPayload],
   );
 
   useEffect(() => {
     activeQueryKeyRef.current = currentQueryKey;
   }, [currentQueryKey]);
+
+  useEffect(() => {
+    activeOverviewKeyRef.current = overviewConfigKey;
+  }, [overviewConfigKey]);
 
   useEffect(
     () => () => {
@@ -109,6 +129,8 @@ export const useProfitBoardQuery = ({
 
   const reportMatchesCurrentFilters =
     !!report && lastQueryKey === currentQueryKey;
+  const overviewMatchesCurrentConfig =
+    !!overviewReport && lastOverviewKey === overviewConfigKey;
 
   const autoRefreshEligible = useMemo(
     () =>
@@ -135,7 +157,7 @@ export const useProfitBoardQuery = ({
   );
 
   const runOverviewQuery = useCallback(async (options = {}) => {
-    const { expectedQueryKey = currentQueryKey } = options;
+    const { expectedOverviewKey = overviewConfigKey } = options;
     if (!queryReady || validationErrors.length > 0) return false;
     const requestId = ++overviewRequestIdRef.current;
     setOverviewQuerying(true);
@@ -144,11 +166,12 @@ export const useProfitBoardQuery = ({
       if (!res.data.success) return showError(res.data.message);
       if (
         overviewRequestIdRef.current !== requestId ||
-        activeQueryKeyRef.current !== expectedQueryKey
+        activeOverviewKeyRef.current !== expectedOverviewKey
       ) {
         return false;
       }
       setOverviewReport(res.data.data);
+      setLastOverviewKey(expectedOverviewKey);
       return true;
     } catch (error) {
       showError(error);
@@ -158,7 +181,7 @@ export const useProfitBoardQuery = ({
         setOverviewQuerying(false);
       }
     }
-  }, [configPayload, currentQueryKey, queryReady, validationErrors.length]);
+  }, [configPayload, overviewConfigKey, queryReady, validationErrors.length]);
 
   const runQuery = useCallback(async (options = {}) => {
     const { expectedQueryKey = currentQueryKey, showValidationError = true } =
@@ -206,8 +229,11 @@ export const useProfitBoardQuery = ({
 
   const runFullRefresh = useCallback(
     async (options = {}) => {
-      const { expectedQueryKey = currentQueryKey, showValidationError = true } =
-        options;
+      const {
+        expectedQueryKey = currentQueryKey,
+        expectedOverviewKey = overviewConfigKey,
+        showValidationError = true,
+      } = options;
       if (autoRefreshTimerRef.current) {
         window.clearTimeout(autoRefreshTimerRef.current);
         autoRefreshTimerRef.current = null;
@@ -219,14 +245,15 @@ export const useProfitBoardQuery = ({
         }
         return false;
       }
-      await runOverviewQuery({ expectedQueryKey });
-      return runQuery({
+      await runQuery({
         expectedQueryKey,
         showValidationError: false,
       });
+      return runOverviewQuery({ expectedOverviewKey });
     },
     [
       currentQueryKey,
+      overviewConfigKey,
       queryReady,
       runOverviewQuery,
       runQuery,
@@ -235,7 +262,12 @@ export const useProfitBoardQuery = ({
   );
 
   const checkActivity = useCallback(async () => {
-    if (!autoRefreshMode || !autoRefreshEligible || validationErrors.length > 0)
+    if (
+      !autoRefreshMode ||
+      !autoRefreshEligible ||
+      activeTab !== 'analysis' ||
+      validationErrors.length > 0
+    )
       return;
     setActivityChecking(true);
     try {
@@ -255,6 +287,7 @@ export const useProfitBoardQuery = ({
       setActivityChecking(false);
     }
   }, [
+    activeTab,
     autoRefreshEligible,
     autoRefreshMode,
     queryPayload,
@@ -277,8 +310,10 @@ export const useProfitBoardQuery = ({
 
     if (!queryReady || validationErrors.length > 0) {
       scheduledAutoQueryKeyRef.current = '';
+      scheduledAutoOverviewKeyRef.current = '';
       setAutoRefreshing(false);
       setOverviewReport(null);
+      setLastOverviewKey('');
       setReport(null);
       setLastQueryKey('');
       setHasNewActivity(false);
@@ -286,28 +321,39 @@ export const useProfitBoardQuery = ({
       return undefined;
     }
 
-    const usingCurrentCachedReport =
-      !!report && lastQueryKey === currentQueryKey;
-    if (!usingCurrentCachedReport) {
-      setOverviewReport(null);
-      setReport(null);
-      setLastQueryKey('');
-      setHasNewActivity(false);
-      lastActivityWatermarkRef.current = '';
+    if (activeTab !== 'analysis') {
+      scheduledAutoQueryKeyRef.current = '';
+      scheduledAutoOverviewKeyRef.current = '';
+      setAutoRefreshing(false);
+      return undefined;
+    }
+
+    const needsReport = !reportMatchesCurrentFilters;
+    const needsOverview = !overviewMatchesCurrentConfig;
+    if (!needsReport && !needsOverview) {
+      setAutoRefreshing(false);
+      return undefined;
     }
 
     setAutoRefreshing(true);
     scheduledAutoQueryKeyRef.current = currentQueryKey;
+    scheduledAutoOverviewKeyRef.current = overviewConfigKey;
     autoRefreshTimerRef.current = window.setTimeout(async () => {
       const expectedQueryKey = scheduledAutoQueryKeyRef.current;
-      await runOverviewQuery({ expectedQueryKey });
-      if (activeTab === 'analysis') {
+      const expectedOverviewKey = scheduledAutoOverviewKeyRef.current;
+      if (needsReport) {
         await runQuery({
           expectedQueryKey,
           showValidationError: false,
         });
       }
-      if (scheduledAutoQueryKeyRef.current === expectedQueryKey) {
+      if (needsOverview) {
+        await runOverviewQuery({ expectedOverviewKey });
+      }
+      if (
+        scheduledAutoQueryKeyRef.current === expectedQueryKey &&
+        scheduledAutoOverviewKeyRef.current === expectedOverviewKey
+      ) {
         setAutoRefreshing(false);
       }
     }, 400);
@@ -318,7 +364,17 @@ export const useProfitBoardQuery = ({
         autoRefreshTimerRef.current = null;
       }
     };
-  }, [activeTab, currentQueryKey, queryReady, runOverviewQuery, runQuery, validationErrors.length]);
+  }, [
+    activeTab,
+    currentQueryKey,
+    overviewConfigKey,
+    overviewMatchesCurrentConfig,
+    queryReady,
+    reportMatchesCurrentFilters,
+    runOverviewQuery,
+    runQuery,
+    validationErrors.length,
+  ]);
 
   return {
     querying,
@@ -342,7 +398,9 @@ export const useProfitBoardQuery = ({
     overviewReport,
     report,
     lastQueryKey,
+    lastOverviewKey,
     currentQueryKey,
+    overviewConfigKey,
     reportMatchesCurrentFilters,
     autoRefreshMode,
     setAutoRefreshMode,

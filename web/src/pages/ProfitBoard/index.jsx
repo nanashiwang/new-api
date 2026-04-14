@@ -138,7 +138,6 @@ const ProfitBoardPage = () => {
   );
   const [activeTab, setActiveTab] = useState('wallet');
   const [builderOptionsReady, setBuilderOptionsReady] = useState(false);
-  const [accountsReady, setAccountsReady] = useState(false);
   const [configReady, setConfigReady] = useState(false);
   const serverRestoredRef = useRef(false);
   const pendingAutoSaveRef = useRef(false);
@@ -298,7 +297,7 @@ const ProfitBoardPage = () => {
     t,
   ]);
 
-  const queryReady = accountsReady && configReady && batchPayload.length > 0;
+  const queryReady = configReady && batchPayload.length > 0;
 
   const queryHook = useProfitBoardQuery({
     restoredState,
@@ -384,12 +383,8 @@ const ProfitBoardPage = () => {
   useEffect(() => {
     let cancelled = false;
     loadUpstreamAccounts()
-      .then(() => {
-        if (!cancelled) setAccountsReady(true);
-      })
       .catch((error) => {
         if (cancelled) return;
-        setAccountsReady(false);
         showError(error);
       });
     if (!serverRestoredRef.current) {

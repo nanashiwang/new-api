@@ -349,23 +349,7 @@ func GetProfitBoardUpstreamAccountOptions() ([]ProfitBoardUpstreamAccountOption,
 		return nil, err
 	}
 	options := make([]ProfitBoardUpstreamAccountOption, 0, len(accounts))
-	now := common.GetTimestamp()
 	for _, account := range accounts {
-		if account.Enabled {
-			aggregate, aggregateErr := collectProfitBoardUpstreamAccountObservedAggregate(
-				account.Id,
-				now-7*24*60*60,
-				now,
-				"day",
-				0,
-				false,
-			)
-			if aggregateErr != nil {
-				return nil, aggregateErr
-			}
-			options = append(options, aggregate.State)
-			continue
-		}
 		state, stateErr := buildProfitBoardUpstreamAccountState(account, 0)
 		if stateErr != nil {
 			return nil, stateErr

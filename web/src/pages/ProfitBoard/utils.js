@@ -81,6 +81,84 @@ export const normalizeSubscriptionPlans = (items) => {
   return items.map((item) => item?.plan || item).filter(Boolean);
 };
 
+export const groupWarningDetailsByScope = (details) => {
+  if (!Array.isArray(details) || details.length === 0) return [];
+
+  const labelScopeMap = new Map();
+  details.forEach((detail) => {
+    const scopeType = detail?.scope_type || 'channel';
+    const scopeLabel = detail?.scope_label || '';
+    const scopeValue = String(detail?.scope_value || scopeLabel || '');
+    const labelKey = `${scopeType}:${scopeLabel}`;
+    const values = labelScopeMap.get(labelKey) || new Set();
+    values.add(scopeValue);
+    labelScopeMap.set(labelKey, values);
+  });
+
+  const grouped = new Map();
+  details.forEach((detail) => {
+    const scopeType = detail?.scope_type || 'channel';
+    const scopeLabel = detail?.scope_label || '';
+    const scopeValue = String(detail?.scope_value || scopeLabel || '');
+    const modelName = detail?.model_name || '';
+    const count = Number(detail?.count || 0);
+    const scopeKey = `${scopeType}:${scopeValue}`;
+
+    if (!grouped.has(scopeKey)) {
+      grouped.set(scopeKey, {
+        scopeKey,
+        scopeType,
+        scopeLabel,
+        scopeValue,
+        totalCount: 0,
+        models: new Map(),
+      });
+    }
+
+    const current = grouped.get(scopeKey);
+    current.totalCount += count;
+    current.models.set(modelName, (current.models.get(modelName) || 0) + count);
+  });
+
+  return Array.from(grouped.values())
+    .map((item) => {
+      const labelKey = `${item.scopeType}:${item.scopeLabel}`;
+      const hasDuplicateLabel = (labelScopeMap.get(labelKey)?.size || 0) > 1;
+      let displayHint = '';
+      if (hasDuplicateLabel) {
+        displayHint =
+          item.scopeType === 'channel' && item.scopeValue
+            ? `#${item.scopeValue}`
+            : item.scopeValue;
+      }
+
+      return {
+        scopeKey: item.scopeKey,
+        scopeType: item.scopeType,
+        scopeLabel: item.scopeLabel,
+        scopeValue: item.scopeValue,
+        totalCount: item.totalCount,
+        displayHint,
+        models: Array.from(item.models.entries())
+          .map(([name, value]) => ({
+            modelName: name,
+            count: value,
+          }))
+          .sort((left, right) => {
+            if (right.count !== left.count) return right.count - left.count;
+            return left.modelName.localeCompare(right.modelName);
+          }),
+      };
+    })
+    .sort((left, right) => {
+      if (right.totalCount !== left.totalCount) return right.totalCount - left.totalCount;
+      if (left.scopeLabel !== right.scopeLabel) {
+        return left.scopeLabel.localeCompare(right.scopeLabel);
+      }
+      return left.scopeValue.localeCompare(right.scopeValue);
+    });
+};
+
 export const computePackageEffectiveRate = (plan, quotaPerUnit, usdExchangeRate) => {
   const totalAmount = Number(plan?.total_amount || 0);
   if (!plan || totalAmount <= 0) return null;
