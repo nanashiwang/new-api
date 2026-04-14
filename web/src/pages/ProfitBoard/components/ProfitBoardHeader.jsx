@@ -27,12 +27,15 @@ import {
 } from '@douyinfe/semi-ui';
 import {
   AlertTriangle,
+  ChevronDown,
+  ChevronRight,
   Info,
   RefreshCw,
   Save,
 } from 'lucide-react';
 
 const { Text, Title } = Typography;
+const WARNING_DETAIL_DEFAULT_LIMIT = 10;
 
 const ProfitBoardHeader = ({
   querying,
@@ -45,20 +48,30 @@ const ProfitBoardHeader = ({
   statusSummary,
   hasNewActivity,
   generatedAtText,
-  combinedWarnings,
-  sitePriceFactorNote,
+  combinedMessages,
   hasUnsavedConfigChanges,
   configReady,
   t,
 }) => {
   const [warningsExpanded, setWarningsExpanded] = useState(false);
-  const allMessages = [
-    ...combinedWarnings.map((w) => ({ type: 'warning', text: w })),
-    ...(sitePriceFactorNote
-      ? [{ type: 'info', text: sitePriceFactorNote }]
-      : []),
-  ];
+  const [expandedWarningKeys, setExpandedWarningKeys] = useState({});
+  const [expandedWarningMore, setExpandedWarningMore] = useState({});
+  const allMessages = combinedMessages || [];
   const hasMessages = allMessages.length > 0;
+
+  const toggleWarningDetails = (key) => {
+    setExpandedWarningKeys((current) => ({
+      ...current,
+      [key]: !current[key],
+    }));
+  };
+
+  const toggleWarningMore = (key) => {
+    setExpandedWarningMore((current) => ({
+      ...current,
+      [key]: !current[key],
+    }));
+  };
 
   return (
     <>
@@ -143,25 +156,139 @@ const ProfitBoardHeader = ({
       {hasMessages && (
         <Collapsible isOpen={warningsExpanded}>
           <div className='mt-2 space-y-0.5 rounded-lg bg-semi-color-fill-0 px-3 py-2'>
-            {allMessages.map((msg, idx) => (
-              <div
-                key={idx}
-                className='flex items-start gap-2 py-1 text-sm'
-              >
-                {msg.type === 'warning' ? (
-                  <AlertTriangle
-                    size={13}
-                    className='mt-0.5 shrink-0 text-semi-color-warning'
-                  />
-                ) : (
-                  <Info
-                    size={13}
-                    className='mt-0.5 shrink-0 text-semi-color-primary'
-                  />
-                )}
-                <span className='text-semi-color-text-1'>{msg.text}</span>
-              </div>
-            ))}
+            {allMessages.map((msg, idx) => {
+              const messageKey = msg.key || `${msg.type}-${idx}-${msg.text}`;
+              const detailItems = Array.isArray(msg.details) ? msg.details : [];
+              const hasDetails = msg.type === 'warning' && detailItems.length > 0;
+              const detailExpanded = !!expandedWarningKeys[messageKey];
+              const showAllDetails = !!expandedWarningMore[messageKey];
+              const overflowDetailCount = Math.max(
+                0,
+                detailItems.length - WARNING_DETAIL_DEFAULT_LIMIT,
+              );
+              const visibleDetails = showAllDetails
+                ? detailItems
+                : detailItems.slice(0, WARNING_DETAIL_DEFAULT_LIMIT);
+              const hiddenDetailCount = Math.max(
+                0,
+                detailItems.length - visibleDetails.length,
+              );
+
+              return (
+                <div
+                  key={messageKey}
+                  className='rounded-md py-1'
+                >
+                  <div className='flex items-start justify-between gap-3 text-sm'>
+                    <div className='flex min-w-0 items-start gap-2'>
+                      {msg.type === 'warning' ? (
+                        <AlertTriangle
+                          size={13}
+                          className='mt-0.5 shrink-0 text-semi-color-warning'
+                        />
+                      ) : (
+                        <Info
+                          size={13}
+                          className='mt-0.5 shrink-0 text-semi-color-primary'
+                        />
+                      )}
+                      <div className='min-w-0'>
+                        <div className='break-words text-semi-color-text-1'>
+                          {msg.text}
+                        </div>
+                        {hasDetails && (
+                          <div className='mt-1 flex flex-wrap items-center gap-2'>
+                            <Text type='tertiary' size='small'>
+                              {t('共 {{count}} 条未命中', {
+                                count: msg.totalCount || detailItems.length,
+                              })}
+                            </Text>
+                            <Button
+                              theme='borderless'
+                              type='primary'
+                              size='small'
+                              icon={
+                                detailExpanded ? (
+                                  <ChevronDown size={14} />
+                                ) : (
+                                  <ChevronRight size={14} />
+                                )
+                              }
+                              onClick={() => toggleWarningDetails(messageKey)}
+                            >
+                              {detailExpanded ? t('收起明细') : t('查看明细')}
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {hasDetails && (
+                    <Collapsible isOpen={detailExpanded}>
+                      <div className='mt-2 space-y-2 pl-5'>
+                        {visibleDetails.map((detail, detailIdx) => (
+                          <div
+                            key={`${messageKey}-${detail.scope_type || 'scope'}-${
+                              detail.scope_value || detail.scope_label || detailIdx
+                            }-${detail.model_name || detailIdx}`}
+                            className='flex items-center justify-between gap-3 rounded-md border border-semi-color-border bg-white px-3 py-2'
+                          >
+                            <div className='min-w-0 space-y-1'>
+                              <div className='flex flex-wrap items-center gap-2'>
+                                <Tag
+                                  color={
+                                    detail.scope_type === 'tag' ? 'blue' : 'grey'
+                                  }
+                                  size='small'
+                                >
+                                  {detail.scope_type === 'tag'
+                                    ? t('标签')
+                                    : t('渠道')}
+                                </Tag>
+                                <Text strong className='break-all'>
+                                  {detail.scope_label}
+                                </Text>
+                              </div>
+                              <div className='flex flex-wrap items-center gap-2'>
+                                <Tag color='grey' size='small'>
+                                  {t('模型')}
+                                </Tag>
+                                <Text type='tertiary' size='small'>
+                                  {detail.model_name}
+                                </Text>
+                              </div>
+                            </div>
+                            <div className='shrink-0 text-right'>
+                              <Text strong>{detail.count}</Text>
+                              <div>
+                                <Text type='tertiary' size='small'>
+                                  {t('次未命中')}
+                                </Text>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                        {overflowDetailCount > 0 && (
+                          <Button
+                            theme='borderless'
+                            type='primary'
+                            size='small'
+                            onClick={() => toggleWarningMore(messageKey)}
+                          >
+                            {showAllDetails
+                              ? t('收起多余项')
+                              : t('再展开 {{count}} 项', {
+                                  count: hiddenDetailCount,
+                                })}
+                          </Button>
+                        )}
+                      </div>
+                    </Collapsible>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </Collapsible>
       )}

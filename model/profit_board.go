@@ -417,6 +417,21 @@ type ProfitBoardDetailPage struct {
 	PageSize int                    `json:"page_size"`
 }
 
+type ProfitBoardWarningDetail struct {
+	ScopeType  string `json:"scope_type"`
+	ScopeLabel string `json:"scope_label"`
+	ScopeValue string `json:"scope_value"`
+	ModelName  string `json:"model_name"`
+	Count      int    `json:"count"`
+}
+
+type ProfitBoardWarningItem struct {
+	Code       string                     `json:"code"`
+	Message    string                     `json:"message"`
+	TotalCount int                        `json:"total_count"`
+	Details    []ProfitBoardWarningDetail `json:"details,omitempty"`
+}
+
 type ProfitBoardReport struct {
 	Signature            string                           `json:"signature"`
 	Batches              []ProfitBoardBatchInfo           `json:"batches"`
@@ -429,7 +444,20 @@ type ProfitBoardReport struct {
 	DetailRows           []ProfitBoardDetailRow           `json:"detail_rows"`
 	DetailTruncated      bool                             `json:"detail_truncated"`
 	RemoteObserverStates []ProfitBoardRemoteObserverState `json:"remote_observer_states,omitempty"`
+	WarningItems         []ProfitBoardWarningItem         `json:"warning_items,omitempty"`
 	Warnings             []string                         `json:"warnings,omitempty"`
+}
+
+type profitBoardWarningDetailKey struct {
+	Code       string
+	ScopeType  string
+	ScopeValue string
+	ModelName  string
+}
+
+type profitBoardWarningAccumulator struct {
+	totalCounts map[string]int
+	details     map[profitBoardWarningDetailKey]*ProfitBoardWarningDetail
 }
 
 type profitBoardOtherInfo struct {
@@ -508,10 +536,10 @@ var (
 )
 
 var (
-	profitBoardReportCacheOnce       sync.Once
-	profitBoardReportCache           *cachex.HybridCache[ProfitBoardReport]
-	profitBoardOverviewCacheOnce     sync.Once
-	profitBoardOverviewCache         *cachex.HybridCache[ProfitBoardReport]
+	profitBoardReportCacheOnce        sync.Once
+	profitBoardReportCache            *cachex.HybridCache[ProfitBoardReport]
+	profitBoardOverviewCacheOnce      sync.Once
+	profitBoardOverviewCache          *cachex.HybridCache[ProfitBoardReport]
 	profitBoardOverviewStaleCacheOnce sync.Once
 	profitBoardOverviewStaleCache     *cachex.HybridCache[ProfitBoardReport]
 )
@@ -1839,6 +1867,110 @@ func buildProfitBoardBucket(timestamp int64, granularity string, customIntervalM
 	}
 }
 
+func newProfitBoardWarningAccumulator() *profitBoardWarningAccumulator {
+	return &profitBoardWarningAccumulator{
+		totalCounts: make(map[string]int),
+		details:     make(map[profitBoardWarningDetailKey]*ProfitBoardWarningDetail),
+	}
+}
+
+func profitBoardResolvedChannelMaps(batches []ProfitBoardBatchInfo) (map[int]string, map[int]string) {
+	channelNameMap := make(map[int]string)
+	channelTagMap := make(map[int]string)
+	for _, batch := range batches {
+		for _, channel := range batch.ResolvedChannels {
+			name := strings.TrimSpace(channel.Name)
+			if name == "" {
+				name = fmt.Sprintf("渠道 #%d", channel.Id)
+			}
+			channelNameMap[channel.Id] = name
+			channelTagMap[channel.Id] = strings.TrimSpace(channel.Tag)
+		}
+	}
+	return channelNameMap, channelTagMap
+}
+
+func profitBoardWarningScope(channelID int, channelNameMap map[int]string, channelTagMap map[int]string) (string, string, string) {
+	if tag := strings.TrimSpace(channelTagMap[channelID]); tag != "" {
+		return "tag", tag, tag
+	}
+	if name := strings.TrimSpace(channelNameMap[channelID]); name != "" {
+		return "channel", name, strconv.Itoa(channelID)
+	}
+	return "channel", fmt.Sprintf("渠道 #%d", channelID), strconv.Itoa(channelID)
+}
+
+func (acc *profitBoardWarningAccumulator) add(code string, channelID int, modelName string, channelNameMap map[int]string, channelTagMap map[int]string) {
+	if acc == nil || strings.TrimSpace(code) == "" {
+		return
+	}
+	scopeType, scopeLabel, scopeValue := profitBoardWarningScope(channelID, channelNameMap, channelTagMap)
+	key := profitBoardWarningDetailKey{
+		Code:       code,
+		ScopeType:  scopeType,
+		ScopeValue: scopeValue,
+		ModelName:  modelName,
+	}
+	acc.totalCounts[code]++
+	if detail, ok := acc.details[key]; ok {
+		detail.Count++
+		return
+	}
+	acc.details[key] = &ProfitBoardWarningDetail{
+		ScopeType:  scopeType,
+		ScopeLabel: scopeLabel,
+		ScopeValue: scopeValue,
+		ModelName:  modelName,
+		Count:      1,
+	}
+}
+
+func (acc *profitBoardWarningAccumulator) items(messages map[string]string) []ProfitBoardWarningItem {
+	if acc == nil || len(acc.totalCounts) == 0 {
+		return nil
+	}
+	warningOrder := []string{
+		"missing_upstream_cost",
+		"missing_site_pricing",
+	}
+	items := make([]ProfitBoardWarningItem, 0, len(warningOrder))
+	for _, code := range warningOrder {
+		totalCount := acc.totalCounts[code]
+		if totalCount <= 0 {
+			continue
+		}
+		details := make([]ProfitBoardWarningDetail, 0)
+		for key, detail := range acc.details {
+			if key.Code != code {
+				continue
+			}
+			details = append(details, *detail)
+		}
+		sort.Slice(details, func(i, j int) bool {
+			if details[i].Count != details[j].Count {
+				return details[i].Count > details[j].Count
+			}
+			if details[i].ScopeLabel != details[j].ScopeLabel {
+				return details[i].ScopeLabel < details[j].ScopeLabel
+			}
+			if details[i].ModelName != details[j].ModelName {
+				return details[i].ModelName < details[j].ModelName
+			}
+			if details[i].ScopeType != details[j].ScopeType {
+				return details[i].ScopeType < details[j].ScopeType
+			}
+			return details[i].ScopeValue < details[j].ScopeValue
+		})
+		items = append(items, ProfitBoardWarningItem{
+			Code:       code,
+			Message:    strings.TrimSpace(messages[code]),
+			TotalCount: totalCount,
+			Details:    details,
+		})
+	}
+	return items
+}
+
 func profitBoardLatestLogIdForChannels(channelIDs []int) int {
 	if len(channelIDs) == 0 {
 		return 0
@@ -2492,7 +2624,8 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 	channelBreakdown := make(map[string]*ProfitBoardBreakdownItem)
 	modelBreakdown := make(map[string]*ProfitBoardBreakdownItem)
 	batchSummaryMap := make(map[string]*ProfitBoardBatchSummary, len(resolvedBatches))
-	channelNameMap := make(map[int]string)
+	channelNameMap, channelTagMap := profitBoardResolvedChannelMaps(resolvedBatches)
+	warningAccumulator := newProfitBoardWarningAccumulator()
 	latestLogId := 0
 	latestLogCreatedAt := int64(0)
 	accountWalletCombos := profitBoardWalletObserverCombosByAccount(comboPricingMap)
@@ -2501,9 +2634,6 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		batchSummaryMap[batch.Id] = &ProfitBoardBatchSummary{
 			BatchId:   batch.Id,
 			BatchName: batch.Name,
-		}
-		for _, channel := range batch.ResolvedChannels {
-			channelNameMap[channel.Id] = channel.Name
 		}
 	}
 
@@ -2670,6 +2800,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		if !sitePricingKnown {
 			report.Summary.MissingSitePricingCount++
 			batchSummary.MissingSitePricingCount++
+			warningAccumulator.add("missing_site_pricing", row.ChannelId, row.ModelName, channelNameMap, channelTagMap)
 		}
 		if !isWalletCombo {
 			if upstreamCostKnown {
@@ -2690,6 +2821,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 			} else {
 				report.Summary.MissingUpstreamCostCount++
 				batchSummary.MissingUpstreamCostCount++
+				warningAccumulator.add("missing_upstream_cost", row.ChannelId, row.ModelName, channelNameMap, channelTagMap)
 			}
 		}
 
@@ -3080,6 +3212,10 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		latestLogCreatedAt,
 		walletSnapshotWatermark,
 	)
+	report.WarningItems = warningAccumulator.items(map[string]string{
+		"missing_upstream_cost": "部分日志未命中上游成本配置，已按可用规则回退，仍无法确定的记为未知",
+		"missing_site_pricing":  "部分日志没有命中本站模型定价，已按手动价格或零值处理",
+	})
 	report.Warnings = uniqueProfitBoardWarnings(report.Warnings)
 	if !normalizedQuery.IncludeDetails {
 		if cacheKey := buildProfitBoardReportCacheKey(normalizedQuery); cacheKey != "" {
@@ -3171,6 +3307,8 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 
 	batchSummaryMap := make(map[string]*ProfitBoardBatchSummary, len(resolvedBatches))
 	timeBuckets := make(map[string]*ProfitBoardTimeseriesPoint)
+	channelNameMap, channelTagMap := profitBoardResolvedChannelMaps(resolvedBatches)
+	warningAccumulator := newProfitBoardWarningAccumulator()
 	latestLogId := 0
 	latestLogCreatedAt := int64(0)
 	accountWalletCombos := profitBoardWalletObserverCombosByAccount(comboPricingMap)
@@ -3332,6 +3470,7 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 		if !sitePricingKnown {
 			report.Summary.MissingSitePricingCount++
 			batchSummary.MissingSitePricingCount++
+			warningAccumulator.add("missing_site_pricing", row.ChannelId, row.ModelName, channelNameMap, channelTagMap)
 		}
 		if !isWalletCombo {
 			if upstreamCostKnown {
@@ -3352,6 +3491,7 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 			} else {
 				report.Summary.MissingUpstreamCostCount++
 				batchSummary.MissingUpstreamCostCount++
+				warningAccumulator.add("missing_upstream_cost", row.ChannelId, row.ModelName, channelNameMap, channelTagMap)
 			}
 		}
 
@@ -3491,6 +3631,10 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 		latestLogCreatedAt,
 		walletSnapshotWatermark,
 	)
+	report.WarningItems = warningAccumulator.items(map[string]string{
+		"missing_upstream_cost": "累计总览中部分日志未命中上游成本配置，已按可用规则回退，仍无法确定的记为未知",
+		"missing_site_pricing":  "累计总览中部分日志没有命中本站模型定价，已按手动价格或零值处理",
+	})
 	report.Warnings = uniqueProfitBoardWarnings(report.Warnings)
 	if overviewCacheKey != "" {
 		_ = getProfitBoardOverviewCache().SetWithTTL(overviewCacheKey, *report, profitBoardReportCacheTTL())

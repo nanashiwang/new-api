@@ -863,17 +863,78 @@ const ProfitBoardPage = () => {
     t,
   ]);
 
-  const combinedWarnings = useMemo(
-    () =>
-      Array.from(
-        new Set([
-          ...(overviewReport?.warnings || []),
-          ...(report?.warnings || []),
-          ...validationErrors,
-        ]),
-      ),
-    [overviewReport?.warnings, report?.warnings, validationErrors],
-  );
+  const sitePriceFactorNote =
+    overviewReport?.meta?.site_price_factor_note ||
+    report?.meta?.site_price_factor_note ||
+    '';
+
+  const combinedMessages = useMemo(() => {
+    const messages = [];
+    const seenKeys = new Set();
+    const structuredWarningTexts = new Set();
+
+    const pushMessage = (message) => {
+      if (!message?.text) return;
+      const key = message.key || `${message.type}:${message.code || message.text}`;
+      if (seenKeys.has(key)) return;
+      seenKeys.add(key);
+      messages.push(message);
+    };
+
+    const pushWarningItems = (items = []) => {
+      items.forEach((item, index) => {
+        if (!item?.message) return;
+        structuredWarningTexts.add(item.message);
+        pushMessage({
+          key: `warning-item:${item.code || item.message}:${index}`,
+          type: 'warning',
+          code: item.code || item.message,
+          text: item.message,
+          totalCount: Number(item.total_count || 0),
+          details: Array.isArray(item.details) ? item.details : [],
+        });
+      });
+    };
+
+    pushWarningItems(overviewReport?.warning_items || []);
+    pushWarningItems(report?.warning_items || []);
+
+    [...(overviewReport?.warnings || []), ...(report?.warnings || [])].forEach(
+      (warningText) => {
+        if (!warningText || structuredWarningTexts.has(warningText)) return;
+        pushMessage({
+          key: `warning-text:${warningText}`,
+          type: 'warning',
+          text: warningText,
+        });
+      },
+    );
+
+    validationErrors.forEach((warningText) => {
+      pushMessage({
+        key: `validation:${warningText}`,
+        type: 'warning',
+        text: warningText,
+      });
+    });
+
+    if (sitePriceFactorNote) {
+      pushMessage({
+        key: 'info:site-price-factor-note',
+        type: 'info',
+        text: sitePriceFactorNote,
+      });
+    }
+
+    return messages;
+  }, [
+    overviewReport?.warning_items,
+    report?.warning_items,
+    overviewReport?.warnings,
+    report?.warnings,
+    validationErrors,
+    sitePriceFactorNote,
+  ]);
 
   const batchDigest = useCallback(
     (batch) => {
@@ -903,10 +964,6 @@ const ProfitBoardPage = () => {
     () => new Set((trendRows || []).map((row) => row.bucket)).size,
     [trendRows],
   );
-  const sitePriceFactorNote =
-    overviewReport?.meta?.site_price_factor_note ||
-    report?.meta?.site_price_factor_note ||
-    '';
 
   const batchMetrics = useMemo(() => {
     const summaries = overviewReport?.batch_summaries;
@@ -969,8 +1026,7 @@ const ProfitBoardPage = () => {
           statusSummary={statusSummary}
           hasNewActivity={hasNewActivity}
           generatedAtText={generatedAtText}
-          combinedWarnings={combinedWarnings}
-          sitePriceFactorNote={sitePriceFactorNote}
+          combinedMessages={combinedMessages}
           hasUnsavedConfigChanges={hasUnsavedConfigChanges}
           configReady={configReady}
           t={t}

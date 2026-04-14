@@ -39,6 +39,15 @@ func requireProfitBoardFloat(t *testing.T, value any, expected float64, field st
 	}
 }
 
+func findProfitBoardWarningItem(items []ProfitBoardWarningItem, code string) *ProfitBoardWarningItem {
+	for i := range items {
+		if items[i].Code == code {
+			return &items[i]
+		}
+	}
+	return nil
+}
+
 func setupProfitBoardTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
@@ -2253,5 +2262,146 @@ func TestQueryProfitBoardDetailsSupportsTagFilter(t *testing.T) {
 	}
 	if page.Total != 1 || len(page.Rows) != 1 {
 		t.Fatalf("unexpected tag filtered page: %+v", page)
+	}
+}
+
+func TestProfitBoardWarningsExposeStructuredDetails(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	originQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 1000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originQuotaPerUnit
+	})
+
+	channels := []Channel{
+		{Id: 1, Name: "alpha", Tag: common.GetPointer("vip"), Status: common.ChannelStatusEnabled},
+		{Id: 2, Name: "beta", Tag: common.GetPointer("vip"), Status: common.ChannelStatusEnabled},
+		{Id: 3, Name: "gamma", Status: common.ChannelStatusEnabled},
+		{Id: 4, Name: "delta", Tag: common.GetPointer("billing"), Status: common.ChannelStatusEnabled},
+		{Id: 5, Name: "epsilon", Status: common.ChannelStatusEnabled},
+	}
+	for _, channel := range channels {
+		if err := db.Create(&channel).Error; err != nil {
+			t.Fatalf("seed channel: %v", err)
+		}
+	}
+
+	now := common.GetTimestamp()
+	logs := []Log{
+		{Id: 1, Type: LogTypeConsume, CreatedAt: now - 90, ChannelId: 1, ModelName: "missing-site-model", PromptTokens: 1000, CompletionTokens: 0, Quota: 5},
+		{Id: 2, Type: LogTypeConsume, CreatedAt: now - 80, ChannelId: 2, ModelName: "missing-site-model", PromptTokens: 1000, CompletionTokens: 0, Quota: 5},
+		{Id: 3, Type: LogTypeConsume, CreatedAt: now - 70, ChannelId: 3, ModelName: "missing-site-model", PromptTokens: 1000, CompletionTokens: 0, Quota: 5},
+		{Id: 4, Type: LogTypeConsume, CreatedAt: now - 60, ChannelId: 4, ModelName: "known-site-model", PromptTokens: 1000, CompletionTokens: 0, Quota: 5},
+		{Id: 5, Type: LogTypeConsume, CreatedAt: now - 50, ChannelId: 4, ModelName: "known-site-model", PromptTokens: 1000, CompletionTokens: 0, Quota: 5},
+		{Id: 6, Type: LogTypeConsume, CreatedAt: now - 40, ChannelId: 5, ModelName: "known-site-model", PromptTokens: 1000, CompletionTokens: 0, Quota: 5},
+	}
+	for _, logRow := range logs {
+		if err := db.Create(&logRow).Error; err != nil {
+			t.Fatalf("seed log: %v", err)
+		}
+	}
+
+	query := ProfitBoardQuery{
+		Batches: []ProfitBoardBatch{
+			{
+				Id:         "site-missing-batch",
+				Name:       "站内缺失",
+				ScopeType:  ProfitBoardScopeChannel,
+				ChannelIDs: []int{1, 2, 3},
+				CreatedAt:  now - 120,
+			},
+			{
+				Id:         "upstream-missing-batch",
+				Name:       "上游缺失",
+				ScopeType:  ProfitBoardScopeChannel,
+				ChannelIDs: []int{4, 5},
+				CreatedAt:  now - 120,
+			},
+		},
+		ComboConfigs: []ProfitBoardComboPricingConfig{
+			{
+				ComboId:    "site-missing-batch",
+				SiteMode:   ProfitBoardComboSiteModeSharedSite,
+				CostSource: ProfitBoardCostSourceManualOnly,
+				UpstreamRules: []ProfitBoardModelPricingRule{{
+					IsDefault:  true,
+					InputPrice: 2,
+				}},
+			},
+			{
+				ComboId:    "upstream-missing-batch",
+				CostSource: ProfitBoardCostSourceReturnedOnly,
+				SiteRules: []ProfitBoardModelPricingRule{{
+					IsDefault:  true,
+					InputPrice: 5,
+				}},
+			},
+		},
+		Upstream: ProfitBoardTokenPricingConfig{
+			CostSource: ProfitBoardCostSourceManualOnly,
+		},
+		Site: ProfitBoardTokenPricingConfig{
+			PricingMode: ProfitBoardSitePricingManual,
+		},
+		StartTimestamp: now - 120,
+		EndTimestamp:   now,
+		Granularity:    "day",
+	}
+
+	report, err := GenerateProfitBoardReport(query)
+	if err != nil {
+		t.Fatalf("GenerateProfitBoardReport: %v", err)
+	}
+
+	if warningText := strings.Join(report.Warnings, "\n"); !strings.Contains(warningText, "部分日志没有命中本站模型定价") || !strings.Contains(warningText, "部分日志未命中上游成本配置") {
+		t.Fatalf("expected warning texts preserved, got %v", report.Warnings)
+	}
+
+	siteWarning := findProfitBoardWarningItem(report.WarningItems, "missing_site_pricing")
+	if siteWarning == nil {
+		t.Fatalf("expected missing_site_pricing warning item, got %+v", report.WarningItems)
+	}
+	if siteWarning.TotalCount != 3 || len(siteWarning.Details) != 2 {
+		t.Fatalf("unexpected site warning item: %+v", siteWarning)
+	}
+	if siteWarning.Details[0].ScopeType != "tag" || siteWarning.Details[0].ScopeLabel != "vip" || siteWarning.Details[0].ModelName != "missing-site-model" || siteWarning.Details[0].Count != 2 {
+		t.Fatalf("unexpected first site warning detail: %+v", siteWarning.Details[0])
+	}
+	if siteWarning.Details[1].ScopeType != "channel" || siteWarning.Details[1].ScopeLabel != "gamma" || siteWarning.Details[1].ModelName != "missing-site-model" || siteWarning.Details[1].Count != 1 {
+		t.Fatalf("unexpected second site warning detail: %+v", siteWarning.Details[1])
+	}
+
+	upstreamWarning := findProfitBoardWarningItem(report.WarningItems, "missing_upstream_cost")
+	if upstreamWarning == nil {
+		t.Fatalf("expected missing_upstream_cost warning item, got %+v", report.WarningItems)
+	}
+	if upstreamWarning.TotalCount != 3 || len(upstreamWarning.Details) != 2 {
+		t.Fatalf("unexpected upstream warning item: %+v", upstreamWarning)
+	}
+	if upstreamWarning.Details[0].ScopeType != "tag" || upstreamWarning.Details[0].ScopeLabel != "billing" || upstreamWarning.Details[0].ModelName != "known-site-model" || upstreamWarning.Details[0].Count != 2 {
+		t.Fatalf("unexpected first upstream warning detail: %+v", upstreamWarning.Details[0])
+	}
+	if upstreamWarning.Details[1].ScopeType != "channel" || upstreamWarning.Details[1].ScopeLabel != "epsilon" || upstreamWarning.Details[1].ModelName != "known-site-model" || upstreamWarning.Details[1].Count != 1 {
+		t.Fatalf("unexpected second upstream warning detail: %+v", upstreamWarning.Details[1])
+	}
+
+	overview, err := GenerateProfitBoardOverview(ProfitBoardConfigPayload{
+		Batches:      query.Batches,
+		ComboConfigs: query.ComboConfigs,
+		Upstream:     query.Upstream,
+		Site:         query.Site,
+	})
+	if err != nil {
+		t.Fatalf("GenerateProfitBoardOverview: %v", err)
+	}
+
+	overviewSiteWarning := findProfitBoardWarningItem(overview.WarningItems, "missing_site_pricing")
+	if overviewSiteWarning == nil || overviewSiteWarning.Message == "" || !strings.Contains(overviewSiteWarning.Message, "累计总览") {
+		t.Fatalf("expected overview site warning message, got %+v", overview.WarningItems)
+	}
+	overviewUpstreamWarning := findProfitBoardWarningItem(overview.WarningItems, "missing_upstream_cost")
+	if overviewUpstreamWarning == nil || overviewUpstreamWarning.Message == "" || !strings.Contains(overviewUpstreamWarning.Message, "累计总览") {
+		t.Fatalf("expected overview upstream warning message, got %+v", overview.WarningItems)
 	}
 }
