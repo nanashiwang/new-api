@@ -25,24 +25,17 @@ import {
   Tooltip,
   Popover,
   Typography,
-  Button
 } from '@douyinfe/semi-ui';
 import {
-  timestamp2string,
   renderGroup,
   renderQuota,
   stringToColor,
   getLogOther,
   renderModelTag,
-  renderClaudeLogContent,
-  renderLogContent,
   renderModelPriceSimple,
-  renderAudioModelPrice,
-  renderClaudeModelPrice,
-  renderModelPrice,
 } from '../../../helpers';
 import { IconHelpCircle } from '@douyinfe/semi-icons';
-import { Route, Sparkles } from 'lucide-react';
+import { CircleAlert, Route, Sparkles } from 'lucide-react';
 
 const colors = [
   'amber',
@@ -100,7 +93,6 @@ function buildChannelAffinityTooltip(affinity, t) {
   );
 }
 
-// 渲染函数
 function renderType(type, t) {
   switch (type) {
     case 1:
@@ -148,23 +140,68 @@ function renderType(type, t) {
   }
 }
 
-function renderIsStream(bool, t) {
-  if (bool) {
-    return (
-      <Tag color='blue' shape='circle'>
-        {t('流')}
-      </Tag>
-    );
-  } else {
-    return (
-      <Tag color='purple' shape='circle'>
-        {t('非流')}
-      </Tag>
-    );
+function buildStreamStatusTooltip(ss, t) {
+  if (!ss) {
+    return null;
   }
+  const lines = [t('流状态') + '：' + t('异常'), ss.end_reason || 'unknown'];
+  if (ss.error_count > 0) {
+    lines.push(`${t('软错误')}: ${ss.error_count}`);
+  }
+  if (ss.end_error) {
+    lines.push(ss.end_error);
+  }
+  return (
+    <div style={{ lineHeight: 1.6, display: 'flex', flexDirection: 'column' }}>
+      {lines.map((line, i) => (
+        <div key={i}>{line}</div>
+      ))}
+    </div>
+  );
 }
 
-function renderUseTime(type, t) {
+function renderIsStream(bool, t, streamStatus) {
+  const isError = streamStatus && streamStatus.status !== 'ok';
+
+  if (bool) {
+    return (
+      <span style={{ position: 'relative', display: 'inline-block' }}>
+        <Tag color='blue' shape='circle'>
+          {t('流')}
+        </Tag>
+        {isError && (
+          <Tooltip content={buildStreamStatusTooltip(streamStatus, t)}>
+            <span
+              style={{
+                position: 'absolute',
+                right: -4,
+                top: -4,
+                lineHeight: 1,
+                color: '#ef4444',
+                cursor: 'pointer',
+                userSelect: 'none',
+              }}
+            >
+              <CircleAlert
+                size={14}
+                strokeWidth={2.5}
+                color='currentColor'
+              />
+            </span>
+          </Tooltip>
+        )}
+      </span>
+    );
+  }
+
+  return (
+    <Tag color='purple' shape='circle'>
+      {t('非流')}
+    </Tag>
+  );
+}
+
+function renderUseTime(type) {
   const time = parseInt(type);
   if (time < 101) {
     return (
@@ -180,17 +217,16 @@ function renderUseTime(type, t) {
         {time} s{' '}
       </Tag>
     );
-  } else {
-    return (
-      <Tag color='red' shape='circle'>
-        {' '}
-        {time} s{' '}
-      </Tag>
-    );
   }
+  return (
+    <Tag color='red' shape='circle'>
+      {' '}
+      {time} s{' '}
+    </Tag>
+  );
 }
 
-function renderFirstUseTime(type, t) {
+function renderFirstUseTime(type) {
   let time = parseFloat(type) / 1000.0;
   time = time.toFixed(1);
   if (time < 3) {
@@ -207,14 +243,13 @@ function renderFirstUseTime(type, t) {
         {time} s{' '}
       </Tag>
     );
-  } else {
-    return (
-      <Tag color='red' shape='circle'>
-        {' '}
-        {time} s{' '}
-      </Tag>
-    );
   }
+  return (
+    <Tag color='red' shape='circle'>
+      {' '}
+      {time} s{' '}
+    </Tag>
+  );
 }
 
 function renderBillingTag(record, t) {
@@ -230,66 +265,63 @@ function renderBillingTag(record, t) {
 }
 
 function renderModelName(record, copyText, t) {
-  let other = getLogOther(record.other);
-  let modelMapped =
+  const other = getLogOther(record.other);
+  const modelMapped =
     other?.is_model_mapped &&
     other?.upstream_model_name &&
     other?.upstream_model_name !== '';
+
   if (!modelMapped) {
     return renderModelTag(record.model_name, {
       onClick: (event) => {
-        copyText(event, record.model_name).then((r) => {});
+        copyText(event, record.model_name).then(() => {});
       },
     });
-  } else {
-    return (
-      <>
-        <Space vertical align={'start'}>
-          <Popover
-            content={
-              <div style={{ padding: 10 }}>
-                <Space vertical align={'start'}>
-                  <div className='flex items-center'>
-                    <Typography.Text strong style={{ marginRight: 8 }}>
-                      {t('请求并计费模型')}:
-                    </Typography.Text>
-                    {renderModelTag(record.model_name, {
-                      onClick: (event) => {
-                        copyText(event, record.model_name).then((r) => {});
-                      },
-                    })}
-                  </div>
-                  <div className='flex items-center'>
-                    <Typography.Text strong style={{ marginRight: 8 }}>
-                      {t('实际模型')}:
-                    </Typography.Text>
-                    {renderModelTag(other.upstream_model_name, {
-                      onClick: (event) => {
-                        copyText(event, other.upstream_model_name).then(
-                          (r) => {},
-                        );
-                      },
-                    })}
-                  </div>
-                </Space>
-              </div>
-            }
-          >
-            {renderModelTag(record.model_name, {
-              onClick: (event) => {
-                copyText(event, record.model_name).then((r) => {});
-              },
-              suffixIcon: (
-                <Route
-                  style={{ width: '0.9em', height: '0.9em', opacity: 0.75 }}
-                />
-              ),
-            })}
-          </Popover>
-        </Space>
-      </>
-    );
   }
+
+  return (
+    <Space vertical align={'start'}>
+      <Popover
+        content={
+          <div style={{ padding: 10 }}>
+            <Space vertical align={'start'}>
+              <div className='flex items-center'>
+                <Typography.Text strong style={{ marginRight: 8 }}>
+                  {t('请求并计费模型')}:
+                </Typography.Text>
+                {renderModelTag(record.model_name, {
+                  onClick: (event) => {
+                    copyText(event, record.model_name).then(() => {});
+                  },
+                })}
+              </div>
+              <div className='flex items-center'>
+                <Typography.Text strong style={{ marginRight: 8 }}>
+                  {t('实际模型')}:
+                </Typography.Text>
+                {renderModelTag(other.upstream_model_name, {
+                  onClick: (event) => {
+                    copyText(event, other.upstream_model_name).then(() => {});
+                  },
+                })}
+              </div>
+            </Space>
+          </div>
+        }
+      >
+        {renderModelTag(record.model_name, {
+          onClick: (event) => {
+            copyText(event, record.model_name).then(() => {});
+          },
+          suffixIcon: (
+            <Route
+              style={{ width: '0.9em', height: '0.9em', opacity: 0.75 }}
+            />
+          ),
+        })}
+      </Popover>
+    </Space>
+  );
 }
 
 function toTokenNumber(value) {
@@ -330,6 +362,136 @@ function getPromptCacheSummary(other) {
   };
 }
 
+function getUsageLogGroupSummary(groupRatio, userGroupRatio, t) {
+  const parsedUserGroupRatio = Number(userGroupRatio);
+  const useUserGroupRatio =
+    Number.isFinite(parsedUserGroupRatio) && parsedUserGroupRatio !== -1;
+  const ratio = useUserGroupRatio ? userGroupRatio : groupRatio;
+  if (ratio === undefined || ratio === null || ratio === '') {
+    return '';
+  }
+  return `${useUserGroupRatio ? t('专属倍率') : t('分组')} ${formatRatio(ratio)}x`;
+}
+
+function renderCompactDetailSummary(summarySegments) {
+  const segments = Array.isArray(summarySegments)
+    ? summarySegments.filter((segment) => segment?.text)
+    : [];
+  if (!segments.length) {
+    return null;
+  }
+
+  return (
+    <div
+      style={{
+        maxWidth: 180,
+        lineHeight: 1.35,
+      }}
+    >
+      {segments.map((segment, index) => (
+        <Typography.Text
+          key={`${segment.text}-${index}`}
+          type={segment.tone === 'secondary' ? 'tertiary' : undefined}
+          size={segment.tone === 'secondary' ? 'small' : undefined}
+          style={{
+            display: 'block',
+            maxWidth: '100%',
+            fontSize: 12,
+            marginTop: index === 0 ? 0 : 2,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+        >
+          {segment.text}
+        </Typography.Text>
+      ))}
+    </div>
+  );
+}
+
+function getUsageLogDetailSummary(record, text, billingDisplayMode, t) {
+  const other = getLogOther(record.other);
+
+  if (record.type === 6) {
+    return {
+      segments: [{ text: t('异步任务退款'), tone: 'primary' }],
+    };
+  }
+
+  if (other == null || record.type !== 2) {
+    return null;
+  }
+
+  if (
+    other?.violation_fee === true ||
+    Boolean(other?.violation_fee_code) ||
+    Boolean(other?.violation_fee_marker)
+  ) {
+    const feeQuota = other?.fee_quota ?? record?.quota;
+    const groupText = getUsageLogGroupSummary(
+      other?.group_ratio,
+      other?.user_group_ratio,
+      t,
+    );
+    return {
+      segments: [
+        groupText ? { text: groupText, tone: 'primary' } : null,
+        { text: t('违规扣费'), tone: 'primary' },
+        {
+          text: `${t('扣费')}：${renderQuota(feeQuota, 6)}`,
+          tone: 'secondary',
+        },
+        text ? { text: `${t('详情')}：${text}`, tone: 'secondary' } : null,
+      ].filter(Boolean),
+    };
+  }
+
+  return {
+    segments: other?.claude
+      ? renderModelPriceSimple(
+          other.model_ratio,
+          other.model_price,
+          other.group_ratio,
+          other?.user_group_ratio,
+          other.cache_tokens || 0,
+          other.cache_ratio || 1.0,
+          other.cache_creation_tokens || 0,
+          other.cache_creation_ratio || 1.0,
+          other.cache_creation_tokens_5m || 0,
+          other.cache_creation_ratio_5m || other.cache_creation_ratio || 1.0,
+          other.cache_creation_tokens_1h || 0,
+          other.cache_creation_ratio_1h || other.cache_creation_ratio || 1.0,
+          false,
+          1.0,
+          other?.is_system_prompt_overwritten,
+          'claude',
+          billingDisplayMode,
+          'segments',
+        )
+      : renderModelPriceSimple(
+          other.model_ratio,
+          other.model_price,
+          other.group_ratio,
+          other?.user_group_ratio,
+          other.cache_tokens || 0,
+          other.cache_ratio || 1.0,
+          0,
+          1.0,
+          0,
+          1.0,
+          0,
+          1.0,
+          false,
+          1.0,
+          other?.is_system_prompt_overwritten,
+          'openai',
+          billingDisplayMode,
+          'segments',
+        ),
+  };
+}
+
 export const getLogsColumns = ({
   t,
   COLUMN_KEYS,
@@ -337,6 +499,7 @@ export const getLogsColumns = ({
   showUserInfoFunc,
   openChannelAffinityUsageCacheModal,
   isAdminUser,
+  billingDisplayMode = 'price',
 }) => {
   return [
     {
@@ -348,15 +511,16 @@ export const getLogsColumns = ({
       key: COLUMN_KEYS.CHANNEL,
       title: t('渠道'),
       dataIndex: 'channel',
-      render: (text, record, index) => {
+      render: (text, record) => {
         let isMultiKey = false;
         let multiKeyIndex = -1;
         let content = t('渠道') + `：${record.channel}`;
         let affinity = null;
         let showMarker = false;
-        let other = getLogOther(record.other);
+        const other = getLogOther(record.other);
+
         if (other?.admin_info) {
-          let adminInfo = other.admin_info;
+          const adminInfo = other.admin_info;
           if (adminInfo?.is_multi_key) {
             isMultiKey = true;
             multiKeyIndex = adminInfo.multi_key_index;
@@ -374,7 +538,10 @@ export const getLogsColumns = ({
         }
 
         return isAdminUser &&
-          (record.type === 0 || record.type === 2 || record.type === 5 || record.type === 6) ? (
+          (record.type === 0 ||
+            record.type === 2 ||
+            record.type === 5 ||
+            record.type === 6) ? (
           <Space>
             <span style={{ position: 'relative', display: 'inline-block' }}>
               <Tooltip content={record.channel_name || t('未知渠道')}>
@@ -439,7 +606,7 @@ export const getLogsColumns = ({
       key: COLUMN_KEYS.USERNAME,
       title: t('用户'),
       dataIndex: 'username',
-      render: (text, record, index) => {
+      render: (text, record) => {
         return isAdminUser ? (
           <div>
             <Avatar
@@ -464,8 +631,11 @@ export const getLogsColumns = ({
       key: COLUMN_KEYS.TOKEN,
       title: t('令牌'),
       dataIndex: 'token_name',
-      render: (text, record, index) => {
-        return record.type === 0 || record.type === 2 || record.type === 5 || record.type === 6 ? (
+      render: (text, record) => {
+        return record.type === 0 ||
+          record.type === 2 ||
+          record.type === 5 ||
+          record.type === 6 ? (
           <div>
             <Tag
               color='grey'
@@ -487,39 +657,35 @@ export const getLogsColumns = ({
       key: COLUMN_KEYS.GROUP,
       title: t('分组'),
       dataIndex: 'group',
-      render: (text, record, index) => {
-        if (record.type === 0 || record.type === 2 || record.type === 5 || record.type === 6) {
+      render: (text, record) => {
+        if (
+          record.type === 0 ||
+          record.type === 2 ||
+          record.type === 5 ||
+          record.type === 6
+        ) {
           if (record.group) {
             return <>{renderGroup(record.group)}</>;
-          } else {
-            let other = null;
-            try {
-              other = JSON.parse(record.other);
-            } catch (e) {
-              console.error(
-                `Failed to parse record.other: "${record.other}".`,
-                e,
-              );
-            }
-            if (other === null) {
-              return <></>;
-            }
-            if (other.group !== undefined) {
-              return <>{renderGroup(other.group)}</>;
-            } else {
-              return <></>;
-            }
           }
-        } else {
-          return <></>;
+
+          let other = null;
+          try {
+            other = JSON.parse(record.other);
+          } catch (e) {
+            console.error(`Failed to parse record.other: "${record.other}".`, e);
+          }
+          if (other?.group !== undefined) {
+            return <>{renderGroup(other.group)}</>;
+          }
         }
+        return <></>;
       },
     },
     {
       key: COLUMN_KEYS.TYPE,
       title: t('类型'),
       dataIndex: 'type',
-      render: (text, record, index) => {
+      render: (text) => {
         return <>{renderType(text, t)}</>;
       },
     },
@@ -527,8 +693,11 @@ export const getLogsColumns = ({
       key: COLUMN_KEYS.MODEL,
       title: t('模型'),
       dataIndex: 'model_name',
-      render: (text, record, index) => {
-        return record.type === 0 || record.type === 2 || record.type === 5 || record.type === 6 ? (
+      render: (text, record) => {
+        return record.type === 0 ||
+          record.type === 2 ||
+          record.type === 5 ||
+          record.type === 6 ? (
           <>{renderModelName(record, copyText, t)}</>
         ) : (
           <></>
@@ -539,31 +708,26 @@ export const getLogsColumns = ({
       key: COLUMN_KEYS.USE_TIME,
       title: t('用时/首字'),
       dataIndex: 'use_time',
-      render: (text, record, index) => {
+      render: (text, record) => {
         if (!(record.type === 2 || record.type === 5)) {
           return <></>;
         }
         if (record.is_stream) {
-          let other = getLogOther(record.other);
+          const other = getLogOther(record.other);
           return (
-            <>
-              <Space>
-                {renderUseTime(text, t)}
-                {renderFirstUseTime(other?.frt, t)}
-                {renderIsStream(record.is_stream, t)}
-              </Space>
-            </>
-          );
-        } else {
-          return (
-            <>
-              <Space>
-                {renderUseTime(text, t)}
-                {renderIsStream(record.is_stream, t)}
-              </Space>
-            </>
+            <Space>
+              {renderUseTime(text)}
+              {renderFirstUseTime(other?.frt)}
+              {renderIsStream(record.is_stream, t, other?.stream_status)}
+            </Space>
           );
         }
+        return (
+          <Space>
+            {renderUseTime(text)}
+            {renderIsStream(record.is_stream, t)}
+          </Space>
+        );
       },
     },
     {
@@ -581,7 +745,7 @@ export const getLogsColumns = ({
         </div>
       ),
       dataIndex: 'prompt_tokens',
-      render: (text, record, index) => {
+      render: (text, record) => {
         const other = getLogOther(record.other);
         const cacheSummary = getPromptCacheSummary(other);
         const hasCacheRead = (cacheSummary?.cacheReadTokens || 0) > 0;
@@ -595,7 +759,10 @@ export const getLogsColumns = ({
           cacheText = `${t('缓存写')} ${formatTokenCount(cacheSummary.cacheWriteTokens)}`;
         }
 
-        return record.type === 0 || record.type === 2 || record.type === 5 || record.type === 6 ? (
+        return record.type === 0 ||
+          record.type === 2 ||
+          record.type === 5 ||
+          record.type === 6 ? (
           <div
             style={{
               display: 'inline-flex',
@@ -627,10 +794,13 @@ export const getLogsColumns = ({
       key: COLUMN_KEYS.COMPLETION,
       title: t('输出'),
       dataIndex: 'completion_tokens',
-      render: (text, record, index) => {
+      render: (text, record) => {
         return parseInt(text) > 0 &&
-          (record.type === 0 || record.type === 2 || record.type === 5 || record.type === 6) ? (
-          <>{<span> {text} </span>}</>
+          (record.type === 0 ||
+            record.type === 2 ||
+            record.type === 5 ||
+            record.type === 6) ? (
+          <span> {text} </span>
         ) : (
           <></>
         );
@@ -640,14 +810,19 @@ export const getLogsColumns = ({
       key: COLUMN_KEYS.COST,
       title: t('花费'),
       dataIndex: 'quota',
-      render: (text, record, index) => {
-        if (!(record.type === 0 || record.type === 2 || record.type === 5 || record.type === 6)) {
+      render: (text, record) => {
+        if (
+          !(
+            record.type === 0 ||
+            record.type === 2 ||
+            record.type === 5 ||
+            record.type === 6
+          )
+        ) {
           return <></>;
         }
         const other = getLogOther(record.other);
-        const isSubscription = other?.billing_source === 'subscription';
-        if (isSubscription) {
-          // Subscription billed: show only tag (no $0), but keep tooltip for equivalent cost.
+        if (other?.billing_source === 'subscription') {
           return (
             <Tooltip content={`${t('由订阅抵扣')}：${renderQuota(text, 6)}`}>
               <span>{renderBillingTag(record, t)}</span>
@@ -672,7 +847,7 @@ export const getLogsColumns = ({
         </div>
       ),
       dataIndex: 'ip',
-      render: (text, record, index) => {
+      render: (text, record) => {
         return (record.type === 2 || record.type === 5) && text ? (
           <Tooltip content={text}>
             <span>
@@ -696,26 +871,15 @@ export const getLogsColumns = ({
       key: COLUMN_KEYS.RETRY,
       title: t('重试'),
       dataIndex: 'retry',
-      render: (text, record, index) => {
+      render: (text, record) => {
         if (!(record.type === 2 || record.type === 5)) {
           return <></>;
         }
         let content = t('渠道') + `：${record.channel}`;
         if (record.other !== '') {
-          let other = JSON.parse(record.other);
-          if (other === null) {
-            return <></>;
-          }
-          if (other.admin_info !== undefined) {
-            if (
-                other.admin_info.use_channel !== null &&
-                other.admin_info.use_channel !== undefined &&
-                other.admin_info.use_channel !== ''
-            ) {
-              let useChannel = other.admin_info.use_channel;
-              let useChannelStr = useChannel.join('->');
-              content = t('渠道') + `：${useChannelStr}`;
-            }
+          const other = JSON.parse(record.other);
+          if (other?.admin_info?.use_channel) {
+            content = t('渠道') + `：${other.admin_info.use_channel.join('->')}`;
           }
         }
         return isAdminUser ? <div>{content}</div> : <></>;
@@ -726,19 +890,16 @@ export const getLogsColumns = ({
       title: t('详情'),
       dataIndex: 'content',
       fixed: 'right',
-      render: (text, record, index) => {
-        let other = getLogOther(record.other);
-        if (record.type === 6) {
-          return (
-            <Typography.Paragraph
-              ellipsis={{ rows: 2 }}
-              style={{ maxWidth: 240 }}
-            >
-              {t('异步任务退款')}
-            </Typography.Paragraph>
-          );
-        }
-        if (other == null || record.type !== 2) {
+      width: 200,
+      render: (text, record) => {
+        const detailSummary = getUsageLogDetailSummary(
+          record,
+          text,
+          billingDisplayMode,
+          t,
+        );
+
+        if (!detailSummary) {
           return (
             <Typography.Paragraph
               ellipsis={{
@@ -748,95 +909,14 @@ export const getLogsColumns = ({
                   opts: { style: { width: 240 } },
                 },
               }}
-              style={{ maxWidth: 240 }}
+              style={{ maxWidth: 200, marginBottom: 0 }}
             >
               {text}
             </Typography.Paragraph>
           );
         }
 
-        if (
-          other?.violation_fee === true ||
-          Boolean(other?.violation_fee_code) ||
-          Boolean(other?.violation_fee_marker)
-        ) {
-          const feeQuota = other?.fee_quota ?? record?.quota;
-          const ratioText = formatRatio(other?.group_ratio);
-          const summary = [
-            t('违规扣费'),
-            `${t('分组倍率')}：${ratioText}`,
-            `${t('扣费')}：${renderQuota(feeQuota, 6)}`,
-            text ? `${t('详情')}：${text}` : null,
-          ]
-            .filter(Boolean)
-            .join('\n');
-          return (
-            <Typography.Paragraph
-              ellipsis={{
-                rows: 2,
-                showTooltip: {
-                  type: 'popover',
-                  opts: { style: { width: 240 } },
-                },
-              }}
-              style={{ maxWidth: 240, whiteSpace: 'pre-line' }}
-            >
-              {summary}
-            </Typography.Paragraph>
-          );
-        }
-
-        let content = other?.claude
-          ? renderModelPriceSimple(
-              other.model_ratio,
-              other.model_price,
-              other.group_ratio,
-              other?.user_group_ratio,
-              other.cache_tokens || 0,
-              other.cache_ratio || 1.0,
-              other.cache_creation_tokens || 0,
-              other.cache_creation_ratio || 1.0,
-              other.cache_creation_tokens_5m || 0,
-              other.cache_creation_ratio_5m ||
-                other.cache_creation_ratio ||
-                1.0,
-              other.cache_creation_tokens_1h || 0,
-              other.cache_creation_ratio_1h ||
-                other.cache_creation_ratio ||
-                1.0,
-              false,
-              1.0,
-              other?.is_system_prompt_overwritten,
-              'claude',
-            )
-          : renderModelPriceSimple(
-              other.model_ratio,
-              other.model_price,
-              other.group_ratio,
-              other?.user_group_ratio,
-              other.cache_tokens || 0,
-              other.cache_ratio || 1.0,
-              0,
-              1.0,
-              0,
-              1.0,
-              0,
-              1.0,
-              false,
-              1.0,
-              other?.is_system_prompt_overwritten,
-              'openai',
-            );
-        return (
-            <Typography.Paragraph
-                ellipsis={{
-                  rows: 3,
-                }}
-                style={{ maxWidth: 240, whiteSpace: 'pre-line' }}
-            >
-              {content}
-            </Typography.Paragraph>
-        );
+        return renderCompactDetailSummary(detailSummary.segments);
       },
     },
   ];

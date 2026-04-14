@@ -13,6 +13,20 @@ import (
 
 var negativeIndexRegexp = regexp.MustCompile(`\.(-\d+)`)
 
+const paramOverrideContextAuditRecorder = "__param_override_audit_recorder"
+
+var paramOverrideKeyAuditPaths = map[string]struct{}{
+	"model":          {},
+	"original_model": {},
+	"upstream_model": {},
+	"service_tier":   {},
+	"inference_geo":  {},
+}
+
+type paramOverrideAuditRecorder struct {
+	lines []string
+}
+
 type ConditionOperation struct {
 	Path           string      `json:"path"`             // JSON路径
 	Mode           string      `json:"mode"`             // full, prefix, suffix, contains, gt, gte, lt, lte
@@ -37,6 +51,8 @@ func ApplyParamOverride(jsonData []byte, paramOverride map[string]interface{}, c
 		return jsonData, nil
 	}
 
+	auditRecorder := getParamOverrideAuditRecorder(conditionContext)
+
 	// 尝试断言为操作格式
 	if operations, ok := tryParseOperations(paramOverride); ok {
 		// 使用新方法
@@ -45,7 +61,34 @@ func ApplyParamOverride(jsonData []byte, paramOverride map[string]interface{}, c
 	}
 
 	// 直接使用旧方法
-	return applyOperationsLegacy(jsonData, paramOverride)
+	return applyOperationsLegacy(jsonData, paramOverride, auditRecorder)
+}
+
+func ApplyParamOverrideWithRelayInfo(jsonData []byte, info *RelayInfo) ([]byte, error) {
+	paramOverride := getParamOverrideMap(info)
+	if len(paramOverride) == 0 {
+		return jsonData, nil
+	}
+
+	overrideCtx := BuildParamOverrideContext(info)
+	var recorder *paramOverrideAuditRecorder
+	if shouldEnableParamOverrideAudit(paramOverride) {
+		recorder = &paramOverrideAuditRecorder{}
+		overrideCtx[paramOverrideContextAuditRecorder] = recorder
+	}
+
+	result, err := ApplyParamOverride(jsonData, paramOverride, overrideCtx)
+	if err != nil {
+		return nil, err
+	}
+	if info != nil {
+		if recorder != nil {
+			info.ParamOverrideAudit = recorder.lines
+		} else {
+			info.ParamOverrideAudit = nil
+		}
+	}
+	return result, nil
 }
 
 func tryParseOperations(paramOverride map[string]interface{}) ([]ParamOperation, bool) {
@@ -294,7 +337,148 @@ func compareNumeric(jsonValue, targetValue gjson.Result, operator string) (bool,
 }
 
 // applyOperationsLegacy 原参数覆盖方法
-func applyOperationsLegacy(jsonData []byte, paramOverride map[string]interface{}) ([]byte, error) {
+func shouldAuditParamPath(path string) bool {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false
+	}
+	if common.DebugEnabled {
+		return true
+	}
+	_, ok := paramOverrideKeyAuditPaths[path]
+	return ok
+}
+
+func shouldEnableParamOverrideAudit(paramOverride map[string]interface{}) bool {
+	if common.DebugEnabled {
+		return true
+	}
+	if len(paramOverride) == 0 {
+		return false
+	}
+	if operations, ok := tryParseOperations(paramOverride); ok {
+		for _, operation := range operations {
+			if shouldAuditParamPath(operation.Path) || shouldAuditParamPath(operation.To) {
+				return true
+			}
+		}
+		return false
+	}
+	for key := range paramOverride {
+		if shouldAuditParamPath(key) {
+			return true
+		}
+	}
+	return false
+}
+
+func getParamOverrideMap(info *RelayInfo) map[string]interface{} {
+	if info == nil || info.ChannelMeta == nil {
+		return nil
+	}
+	return info.ChannelMeta.ParamOverride
+}
+
+func getParamOverrideAuditRecorder(context map[string]interface{}) *paramOverrideAuditRecorder {
+	if context == nil {
+		return nil
+	}
+	recorder, _ := context[paramOverrideContextAuditRecorder].(*paramOverrideAuditRecorder)
+	return recorder
+}
+
+func formatParamOverrideAuditValue(value interface{}) string {
+	switch typed := value.(type) {
+	case nil:
+		return "<empty>"
+	case string:
+		return typed
+	default:
+		return common.GetJsonString(typed)
+	}
+}
+
+func buildParamOverrideAuditLine(mode, path, from, to string, value interface{}) string {
+	mode = strings.TrimSpace(mode)
+	path = strings.TrimSpace(path)
+	from = strings.TrimSpace(from)
+	to = strings.TrimSpace(to)
+
+	if !common.DebugEnabled && !shouldAuditParamPath(path) && !shouldAuditParamPath(to) {
+		return ""
+	}
+
+	switch mode {
+	case "set":
+		if path == "" {
+			return ""
+		}
+		return fmt.Sprintf("set %s = %s", path, formatParamOverrideAuditValue(value))
+	case "delete":
+		if path == "" {
+			return ""
+		}
+		return fmt.Sprintf("delete %s", path)
+	case "copy":
+		if from == "" || to == "" {
+			return ""
+		}
+		return fmt.Sprintf("copy %s -> %s", from, to)
+	case "move":
+		if from == "" || to == "" {
+			return ""
+		}
+		return fmt.Sprintf("move %s -> %s", from, to)
+	case "prepend":
+		if path == "" {
+			return ""
+		}
+		return fmt.Sprintf("prepend %s with %s", path, formatParamOverrideAuditValue(value))
+	case "append":
+		if path == "" {
+			return ""
+		}
+		return fmt.Sprintf("append %s with %s", path, formatParamOverrideAuditValue(value))
+	case "trim_prefix", "trim_suffix", "ensure_prefix", "ensure_suffix":
+		if path == "" {
+			return ""
+		}
+		return fmt.Sprintf("%s %s with %s", mode, path, formatParamOverrideAuditValue(value))
+	case "trim_space", "to_lower", "to_upper":
+		if path == "" {
+			return ""
+		}
+		return fmt.Sprintf("%s %s", mode, path)
+	case "replace", "regex_replace":
+		if path == "" {
+			return ""
+		}
+		return fmt.Sprintf("%s %s from %s to %s", mode, path, from, to)
+	default:
+		if path == "" {
+			return mode
+		}
+		return fmt.Sprintf("%s %s", mode, path)
+	}
+}
+
+func (r *paramOverrideAuditRecorder) recordOperation(mode, path, from, to string, value interface{}) {
+	if r == nil {
+		return
+	}
+	line := buildParamOverrideAuditLine(mode, path, from, to, value)
+	if line == "" {
+		return
+	}
+	for _, existing := range r.lines {
+		if existing == line {
+			return
+		}
+	}
+	r.lines = append(r.lines, line)
+}
+
+func applyOperationsLegacy(jsonData []byte, paramOverride map[string]interface{}, auditRecorder *paramOverrideAuditRecorder) ([]byte, error) {
 	reqMap := make(map[string]interface{})
 	err := common.Unmarshal(jsonData, &reqMap)
 	if err != nil {
@@ -303,6 +487,7 @@ func applyOperationsLegacy(jsonData []byte, paramOverride map[string]interface{}
 
 	for key, value := range paramOverride {
 		reqMap[key] = value
+		auditRecorder.recordOperation("set", key, "", "", value)
 	}
 
 	return common.Marshal(reqMap)
@@ -319,6 +504,7 @@ func applyOperations(jsonStr string, operations []ParamOperation, conditionConte
 	}
 
 	result := jsonStr
+	auditRecorder := getParamOverrideAuditRecorder(conditionContext)
 	for _, op := range operations {
 		// 检查条件是否满足
 		ok, err := checkConditions(result, contextJSON, op.Conditions, op.Logic)
@@ -378,6 +564,7 @@ func applyOperations(jsonStr string, operations []ParamOperation, conditionConte
 		if err != nil {
 			return "", fmt.Errorf("operation %s failed: %v", op.Mode, err)
 		}
+		auditRecorder.recordOperation(op.Mode, opPath, op.From, op.To, op.Value)
 	}
 	return result, nil
 }

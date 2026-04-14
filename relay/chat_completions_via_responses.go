@@ -97,7 +97,6 @@ func restoreResponsesInstructionsFromOriginalChat(responsesReq *dto.OpenAIRespon
 }
 
 func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, adaptor channel.Adaptor, request *dto.GeneralOpenAIRequest) (*dto.Usage, *types.NewAPIError) {
-	overrideCtx := relaycommon.BuildParamOverrideContext(info)
 	shouldRemoveDisabledFields := shouldRemoveDisabledFieldsInResponsesBridge(info)
 
 	overriddenChatReq, err := common.DeepCopy(request)
@@ -118,7 +117,7 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 		}
 
 		if len(info.ParamOverride) > 0 {
-			chatJSON, err = relaycommon.ApplyParamOverride(chatJSON, info.ParamOverride, overrideCtx)
+			chatJSON, err = relaycommon.ApplyParamOverrideWithRelayInfo(chatJSON, info)
 			if err != nil {
 				return nil, types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid, types.ErrOptionWithSkipRetry())
 			}

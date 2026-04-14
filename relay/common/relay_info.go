@@ -146,6 +146,8 @@ type RelayInfo struct {
 	SubscriptionAmountUsedAfterPreConsume int64
 	IsClaudeBetaQuery                     bool // /v1/messages?beta=true
 	IsChannelTest                         bool // channel test request
+	ParamOverrideAudit                    []string
+	StreamStatus                          *StreamStatus
 
 	PriceData types.PriceData
 
