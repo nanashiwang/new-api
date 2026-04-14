@@ -57,6 +57,7 @@ const ProfitBoardHeader = ({
   const [warningsExpanded, setWarningsExpanded] = useState(false);
   const [expandedWarningKeys, setExpandedWarningKeys] = useState({});
   const [expandedWarningMore, setExpandedWarningMore] = useState({});
+  const [expandedModelKeys, setExpandedModelKeys] = useState({});
   const allMessages = combinedMessages || [];
   const hasMessages = allMessages.length > 0;
 
@@ -69,6 +70,13 @@ const ProfitBoardHeader = ({
 
   const toggleWarningMore = (key) => {
     setExpandedWarningMore((current) => ({
+      ...current,
+      [key]: !current[key],
+    }));
+  };
+
+  const toggleModelReasons = (key) => {
+    setExpandedModelKeys((current) => ({
       ...current,
       [key]: !current[key],
     }));
@@ -256,24 +264,69 @@ const ProfitBoardHeader = ({
                                   ) : null}
                                 </div>
                                 <div className='space-y-1.5'>
-                                  {detail.models.map((model) => (
-                                    <div
-                                      key={`${detail.scopeKey}-${model.modelName || 'model'}`}
-                                      className='flex items-center justify-between gap-3 rounded-md bg-semi-color-fill-0 px-2.5 py-1.5'
-                                    >
-                                      <div className='flex min-w-0 items-center gap-2'>
-                                        <Tag color='grey' size='small'>
-                                          {t('模型')}
-                                        </Tag>
-                                        <Text type='tertiary' size='small' className='break-all'>
-                                          {model.modelName}
-                                        </Text>
+                                  {detail.models.map((model) => {
+                                    const modelKey = `${messageKey}-${detail.scopeKey}-${model.modelName || 'model'}`;
+                                    const hasReasons = Array.isArray(model.reasons) && model.reasons.length > 0;
+                                    const modelExpanded = !!expandedModelKeys[modelKey];
+                                    return (
+                                      <div
+                                        key={modelKey}
+                                        className='rounded-md bg-semi-color-fill-0'
+                                      >
+                                        <div className='flex items-center justify-between gap-3 px-2.5 py-1.5'>
+                                          <div className='flex min-w-0 items-center gap-2'>
+                                            <Tag color='grey' size='small'>
+                                              {t('模型')}
+                                            </Tag>
+                                            <Text type='tertiary' size='small' className='break-all'>
+                                              {model.modelName}
+                                            </Text>
+                                          </div>
+                                          <div className='flex items-center gap-2'>
+                                            <Text type='tertiary' size='small'>
+                                              {t('{{count}} 次', { count: model.count })}
+                                            </Text>
+                                            {hasReasons ? (
+                                              <Button
+                                                theme='borderless'
+                                                type='primary'
+                                                size='small'
+                                                icon={
+                                                  modelExpanded ? (
+                                                    <ChevronDown size={14} />
+                                                  ) : (
+                                                    <ChevronRight size={14} />
+                                                  )
+                                                }
+                                                onClick={() => toggleModelReasons(modelKey)}
+                                              >
+                                                {modelExpanded ? t('收起原因') : t('查看原因')}
+                                              </Button>
+                                            ) : null}
+                                          </div>
+                                        </div>
+                                        {hasReasons ? (
+                                          <Collapsible isOpen={modelExpanded}>
+                                            <div className='space-y-1.5 border-t border-semi-color-border px-2.5 py-2'>
+                                              {model.reasons.map((reason) => (
+                                                <div
+                                                  key={`${modelKey}-${reason.reasonCode || reason.reasonLabel}`}
+                                                  className='flex items-center justify-between gap-3 rounded-md border border-semi-color-border bg-white px-2.5 py-2'
+                                                >
+                                                  <Text type='tertiary' size='small' className='break-words'>
+                                                    {reason.reasonLabel || reason.reasonCode}
+                                                  </Text>
+                                                  <Text type='tertiary' size='small'>
+                                                    {t('{{count}} 次', { count: reason.count })}
+                                                  </Text>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </Collapsible>
+                                        ) : null}
                                       </div>
-                                      <Text type='tertiary' size='small'>
-                                        {t('{{count}} 次', { count: model.count })}
-                                      </Text>
-                                    </div>
-                                  ))}
+                                    );
+                                  })}
                                 </div>
                               </div>
                               <div className='shrink-0 text-right'>

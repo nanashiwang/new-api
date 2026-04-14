@@ -332,6 +332,7 @@ const ProfitBoardPage = () => {
     overviewReport,
     report,
     reportMatchesCurrentFilters,
+    activeChartSectionLoaded,
     autoRefreshMode,
     setAutoRefreshMode,
     hasNewActivity,
@@ -722,7 +723,9 @@ const ProfitBoardPage = () => {
 
   const chartContent = useMemo(
     () => ({
-      trend: trendRows.length ? (
+      trend: !activeChartSectionLoaded && chartTab === 'trend' ? (
+        <Empty description={t('当前收益分析正在加载')} />
+      ) : trendRows.length ? (
         renderChart(
           `trend-${analysisMode}-${viewBatchId}-${metricKey}-${granularity}-${customIntervalMinutes}-${lastQueryKey}-${trendRows.length}`,
           trendSpec,
@@ -730,7 +733,9 @@ const ProfitBoardPage = () => {
       ) : (
         <Empty description={t('当前没有趋势数据')} />
       ),
-      channel: channelRows.length ? (
+      channel: !activeChartSectionLoaded && chartTab === 'channel' ? (
+        <Empty description={t('当前收益分析正在加载')} />
+      ) : channelRows.length ? (
         renderChart(
           `channel-${analysisMode}-${viewBatchId}-${metricKey}-${channelGroupMode}-${granularity}-${customIntervalMinutes}-${lastQueryKey}-${channelRows.length}`,
           channelSpec,
@@ -740,7 +745,9 @@ const ProfitBoardPage = () => {
           description={tagAggregationMeta.emptyReason || t('当前没有渠道数据')}
         />
       ),
-      model: modelRows.length ? (
+      model: !activeChartSectionLoaded && chartTab === 'model' ? (
+        <Empty description={t('当前收益分析正在加载')} />
+      ) : modelRows.length ? (
         renderChart(
           `model-${analysisMode}-${viewBatchId}-${metricKey}-${granularity}-${customIntervalMinutes}-${lastQueryKey}-${modelRows.length}`,
           modelSpec,
@@ -751,6 +758,8 @@ const ProfitBoardPage = () => {
     }),
     [
       analysisMode,
+      activeChartSectionLoaded,
+      chartTab,
       channelGroupMode,
       channelRows.length,
       channelSpec,

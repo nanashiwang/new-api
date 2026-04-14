@@ -102,6 +102,8 @@ export const groupWarningDetailsByScope = (details) => {
     const scopeValue = String(detail?.scope_value || scopeLabel || '');
     const modelName = detail?.model_name || '';
     const count = Number(detail?.count || 0);
+    const reasonCode = detail?.reason_code || '';
+    const reasonLabel = detail?.reason_label || '';
     const scopeKey = `${scopeType}:${scopeValue}`;
 
     if (!grouped.has(scopeKey)) {
@@ -117,7 +119,25 @@ export const groupWarningDetailsByScope = (details) => {
 
     const current = grouped.get(scopeKey);
     current.totalCount += count;
-    current.models.set(modelName, (current.models.get(modelName) || 0) + count);
+    if (!current.models.has(modelName)) {
+      current.models.set(modelName, {
+        modelName,
+        count: 0,
+        reasons: new Map(),
+      });
+    }
+    const modelItem = current.models.get(modelName);
+    modelItem.count += count;
+    if (reasonCode || reasonLabel) {
+      const reasonKey = reasonCode || reasonLabel;
+      const reasonItem = modelItem.reasons.get(reasonKey) || {
+        reasonCode,
+        reasonLabel,
+        count: 0,
+      };
+      reasonItem.count += count;
+      modelItem.reasons.set(reasonKey, reasonItem);
+    }
   });
 
   return Array.from(grouped.values())
@@ -139,10 +159,16 @@ export const groupWarningDetailsByScope = (details) => {
         scopeValue: item.scopeValue,
         totalCount: item.totalCount,
         displayHint,
-        models: Array.from(item.models.entries())
-          .map(([name, value]) => ({
-            modelName: name,
-            count: value,
+        models: Array.from(item.models.values())
+          .map((model) => ({
+            modelName: model.modelName,
+            count: model.count,
+            reasons: Array.from(model.reasons.values()).sort((left, right) => {
+              if (right.count !== left.count) return right.count - left.count;
+              return (left.reasonLabel || left.reasonCode).localeCompare(
+                right.reasonLabel || right.reasonCode,
+              );
+            }),
           }))
           .sort((left, right) => {
             if (right.count !== left.count) return right.count - left.count;

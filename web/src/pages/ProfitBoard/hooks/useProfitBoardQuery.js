@@ -20,6 +20,82 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { API, showError } from '../../../helpers';
 import { buildQueryKey } from '../utils';
 
+const SECTION_TIMESERIES = 'timeseries';
+const SECTION_CHANNEL_BREAKDOWN = 'channel_breakdown';
+const SECTION_MODEL_BREAKDOWN = 'model_breakdown';
+const SECTION_WARNING_ITEMS = 'warning_items';
+const DEFAULT_REPORT_SECTIONS = [
+  SECTION_TIMESERIES,
+  SECTION_CHANNEL_BREAKDOWN,
+  SECTION_MODEL_BREAKDOWN,
+  SECTION_WARNING_ITEMS,
+];
+
+const getSectionsForChartTab = (chartTab) => {
+  switch (chartTab) {
+    case 'channel':
+      return [SECTION_CHANNEL_BREAKDOWN, SECTION_WARNING_ITEMS];
+    case 'model':
+      return [SECTION_MODEL_BREAKDOWN, SECTION_WARNING_ITEMS];
+    case 'trend':
+    default:
+      return [SECTION_TIMESERIES, SECTION_WARNING_ITEMS];
+  }
+};
+
+const normalizeLoadedSections = (report) => {
+  if (!report) return [];
+  const loaded = report?.meta?.loaded_sections;
+  return Array.isArray(loaded) && loaded.length ? loaded : DEFAULT_REPORT_SECTIONS;
+};
+
+const mergeUniqueSections = (...sectionLists) =>
+  Array.from(
+    new Set(
+      sectionLists.flatMap((items) => (Array.isArray(items) ? items : [])),
+    ),
+  );
+
+const mergeReportSections = (prevReport, nextReport) => {
+  if (!prevReport) return nextReport;
+  const loadedSections = mergeUniqueSections(
+    normalizeLoadedSections(prevReport),
+    normalizeLoadedSections(nextReport),
+  );
+  return {
+    ...prevReport,
+    ...nextReport,
+    meta: {
+      ...(prevReport.meta || {}),
+      ...(nextReport.meta || {}),
+      loaded_sections: loadedSections,
+    },
+    timeseries:
+      nextReport?.timeseries?.length || loadedSections.includes(SECTION_TIMESERIES)
+        ? nextReport?.timeseries || prevReport?.timeseries || []
+        : prevReport?.timeseries || [],
+    channel_breakdown:
+      nextReport?.channel_breakdown?.length ||
+      loadedSections.includes(SECTION_CHANNEL_BREAKDOWN)
+        ? nextReport?.channel_breakdown || prevReport?.channel_breakdown || []
+        : prevReport?.channel_breakdown || [],
+    model_breakdown:
+      nextReport?.model_breakdown?.length ||
+      loadedSections.includes(SECTION_MODEL_BREAKDOWN)
+        ? nextReport?.model_breakdown || prevReport?.model_breakdown || []
+        : prevReport?.model_breakdown || [],
+    warning_items:
+      nextReport?.warning_items?.length ||
+      loadedSections.includes(SECTION_WARNING_ITEMS)
+        ? nextReport?.warning_items || prevReport?.warning_items || []
+        : prevReport?.warning_items || [],
+    warnings:
+      nextReport?.warnings?.length || loadedSections.includes(SECTION_WARNING_ITEMS)
+        ? nextReport?.warnings || prevReport?.warnings || []
+        : prevReport?.warnings || [],
+  };
+};
+
 export const useProfitBoardQuery = ({
   restoredState,
   cachedBundle,
@@ -131,6 +207,24 @@ export const useProfitBoardQuery = ({
     !!report && lastQueryKey === currentQueryKey;
   const overviewMatchesCurrentConfig =
     !!overviewReport && lastOverviewKey === overviewConfigKey;
+  const loadedReportSections = useMemo(
+    () => normalizeLoadedSections(report),
+    [report],
+  );
+  const activeChartSection = useMemo(() => {
+    switch (chartTab) {
+      case 'channel':
+        return SECTION_CHANNEL_BREAKDOWN;
+      case 'model':
+        return SECTION_MODEL_BREAKDOWN;
+      case 'trend':
+      default:
+        return SECTION_TIMESERIES;
+    }
+  }, [chartTab]);
+  const activeChartSectionLoaded = loadedReportSections.includes(
+    activeChartSection,
+  );
 
   const autoRefreshEligible = useMemo(
     () =>
@@ -184,8 +278,12 @@ export const useProfitBoardQuery = ({
   }, [configPayload, overviewConfigKey, queryReady, validationErrors.length]);
 
   const runQuery = useCallback(async (options = {}) => {
-    const { expectedQueryKey = currentQueryKey, showValidationError = true } =
-      options;
+    const {
+      expectedQueryKey = currentQueryKey,
+      showValidationError = true,
+      sections = getSectionsForChartTab(chartTab),
+      merge = false,
+    } = options;
     if (!queryReady || validationErrors.length > 0) {
       if (showValidationError && validationErrors.length > 0) {
         showError(validationErrors[0]);
@@ -195,7 +293,10 @@ export const useProfitBoardQuery = ({
     const requestId = ++queryRequestIdRef.current;
     setQuerying(true);
     try {
-      const res = await API.post('/api/profit_board/query', queryPayload);
+      const res = await API.post('/api/profit_board/query', {
+        ...queryPayload,
+        sections,
+      });
       if (!res.data.success) return showError(res.data.message);
       if (
         queryRequestIdRef.current !== requestId ||
@@ -203,7 +304,9 @@ export const useProfitBoardQuery = ({
       ) {
         return false;
       }
-      const nextReport = res.data.data;
+      const nextReport = merge
+        ? mergeReportSections(report, res.data.data)
+        : res.data.data;
       setReport(nextReport);
       setLastQueryKey(expectedQueryKey);
       setHasNewActivity(false);
@@ -221,9 +324,11 @@ export const useProfitBoardQuery = ({
     }
   }, [
     currentQueryKey,
+    chartTab,
     persistReportCache,
     queryPayload,
     queryReady,
+    report,
     validationErrors,
   ]);
 
@@ -245,13 +350,20 @@ export const useProfitBoardQuery = ({
         }
         return false;
       }
-      await runQuery({
+      const reportPromise = runQuery({
         expectedQueryKey,
         showValidationError: false,
+        sections: getSectionsForChartTab(chartTab),
       });
-      return runOverviewQuery({ expectedOverviewKey });
+      const overviewPromise = runOverviewQuery({ expectedOverviewKey });
+      const [reportOk, overviewOk] = await Promise.all([
+        reportPromise,
+        overviewPromise,
+      ]);
+      return !!reportOk && !!overviewOk;
     },
     [
+      chartTab,
       currentQueryKey,
       overviewConfigKey,
       queryReady,
@@ -345,6 +457,7 @@ export const useProfitBoardQuery = ({
         await runQuery({
           expectedQueryKey,
           showValidationError: false,
+          sections: getSectionsForChartTab(chartTab),
         });
       }
       if (needsOverview) {
@@ -366,12 +479,42 @@ export const useProfitBoardQuery = ({
     };
   }, [
     activeTab,
+    chartTab,
     currentQueryKey,
     overviewConfigKey,
     overviewMatchesCurrentConfig,
     queryReady,
     reportMatchesCurrentFilters,
     runOverviewQuery,
+    runQuery,
+    validationErrors.length,
+  ]);
+
+  useEffect(() => {
+    if (
+      activeTab !== 'analysis' ||
+      !queryReady ||
+      validationErrors.length > 0 ||
+      !reportMatchesCurrentFilters ||
+      !report ||
+      activeChartSectionLoaded
+    ) {
+      return;
+    }
+    runQuery({
+      expectedQueryKey: currentQueryKey,
+      showValidationError: false,
+      sections: getSectionsForChartTab(chartTab),
+      merge: true,
+    });
+  }, [
+    activeTab,
+    activeChartSectionLoaded,
+    chartTab,
+    currentQueryKey,
+    queryReady,
+    report,
+    reportMatchesCurrentFilters,
     runQuery,
     validationErrors.length,
   ]);
@@ -402,6 +545,8 @@ export const useProfitBoardQuery = ({
     currentQueryKey,
     overviewConfigKey,
     reportMatchesCurrentFilters,
+    loadedReportSections,
+    activeChartSectionLoaded,
     autoRefreshMode,
     setAutoRefreshMode,
     hasNewActivity,

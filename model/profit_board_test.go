@@ -48,6 +48,15 @@ func findProfitBoardWarningItem(items []ProfitBoardWarningItem, code string) *Pr
 	return nil
 }
 
+func findProfitBoardWarningDetail(items []ProfitBoardWarningDetail, scopeType, scopeLabel, modelName string) *ProfitBoardWarningDetail {
+	for i := range items {
+		if items[i].ScopeType == scopeType && items[i].ScopeLabel == scopeLabel && items[i].ModelName == modelName {
+			return &items[i]
+		}
+	}
+	return nil
+}
+
 func setupProfitBoardTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
@@ -108,6 +117,90 @@ func TestGetProfitBoardOptionsIncludesAdminUsers(t *testing.T) {
 	}
 	if options.AdminUsers[0].Id != 2 || options.AdminUsers[1].Id != 1 {
 		t.Fatalf("unexpected admin users order: %+v", options.AdminUsers)
+	}
+}
+
+func TestGetProfitBoardUserOptionsFiltersByRoleGroupAndKeyword(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	users := []User{
+		{Id: 1, Username: "admin-user", DisplayName: "Admin User", Role: common.RoleAdminUser, Status: common.UserStatusEnabled, AffCode: "pb-user-option-admin"},
+		{Id: 2, Username: "root-user", DisplayName: "Root User", Role: common.RoleRootUser, Status: common.UserStatusEnabled, AffCode: "pb-user-option-root"},
+		{Id: 3, Username: "common-alpha", DisplayName: "Alpha Nick", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "pb-user-option-common-a"},
+		{Id: 4, Username: "common-beta", DisplayName: "Beta Nick", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "pb-user-option-common-b"},
+	}
+	for _, user := range users {
+		if err := db.Create(&user).Error; err != nil {
+			t.Fatalf("seed user: %v", err)
+		}
+	}
+
+	adminUsers, adminTotal, err := GetProfitBoardUserOptions(ProfitBoardUserOptionQuery{
+		RoleGroup: "admin",
+		Limit:     100,
+	})
+	if err != nil {
+		t.Fatalf("GetProfitBoardUserOptions admin: %v", err)
+	}
+	if adminTotal != 2 {
+		t.Fatalf("expected 2 admin users, got total=%d data=%+v", adminTotal, adminUsers)
+	}
+	if len(adminUsers) != 2 || adminUsers[0].Id != 2 || adminUsers[1].Id != 1 {
+		t.Fatalf("unexpected admin users order: %+v", adminUsers)
+	}
+
+	commonUsers, commonTotal, err := GetProfitBoardUserOptions(ProfitBoardUserOptionQuery{
+		RoleGroup: "common",
+		Keyword:   "Nick",
+		Limit:     100,
+	})
+	if err != nil {
+		t.Fatalf("GetProfitBoardUserOptions common: %v", err)
+	}
+	if commonTotal != 2 {
+		t.Fatalf("expected 2 common users, got total=%d data=%+v", commonTotal, commonUsers)
+	}
+	if len(commonUsers) != 2 || commonUsers[0].Id != 4 || commonUsers[1].Id != 3 {
+		t.Fatalf("unexpected common users order: %+v", commonUsers)
+	}
+
+	byIDUsers, byIDTotal, err := GetProfitBoardUserOptions(ProfitBoardUserOptionQuery{
+		RoleGroup: "all",
+		Keyword:   "3",
+		Limit:     100,
+	})
+	if err != nil {
+		t.Fatalf("GetProfitBoardUserOptions by id: %v", err)
+	}
+	if byIDTotal != 1 || len(byIDUsers) != 1 || byIDUsers[0].Id != 3 {
+		t.Fatalf("expected exact id match, got total=%d data=%+v", byIDTotal, byIDUsers)
+	}
+}
+
+func TestGetProfitBoardUserOptionsSupportsIDsAndSkipsDeletedUsers(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	active := User{Id: 10, Username: "keep-me", DisplayName: "Keep Me", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "pb-user-option-keep"}
+	deleted := User{Id: 11, Username: "delete-me", DisplayName: "Delete Me", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "pb-user-option-delete"}
+	if err := db.Create(&active).Error; err != nil {
+		t.Fatalf("seed active user: %v", err)
+	}
+	if err := db.Create(&deleted).Error; err != nil {
+		t.Fatalf("seed deleted user: %v", err)
+	}
+	if err := db.Delete(&deleted).Error; err != nil {
+		t.Fatalf("soft delete user: %v", err)
+	}
+
+	users, total, err := GetProfitBoardUserOptions(ProfitBoardUserOptionQuery{
+		IDs:   []int{11, 10},
+		Limit: 100,
+	})
+	if err != nil {
+		t.Fatalf("GetProfitBoardUserOptions ids: %v", err)
+	}
+	if total != 1 || len(users) != 1 || users[0].Id != 10 {
+		t.Fatalf("expected only active user returned, got total=%d data=%+v", total, users)
 	}
 }
 
@@ -729,6 +822,48 @@ func TestGenerateProfitBoardReportSupportsCustomMinuteGranularity(t *testing.T) 
 	}
 	if report.Timeseries[0].Bucket != "2026-03-01 10:00" || report.Timeseries[1].Bucket != "2026-03-01 10:15" {
 		t.Fatalf("unexpected custom buckets: %+v", report.Timeseries)
+	}
+}
+
+func TestBuildProfitBoardReportCacheKeyIncludesPricingAndGranularity(t *testing.T) {
+	base := ProfitBoardQuery{
+		Batches: []ProfitBoardBatch{{
+			Id:         "batch-1",
+			Name:       "批次 1",
+			ScopeType:  ProfitBoardScopeChannel,
+			ChannelIDs: []int{1},
+		}},
+		Upstream: ProfitBoardTokenPricingConfig{
+			CostSource: ProfitBoardCostSourceReturnedOnly,
+		},
+		Site: ProfitBoardTokenPricingConfig{
+			PricingMode: ProfitBoardSitePricingManual,
+			InputPrice:  1,
+		},
+		StartTimestamp:        100,
+		EndTimestamp:          200,
+		Granularity:           "custom",
+		CustomIntervalMinutes: 15,
+		Sections:              []string{"timeseries", "warning_items"},
+	}
+
+	keyA := buildProfitBoardReportCacheKey(base)
+	if keyA == "" {
+		t.Fatal("expected non-empty cache key")
+	}
+
+	withDifferentSite := base
+	withDifferentSite.Site.InputPrice = 2
+	keyB := buildProfitBoardReportCacheKey(withDifferentSite)
+	if keyA == keyB {
+		t.Fatalf("expected cache key to change when site pricing changes: %q", keyA)
+	}
+
+	withDifferentGranularity := base
+	withDifferentGranularity.CustomIntervalMinutes = 30
+	keyC := buildProfitBoardReportCacheKey(withDifferentGranularity)
+	if keyA == keyC {
+		t.Fatalf("expected cache key to change when custom interval changes: %q", keyA)
 	}
 }
 
@@ -2283,6 +2418,7 @@ func TestProfitBoardWarningsExposeStructuredDetails(t *testing.T) {
 		{Id: 3, Name: "gamma", Status: common.ChannelStatusEnabled},
 		{Id: 4, Name: "delta", Tag: common.GetPointer("billing"), Status: common.ChannelStatusEnabled},
 		{Id: 5, Name: "epsilon", Status: common.ChannelStatusEnabled},
+		{Id: 6, Name: "zeta", Status: common.ChannelStatusEnabled},
 	}
 	for _, channel := range channels {
 		if err := db.Create(&channel).Error; err != nil {
@@ -2298,6 +2434,7 @@ func TestProfitBoardWarningsExposeStructuredDetails(t *testing.T) {
 		{Id: 4, Type: LogTypeConsume, CreatedAt: now - 60, ChannelId: 4, ModelName: "known-site-model", PromptTokens: 1000, CompletionTokens: 0, Quota: 5},
 		{Id: 5, Type: LogTypeConsume, CreatedAt: now - 50, ChannelId: 4, ModelName: "known-site-model", PromptTokens: 1000, CompletionTokens: 0, Quota: 5},
 		{Id: 6, Type: LogTypeConsume, CreatedAt: now - 40, ChannelId: 5, ModelName: "known-site-model", PromptTokens: 1000, CompletionTokens: 0, Quota: 5},
+		{Id: 31, Type: LogTypeConsume, CreatedAt: now - 39, ChannelId: 6, ModelName: "manual-only-missing", PromptTokens: 1000, CompletionTokens: 0, Quota: 5},
 	}
 	for _, logRow := range logs {
 		if err := db.Create(&logRow).Error; err != nil {
@@ -2321,12 +2458,23 @@ func TestProfitBoardWarningsExposeStructuredDetails(t *testing.T) {
 				ChannelIDs: []int{4, 5},
 				CreatedAt:  now - 120,
 			},
+			{
+				Id:         "manual-site-batch",
+				Name:       "手动缺失",
+				ScopeType:  ProfitBoardScopeChannel,
+				ChannelIDs: []int{6},
+				CreatedAt:  now - 120,
+			},
 		},
 		ComboConfigs: []ProfitBoardComboPricingConfig{
 			{
 				ComboId:    "site-missing-batch",
 				SiteMode:   ProfitBoardComboSiteModeSharedSite,
 				CostSource: ProfitBoardCostSourceManualOnly,
+				SiteRules: []ProfitBoardModelPricingRule{{
+					ModelName:  "known-site-fallback",
+					InputPrice: 5,
+				}},
 				UpstreamRules: []ProfitBoardModelPricingRule{{
 					IsDefault:  true,
 					InputPrice: 2,
@@ -2339,6 +2487,10 @@ func TestProfitBoardWarningsExposeStructuredDetails(t *testing.T) {
 					IsDefault:  true,
 					InputPrice: 5,
 				}},
+			},
+			{
+				ComboId:    "manual-site-batch",
+				CostSource: ProfitBoardCostSourceManualOnly,
 			},
 		},
 		Upstream: ProfitBoardTokenPricingConfig{
@@ -2365,21 +2517,39 @@ func TestProfitBoardWarningsExposeStructuredDetails(t *testing.T) {
 	if siteWarning == nil {
 		t.Fatalf("expected missing_site_pricing warning item, got %+v", report.WarningItems)
 	}
-	if siteWarning.TotalCount != 3 || len(siteWarning.Details) != 2 {
+	if siteWarning.TotalCount != 4 || len(siteWarning.Details) != 3 {
 		t.Fatalf("unexpected site warning item: %+v", siteWarning)
 	}
-	if siteWarning.Details[0].ScopeType != "tag" || siteWarning.Details[0].ScopeLabel != "vip" || siteWarning.Details[0].ModelName != "missing-site-model" || siteWarning.Details[0].Count != 2 {
-		t.Fatalf("unexpected first site warning detail: %+v", siteWarning.Details[0])
+	siteVipDetail := findProfitBoardWarningDetail(siteWarning.Details, "tag", "vip", "missing-site-model")
+	if siteVipDetail == nil || siteVipDetail.Count != 2 {
+		t.Fatalf("unexpected site vip detail: %+v", siteWarning.Details)
 	}
-	if siteWarning.Details[1].ScopeType != "channel" || siteWarning.Details[1].ScopeLabel != "gamma" || siteWarning.Details[1].ModelName != "missing-site-model" || siteWarning.Details[1].Count != 1 {
-		t.Fatalf("unexpected second site warning detail: %+v", siteWarning.Details[1])
+	if siteVipDetail.ReasonCode == "" || siteVipDetail.ReasonLabel == "" {
+		t.Fatalf("expected site vip detail reason fields, got %+v", siteVipDetail)
+	}
+	gammaSharedSiteDetail := findProfitBoardWarningDetail(siteWarning.Details, "channel", "gamma", "missing-site-model")
+	if gammaSharedSiteDetail == nil || gammaSharedSiteDetail.Count != 1 {
+		t.Fatalf("unexpected gamma shared-site detail: %+v", siteWarning.Details)
+	}
+	if gammaSharedSiteDetail.ReasonCode == "" || gammaSharedSiteDetail.ReasonLabel == "" {
+		t.Fatalf("expected gamma shared-site reason fields, got %+v", gammaSharedSiteDetail)
+	}
+	manualOnlyDetail := findProfitBoardWarningDetail(siteWarning.Details, "channel", "zeta", "manual-only-missing")
+	if manualOnlyDetail == nil || manualOnlyDetail.Count != 1 {
+		t.Fatalf("unexpected manual-only detail: %+v", siteWarning.Details)
+	}
+	if manualOnlyDetail.ReasonCode == "" || manualOnlyDetail.ReasonLabel == "" {
+		t.Fatalf("expected manual-only reason fields, got %+v", manualOnlyDetail)
+	}
+	if gammaSharedSiteDetail.ReasonCode == manualOnlyDetail.ReasonCode {
+		t.Fatalf("expected different site missing reasons, got shared=%s manual=%s", gammaSharedSiteDetail.ReasonCode, manualOnlyDetail.ReasonCode)
 	}
 
 	upstreamWarning := findProfitBoardWarningItem(report.WarningItems, "missing_upstream_cost")
 	if upstreamWarning == nil {
 		t.Fatalf("expected missing_upstream_cost warning item, got %+v", report.WarningItems)
 	}
-	if upstreamWarning.TotalCount != 3 || len(upstreamWarning.Details) != 2 {
+	if upstreamWarning.TotalCount != 4 || len(upstreamWarning.Details) != 3 {
 		t.Fatalf("unexpected upstream warning item: %+v", upstreamWarning)
 	}
 	if upstreamWarning.Details[0].ScopeType != "tag" || upstreamWarning.Details[0].ScopeLabel != "billing" || upstreamWarning.Details[0].ModelName != "known-site-model" || upstreamWarning.Details[0].Count != 2 {
@@ -2387,6 +2557,9 @@ func TestProfitBoardWarningsExposeStructuredDetails(t *testing.T) {
 	}
 	if upstreamWarning.Details[1].ScopeType != "channel" || upstreamWarning.Details[1].ScopeLabel != "epsilon" || upstreamWarning.Details[1].ModelName != "known-site-model" || upstreamWarning.Details[1].Count != 1 {
 		t.Fatalf("unexpected second upstream warning detail: %+v", upstreamWarning.Details[1])
+	}
+	if upstreamWarning.Details[2].ScopeType != "channel" || upstreamWarning.Details[2].ScopeLabel != "zeta" || upstreamWarning.Details[2].ModelName != "manual-only-missing" || upstreamWarning.Details[2].Count != 1 {
+		t.Fatalf("unexpected third upstream warning detail: %+v", upstreamWarning.Details[2])
 	}
 
 	overview, err := GenerateProfitBoardOverview(ProfitBoardConfigPayload{
@@ -2406,5 +2579,83 @@ func TestProfitBoardWarningsExposeStructuredDetails(t *testing.T) {
 	overviewUpstreamWarning := findProfitBoardWarningItem(overview.WarningItems, "missing_upstream_cost")
 	if overviewUpstreamWarning == nil || overviewUpstreamWarning.Message == "" || !strings.Contains(overviewUpstreamWarning.Message, "累计总览") {
 		t.Fatalf("expected overview upstream warning message, got %+v", overview.WarningItems)
+	}
+}
+
+func TestGenerateProfitBoardReportSupportsSections(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	originQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 1000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originQuotaPerUnit
+	})
+
+	channel := Channel{Id: 1, Name: "alpha", Tag: common.GetPointer("vip"), Status: common.ChannelStatusEnabled}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+	now := common.GetTimestamp()
+	logRow := Log{
+		Id:               1,
+		Type:             LogTypeConsume,
+		CreatedAt:        now - 30,
+		ChannelId:        1,
+		ModelName:        "gpt-4.1",
+		PromptTokens:     1000,
+		CompletionTokens: 0,
+		Quota:            5,
+	}
+	if err := db.Create(&logRow).Error; err != nil {
+		t.Fatalf("seed log: %v", err)
+	}
+
+	report, err := GenerateProfitBoardReport(ProfitBoardQuery{
+		Batches: []ProfitBoardBatch{{
+			Id:         "batch-1",
+			Name:       "批次 1",
+			ScopeType:  ProfitBoardScopeChannel,
+			ChannelIDs: []int{1},
+		}},
+		ComboConfigs: []ProfitBoardComboPricingConfig{{
+			ComboId: "batch-1",
+			SiteRules: []ProfitBoardModelPricingRule{{
+				IsDefault:  true,
+				InputPrice: 5,
+			}},
+			UpstreamRules: []ProfitBoardModelPricingRule{{
+				IsDefault:  true,
+				InputPrice: 2,
+			}},
+		}},
+		Upstream: ProfitBoardTokenPricingConfig{
+			CostSource: ProfitBoardCostSourceManualOnly,
+		},
+		Site: ProfitBoardTokenPricingConfig{
+			PricingMode: ProfitBoardSitePricingManual,
+		},
+		StartTimestamp: now - 60,
+		EndTimestamp:   now,
+		Granularity:    "day",
+		Sections:       []string{"timeseries", "warning_items"},
+	})
+	if err != nil {
+		t.Fatalf("GenerateProfitBoardReport: %v", err)
+	}
+
+	if len(report.Timeseries) != 1 {
+		t.Fatalf("expected timeseries section loaded, got %+v", report.Timeseries)
+	}
+	if len(report.ChannelBreakdown) != 0 {
+		t.Fatalf("expected channel breakdown skipped, got %+v", report.ChannelBreakdown)
+	}
+	if len(report.ModelBreakdown) != 0 {
+		t.Fatalf("expected model breakdown skipped, got %+v", report.ModelBreakdown)
+	}
+	if len(report.Meta.LoadedSections) == 0 {
+		t.Fatalf("expected loaded sections metadata, got %+v", report.Meta)
+	}
+	if report.Meta.LoadedSections[0] == "" {
+		t.Fatalf("expected non-empty loaded sections, got %+v", report.Meta.LoadedSections)
 	}
 }
