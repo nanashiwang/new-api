@@ -37,6 +37,7 @@ import { useIsMobile } from '../common/useIsMobile';
 import { useTableCompactMode } from '../common/useTableCompactMode';
 import { useChannelUpstreamUpdates } from './useChannelUpstreamUpdates';
 import { parseUpstreamUpdateMeta } from './upstreamUpdateUtils';
+import { getTagAggregationStatus } from '../../components/table/channels/tagAggregationStatus';
 import { Modal, Button } from '@douyinfe/semi-ui';
 import { openCodexUsageModal } from '../../components/table/channels/modals/CodexUsageModal';
 
@@ -323,13 +324,33 @@ export const useChannelsData = () => {
             ]),
           );
         }
-        if (currentChannel.status === 1) {
-          tagChannelDates.status = 1;
-        }
         tagChannelDates.used_quota += currentChannel.used_quota;
         tagChannelDates.response_time += currentChannel.response_time;
         tagChannelDates.response_time = tagChannelDates.response_time / 2;
       }
+    }
+    if (enableTagMode) {
+      channelDates = channelDates.map((item) => {
+        if (item?.children === undefined) {
+          return item;
+        }
+        const tagAggregationStatus = getTagAggregationStatus(item.children);
+        let status = item.status;
+        if (tagAggregationStatus.isAllEnabled) {
+          status = 1;
+        } else if (tagAggregationStatus.isAllDisabled) {
+          status = 2;
+        } else if (tagAggregationStatus.isMixed) {
+          // Mixed tag rows should stay visually available, but render as a compact progress state.
+          status = 1;
+        }
+        return {
+          ...item,
+          status,
+          effective_available: tagAggregationStatus.enabledCount > 0,
+          tagAggregationStatus,
+        };
+      });
     }
     setChannels(channelDates);
   };

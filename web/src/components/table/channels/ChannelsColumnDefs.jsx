@@ -23,6 +23,7 @@ import {
   Dropdown,
   InputNumber,
   Modal,
+  Progress,
   Space,
   SplitButtonGroup,
   Tag,
@@ -44,6 +45,7 @@ import {
   MODEL_FETCHABLE_CHANNEL_TYPES,
 } from '../../../constants';
 import { parseUpstreamUpdateMeta } from '../../../hooks/channels/upstreamUpdateUtils';
+import { getTagAggregationStatus } from './tagAggregationStatus';
 import {
   IconTreeTriangleDown,
   IconMore,
@@ -182,6 +184,52 @@ const buildEffectiveAvailabilityMessage = (record, t) => {
 };
 
 const renderStatus = (status, record = {}, t) => {
+  if (record?.children !== undefined) {
+    const summary =
+      record?.tagAggregationStatus || getTagAggregationStatus(record.children);
+    if (summary.isMixed) {
+      return (
+        <Tooltip
+          content={`${summary.enabledCount}/${summary.totalCount} ${t('个渠道已启用')}`}
+        >
+          <Tag color='white' shape='circle'>
+            <div
+              className='flex flex-col items-center'
+              style={{ minWidth: 86, lineHeight: 1 }}
+            >
+              <span className='text-xs leading-none'>
+                {summary.countLabel}
+              </span>
+              <Progress
+                percent={summary.progressPercent}
+                stroke={summary.progressStroke}
+                showInfo={false}
+                style={{
+                  width: '100%',
+                  marginTop: 3,
+                  marginBottom: 0,
+                }}
+              />
+            </div>
+          </Tag>
+        </Tooltip>
+      );
+    }
+    if (summary.isAllDisabled) {
+      return (
+        <Tag color='red' shape='circle'>
+          {t('已禁用')}
+        </Tag>
+      );
+    }
+    if (summary.isAllEnabled) {
+      return (
+        <Tag color='green' shape='circle'>
+          {t('已启用')}
+        </Tag>
+      );
+    }
+  }
   const channelInfo = record?.channel_info;
   if (channelInfo) {
     if (channelInfo.is_multi_key) {
