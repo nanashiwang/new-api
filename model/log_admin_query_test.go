@@ -68,7 +68,7 @@ func TestSumUsedQuota_FuzzyUsernameSearch(t *testing.T) {
 	db := setupLogQueryTestDB(t)
 	seedLogQueryFixtures(t, db)
 
-	stat, err := SumUsedQuota(LogTypeConsume, 0, 0, "", "alice", "", 0, "", true)
+	stat, err := SumUsedQuota(LogTypeConsume, 0, 0, "", "alice", "", 0, "", "", true)
 	if err != nil {
 		t.Fatalf("SumUsedQuota: %v", err)
 	}

@@ -24,6 +24,14 @@ import CompactModeToggle from '../../common/ui/CompactModeToggle';
 import { useMinimumLoadingTime } from '../../../hooks/common/useMinimumLoadingTime';
 import { BarChart3 } from 'lucide-react';
 
+function formatPercent(value) {
+  const rate = Number(value || 0);
+  if (!Number.isFinite(rate) || rate <= 0) {
+    return '0.00%';
+  }
+  return `${(rate * 100).toFixed(2)}%`;
+}
+
 const LogsActions = ({
   stat,
   loadingStat,
@@ -42,6 +50,8 @@ const LogsActions = ({
       <Skeleton.Title style={{ width: 108, height: 21, borderRadius: 6 }} />
       <Skeleton.Title style={{ width: 65, height: 21, borderRadius: 6 }} />
       <Skeleton.Title style={{ width: 64, height: 21, borderRadius: 6 }} />
+      <Skeleton.Title style={{ width: 108, height: 21, borderRadius: 6 }} />
+      <Skeleton.Title style={{ width: 108, height: 21, borderRadius: 6 }} />
     </Space>
   );
 
@@ -82,6 +92,28 @@ const LogsActions = ({
             className='!rounded-lg'
           >
             TPM: {stat.tpm}
+          </Tag>
+          <Tag
+            color='green'
+            style={{
+              fontWeight: 500,
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+              padding: 13,
+            }}
+            className='!rounded-lg'
+          >
+            {t('命中缓存率')}: {formatPercent(stat.cache_hit_rate)}
+          </Tag>
+          <Tag
+            color='teal'
+            style={{
+              fontWeight: 500,
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+              padding: 13,
+            }}
+            className='!rounded-lg'
+          >
+            {t('全局缓存率')}: {formatPercent(stat.cache_global_rate)}
           </Tag>
         </Space>
       </Skeleton>

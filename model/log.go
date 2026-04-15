@@ -430,36 +430,104 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 }
 
 type Stat struct {
-	Quota int `json:"quota"`
-	Rpm   int `json:"rpm"`
-	Tpm   int `json:"tpm"`
+	Quota           int     `json:"quota"`
+	Rpm             int     `json:"rpm"`
+	Tpm             int     `json:"tpm"`
+	CacheHitRate    float64 `json:"cache_hit_rate"`
+	CacheGlobalRate float64 `json:"cache_global_rate"`
 }
 
-func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string, fuzzyUsername bool) (stat Stat, err error) {
+type logCacheRateRow struct {
+	PromptTokens int    `gorm:"column:prompt_tokens"`
+	Other        string `gorm:"column:other"`
+}
+
+func getDisplayedInputTokens(promptTokens, cacheReadTokens, cacheWriteTokens int, other tokenUsageOtherInfo) int {
+	if promptTokens < 0 {
+		promptTokens = 0
+	}
+	if other.Claude || strings.EqualFold(other.UsageSemantic, "anthropic") {
+		return promptTokens + cacheReadTokens + cacheWriteTokens
+	}
+	return promptTokens
+}
+
+func calculateCacheRates(rows []logCacheRateRow) (cacheHitRate float64, cacheGlobalRate float64) {
+	var globalReadTokens int
+	var globalInputTokens int
+	var hitReadTokens int
+	var hitInputTokens int
+
+	for _, row := range rows {
+		other := tokenUsageOtherInfo{}
+		if row.Other != "" {
+			_ = common.UnmarshalJsonStr(row.Other, &other)
+		}
+
+		cacheReadTokens := other.CacheTokens
+		if cacheReadTokens < 0 {
+			cacheReadTokens = 0
+		}
+		cacheWriteTokens := sumCacheCreationTokens(other)
+		if cacheWriteTokens < 0 {
+			cacheWriteTokens = 0
+		}
+
+		displayedInputTokens := getDisplayedInputTokens(
+			row.PromptTokens,
+			cacheReadTokens,
+			cacheWriteTokens,
+			other,
+		)
+
+		globalReadTokens += cacheReadTokens
+		globalInputTokens += displayedInputTokens
+		if cacheReadTokens > 0 {
+			hitReadTokens += cacheReadTokens
+			hitInputTokens += displayedInputTokens
+		}
+	}
+
+	if globalInputTokens > 0 {
+		cacheGlobalRate = float64(globalReadTokens) / float64(globalInputTokens)
+	}
+	if hitInputTokens > 0 {
+		cacheHitRate = float64(hitReadTokens) / float64(hitInputTokens)
+	}
+	return cacheHitRate, cacheGlobalRate
+}
+
+func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string, requestID string, fuzzyUsername bool) (stat Stat, err error) {
 	tx := LOG_DB.Table("logs").Select("sum(quota) quota")
 
 	// 为rpm和tpm创建单独的查询
 	rpmTpmQuery := LOG_DB.Table("logs").Select("count(*) rpm, sum(prompt_tokens) + sum(completion_tokens) tpm")
+	cacheRateQuery := LOG_DB.Table("logs").Select("prompt_tokens, other")
 
 	if username != "" {
 		if fuzzyUsername {
 			usernamePattern := buildContainsLikePattern(username)
 			tx = tx.Where("username LIKE ? ESCAPE '!'", usernamePattern)
 			rpmTpmQuery = rpmTpmQuery.Where("username LIKE ? ESCAPE '!'", usernamePattern)
+			cacheRateQuery = cacheRateQuery.Where("username LIKE ? ESCAPE '!'", usernamePattern)
 		} else {
 			tx = tx.Where("username = ?", username)
 			rpmTpmQuery = rpmTpmQuery.Where("username = ?", username)
+			cacheRateQuery = cacheRateQuery.Where("username = ?", username)
 		}
 	}
 	if tokenName != "" {
 		tx = tx.Where("token_name = ?", tokenName)
 		rpmTpmQuery = rpmTpmQuery.Where("token_name = ?", tokenName)
+		cacheRateQuery = cacheRateQuery.Where("token_name = ?", tokenName)
 	}
 	if startTimestamp != 0 {
 		tx = tx.Where("created_at >= ?", startTimestamp)
+		cacheRateQuery = cacheRateQuery.Where("created_at >= ?", startTimestamp)
 	}
 	if endTimestamp != 0 {
 		tx = tx.Where("created_at <= ?", endTimestamp)
+		cacheRateQuery = cacheRateQuery.Where("created_at <= ?", endTimestamp)
 	}
 	if modelName != "" {
 		modelNamePattern, err := sanitizeLikePattern(modelName)
@@ -468,18 +536,27 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 		}
 		tx = tx.Where("model_name LIKE ? ESCAPE '!'", modelNamePattern)
 		rpmTpmQuery = rpmTpmQuery.Where("model_name LIKE ? ESCAPE '!'", modelNamePattern)
+		cacheRateQuery = cacheRateQuery.Where("model_name LIKE ? ESCAPE '!'", modelNamePattern)
 	}
 	if channel != 0 {
 		tx = tx.Where("channel_id = ?", channel)
 		rpmTpmQuery = rpmTpmQuery.Where("channel_id = ?", channel)
+		cacheRateQuery = cacheRateQuery.Where("channel_id = ?", channel)
 	}
 	if group != "" {
 		tx = tx.Where(logGroupCol+" = ?", group)
 		rpmTpmQuery = rpmTpmQuery.Where(logGroupCol+" = ?", group)
+		cacheRateQuery = cacheRateQuery.Where(logGroupCol+" = ?", group)
+	}
+	if requestID != "" {
+		tx = tx.Where("request_id = ?", requestID)
+		rpmTpmQuery = rpmTpmQuery.Where("request_id = ?", requestID)
+		cacheRateQuery = cacheRateQuery.Where("request_id = ?", requestID)
 	}
 
 	tx = tx.Where("type = ?", LogTypeConsume)
 	rpmTpmQuery = rpmTpmQuery.Where("type = ?", LogTypeConsume)
+	cacheRateQuery = cacheRateQuery.Where("type = ?", LogTypeConsume)
 
 	// 只统计最近60秒的rpm和tpm
 	rpmTpmQuery = rpmTpmQuery.Where("created_at >= ?", time.Now().Add(-60*time.Second).Unix())
@@ -493,6 +570,12 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 		common.SysError("failed to query rpm/tpm stat: " + err.Error())
 		return stat, errors.New("查询统计数据失败")
 	}
+	rows := make([]logCacheRateRow, 0)
+	if err := cacheRateQuery.Scan(&rows).Error; err != nil {
+		common.SysError("failed to query log cache stat: " + err.Error())
+		return stat, errors.New("查询统计数据失败")
+	}
+	stat.CacheHitRate, stat.CacheGlobalRate = calculateCacheRates(rows)
 
 	return stat, nil
 }
