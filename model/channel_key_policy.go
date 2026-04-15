@@ -56,6 +56,25 @@ func SetMultiKeyCooldown(channelId int, keyIndex int, reason string, seconds int
 	)
 }
 
+func ClearMultiKeyCooldown(channelId int, keyIndex int) error {
+	if !common.RedisEnabled || channelId <= 0 || keyIndex < 0 {
+		return nil
+	}
+	return common.RedisDel(buildMultiKeyCooldownKey(channelId, keyIndex))
+}
+
+func ClearAllMultiKeyCooldown(channelId int, keyCount int) error {
+	if !common.RedisEnabled || channelId <= 0 || keyCount <= 0 {
+		return nil
+	}
+	for i := 0; i < keyCount; i++ {
+		if err := ClearMultiKeyCooldown(channelId, i); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func GetMultiKeyStickyIndex(tokenId int, channelId int, modelName string) (int, bool) {
 	if !common.RedisEnabled || tokenId <= 0 || channelId <= 0 {
 		return 0, false

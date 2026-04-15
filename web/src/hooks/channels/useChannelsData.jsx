@@ -507,6 +507,10 @@ export const useChannelsData = () => {
     const { success, message } = res.data;
     if (success) {
       showSuccess(t('操作成功完成！'));
+      if (action === 'enable' || action === 'enable_all') {
+        await refresh();
+        return;
+      }
       let channel = res.data.data;
       let newChannels = [...channels];
       if (action !== 'delete') {
@@ -532,6 +536,10 @@ export const useChannelsData = () => {
     const { success, message } = res.data;
     if (success) {
       showSuccess(t('操作成功完成！'));
+      if (action === 'enable') {
+        await refresh();
+        return;
+      }
       let newChannels = [...channels];
       for (let i = 0; i < newChannels.length; i++) {
         if (newChannels[i].tag === tag) {

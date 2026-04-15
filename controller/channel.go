@@ -1041,6 +1041,8 @@ func UpdateChannel(c *gin.Context) {
 	if channel.MultiKeyMode != nil && *channel.MultiKeyMode != "" {
 		channel.ChannelInfo.MultiKeyMode = constant.MultiKeyMode(*channel.MultiKeyMode)
 	}
+	manualEnableRequested := channel.Status == common.ChannelStatusEnabled &&
+		originChannel.Status != common.ChannelStatusEnabled
 
 	// 处理多key模式下的密钥追加/覆盖逻辑
 	if channel.KeyMode != nil && channel.ChannelInfo.IsMultiKey {
@@ -1127,14 +1129,26 @@ func UpdateChannel(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	if manualEnableRequested {
+		err = model.RecoverChannelForManualEnable(channel.Id)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	}
 	model.InitChannelCache()
 	service.ResetProxyClientCache()
-	channel.Key = ""
-	clearChannelInfo(&channel.Channel)
+
+	updatedChannel, err := model.GetChannelById(channel.Id, false)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	clearChannelInfo(updatedChannel)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    channel,
+		"data":    updatedChannel,
 	})
 	return
 }
@@ -1613,18 +1627,7 @@ func ManageMultiKeys(c *gin.Context) {
 			return
 		}
 
-		// 从状态列表中删除该密钥的记录，使其回到默认启用状态
-		if channel.ChannelInfo.MultiKeyStatusList != nil {
-			delete(channel.ChannelInfo.MultiKeyStatusList, keyIndex)
-		}
-		if channel.ChannelInfo.MultiKeyDisabledTime != nil {
-			delete(channel.ChannelInfo.MultiKeyDisabledTime, keyIndex)
-		}
-		if channel.ChannelInfo.MultiKeyDisabledReason != nil {
-			delete(channel.ChannelInfo.MultiKeyDisabledReason, keyIndex)
-		}
-
-		err = channel.Update()
+		err = model.RecoverChannelKeyForManualEnable(request.ChannelId, keyIndex)
 		if err != nil {
 			common.ApiError(c, err)
 			return
@@ -1644,11 +1647,7 @@ func ManageMultiKeys(c *gin.Context) {
 			enabledCount = len(channel.ChannelInfo.MultiKeyStatusList)
 		}
 
-		channel.ChannelInfo.MultiKeyStatusList = make(map[int]int)
-		channel.ChannelInfo.MultiKeyDisabledTime = make(map[int]int64)
-		channel.ChannelInfo.MultiKeyDisabledReason = make(map[int]string)
-
-		err = channel.Update()
+		err = model.RecoverChannelForManualEnable(request.ChannelId)
 		if err != nil {
 			common.ApiError(c, err)
 			return

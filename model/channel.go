@@ -733,12 +733,7 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 }
 
 func EnableChannelByTag(tag string) error {
-	err := DB.Model(&Channel{}).Where("tag = ?", tag).Update("status", common.ChannelStatusEnabled).Error
-	if err != nil {
-		return err
-	}
-	err = UpdateAbilityStatusByTag(tag, true)
-	return err
+	return RecoverChannelsByTagForManualEnable(tag)
 }
 
 func DisableChannelByTag(tag string) error {
