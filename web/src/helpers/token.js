@@ -61,3 +61,32 @@ export function getServerAddress() {
 
   return serverAddress;
 }
+
+export const CHANNEL_CONN_CLIPBOARD_TYPE = 'newapi_channel_conn';
+
+export function encodeChannelConnectionString(key, url) {
+  return JSON.stringify({
+    _type: CHANNEL_CONN_CLIPBOARD_TYPE,
+    key,
+    url,
+  });
+}
+
+export function parseChannelConnectionString(text) {
+  if (!text || typeof text !== 'string') return null;
+  try {
+    const parsed = JSON.parse(text.trim());
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      parsed._type === CHANNEL_CONN_CLIPBOARD_TYPE &&
+      typeof parsed.key === 'string' &&
+      typeof parsed.url === 'string'
+    ) {
+      return { key: parsed.key, url: parsed.url };
+    }
+  } catch {
+    // Ignore non-JSON clipboard content.
+  }
+  return null;
+}

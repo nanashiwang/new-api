@@ -62,11 +62,13 @@ import ModelSelectModal from './ModelSelectModal';
 import SingleModelSelectModal from './SingleModelSelectModal';
 import OllamaModelModal from './OllamaModelModal';
 import CodexOAuthModal from './CodexOAuthModal';
+import ParamOverrideEditorModal from './ParamOverrideEditorModal';
 import JSONEditor from '../../../common/ui/JSONEditor';
 import SecureVerificationModal from '../../../common/modals/SecureVerificationModal';
 import StatusCodeRiskGuardModal from './StatusCodeRiskGuardModal';
 import ChannelKeyDisplay from '../../../common/ui/ChannelKeyDisplay';
 import { useSecureVerification } from '../../../../hooks/common/useSecureVerification';
+import { parseChannelConnectionString } from '../../../../helpers/token';
 import { createApiCalls } from '../../../../services/secureVerification';
 import {
   collectInvalidStatusCodeEntries,
@@ -101,6 +103,8 @@ const REGION_EXAMPLE = {
   'gemini-1.5-flash-002': 'europe-west2',
   'claude-3-5-sonnet-20240620': 'europe-west1',
 };
+
+const ADVANCED_SETTINGS_EXPANDED_KEY = 'channel-advanced-settings-expanded';
 
 const CAPABILITY_MODE_OPTIONS = [
   { label: '继承默认', value: 'inherit' },
@@ -271,6 +275,10 @@ const EditChannelModal = (props) => {
   const [codexOAuthModalVisible, setCodexOAuthModalVisible] = useState(false);
   const [codexCredentialRefreshing, setCodexCredentialRefreshing] =
     useState(false);
+  const [paramOverrideEditorVisible, setParamOverrideEditorVisible] =
+    useState(false);
+  const [clipboardConfig, setClipboardConfig] = useState(null);
+  const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
 
   // 密钥显示状态
   const [keyDisplayState, setKeyDisplayState] = useState({
@@ -325,6 +333,11 @@ const EditChannelModal = (props) => {
   const initialModelsRef = useRef([]);
   const initialModelMappingRef = useRef('');
   const initialStatusCodeMappingRef = useRef('');
+
+  const toggleAdvancedSettings = (open) => {
+    setAdvancedSettingsOpen(open);
+    localStorage.setItem(ADVANCED_SETTINGS_EXPANDED_KEY, String(open));
+  };
 
   // 2FA状态更新辅助函数
   const updateTwoFAState = (updates) => {
@@ -483,6 +496,39 @@ const EditChannelModal = (props) => {
     settings[key] = value;
     const settingsJson = JSON.stringify(settings);
     handleInputChange('settings', settingsJson);
+  };
+
+  const applyClipboardConfig = (config) => {
+    if (!config) return;
+    setInputs((prev) => ({
+      ...prev,
+      key: config.key,
+      base_url: config.url,
+    }));
+    if (formApiRef.current) {
+      formApiRef.current.setValue('key', config.key);
+      formApiRef.current.setValue('base_url', config.url);
+    }
+    setClipboardConfig(null);
+    showSuccess(t('连接信息已填入'));
+  };
+
+  const pasteFromClipboard = async () => {
+    if (!navigator?.clipboard?.readText) {
+      showError(t('无法读取剪贴板'));
+      return;
+    }
+    try {
+      const text = await navigator.clipboard.readText();
+      const parsed = parseChannelConnectionString(text);
+      if (parsed) {
+        applyClipboardConfig(parsed);
+      } else {
+        showInfo(t('剪贴板中未检测到连接信息'));
+      }
+    } catch {
+      showError(t('无法读取剪贴板'));
+    }
   };
 
   const isIonetLocked = isIonetChannel && isEdit;
@@ -1122,6 +1168,23 @@ const EditChannelModal = (props) => {
       setUseManualInput(false);
       // 重置导航状态
       setCurrentSectionIndex(0);
+      setAdvancedSettingsOpen(
+        isEdit &&
+          localStorage.getItem(ADVANCED_SETTINGS_EXPANDED_KEY) === 'true',
+      );
+      if (!isEdit) {
+        try {
+          navigator?.clipboard
+            ?.readText?.()
+            ?.then((text) => {
+              const parsed = parseChannelConnectionString(text);
+              if (parsed) {
+                setClipboardConfig(parsed);
+              }
+            })
+            .catch(() => {});
+        } catch {}
+      }
     } else {
       // 统一的模态框关闭重置逻辑
       resetModalState();
@@ -1176,6 +1239,7 @@ const EditChannelModal = (props) => {
     setInputs(getInitValues());
     // 重置密钥显示状态
     resetKeyDisplayState();
+    setClipboardConfig(null);
   };
 
   const handleVertexUploadChange = ({ fileList }) => {
@@ -1979,6 +2043,16 @@ const EditChannelModal = (props) => {
         footer={
           <div className='flex justify-between items-center bg-white'>
             <div className='flex gap-2'>
+              {!isEdit && (
+                <Button
+                  size='small'
+                  type='tertiary'
+                  icon={<IconBolt />}
+                  onClick={pasteFromClipboard}
+                >
+                  {t('从剪贴板粘贴配置')}
+                </Button>
+              )}
               <Button
                 size='small'
                 type='tertiary'
@@ -2043,6 +2117,33 @@ const EditChannelModal = (props) => {
           {() => (
             <Spin spinning={loading}>
               <div className='p-2 space-y-3' ref={formContainerRef}>
+                {!isEdit && clipboardConfig && (
+                  <Banner
+                    type='info'
+                    description={
+                      <div className='flex items-center justify-between gap-2'>
+                        <span>{t('检测到剪贴板中的连接信息')}</span>
+                        <div className='flex gap-1'>
+                          <Button
+                            size='small'
+                            theme='solid'
+                            type='primary'
+                            onClick={() => applyClipboardConfig(clipboardConfig)}
+                          >
+                            {t('自动填入')}
+                          </Button>
+                          <Button
+                            size='small'
+                            type='tertiary'
+                            onClick={() => setClipboardConfig(null)}
+                          >
+                            {t('忽略')}
+                          </Button>
+                        </div>
+                      </div>
+                    }
+                  />
+                )}
                 <div ref={(el) => (formSectionRefs.current.basicInfo = el)}>
                   <Card className='!rounded-2xl shadow-sm border-0 mb-6'>
                     {/* Header: Basic Info */}
@@ -3205,25 +3306,46 @@ const EditChannelModal = (props) => {
                 >
                   <Card className='!rounded-2xl shadow-sm border-0 mb-6'>
                     {/* Header: Advanced Settings */}
-                    <div className='flex items-center mb-2'>
-                      <Avatar
-                        size='small'
-                        color='orange'
-                        className='mr-2 shadow-md'
-                      >
-                        <IconSetting size={16} />
-                      </Avatar>
-                      <div>
-                        <Text className='text-lg font-medium'>
-                          {t('高级设置')}
-                        </Text>
-                        <div className='text-xs text-gray-600'>
-                          {t('渠道的高级配置选项')}
+                    <div className='flex items-center justify-between mb-2'>
+                      <div className='flex items-center'>
+                        <Avatar
+                          size='small'
+                          color='orange'
+                          className='mr-2 shadow-md'
+                        >
+                          <IconSetting size={16} />
+                        </Avatar>
+                        <div>
+                          <Text className='text-lg font-medium'>
+                            {t('高级设置')}
+                          </Text>
+                          <div className='text-xs text-gray-600'>
+                            {t('渠道的高级配置选项')}
+                          </div>
                         </div>
                       </div>
+                      <Button
+                        size='small'
+                        type='tertiary'
+                        theme='borderless'
+                        icon={
+                          advancedSettingsOpen ? (
+                            <IconChevronUp size={14} />
+                          ) : (
+                            <IconChevronDown size={14} />
+                          )
+                        }
+                        onClick={() =>
+                          toggleAdvancedSettings(!advancedSettingsOpen)
+                        }
+                      >
+                        {advancedSettingsOpen ? t('收起') : t('展开')}
+                      </Button>
                     </div>
 
-                    <Form.Select
+                    {advancedSettingsOpen && (
+                      <>
+                        <Form.Select
                       field='groups'
                       label={t('分组')}
                       placeholder={t('请选择可以使用该渠道的分组')}
@@ -3338,7 +3460,7 @@ const EditChannelModal = (props) => {
                           field='upstream_model_update_ignored_models'
                           label={t('已忽略模型')}
                           placeholder={t(
-                            '例如：gpt-4.1-nano,gpt-4o-mini',
+                            '例如：gpt-4.1-nano,regex:^claude-.*$,regex:^sora-.*$',
                           )}
                           onChange={(value) =>
                             handleInputChange(
@@ -3347,7 +3469,7 @@ const EditChannelModal = (props) => {
                             )
                           }
                           extraText={t(
-                            '逗号分隔，检测到这些模型时不会再出现在待处理列表',
+                            '支持精确匹配；使用 regex: 开头可按正则匹配。',
                           )}
                           showClear
                         />
@@ -3387,54 +3509,69 @@ const EditChannelModal = (props) => {
                         handleInputChange('param_override', value)
                       }
                       extraText={
-                        <div className='flex gap-2 flex-wrap'>
-                          <Text
-                            className='!text-semi-color-primary cursor-pointer'
-                            onClick={() =>
-                              handleInputChange(
-                                'param_override',
-                                JSON.stringify({ temperature: 0 }, null, 2),
-                              )
-                            }
-                          >
-                            {t('旧格式模板')}
-                          </Text>
-                          <Text
-                            className='!text-semi-color-primary cursor-pointer'
-                            onClick={() =>
-                              handleInputChange(
-                                'param_override',
-                                JSON.stringify(
-                                  {
-                                    operations: [
-                                      {
-                                        path: 'temperature',
-                                        mode: 'set',
-                                        value: 0.7,
-                                        conditions: [
-                                          {
-                                            path: 'model',
-                                            mode: 'prefix',
-                                            value: 'gpt',
-                                          },
-                                        ],
-                                        logic: 'AND',
-                                      },
-                                    ],
-                                  },
-                                  null,
-                                  2,
-                                ),
-                              )
-                            }
-                          >
-                            {t('新格式模板')}
-                          </Text>
-                          <Text
-                            className='!text-semi-color-primary cursor-pointer'
-                            onClick={() => formatJsonField('param_override')}
-                          >
-                            {t('格式化')}
+                        <div className='flex flex-col gap-2'>
+                          <div className='flex gap-2 flex-wrap items-center'>
+                            <Button
+                              size='small'
+                              type='primary'
+                              icon={<IconCode size={14} />}
+                              onClick={() =>
+                                setParamOverrideEditorVisible(true)
+                              }
+                            >
+                              {t('可视化编辑')}
+                            </Button>
+                            <Text
+                              className='!text-semi-color-primary cursor-pointer'
+                              onClick={() =>
+                                handleInputChange(
+                                  'param_override',
+                                  JSON.stringify({ temperature: 0 }, null, 2),
+                                )
+                              }
+                            >
+                              {t('旧格式模板')}
+                            </Text>
+                            <Text
+                              className='!text-semi-color-primary cursor-pointer'
+                              onClick={() =>
+                                handleInputChange(
+                                  'param_override',
+                                  JSON.stringify(
+                                    {
+                                      operations: [
+                                        {
+                                          path: 'temperature',
+                                          mode: 'set',
+                                          value: 0.7,
+                                          conditions: [
+                                            {
+                                              path: 'model',
+                                              mode: 'prefix',
+                                              value: 'gpt',
+                                            },
+                                          ],
+                                          logic: 'AND',
+                                        },
+                                      ],
+                                    },
+                                    null,
+                                    2,
+                                  ),
+                                )
+                              }
+                            >
+                              {t('新格式模板')}
+                            </Text>
+                            <Text
+                              className='!text-semi-color-primary cursor-pointer'
+                              onClick={() => formatJsonField('param_override')}
+                            >
+                              {t('格式化')}
+                            </Text>
+                          </div>
+                          <Text type='tertiary' size='small'>
+                            {t('默认推荐使用可视化编辑；下方原始 JSON 输入可作为回退方式。')}
                           </Text>
                         </div>
                       }
@@ -3757,6 +3894,8 @@ const EditChannelModal = (props) => {
                         />
                       </>
                     )}
+                      </>
+                    )}
                   </Card>
                 </div>
 
@@ -4022,6 +4161,16 @@ const EditChannelModal = (props) => {
           )}
         />
       </Modal>
+
+      <ParamOverrideEditorModal
+        visible={paramOverrideEditorVisible}
+        value={inputs.param_override || ''}
+        onCancel={() => setParamOverrideEditorVisible(false)}
+        onSave={(nextValue) => {
+          handleInputChange('param_override', nextValue);
+          setParamOverrideEditorVisible(false);
+        }}
+      />
 
       <ModelSelectModal
         visible={modelModalVisible}

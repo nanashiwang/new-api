@@ -786,7 +786,10 @@ func resolveChannelTestFailure(result testResult) (string, int) {
 	if result.newAPIError != nil && result.newAPIError.StatusCode > 0 {
 		statusCode = result.newAPIError.StatusCode
 	}
-	message := summarizeOpenAIStyleError(statusCode, result.responseBody, "")
+	message := ""
+	if len(result.responseBody) > 0 {
+		message = summarizeOpenAIStyleError(statusCode, result.responseBody, "")
+	}
 	if message != "" {
 		return message, statusCode
 	}
@@ -797,6 +800,20 @@ func resolveChannelTestFailure(result testResult) (string, int) {
 		return result.localErr.Error(), statusCode
 	}
 	return "测试失败", statusCode
+}
+
+func buildChannelTestFailureResponse(result testResult, consumedTime float64) gin.H {
+	message, statusCode := resolveChannelTestFailure(result)
+	resp := gin.H{
+		"success":     false,
+		"message":     message,
+		"time":        consumedTime,
+		"status_code": statusCode,
+	}
+	if result.newAPIError != nil {
+		resp["error_code"] = string(result.newAPIError.GetErrorCode())
+	}
+	return resp
 }
 
 func buildTestRequest(model string, endpointType string, channel *model.Channel, isStream bool) dto.Request {
@@ -961,13 +978,7 @@ func TestChannel(c *gin.Context) {
 	tik := time.Now()
 	result := testChannel(channel, testModel, endpointType, streamOverride, nil)
 	if result.localErr != nil {
-		message, statusCode := resolveChannelTestFailure(result)
-		c.JSON(http.StatusOK, gin.H{
-			"success":     false,
-			"message":     message,
-			"time":        0.0,
-			"status_code": statusCode,
-		})
+		c.JSON(http.StatusOK, buildChannelTestFailureResponse(result, 0.0))
 		return
 	}
 	tok := time.Now()
@@ -975,13 +986,7 @@ func TestChannel(c *gin.Context) {
 	go channel.UpdateResponseTime(milliseconds)
 	consumedTime := float64(milliseconds) / 1000.0
 	if result.newAPIError != nil {
-		message, statusCode := resolveChannelTestFailure(result)
-		c.JSON(http.StatusOK, gin.H{
-			"success":     false,
-			"message":     message,
-			"time":        consumedTime,
-			"status_code": statusCode,
-		})
+		c.JSON(http.StatusOK, buildChannelTestFailureResponse(result, consumedTime))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
