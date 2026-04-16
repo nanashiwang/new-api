@@ -150,6 +150,14 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 	if sessionMatch != nil {
 		responsesReq.PreviousResponseID = sessionMatch.ResponseID
 	}
+	var fallbackResponsesReq *dto.OpenAIResponsesRequest
+	if sessionMatch != nil {
+		fallbackResponsesReq, err = service.ChatCompletionsRequestToResponsesRequest(overriddenChatReq)
+		if err != nil {
+			return nil, types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+		}
+		relaycommon.NormalizeResponsesStreamOptions(fallbackResponsesReq, info.SupportsResponsesStreamOptions)
+	}
 	info.AppendRequestConversion(types.RelayFormatOpenAIResponses)
 
 	savedRelayMode := info.RelayMode
@@ -164,9 +172,15 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 
 	statusCodeMappingStr := c.GetString("status_code_mapping")
 	strippedStreamOptions := false
+	retriedWithoutPreviousResponseID := false
 	var httpResp *http.Response
 	for {
-		responsesReqForUpstream, err := common.DeepCopy(responsesReq)
+		requestTemplate := responsesReq
+		if retriedWithoutPreviousResponseID && fallbackResponsesReq != nil {
+			requestTemplate = fallbackResponsesReq
+		}
+
+		responsesReqForUpstream, err := common.DeepCopy(requestTemplate)
 		if err != nil {
 			return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 		}
@@ -221,6 +235,12 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 		switch {
 		case issue == upstreamCompatIssueStreamOptions && !strippedStreamOptions:
 			strippedStreamOptions = true
+			logCompatFallback(c, info, string(issue))
+			_ = httpResp.Body.Close()
+			continue
+		case issue == upstreamCompatIssuePreviousResponseID && !retriedWithoutPreviousResponseID && fallbackResponsesReq != nil:
+			retriedWithoutPreviousResponseID = true
+			service.MarkResponsesPreviousResponseIDUnsupported(info)
 			logCompatFallback(c, info, string(issue))
 			_ = httpResp.Body.Close()
 			continue

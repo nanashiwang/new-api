@@ -124,7 +124,8 @@ var (
 	openAIResponsesSessionStore = &responsesSessionStore{
 		entries: make(map[string]map[string]*responsesSessionEntry),
 	}
-	responsesBridgeInitOnce sync.Once
+	responsesBridgeInitOnce                    sync.Once
+	responsesPreviousResponseIDUnsupportedStore sync.Map
 )
 
 func InitOpenAIResponsesBridge() {
@@ -299,6 +300,9 @@ func ApplyResponsesSessionBridge(info *relaycommon.RelayInfo, req *dto.GeneralOp
 	if !getResponsesSessionBridgeEnabled() || info == nil || req == nil || len(req.Messages) < 2 {
 		return nil, nil
 	}
+	if hasResponsesPreviousResponseIDUnsupported(info) {
+		return nil, nil
+	}
 
 	scopeKey, err := buildResponsesSessionScopeKey(info, req)
 	if err != nil {
@@ -325,6 +329,9 @@ func StoreResponsesSessionBridge(info *relaycommon.RelayInfo, req *dto.GeneralOp
 	if !getResponsesSessionBridgeEnabled() || info == nil || req == nil || strings.TrimSpace(responseID) == "" {
 		return nil
 	}
+	if hasResponsesPreviousResponseIDUnsupported(info) {
+		return nil
+	}
 
 	scopeKey, err := buildResponsesSessionScopeKey(info, req)
 	if err != nil {
@@ -343,6 +350,23 @@ func StoreResponsesSessionBridge(info *relaycommon.RelayInfo, req *dto.GeneralOp
 
 	openAIResponsesSessionStore.put(scopeKey, fullHash, strings.TrimSpace(responseID))
 	return nil
+}
+
+func MarkResponsesPreviousResponseIDUnsupported(info *relaycommon.RelayInfo) {
+	key, err := buildResponsesPreviousResponseIDCapabilityKey(info)
+	if err != nil || key == "" {
+		return
+	}
+	responsesPreviousResponseIDUnsupportedStore.Store(key, struct{}{})
+}
+
+func hasResponsesPreviousResponseIDUnsupported(info *relaycommon.RelayInfo) bool {
+	key, err := buildResponsesPreviousResponseIDCapabilityKey(info)
+	if err != nil || key == "" {
+		return false
+	}
+	_, ok := responsesPreviousResponseIDUnsupportedStore.Load(key)
+	return ok
 }
 
 func (s *responsesMediaStore) put(data []byte, mimeType string) (*responsesMediaEntry, error) {
@@ -990,6 +1014,25 @@ func getResponsesSessionBackendName() string {
 		return "redis"
 	}
 	return "memory"
+}
+
+func buildResponsesPreviousResponseIDCapabilityKey(info *relaycommon.RelayInfo) (string, error) {
+	if info == nil {
+		return "", nil
+	}
+
+	payload := map[string]any{
+		"channel_id":     info.ChannelId,
+		"api_type":       info.ApiType,
+		"base_url":       strings.TrimSpace(info.ChannelBaseUrl),
+		"origin_model":   strings.TrimSpace(info.OriginModelName),
+		"upstream_model": strings.TrimSpace(info.UpstreamModelName),
+	}
+	data, err := common.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	return common.GenerateHMAC(string(data)), nil
 }
 
 func buildResponsesSessionScopeKey(info *relaycommon.RelayInfo, req *dto.GeneralOpenAIRequest) (string, error) {

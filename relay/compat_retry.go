@@ -20,6 +20,7 @@ type upstreamCompatIssue string
 const (
 	upstreamCompatIssueNone              upstreamCompatIssue = ""
 	upstreamCompatIssueStreamOptions     upstreamCompatIssue = "stream_options_unsupported"
+	upstreamCompatIssuePreviousResponseID upstreamCompatIssue = "previous_response_id_unsupported"
 	upstreamCompatIssueResponsesAPI      upstreamCompatIssue = "responses_api_unsupported"
 	compatFallbackToNativeChatContextKey                     = "compat_fallback_to_native_chat"
 )
@@ -38,6 +39,9 @@ func classifyUpstreamCompatibilityIssue(resp *http.Response, relayMode int) upst
 	if isUnsupportedStreamOptionsResponse(resp.StatusCode, bodyText) {
 		return upstreamCompatIssueStreamOptions
 	}
+	if isUnsupportedPreviousResponseIDResponse(resp.StatusCode, bodyText) {
+		return upstreamCompatIssuePreviousResponseID
+	}
 	if isUnsupportedResponsesResponse(resp.StatusCode, bodyText, relayMode) {
 		return upstreamCompatIssueResponsesAPI
 	}
@@ -49,6 +53,19 @@ func isUnsupportedStreamOptionsResponse(statusCode int, bodyText string) bool {
 		return false
 	}
 	if !strings.Contains(bodyText, "stream_options") {
+		return false
+	}
+	return strings.Contains(bodyText, "unsupported parameter") ||
+		strings.Contains(bodyText, "unknown parameter") ||
+		strings.Contains(bodyText, "unrecognized") ||
+		strings.Contains(bodyText, "not supported")
+}
+
+func isUnsupportedPreviousResponseIDResponse(statusCode int, bodyText string) bool {
+	if statusCode != http.StatusBadRequest {
+		return false
+	}
+	if !strings.Contains(bodyText, "previous_response_id") {
 		return false
 	}
 	return strings.Contains(bodyText, "unsupported parameter") ||

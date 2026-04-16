@@ -293,6 +293,54 @@ func TestResponsesSessionBridge_DisabledSkipsMatch(t *testing.T) {
 	require.Nil(t, match)
 }
 
+func TestResponsesSessionBridge_PreviousResponseIDUnsupportedSkipsMatch(t *testing.T) {
+	setResponsesBridgeTestOptions(t, map[string]string{
+		responsesSessionBridgeEnabledOption:  "true",
+		responsesSessionBridgeUseRedisOption: "false",
+	})
+	openAIResponsesSessionStore.mu.Lock()
+	openAIResponsesSessionStore.entries = make(map[string]map[string]*responsesSessionEntry)
+	openAIResponsesSessionStore.once = sync.Once{}
+	openAIResponsesSessionStore.mu.Unlock()
+
+	info := &relaycommon.RelayInfo{
+		UserId:          101,
+		TokenId:         102,
+		OriginModelName: "gpt-5",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:         103,
+			ApiType:           constant.APITypeOpenAI,
+			ChannelBaseUrl:    "https://example.com",
+			UpstreamModelName: "gpt-5",
+		},
+	}
+
+	initialReq := &dto.GeneralOpenAIRequest{
+		Model: "gpt-5",
+		Messages: []dto.Message{
+			{Role: "system", Content: "sys"},
+			{Role: "user", Content: "hello"},
+		},
+	}
+
+	err := StoreResponsesSessionBridge(info, initialReq, dto.Message{Role: "assistant", Content: "hi"}, "resp_1")
+	require.NoError(t, err)
+
+	MarkResponsesPreviousResponseIDUnsupported(info)
+
+	match, err := ApplyResponsesSessionBridge(info, &dto.GeneralOpenAIRequest{
+		Model: "gpt-5",
+		Messages: []dto.Message{
+			{Role: "system", Content: "sys"},
+			{Role: "user", Content: "hello"},
+			{Role: "assistant", Content: "hi"},
+			{Role: "user", Content: "again"},
+		},
+	})
+	require.NoError(t, err)
+	require.Nil(t, match)
+}
+
 func TestResponsesMediaBridgeCleanupOrphanedFiles_RemovesResiduals(t *testing.T) {
 	tempDir := t.TempDir()
 	setResponsesBridgeTestOptions(t, map[string]string{

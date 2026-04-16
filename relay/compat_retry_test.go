@@ -33,6 +33,18 @@ func TestClassifyUpstreamCompatibilityIssueResponsesAPI(t *testing.T) {
 	}
 }
 
+func TestClassifyUpstreamCompatibilityIssuePreviousResponseID(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"Unsupported parameter: previous_response_id"}}`)),
+	}
+
+	issue := classifyUpstreamCompatibilityIssue(resp, relayconstant.RelayModeResponses)
+	if issue != upstreamCompatIssuePreviousResponseID {
+		t.Fatalf("expected previous_response_id issue, got %q", issue)
+	}
+}
+
 func TestClassifyUpstreamCompatibilityIssuePreservesBody(t *testing.T) {
 	resp := &http.Response{
 		StatusCode: http.StatusBadRequest,
