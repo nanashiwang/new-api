@@ -102,6 +102,10 @@ type profitBoardAggregateRange struct {
 var profitBoardAggregateStateLock sync.Mutex
 var profitBoardAggregateSyncOnce sync.Once
 
+func profitBoardAggregateStateByKeyQuery(tx *gorm.DB, key string) *gorm.DB {
+	return tx.Where(commonKeyCol+" = ?", key)
+}
+
 func profitBoardAggregateSummaryEnabled() bool {
 	return true
 }
@@ -169,7 +173,7 @@ func ensureProfitBoardAggregateState() (*ProfitBoardAggregateState, error) {
 	defer profitBoardAggregateStateLock.Unlock()
 
 	state := &ProfitBoardAggregateState{}
-	err := DB.Where("key = ?", profitBoardAggregateStateKey).First(state).Error
+	err := profitBoardAggregateStateByKeyQuery(DB, profitBoardAggregateStateKey).First(state).Error
 	if err == nil {
 		return state, nil
 	}
@@ -194,7 +198,7 @@ func ensureProfitBoardAggregateState() (*ProfitBoardAggregateState, error) {
 
 func loadProfitBoardAggregateState() (*ProfitBoardAggregateState, error) {
 	state := &ProfitBoardAggregateState{}
-	if err := DB.Where("key = ?", profitBoardAggregateStateKey).First(state).Error; err != nil {
+	if err := profitBoardAggregateStateByKeyQuery(DB, profitBoardAggregateStateKey).First(state).Error; err != nil {
 		return nil, err
 	}
 	return state, nil
@@ -202,8 +206,7 @@ func loadProfitBoardAggregateState() (*ProfitBoardAggregateState, error) {
 
 func persistProfitBoardAggregateState(tx *gorm.DB, state *ProfitBoardAggregateState) error {
 	state.UpdatedAt = common.GetTimestamp()
-	return tx.Model(&ProfitBoardAggregateState{}).
-		Where("key = ?", state.Key).
+	return profitBoardAggregateStateByKeyQuery(tx.Model(&ProfitBoardAggregateState{}), state.Key).
 		Updates(map[string]any{
 			"cutover_log_id":        state.CutoverLogID,
 			"live_cursor_log_id":    state.LiveCursorLogID,

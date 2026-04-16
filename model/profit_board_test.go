@@ -93,6 +93,64 @@ func setupProfitBoardTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func TestProfitBoardAggregateStateQueryUsesQuotedKeyColumn(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	originSQLite := common.UsingSQLite
+	originMySQL := common.UsingMySQL
+	originPostgres := common.UsingPostgreSQL
+	t.Cleanup(func() {
+		common.UsingSQLite = originSQLite
+		common.UsingMySQL = originMySQL
+		common.UsingPostgreSQL = originPostgres
+		initCol()
+	})
+
+	cases := []struct {
+		name          string
+		useSQLite     bool
+		useMySQL      bool
+		usePostgreSQL bool
+		wantFragment  string
+	}{
+		{
+			name:         "mysql",
+			useMySQL:     true,
+			wantFragment: "`key` = ",
+		},
+		{
+			name:          "postgresql",
+			usePostgreSQL: true,
+			wantFragment:  `"key" = `,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			common.UsingSQLite = tc.useSQLite
+			common.UsingMySQL = tc.useMySQL
+			common.UsingPostgreSQL = tc.usePostgreSQL
+			initCol()
+
+			selectSQL := db.ToSQL(func(tx *gorm.DB) *gorm.DB {
+				return profitBoardAggregateStateByKeyQuery(tx, profitBoardAggregateStateKey).
+					First(&ProfitBoardAggregateState{})
+			})
+			if !strings.Contains(selectSQL, tc.wantFragment) {
+				t.Fatalf("select SQL should quote key column, got: %s", selectSQL)
+			}
+
+			updateSQL := db.ToSQL(func(tx *gorm.DB) *gorm.DB {
+				return profitBoardAggregateStateByKeyQuery(tx.Model(&ProfitBoardAggregateState{}), profitBoardAggregateStateKey).
+					Updates(map[string]any{"updated_at": int64(123)})
+			})
+			if !strings.Contains(updateSQL, tc.wantFragment) {
+				t.Fatalf("update SQL should quote key column, got: %s", updateSQL)
+			}
+		})
+	}
+}
+
 func TestGetProfitBoardOptionsIncludesAdminUsers(t *testing.T) {
 	db := setupProfitBoardTestDB(t)
 
