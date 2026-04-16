@@ -332,6 +332,18 @@ export const useProfitBoardQuery = ({
     validationErrors,
   ]);
 
+  const syncAggregate = useCallback(async () => {
+    if (!queryReady || validationErrors.length > 0) return false;
+    try {
+      const res = await API.post('/api/profit_board/sync_aggregate', {});
+      if (!res.data.success) return showError(res.data.message);
+      return true;
+    } catch (error) {
+      showError(error);
+      return false;
+    }
+  }, [queryReady, validationErrors.length]);
+
   const runFullRefresh = useCallback(
     async (options = {}) => {
       const {
@@ -348,6 +360,10 @@ export const useProfitBoardQuery = ({
         if (showValidationError && validationErrors.length > 0) {
           showError(validationErrors[0]);
         }
+        return false;
+      }
+      const syncOk = await syncAggregate();
+      if (!syncOk) {
         return false;
       }
       const reportPromise = runQuery({
@@ -369,6 +385,7 @@ export const useProfitBoardQuery = ({
       queryReady,
       runOverviewQuery,
       runQuery,
+      syncAggregate,
       validationErrors,
     ],
   );

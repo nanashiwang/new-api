@@ -87,7 +87,7 @@ func setupProfitBoardTestDB(t *testing.T) *gorm.DB {
 		initCol()
 	})
 
-	if err := db.AutoMigrate(&User{}, &Channel{}, &Log{}, &Ability{}, &Model{}, &Vendor{}, &ProfitBoardConfig{}, &ProfitBoardUpstreamAccount{}, &ProfitBoardRemoteSnapshot{}); err != nil {
+	if err := db.AutoMigrate(&User{}, &Channel{}, &Log{}, &Ability{}, &Model{}, &Vendor{}, &ProfitBoardConfig{}, &ProfitBoardUpstreamAccount{}, &ProfitBoardRemoteSnapshot{}, &ProfitBoardHourlyStat{}, &ProfitBoardAggregateState{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db
@@ -2657,5 +2657,273 @@ func TestGenerateProfitBoardReportSupportsSections(t *testing.T) {
 	}
 	if report.Meta.LoadedSections[0] == "" {
 		t.Fatalf("expected non-empty loaded sections, got %+v", report.Meta.LoadedSections)
+	}
+}
+
+func TestProfitBoardReportMatchesRawAfterFullAggregateBackfill(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	originQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 1000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originQuotaPerUnit
+	})
+
+	users := []User{
+		{Id: 1, Username: "alpha-user", DisplayName: "Alpha User", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "pb-agg-alpha"},
+		{Id: 2, Username: "beta-user", DisplayName: "Beta User", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "pb-agg-beta"},
+	}
+	for _, user := range users {
+		if err := db.Create(&user).Error; err != nil {
+			t.Fatalf("seed user: %v", err)
+		}
+	}
+
+	channels := []Channel{
+		{Id: 1, Name: "alpha", Status: common.ChannelStatusEnabled},
+		{Id: 2, Name: "beta", Status: common.ChannelStatusEnabled},
+	}
+	for _, channel := range channels {
+		if err := db.Create(&channel).Error; err != nil {
+			t.Fatalf("seed channel: %v", err)
+		}
+	}
+
+	now := common.GetTimestamp()
+	logs := []Log{
+		{
+			Id:               1,
+			UserId:           1,
+			Username:         "alpha-user",
+			Type:             LogTypeConsume,
+			CreatedAt:        now - 7200,
+			ChannelId:        1,
+			ModelName:        "gpt-4.1",
+			PromptTokens:     1200,
+			CompletionTokens: 300,
+			Quota:            10,
+			Other:            `{"upstream_cost":1.25,"upstream_cost_reported":true,"cache_tokens":200}`,
+		},
+		{
+			Id:               2,
+			UserId:           2,
+			Username:         "beta-user",
+			Type:             LogTypeConsume,
+			CreatedAt:        now - 5400,
+			ChannelId:        1,
+			ModelName:        "gpt-4.1",
+			PromptTokens:     900,
+			CompletionTokens: 100,
+			Quota:            8,
+		},
+		{
+			Id:               3,
+			UserId:           2,
+			Username:         "beta-user",
+			Type:             LogTypeConsume,
+			CreatedAt:        now - 1800,
+			ChannelId:        2,
+			ModelName:        "claude-3-5-sonnet",
+			PromptTokens:     700,
+			CompletionTokens: 50,
+			Quota:            6,
+			Other:            `{"claude":true,"cache_tokens":60,"cache_creation_tokens":40}`,
+		},
+	}
+	for _, logRow := range logs {
+		if err := db.Create(&logRow).Error; err != nil {
+			t.Fatalf("seed log: %v", err)
+		}
+	}
+
+	query := ProfitBoardQuery{
+		Batches: []ProfitBoardBatch{
+			{Id: "batch-alpha", Name: "Alpha", ScopeType: ProfitBoardScopeChannel, ChannelIDs: []int{1}, CreatedAt: now - 9000},
+			{Id: "batch-beta", Name: "Beta", ScopeType: ProfitBoardScopeChannel, ChannelIDs: []int{2}, CreatedAt: now - 9000},
+		},
+		ComboConfigs: []ProfitBoardComboPricingConfig{
+			{
+				ComboId:       "batch-alpha",
+				SiteRules:     []ProfitBoardModelPricingRule{{IsDefault: true, InputPrice: 5, OutputPrice: 8, CacheReadPrice: 1}},
+				UpstreamRules: []ProfitBoardModelPricingRule{{IsDefault: true, InputPrice: 2, OutputPrice: 4, CacheReadPrice: 0.5}},
+			},
+			{
+				ComboId:       "batch-beta",
+				SiteRules:     []ProfitBoardModelPricingRule{{IsDefault: true, InputPrice: 4, OutputPrice: 7, CacheReadPrice: 1, CacheCreationPrice: 2}},
+				UpstreamRules: []ProfitBoardModelPricingRule{{IsDefault: true, InputPrice: 1.5, OutputPrice: 3, CacheReadPrice: 0.4, CacheCreationPrice: 0.8}},
+			},
+		},
+		Upstream: ProfitBoardTokenPricingConfig{
+			CostSource: ProfitBoardCostSourceReturnedFirst,
+		},
+		Site: ProfitBoardTokenPricingConfig{
+			PricingMode: ProfitBoardSitePricingManual,
+		},
+		StartTimestamp: now - 10800,
+		EndTimestamp:   now,
+		Granularity:    "hour",
+	}
+
+	rawReport, err := GenerateProfitBoardReport(query)
+	if err != nil {
+		t.Fatalf("GenerateProfitBoardReport raw: %v", err)
+	}
+
+	if _, err := ensureProfitBoardAggregateState(); err != nil {
+		t.Fatalf("ensureProfitBoardAggregateState: %v", err)
+	}
+	for {
+		processed, syncErr := syncProfitBoardAggregateBackfillStep(10)
+		if syncErr != nil {
+			t.Fatalf("syncProfitBoardAggregateBackfillStep: %v", syncErr)
+		}
+		if processed == 0 {
+			break
+		}
+	}
+
+	aggregatedReport, err := GenerateProfitBoardReport(query)
+	if err != nil {
+		t.Fatalf("GenerateProfitBoardReport aggregated: %v", err)
+	}
+
+	rawSummary := decodeProfitBoardJSONMap(t, rawReport.Summary)
+	aggregatedSummary := decodeProfitBoardJSONMap(t, aggregatedReport.Summary)
+	requireProfitBoardFloat(t, aggregatedSummary["configured_profit_usd"], rawSummary["configured_profit_usd"].(float64), "configured_profit_usd")
+	requireProfitBoardFloat(t, aggregatedSummary["upstream_cost_usd"], rawSummary["upstream_cost_usd"].(float64), "upstream_cost_usd")
+	requireProfitBoardFloat(t, aggregatedSummary["configured_site_revenue_usd"], rawSummary["configured_site_revenue_usd"].(float64), "configured_site_revenue_usd")
+	if aggregatedReport.Summary.RequestCount != rawReport.Summary.RequestCount {
+		t.Fatalf("request count mismatch: got=%d want=%d", aggregatedReport.Summary.RequestCount, rawReport.Summary.RequestCount)
+	}
+	if len(aggregatedReport.BatchSummaries) != len(rawReport.BatchSummaries) {
+		t.Fatalf("batch summaries mismatch: got=%d want=%d", len(aggregatedReport.BatchSummaries), len(rawReport.BatchSummaries))
+	}
+	if len(aggregatedReport.Timeseries) != len(rawReport.Timeseries) {
+		t.Fatalf("timeseries mismatch: got=%d want=%d", len(aggregatedReport.Timeseries), len(rawReport.Timeseries))
+	}
+}
+
+func TestProfitBoardReportCombinesAggregateAndRawWhileBackfillPending(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	originQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 1000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originQuotaPerUnit
+	})
+
+	user := User{Id: 1, Username: "mix-user", DisplayName: "Mix User", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "pb-agg-mix"}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	channel := Channel{Id: 1, Name: "mix", Status: common.ChannelStatusEnabled}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+
+	now := common.GetTimestamp()
+	for _, logRow := range []Log{
+		{Id: 1, UserId: 1, Username: "mix-user", Type: LogTypeConsume, CreatedAt: now - 3600, ChannelId: 1, ModelName: "gpt-4.1", PromptTokens: 1000, CompletionTokens: 100, Quota: 9},
+		{Id: 2, UserId: 1, Username: "mix-user", Type: LogTypeConsume, CreatedAt: now - 2400, ChannelId: 1, ModelName: "gpt-4.1", PromptTokens: 800, CompletionTokens: 80, Quota: 7, Other: `{"upstream_cost":0.9,"upstream_cost_reported":true}`},
+		{Id: 3, UserId: 1, Username: "mix-user", Type: LogTypeConsume, CreatedAt: now - 1200, ChannelId: 1, ModelName: "gpt-4.1", PromptTokens: 600, CompletionTokens: 60, Quota: 5},
+	} {
+		if err := db.Create(&logRow).Error; err != nil {
+			t.Fatalf("seed log: %v", err)
+		}
+	}
+
+	query := ProfitBoardQuery{
+		Batches: []ProfitBoardBatch{{
+			Id:         "batch-mix",
+			Name:       "Mix",
+			ScopeType:  ProfitBoardScopeChannel,
+			ChannelIDs: []int{1},
+			CreatedAt:  now - 7200,
+		}},
+		ComboConfigs: []ProfitBoardComboPricingConfig{{
+			ComboId:       "batch-mix",
+			SiteRules:     []ProfitBoardModelPricingRule{{IsDefault: true, InputPrice: 5, OutputPrice: 8}},
+			UpstreamRules: []ProfitBoardModelPricingRule{{IsDefault: true, InputPrice: 2, OutputPrice: 4}},
+		}},
+		Upstream: ProfitBoardTokenPricingConfig{CostSource: ProfitBoardCostSourceReturnedFirst},
+		Site:     ProfitBoardTokenPricingConfig{PricingMode: ProfitBoardSitePricingManual},
+		StartTimestamp: now - 7200,
+		EndTimestamp:   now,
+		Granularity:    "hour",
+	}
+
+	rawReport, err := GenerateProfitBoardReport(query)
+	if err != nil {
+		t.Fatalf("GenerateProfitBoardReport raw: %v", err)
+	}
+
+	if _, err := ensureProfitBoardAggregateState(); err != nil {
+		t.Fatalf("ensureProfitBoardAggregateState: %v", err)
+	}
+	processed, err := syncProfitBoardAggregateBackfillStep(2)
+	if err != nil {
+		t.Fatalf("syncProfitBoardAggregateBackfillStep: %v", err)
+	}
+	if processed == 0 {
+		t.Fatal("expected partial backfill to process some rows")
+	}
+
+	mixedReport, err := GenerateProfitBoardReport(query)
+	if err != nil {
+		t.Fatalf("GenerateProfitBoardReport mixed: %v", err)
+	}
+
+	rawSummary := decodeProfitBoardJSONMap(t, rawReport.Summary)
+	mixedSummary := decodeProfitBoardJSONMap(t, mixedReport.Summary)
+	requireProfitBoardFloat(t, mixedSummary["configured_profit_usd"], rawSummary["configured_profit_usd"].(float64), "configured_profit_usd")
+	requireProfitBoardFloat(t, mixedSummary["upstream_cost_usd"], rawSummary["upstream_cost_usd"].(float64), "upstream_cost_usd")
+	if mixedReport.Summary.RequestCount != rawReport.Summary.RequestCount {
+		t.Fatalf("request count mismatch: got=%d want=%d", mixedReport.Summary.RequestCount, rawReport.Summary.RequestCount)
+	}
+}
+
+func TestSyncProfitBoardAggregateLiveToLatestUpdatesCursor(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	user := User{Id: 1, Username: "cursor-user", DisplayName: "Cursor User", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "pb-agg-cursor"}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	channel := Channel{Id: 1, Name: "cursor", Status: common.ChannelStatusEnabled}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+
+	now := common.GetTimestamp()
+	if err := db.Create(&Log{Id: 1, UserId: 1, Username: "cursor-user", Type: LogTypeConsume, CreatedAt: now - 600, ChannelId: 1, ModelName: "gpt-4.1", PromptTokens: 1000, CompletionTokens: 100, Quota: 10}).Error; err != nil {
+		t.Fatalf("seed log: %v", err)
+	}
+
+	state, err := ensureProfitBoardAggregateState()
+	if err != nil {
+		t.Fatalf("ensureProfitBoardAggregateState: %v", err)
+	}
+	if state.LiveCursorLogID != 1 {
+		t.Fatalf("unexpected initial live cursor: got=%d want=1", state.LiveCursorLogID)
+	}
+
+	if err := db.Create(&Log{Id: 2, UserId: 1, Username: "cursor-user", Type: LogTypeConsume, CreatedAt: now - 300, ChannelId: 1, ModelName: "gpt-4.1", PromptTokens: 500, CompletionTokens: 50, Quota: 5}).Error; err != nil {
+		t.Fatalf("seed second log: %v", err)
+	}
+
+	processed, err := syncProfitBoardAggregateLiveToLatest()
+	if err != nil {
+		t.Fatalf("syncProfitBoardAggregateLiveToLatest: %v", err)
+	}
+	if processed != 1 {
+		t.Fatalf("unexpected processed count: got=%d want=1", processed)
+	}
+
+	updatedState, err := ensureProfitBoardAggregateState()
+	if err != nil {
+		t.Fatalf("ensureProfitBoardAggregateState second: %v", err)
+	}
+	if updatedState.LiveCursorLogID != 2 {
+		t.Fatalf("unexpected updated live cursor: got=%d want=2", updatedState.LiveCursorLogID)
 	}
 }

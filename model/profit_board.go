@@ -2764,6 +2764,11 @@ func iterateProfitBoardRows(query ProfitBoardQuery, batches []ProfitBoardBatchIn
 }
 
 func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*ProfitBoardReport, error) {
+	if profitBoardAggregateSummaryEnabled() &&
+		!query.IncludeDetails &&
+		profitBoardShouldUseHourlyBase(query.Granularity, query.CustomIntervalMinutes) {
+		return generateProfitBoardSummaryReport(query)
+	}
 	normalizedQuery, signature, err := normalizeProfitBoardQuery(query)
 	if err != nil {
 		return nil, err
@@ -3465,6 +3470,9 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 }
 
 func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoardReport, error) {
+	if profitBoardAggregateSummaryEnabled() {
+		return generateProfitBoardOverviewSummary(payload)
+	}
 	normalizedBatches, signature, _, err := normalizeProfitBoardBatches(payload.Batches, payload.Selection)
 	if err != nil {
 		return nil, err

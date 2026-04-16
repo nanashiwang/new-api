@@ -293,6 +293,7 @@ func SetApiRouter(router *gin.Engine) {
 			profitBoardRoute.POST("/config/lookup", controller.LookupProfitBoardConfig)
 			profitBoardRoute.PUT("/config", controller.SaveProfitBoardConfig)
 			profitBoardRoute.POST("/overview", middleware.ProfitBoardQueryRateLimit(), controller.GetProfitBoardOverview)
+			profitBoardRoute.POST("/sync_aggregate", middleware.ProfitBoardQueryRateLimit(), controller.SyncProfitBoardAggregate)
 			profitBoardRoute.POST("/sync_remote", controller.SyncProfitBoardRemote)
 			profitBoardRoute.POST("/query", middleware.ProfitBoardQueryRateLimit(), controller.QueryProfitBoard)
 			profitBoardRoute.POST("/details", middleware.ProfitBoardQueryRateLimit(), controller.QueryProfitBoardDetails)

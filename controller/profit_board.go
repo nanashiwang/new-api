@@ -260,6 +260,16 @@ func SyncProfitBoardRemote(c *gin.Context) {
 	})
 }
 
+func SyncProfitBoardAggregate(c *gin.Context) {
+	if err := model.SyncProfitBoardAggregate(true); err != nil {
+		profitBoardApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{
+		"synced": true,
+	})
+}
+
 func GetProfitBoardUpstreamAccounts(c *gin.Context) {
 	accounts, err := model.GetProfitBoardUpstreamAccountOptions()
 	if err != nil {
