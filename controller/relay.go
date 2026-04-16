@@ -184,11 +184,19 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		Retry:           common.GetPointer(0),
 	}
 
+	// lastRelayError 保留最近一次上游错误，避免重试找不到新渠道时用 (retry) 错误覆盖原始错误。
+	var lastRelayError *types.NewAPIError
+
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
 		channel, channelErr := getChannel(c, relayInfo, retryParam)
 		if channelErr != nil {
 			logger.LogError(c, channelErr.Error())
-			newAPIError = channelErr
+			if lastRelayError != nil {
+				// 保留原始上游错误，让用户能看到真正的失败原因
+				newAPIError = lastRelayError
+			} else {
+				newAPIError = channelErr
+			}
 			break
 		}
 
@@ -221,6 +229,8 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
+
+		lastRelayError = newAPIError
 
 		if service.IsChannelModelMismatchError(newAPIError) {
 			if _, ok := c.Get("specific_channel_id"); ok {
@@ -536,6 +546,9 @@ func RelayTask(c *gin.Context) {
 		Retry:           common.GetPointer(0),
 	}
 
+	// lastTaskRelayErr 保留最近一次上游任务错误，避免重试找不到新渠道时覆盖原始错误。
+	var lastTaskRelayErr *dto.TaskError
+
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
 		var channel *model.Channel
 
@@ -552,7 +565,12 @@ func RelayTask(c *gin.Context) {
 			channel, channelErr = getChannel(c, relayInfo, retryParam)
 			if channelErr != nil {
 				logger.LogError(c, channelErr.Error())
-				taskErr = service.TaskErrorWrapperLocal(channelErr.Err, "get_channel_failed", http.StatusInternalServerError)
+				if lastTaskRelayErr != nil {
+					// 保留原始上游错误，让用户能看到真正的失败原因
+					taskErr = lastTaskRelayErr
+				} else {
+					taskErr = service.TaskErrorWrapperLocal(channelErr.Err, "get_channel_failed", http.StatusInternalServerError)
+				}
 				break
 			}
 		}
@@ -573,6 +591,8 @@ func RelayTask(c *gin.Context) {
 		if taskErr == nil {
 			break
 		}
+
+		lastTaskRelayErr = taskErr
 
 		if !taskErr.LocalError {
 			processChannelError(c,
