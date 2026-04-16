@@ -193,10 +193,7 @@ const renderStatus = (status, record = {}, t) => {
           content={`${summary.enabledCount}/${summary.totalCount} ${t('个渠道已启用')}`}
         >
           <Tag color='white' shape='circle'>
-            <div
-              className='flex flex-col items-center'
-              style={{ minWidth: 86, lineHeight: 1 }}
-            >
+            <div className='flex items-center gap-1.5' style={{ lineHeight: 1 }}>
               <span className='text-xs leading-none'>
                 {summary.countLabel}
               </span>
@@ -204,11 +201,9 @@ const renderStatus = (status, record = {}, t) => {
                 percent={summary.progressPercent}
                 stroke={summary.progressStroke}
                 showInfo={false}
-                style={{
-                  width: '100%',
-                  marginTop: 3,
-                  marginBottom: 0,
-                }}
+                size='small'
+                style={{ width: 40, height: 3 }}
+                className='[&_.semi-progress-bar-inner]:!h-[3px] [&_.semi-progress-bar-track]:!h-[3px]'
               />
             </div>
           </Tag>
