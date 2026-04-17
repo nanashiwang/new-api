@@ -73,7 +73,7 @@ const RULE_TEMPLATES = {
     key_sources: [{ type: 'gjson', path: 'prompt_cache_key' }],
     value_regex: '',
     ttl_seconds: 0,
-    skip_retry_on_failure: false,
+    skip_retry_on_failure: true,
     include_using_group: true,
     include_rule_name: true,
   },
@@ -84,7 +84,7 @@ const RULE_TEMPLATES = {
     key_sources: [{ type: 'gjson', path: 'metadata.user_id' }],
     value_regex: '',
     ttl_seconds: 0,
-    skip_retry_on_failure: false,
+    skip_retry_on_failure: true,
     include_using_group: true,
     include_rule_name: true,
   },
@@ -591,11 +591,9 @@ export default function SettingsChannelAffinity(props) {
         key_sources: keySourcesValidation.value,
         value_regex: (values.value_regex || '').trim(),
         ttl_seconds: Number(values.ttl_seconds || 0),
+        skip_retry_on_failure: !!values.skip_retry_on_failure,
         include_using_group: !!values.include_using_group,
         include_rule_name: !!values.include_rule_name,
-        ...(values.skip_retry_on_failure
-          ? { skip_retry_on_failure: true }
-          : {}),
         ...(userAgentInclude.length > 0
           ? { user_agent_include: userAgentInclude }
           : {}),

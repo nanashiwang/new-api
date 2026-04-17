@@ -945,6 +945,47 @@ func TestApplyParamOverrideWithRelayInfoRecordsOnlyKeyOperationsWhenDebugDisable
 	}
 }
 
+func TestApplyParamOverrideWithRelayInfoSetHeaderAppendsAnthropicBetaTokens(t *testing.T) {
+	info := &RelayInfo{
+		RequestHeaders: map[string]string{
+			"Anthropic-Beta": "computer-use-2025-01-24",
+		},
+		ChannelMeta: &ChannelMeta{
+			ParamOverride: map[string]interface{}{
+				"operations": []interface{}{
+					map[string]interface{}{
+						"mode": "set_header",
+						"path": "anthropic-beta",
+						"value": map[string]interface{}{
+							"$append": []interface{}{"context-1m-2025-08-07", "computer-use-2025-01-24"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	out, err := ApplyParamOverrideWithRelayInfo([]byte(`{"messages":[{"role":"user","content":"hello"}]}`), info)
+	if err != nil {
+		t.Fatalf("ApplyParamOverrideWithRelayInfo returned error: %v", err)
+	}
+
+	assertJSONEqual(t, `{"messages":[{"role":"user","content":"hello"}]}`, string(out))
+	if !info.UseRuntimeHeadersOverride {
+		t.Fatal("expected runtime header override to be enabled")
+	}
+
+	got, ok := info.RuntimeHeadersOverride["anthropic-beta"]
+	if !ok {
+		t.Fatal("expected anthropic-beta runtime header override to be populated")
+	}
+
+	want := "computer-use-2025-01-24,context-1m-2025-08-07"
+	if got != want {
+		t.Fatalf("unexpected anthropic-beta runtime header override, want %q, got %v", want, got)
+	}
+}
+
 func assertJSONEqual(t *testing.T, want, got string) {
 	t.Helper()
 

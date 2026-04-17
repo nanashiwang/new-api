@@ -31,13 +31,14 @@ import { useTranslation } from 'react-i18next';
 import Text from '@douyinfe/semi-ui/lib/es/typography/text';
 
 const CLAUDE_HEADER = {
-  'claude-3-7-sonnet-20250219-thinking': {
-    'anthropic-beta': [
-      'output-128k-2025-02-19',
-      'token-efficient-tools-2025-02-19',
-    ],
+  'claude-sonnet-4-6': {
+    'anthropic-beta': ['context-1m-2025-08-07'],
   },
 };
+
+const CLAUDE_HEADER_APPEND_BEFORE = `anthropic-beta: output-128k-2025-02-19`;
+
+const CLAUDE_HEADER_APPEND_AFTER = `anthropic-beta: output-128k-2025-02-19,context-1m-2025-08-07`;
 
 const CLAUDE_DEFAULT_MAX_TOKENS = {
   default: 8192,
@@ -191,7 +192,7 @@ export default function SettingClaudeModel(props) {
             <Row>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.TextArea
-                  label={t('Claude请求头覆盖')}
+                  label={t('Claude请求头追加')}
                   field={'claude.model_headers_settings'}
                   placeholder={
                     t('为一个 JSON 文本，例如：') +
@@ -199,7 +200,20 @@ export default function SettingClaudeModel(props) {
                     JSON.stringify(CLAUDE_HEADER, null, 2)
                   }
                   extraText={
-                    t('示例') + '\n' + JSON.stringify(CLAUDE_HEADER, null, 2)
+                    <div>
+                      <div>
+                        {t(
+                          'Claude 会在已有请求头基础上合并并追加这些值，不会覆盖已有 anthropic-beta；重复值会自动去重。',
+                        )}
+                      </div>
+                      <div className='mt-2 whitespace-pre-wrap font-mono text-xs'>
+                        {`${t('前：')}\n${CLAUDE_HEADER_APPEND_BEFORE}\n\n${t('配置：')}\n${JSON.stringify(
+                          CLAUDE_HEADER,
+                          null,
+                          2,
+                        )}\n\n${t('后：')}\n${CLAUDE_HEADER_APPEND_AFTER}`}
+                      </div>
+                    </div>
                   }
                   autosize={{ minRows: 6, maxRows: 12 }}
                   trigger='blur'
