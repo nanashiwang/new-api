@@ -14,7 +14,7 @@ type VertexAIClaudeRequest struct {
 	StopSequences    []string            `json:"stop_sequences,omitempty"`
 	Stream           bool                `json:"stream,omitempty"`
 	Temperature      *float64            `json:"temperature,omitempty"`
-	TopP             float64             `json:"top_p,omitempty"`
+	TopP             *float64            `json:"top_p,omitempty"`
 	TopK             int                 `json:"top_k,omitempty"`
 	Tools            any                 `json:"tools,omitempty"`
 	ToolChoice       any                 `json:"tool_choice,omitempty"`

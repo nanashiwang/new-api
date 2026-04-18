@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -282,6 +283,115 @@ func TestRequestOpenAI2ClaudeMessage_AssistantToolCallWithMalformedArguments(t *
 	inputObj, ok := content[1].Input.(map[string]any)
 	require.True(t, ok)
 	assert.Empty(t, inputObj)
+}
+
+func TestRequestOpenAI2ClaudeMessage_OmitsTopPForAdaptiveOpus(t *testing.T) {
+	req, err := RequestOpenAI2ClaudeMessage(nil, dto.GeneralOpenAIRequest{
+		Model: "claude-opus-4-6-high",
+		Messages: []dto.Message{
+			{Role: "user", Content: "hello"},
+		},
+	})
+	require.NoError(t, err)
+
+	payload, err := json.Marshal(req)
+	require.NoError(t, err)
+	assert.NotContains(t, string(payload), `"top_p"`)
+}
+
+func TestRequestOpenAI2ClaudeMessage_Opus47EffortSuffixUsesSummarizedAdaptiveReasoning(t *testing.T) {
+	temperature := 0.2
+	req, err := RequestOpenAI2ClaudeMessage(nil, dto.GeneralOpenAIRequest{
+		Model:       "claude-opus-4-7-xhigh",
+		Temperature: &temperature,
+		TopP:        0.9,
+		TopK:        7,
+		Messages: []dto.Message{
+			{Role: "user", Content: "hello"},
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, req.Thinking)
+
+	assert.Equal(t, "claude-opus-4-7", req.Model)
+	assert.Equal(t, "adaptive", req.Thinking.Type)
+	assert.JSONEq(t, `{"effort":"xhigh"}`, string(req.OutputConfig))
+	assert.Nil(t, req.Temperature)
+	assert.Nil(t, req.TopP)
+	assert.Zero(t, req.TopK)
+
+	payload, err := json.Marshal(req)
+	require.NoError(t, err)
+	assert.Contains(t, string(payload), `"display":"summarized"`)
+}
+
+func TestRequestOpenAI2ClaudeMessage_Opus47ThinkingSuffixMapsToAdaptiveHigh(t *testing.T) {
+	temperature := 0.2
+	req, err := RequestOpenAI2ClaudeMessage(nil, dto.GeneralOpenAIRequest{
+		Model:       "claude-opus-4-7-thinking",
+		Temperature: &temperature,
+		TopP:        0.9,
+		TopK:        7,
+		Messages: []dto.Message{
+			{Role: "user", Content: "hello"},
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, req.Thinking)
+
+	assert.Equal(t, "claude-opus-4-7", req.Model)
+	assert.Equal(t, "adaptive", req.Thinking.Type)
+	assert.JSONEq(t, `{"effort":"high"}`, string(req.OutputConfig))
+	assert.Nil(t, req.Temperature)
+	assert.Nil(t, req.TopP)
+	assert.Zero(t, req.TopK)
+
+	payload, err := json.Marshal(req)
+	require.NoError(t, err)
+	assert.Contains(t, string(payload), `"display":"summarized"`)
+}
+
+func TestRequestOpenAI2ClaudeMessage_EmptyAndTextMergeMatchesOfficialBranch(t *testing.T) {
+	req, err := RequestOpenAI2ClaudeMessage(nil, dto.GeneralOpenAIRequest{
+		Model: "claude-3-5-sonnet-20241022",
+		Messages: []dto.Message{
+			{Role: "user", Content: ""},
+			{Role: "user", Content: "hello"},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, req.Messages, 1)
+	assert.Equal(t, "... hello", req.Messages[0].GetStringContent())
+}
+
+func TestRequestOpenAI2ClaudeMessage_SkipsEmptyTextBlocksInStructuredContent(t *testing.T) {
+	systemMessage := dto.Message{Role: "system"}
+	systemMessage.SetMediaContent([]dto.MediaContent{
+		{Type: dto.ContentTypeText, Text: ""},
+	})
+
+	userMessage := dto.Message{Role: "user"}
+	userMessage.SetMediaContent([]dto.MediaContent{
+		{Type: dto.ContentTypeText, Text: ""},
+		{Type: dto.ContentTypeText, Text: "hello"},
+	})
+
+	req, err := RequestOpenAI2ClaudeMessage(nil, dto.GeneralOpenAIRequest{
+		Model: "claude-3-5-sonnet-20241022",
+		Messages: []dto.Message{
+			systemMessage,
+			userMessage,
+		},
+	})
+	require.NoError(t, err)
+	assert.Nil(t, req.System)
+	require.Len(t, req.Messages, 1)
+
+	content, err := req.Messages[0].ParseContent()
+	require.NoError(t, err)
+	require.Len(t, content, 1)
+	require.NotNil(t, content[0].Text)
+	assert.Equal(t, "hello", *content[0].Text)
 }
 
 func TestStreamResponseClaude2OpenAI_EmptyInputJSONDeltaIgnored(t *testing.T) {

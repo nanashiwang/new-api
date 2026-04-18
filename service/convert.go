@@ -36,8 +36,10 @@ func ClaudeToOpenAIRequest(c *gin.Context, claudeRequest dto.ClaudeRequest, info
 		Model:       claudeRequest.Model,
 		MaxTokens:   claudeRequest.MaxTokens,
 		Temperature: claudeRequest.Temperature,
-		TopP:        claudeRequest.TopP,
 		Stream:      claudeRequest.Stream,
+	}
+	if claudeRequest.TopP != nil {
+		openAIRequest.TopP = *claudeRequest.TopP
 	}
 
 	isOpenRouter := info.ChannelType == constant.ChannelTypeOpenRouter

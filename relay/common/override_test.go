@@ -817,6 +817,8 @@ func TestRemoveDisabledFieldsDefaultFiltering(t *testing.T) {
 	input := `{
 		"service_tier":"flex",
 		"inference_geo":"eu",
+		"speed":"fast",
+		"cache_control":{"type":"ephemeral"},
 		"safety_identifier":"user-123",
 		"store":true,
 		"stream_options":{"include_obfuscation":false}
@@ -827,7 +829,7 @@ func TestRemoveDisabledFieldsDefaultFiltering(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RemoveDisabledFields returned error: %v", err)
 	}
-	assertJSONEqual(t, `{"store":true}`, string(out))
+	assertJSONEqual(t, `{"cache_control":{"type":"ephemeral"},"store":true}`, string(out))
 }
 
 func TestRemoveDisabledFieldsAllowInferenceGeo(t *testing.T) {

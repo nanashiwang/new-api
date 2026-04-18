@@ -192,6 +192,7 @@ type ChannelOtherSettings struct {
 	ClaudeBetaQuery                       bool           `json:"claude_beta_query,omitempty"`         // Claude channel always appends ?beta=true
 	AllowServiceTier                      bool           `json:"allow_service_tier,omitempty"`        // Allow service_tier passthrough.
 	AllowInferenceGeo                     bool           `json:"allow_inference_geo,omitempty"`       // Allow inference_geo passthrough for Claude.
+	AllowSpeed                            bool           `json:"allow_speed,omitempty"`               // Allow speed passthrough for Claude.
 	DisableStore                          bool           `json:"disable_store,omitempty"`             // Disable store passthrough when enabled.
 	AllowSafetyIdentifier                 bool           `json:"allow_safety_identifier,omitempty"`   // Allow safety_identifier passthrough.
 	AllowIncludeObfuscation               bool           `json:"allow_include_obfuscation,omitempty"` // Allow stream_options.include_obfuscation passthrough.

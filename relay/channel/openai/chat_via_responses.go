@@ -39,6 +39,18 @@ func stringDeltaFromPrefix(prev string, next string) string {
 	return next
 }
 
+func hasResponsesWebSearchOutput(resp *dto.OpenAIResponsesResponse) bool {
+	if resp == nil {
+		return false
+	}
+	for _, output := range resp.Output {
+		if output.Type == dto.BuildInCallWebSearchCall {
+			return true
+		}
+	}
+	return false
+}
+
 func getResponsesIncompleteReason(resp *dto.OpenAIResponsesResponse) string {
 	if resp == nil || resp.IncompleteDetails == nil {
 		return ""
@@ -532,6 +544,22 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 						}
 					}
 				}
+			}
+
+			if info.RelayFormat == types.RelayFormatClaude &&
+				!sentStart &&
+				streamResp.Response != nil &&
+				hasResponsesWebSearchOutput(streamResp.Response) {
+				claudeResp := service.ResponseOpenAIResponses2Claude(streamResp.Response, responseId)
+				for _, event := range service.StreamClaudeResponse(claudeResp) {
+					if err := helper.ClaudeData(c, *event); err != nil {
+						streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+						return false
+					}
+				}
+				sentStart = true
+				sentStop = true
+				break
 			}
 
 			if !sendStartIfNeeded() {
