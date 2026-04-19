@@ -229,13 +229,13 @@ func Register(c *gin.Context) {
 }
 
 func GetAllUsers(c *gin.Context) {
-	sortBy, sortOrder, idSortOrder, balanceSortOrder, err := parseUserSortQuery(c)
+	sortBy, sortOrder, idSortOrder, balanceSortOrder, usedQuotaSortOrder, err := parseUserSortQuery(c)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 	pageInfo := common.GetPageQuery(c)
-	users, total, err := model.GetAllUsers(pageInfo, sortBy, sortOrder, idSortOrder, balanceSortOrder)
+	users, total, err := model.GetAllUsers(pageInfo, sortBy, sortOrder, idSortOrder, balanceSortOrder, usedQuotaSortOrder)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -347,7 +347,7 @@ func SearchUsers(c *gin.Context) {
 		return
 	}
 
-	sortBy, sortOrder, idSortOrder, balanceSortOrder, err := parseUserSortQuery(c)
+	sortBy, sortOrder, idSortOrder, balanceSortOrder, usedQuotaSortOrder, err := parseUserSortQuery(c)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -373,6 +373,7 @@ func SearchUsers(c *gin.Context) {
 		SortOrder:             sortOrder,
 		IdSortOrder:           idSortOrder,
 		WalletSortOrder:       balanceSortOrder,
+		UsedQuotaSortOrder:    usedQuotaSortOrder,
 		StartIdx:              pageInfo.GetStartIdx(),
 		PageSize:              pageInfo.GetPageSize(),
 	})
@@ -484,7 +485,7 @@ func parseOptionalBoolQuery(raw string, name string) (*bool, error) {
 	return &value, nil
 }
 
-func parseUserSortQuery(c *gin.Context) (string, string, string, string, error) {
+func parseUserSortQuery(c *gin.Context) (string, string, string, string, string, error) {
 	sortBy := strings.ToLower(strings.TrimSpace(c.Query("sort_by")))
 	if sortBy == "" {
 		sortBy = "id"
@@ -492,7 +493,7 @@ func parseUserSortQuery(c *gin.Context) (string, string, string, string, error) 
 	switch sortBy {
 	case "id", "quota":
 	default:
-		return "", "", "", "", errors.New("参数 sort_by 仅支持 id 或 quota")
+		return "", "", "", "", "", errors.New("参数 sort_by 仅支持 id 或 quota")
 	}
 
 	sortOrder := strings.ToLower(strings.TrimSpace(c.Query("sort_order")))
@@ -502,7 +503,7 @@ func parseUserSortQuery(c *gin.Context) (string, string, string, string, error) 
 	switch sortOrder {
 	case "asc", "desc":
 	default:
-		return "", "", "", "", errors.New("参数 sort_order 仅支持 asc 或 desc")
+		return "", "", "", "", "", errors.New("参数 sort_order 仅支持 asc 或 desc")
 	}
 
 	// 新增组合排序参数：
@@ -513,7 +514,7 @@ func parseUserSortQuery(c *gin.Context) (string, string, string, string, error) 
 	switch idSortOrder {
 	case "", "asc", "desc":
 	default:
-		return "", "", "", "", errors.New("参数 id_sort_order 仅支持 asc 或 desc")
+		return "", "", "", "", "", errors.New("参数 id_sort_order 仅支持 asc 或 desc")
 	}
 
 	walletSortOrder := strings.ToLower(strings.TrimSpace(c.Query("wallet_sort_order")))
@@ -523,10 +524,17 @@ func parseUserSortQuery(c *gin.Context) (string, string, string, string, error) 
 	switch walletSortOrder {
 	case "", "asc", "desc":
 	default:
-		return "", "", "", "", errors.New("参数 wallet_sort_order 仅支持 asc 或 desc")
+		return "", "", "", "", "", errors.New("参数 wallet_sort_order 仅支持 asc 或 desc")
 	}
 
-	return sortBy, sortOrder, idSortOrder, walletSortOrder, nil
+	usedQuotaSortOrder := strings.ToLower(strings.TrimSpace(c.Query("used_quota_sort_order")))
+	switch usedQuotaSortOrder {
+	case "", "asc", "desc":
+	default:
+		return "", "", "", "", "", errors.New("参数 used_quota_sort_order 仅支持 asc 或 desc")
+	}
+
+	return sortBy, sortOrder, idSortOrder, walletSortOrder, usedQuotaSortOrder, nil
 }
 
 func GetUser(c *gin.Context) {

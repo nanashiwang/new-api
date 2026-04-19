@@ -40,9 +40,10 @@ const DEFAULT_ADVANCED_FILTERS = {
   // 将已用额度筛选放在高级面板，保持工具栏紧凑。
   searchUsedBalanceMin: '',
   searchUsedBalanceMax: '',
-  // 复合排序支持 ID 与钱包额度同时生效。
+  // 复合排序支持 ID、钱包额度、已使用额度同时生效。
   searchIdSortOrder: '',
   searchWalletSortOrder: '',
+  searchUsedQuotaSortOrder: '',
 };
 const USERS_ADVANCED_FILTERS_STORAGE_KEY = 'users-advanced-filters';
 
@@ -133,6 +134,7 @@ export const useUsersData = () => {
       searchUsedBalanceMax: next.searchUsedBalanceMax ?? '',
       searchIdSortOrder: next.searchIdSortOrder ?? '',
       searchWalletSortOrder: next.searchWalletSortOrder ?? '',
+      searchUsedQuotaSortOrder: next.searchUsedQuotaSortOrder ?? '',
     };
   };
 
@@ -176,6 +178,7 @@ export const useUsersData = () => {
     pageSize,
     idSortOrder = '',
     walletSortOrder = '',
+    usedQuotaSortOrder = '',
   ) => {
     const reqId = nextRequestId();
     setLoading(true);
@@ -189,6 +192,9 @@ export const useUsersData = () => {
       }
       if (walletSortOrder === 'asc' || walletSortOrder === 'desc') {
         params.wallet_sort_order = walletSortOrder;
+      }
+      if (usedQuotaSortOrder === 'asc' || usedQuotaSortOrder === 'desc') {
+        params.used_quota_sort_order = usedQuotaSortOrder;
       }
       const res = await API.get('/api/user/', { params });
       if (!isLatestRequest(reqId)) {
@@ -275,6 +281,7 @@ export const useUsersData = () => {
         pageSize,
         resolvedAdvanced.searchIdSortOrder,
         resolvedAdvanced.searchWalletSortOrder,
+        resolvedAdvanced.searchUsedQuotaSortOrder,
       );
       return;
     }
@@ -303,6 +310,12 @@ export const useUsersData = () => {
         resolvedAdvanced.searchWalletSortOrder === 'desc'
       ) {
         params.wallet_sort_order = resolvedAdvanced.searchWalletSortOrder;
+      }
+      if (
+        resolvedAdvanced.searchUsedQuotaSortOrder === 'asc' ||
+        resolvedAdvanced.searchUsedQuotaSortOrder === 'desc'
+      ) {
+        params.used_quota_sort_order = resolvedAdvanced.searchUsedQuotaSortOrder;
       }
       if (resolvedAdvanced.searchRole !== '') {
         params.role = resolvedAdvanced.searchRole;
@@ -518,6 +531,7 @@ export const useUsersData = () => {
         pageSize,
         advancedFilters.searchIdSortOrder,
         advancedFilters.searchWalletSortOrder,
+        advancedFilters.searchUsedQuotaSortOrder,
       ).then();
     } else {
       searchUsers(
@@ -554,6 +568,7 @@ export const useUsersData = () => {
         size,
         advancedFilters.searchIdSortOrder,
         advancedFilters.searchWalletSortOrder,
+        advancedFilters.searchUsedQuotaSortOrder,
       )
         .then()
         .catch((reason) => {
@@ -608,6 +623,7 @@ export const useUsersData = () => {
         pageSize,
         advancedFilters.searchIdSortOrder,
         advancedFilters.searchWalletSortOrder,
+        advancedFilters.searchUsedQuotaSortOrder,
       );
     } else {
       await searchUsers(

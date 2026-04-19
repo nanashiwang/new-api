@@ -95,6 +95,7 @@ type UserSearchParams struct {
 	SortOrder             string
 	IdSortOrder           string
 	WalletSortOrder       string
+	UsedQuotaSortOrder    string
 	StartIdx              int
 	PageSize              int
 }
@@ -133,13 +134,16 @@ func normalizeLegacyUserSort(sortBy string, sortOrder string) (string, string) {
 	return normalizedSortBy, normalizedSortOrder
 }
 
-func buildUserOrderClause(sortBy string, sortOrder string, idSortOrder string, walletSortOrder string) string {
-	orderClauses := make([]string, 0, 2)
+func buildUserOrderClause(sortBy string, sortOrder string, idSortOrder string, walletSortOrder string, usedQuotaSortOrder string) string {
+	orderClauses := make([]string, 0, 3)
 	if normalized := normalizeUserSortOrder(idSortOrder); normalized != "" {
 		orderClauses = append(orderClauses, "id "+normalized)
 	}
 	if normalized := normalizeUserSortOrder(walletSortOrder); normalized != "" {
 		orderClauses = append(orderClauses, "quota "+normalized)
+	}
+	if normalized := normalizeUserSortOrder(usedQuotaSortOrder); normalized != "" {
+		orderClauses = append(orderClauses, "used_quota "+normalized)
 	}
 
 	// 兼容旧参数：如果新参数都为空，则回退到 sort_by/sort_order。
@@ -287,7 +291,7 @@ func GetMaxUserId() int {
 	return user.Id
 }
 
-func GetAllUsers(pageInfo *common.PageInfo, sortBy string, sortOrder string, idSortOrder string, balanceSortOrder string) (users []*User, total int64, err error) {
+func GetAllUsers(pageInfo *common.PageInfo, sortBy string, sortOrder string, idSortOrder string, balanceSortOrder string, usedQuotaSortOrder string) (users []*User, total int64, err error) {
 	// Start transaction
 	tx := DB.Begin()
 	if tx.Error != nil {
@@ -306,7 +310,7 @@ func GetAllUsers(pageInfo *common.PageInfo, sortBy string, sortOrder string, idS
 		return nil, 0, err
 	}
 
-	orderClause := buildUserOrderClause(sortBy, sortOrder, idSortOrder, balanceSortOrder)
+	orderClause := buildUserOrderClause(sortBy, sortOrder, idSortOrder, balanceSortOrder, usedQuotaSortOrder)
 	// Get paginated users within same transaction
 	err = tx.Unscoped().Order(orderClause).Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Omit("password").Find(&users).Error
 	if err != nil {
@@ -483,7 +487,7 @@ func SearchUsersWithParams(params UserSearchParams) ([]*User, int64, error) {
 		pageSize = common.ItemsPerPage
 	}
 
-	orderClause := buildUserOrderClause(params.SortBy, params.SortOrder, params.IdSortOrder, params.WalletSortOrder)
+	orderClause := buildUserOrderClause(params.SortBy, params.SortOrder, params.IdSortOrder, params.WalletSortOrder, params.UsedQuotaSortOrder)
 
 	// 获取分页数据
 	err = query.Omit("password").Order(orderClause).Limit(pageSize).Offset(startIdx).Find(&users).Error

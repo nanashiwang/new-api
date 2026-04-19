@@ -120,6 +120,14 @@ const UsersFilters = ({
     ],
     [t],
   );
+  const usedQuotaSortDirectionOptions = useMemo(
+    () => [
+      { label: t('已使用额度排序：默认'), value: '' },
+      { label: t('已使用额度排序：升序'), value: 'asc' },
+      { label: t('已使用额度排序：降序'), value: 'desc' },
+    ],
+    [t],
+  );
 
   // 统计已启用的高级筛选数量，用于徽标提示隐藏条件。
   const activeAdvancedCount = useMemo(() => {
@@ -487,6 +495,19 @@ const UsersFilters = ({
                 }
                 optionList={walletSortDirectionOptions}
                 placeholder={t('钱包额度排序')}
+                showClear
+              />
+              <Select
+                value={draftAdvancedFilters.searchUsedQuotaSortOrder}
+                onChange={(value) =>
+                  setDraftAdvancedFilters((prev) => ({
+                    ...prev,
+                    searchUsedQuotaSortOrder:
+                      value === null || value === undefined ? '' : value,
+                  }))
+                }
+                optionList={usedQuotaSortDirectionOptions}
+                placeholder={t('已使用额度排序')}
                 showClear
               />
             </div>
