@@ -253,6 +253,20 @@ func GenerateKey() (string, error) {
 	return GenerateRandomCharsKey(48)
 }
 
+// ParseTokenKey normalizes a token-style credential from Authorization or raw key input.
+func ParseTokenKey(raw string) (string, []string) {
+	raw = strings.TrimSpace(raw)
+	if strings.HasPrefix(raw, "Bearer ") || strings.HasPrefix(raw, "bearer ") {
+		raw = strings.TrimSpace(raw[7:])
+	}
+	raw = strings.TrimPrefix(raw, "sk-")
+	if raw == "" {
+		return "", nil
+	}
+	parts := strings.Split(raw, "-")
+	return parts[0], parts
+}
+
 func GetRandomInt(max int) int {
 	//rand.Seed(time.Now().UnixNano())
 	return rand.Intn(max)

@@ -188,14 +188,12 @@ func TokenOrUserAuth() func(c *gin.Context) {
 	}
 }
 
-// TokenAuthReadOnly 宽松版本的令牌认证中间件，用于只读查询接口。
-// 只验证令牌 key 是否存在，不检查令牌状态、过期时间和额度。
-// 即使令牌已过期、已耗尽或已禁用，也允许访问。
-// 仍然检查用户是否被封禁。
-func TokenAuthReadOnly() func(c *gin.Context) {
+// TokenAuthQuery 用于令牌查询类接口。
+// 它沿用令牌可用性校验，但不会把 key 后缀解释成指定渠道参数。
+func TokenAuthQuery() func(c *gin.Context) {
 	return func(c *gin.Context) {
-		key := c.Request.Header.Get("Authorization")
-		if key == "" {
+		raw := c.Request.Header.Get("Authorization")
+		if raw == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"success": false,
 				"message": "未提供 Authorization 请求头",
@@ -203,20 +201,19 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 			c.Abort()
 			return
 		}
-		if strings.HasPrefix(key, "Bearer ") || strings.HasPrefix(key, "bearer ") {
-			key = strings.TrimSpace(key[7:])
-		}
-		key = strings.TrimPrefix(key, "sk-")
-		parts := strings.Split(key, "-")
-		key = parts[0]
-
-		token, err := model.GetTokenByKey(key, false)
-		if err != nil {
+		key, _ := common.ParseTokenKey(raw)
+		if key == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"success": false,
 				"message": "无效的令牌",
 			})
 			c.Abort()
+			return
+		}
+
+		token, err := model.ValidateUserToken(key)
+		if err != nil {
+			abortWithOpenAiMessage(c, http.StatusUnauthorized, err.Error())
 			return
 		}
 
@@ -238,11 +235,17 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 			return
 		}
 
-		c.Set("id", token.UserId)
-		c.Set("token_id", token.Id)
-		c.Set("token_key", token.Key)
+		userCache.WriteContext(c)
+		if err := SetupContextForToken(c, token); err != nil {
+			return
+		}
 		c.Next()
 	}
+}
+
+// TokenAuthReadOnly 保留兼容入口，行为与 TokenAuthQuery 一致。
+func TokenAuthReadOnly() func(c *gin.Context) {
+	return TokenAuthQuery()
 }
 
 func TokenAuth() func(c *gin.Context) {
@@ -285,21 +288,11 @@ func TokenAuth() func(c *gin.Context) {
 		}
 		key := c.Request.Header.Get("Authorization")
 		parts := make([]string, 0)
-		if strings.HasPrefix(key, "Bearer ") || strings.HasPrefix(key, "bearer ") {
-			key = strings.TrimSpace(key[7:])
-		}
 		if key == "" || key == "midjourney-proxy" {
 			key = c.Request.Header.Get("mj-api-secret")
-			if strings.HasPrefix(key, "Bearer ") || strings.HasPrefix(key, "bearer ") {
-				key = strings.TrimSpace(key[7:])
-			}
-			key = strings.TrimPrefix(key, "sk-")
-			parts = strings.Split(key, "-")
-			key = parts[0]
+			key, parts = common.ParseTokenKey(key)
 		} else {
-			key = strings.TrimPrefix(key, "sk-")
-			parts = strings.Split(key, "-")
-			key = parts[0]
+			key, parts = common.ParseTokenKey(key)
 		}
 		token, err := model.ValidateUserToken(key)
 		if token != nil {

@@ -344,34 +344,18 @@ func GetTokenStatus(c *gin.Context) {
 }
 
 func GetTokenUsage(c *gin.Context) {
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "" {
+	tokenID := c.GetInt("token_id")
+	if tokenID == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"success": false,
-			"message": "No Authorization header",
+			"message": "Invalid token context",
 		})
 		return
 	}
-
-	parts := strings.Split(authHeader, " ")
-	if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"success": false,
-			"message": "Invalid Bearer token",
-		})
-		return
-	}
-	tokenKey := parts[1]
-
-	token, err := model.GetTokenByKey(strings.TrimPrefix(tokenKey, "sk-"), false)
+	token, err := model.GetTokenById(tokenID)
 	if err != nil {
-		common.SysError("failed to get token by key: " + err.Error())
+		common.SysError("failed to get token by id: " + err.Error())
 		common.ApiErrorI18n(c, i18n.MsgTokenGetInfoFailed)
-		return
-	}
-	token, err = model.NormalizeTokenPackageStateForRead(token)
-	if err != nil {
-		common.ApiError(c, err)
 		return
 	}
 	expiredAt := token.ExpiredTime
@@ -429,7 +413,7 @@ func normalizePublicQueryKeys(keys []string) []string {
 	seen := make(map[string]struct{}, len(keys))
 	normalized := make([]string, 0, len(keys))
 	for _, key := range keys {
-		cleaned := strings.TrimSpace(strings.TrimPrefix(key, "sk-"))
+		cleaned, _ := common.ParseTokenKey(key)
 		if cleaned == "" {
 			continue
 		}
@@ -478,11 +462,11 @@ func parsePublicTokenLogPagination(page int, pageSize int) (int, int) {
 }
 
 func resolvePublicSingleToken(rawKey string) (*model.Token, error) {
-	key := strings.TrimSpace(strings.TrimPrefix(rawKey, "sk-"))
+	key, _ := common.ParseTokenKey(rawKey)
 	if key == "" {
 		return nil, fmt.Errorf("empty key")
 	}
-	token, err := model.GetTokenByKey(key, false)
+	token, err := model.ValidateUserToken(key)
 	if err != nil {
 		return nil, err
 	}
@@ -587,7 +571,7 @@ func resolvePublicQueryTokens(keys []string) ([]*model.Token, []string) {
 	tokens := make([]*model.Token, 0, len(normalized))
 	invalid := make([]string, 0)
 	for _, key := range normalized {
-		token, err := model.GetTokenByKey(key, false)
+		token, err := model.ValidateUserToken(key)
 		if err != nil || token == nil {
 			invalid = append(invalid, key)
 			continue
@@ -636,8 +620,7 @@ func GetPublicTokenUsage(c *gin.Context) {
 		return
 	}
 
-	key := strings.TrimPrefix(req.Key, "sk-")
-	token, err := model.GetTokenByKey(key, false)
+	token, err := resolvePublicSingleToken(req.Key)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
