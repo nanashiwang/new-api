@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -55,9 +56,12 @@ type User struct {
 	// 生效套餐元数据（仅用于用户管理列表响应，不落库）：
 	// - HasActiveSubscription：当前是否存在生效套餐
 	// - ActiveSubscriptionCount：当前生效套餐条数
-	HasActiveSubscription            bool `json:"has_active_subscription" gorm:"-"`
-	ActiveSubscriptionCount          int  `json:"active_subscription_count" gorm:"-"`
-	PendingSubscriptionIssuanceCount int  `json:"pending_subscription_issuance_count" gorm:"-"`
+	HasActiveSubscription            bool  `json:"has_active_subscription" gorm:"-"`
+	ActiveSubscriptionCount          int   `json:"active_subscription_count" gorm:"-"`
+	PendingSubscriptionIssuanceCount int   `json:"pending_subscription_issuance_count" gorm:"-"`
+	SubscriptionQuotaRemaining       int64 `json:"subscription_quota_remaining" gorm:"-"`
+	SubscriptionQuotaTotal           int64 `json:"subscription_quota_total" gorm:"-"`
+	SubscriptionQuotaHasUnlimited    bool  `json:"subscription_quota_has_unlimited" gorm:"-"`
 	// 可售令牌元数据（仅用于用户管理列表响应，不落库）
 	HasSellableToken             bool `json:"has_sellable_token" gorm:"-"`
 	ActiveSellableTokenCount     int  `json:"active_sellable_token_count" gorm:"-"`
@@ -82,14 +86,14 @@ type UserSearchParams struct {
 	HasInvitees           *bool
 	HasActiveSubscription *bool
 	HasSellableToken      *bool
-	BalanceMin            *int
-	BalanceMax            *int
+	WalletMin             *int
+	WalletMax             *int
 	UsedBalanceMin        *int
 	UsedBalanceMax        *int
 	SortBy                string
 	SortOrder             string
 	IdSortOrder           string
-	BalanceSortOrder      string
+	WalletSortOrder       string
 	StartIdx              int
 	PageSize              int
 }
@@ -128,12 +132,12 @@ func normalizeLegacyUserSort(sortBy string, sortOrder string) (string, string) {
 	return normalizedSortBy, normalizedSortOrder
 }
 
-func buildUserOrderClause(sortBy string, sortOrder string, idSortOrder string, balanceSortOrder string) string {
+func buildUserOrderClause(sortBy string, sortOrder string, idSortOrder string, walletSortOrder string) string {
 	orderClauses := make([]string, 0, 2)
 	if normalized := normalizeUserSortOrder(idSortOrder); normalized != "" {
 		orderClauses = append(orderClauses, "id "+normalized)
 	}
-	if normalized := normalizeUserSortOrder(balanceSortOrder); normalized != "" {
+	if normalized := normalizeUserSortOrder(walletSortOrder); normalized != "" {
 		orderClauses = append(orderClauses, "quota "+normalized)
 	}
 
@@ -326,6 +330,12 @@ func GetAllUsers(pageInfo *common.PageInfo, sortBy string, sortOrder string, idS
 	return users, total, nil
 }
 
+type subscriptionQuotaSummary struct {
+	Remaining    int64
+	Total        int64
+	HasUnlimited bool
+}
+
 func SearchUsers(keyword string, group string, startIdx int, num int) ([]*User, int64, error) {
 	return SearchUsersWithParams(UserSearchParams{
 		Keyword:   keyword,
@@ -421,13 +431,12 @@ func SearchUsersWithParams(params UserSearchParams) ([]*User, int64, error) {
 			query = query.Where("NOT EXISTS (" + sellableExistsSQL + ")")
 		}
 	}
-	// 额度筛选基于"总额度 = quota + used_quota"。
-	// 使用参数绑定占位符传值，避免把数值拼接到 SQL 字符串中。
-	if params.BalanceMin != nil {
-		query = query.Where("(quota + used_quota) >= ?", *params.BalanceMin)
+	// 钱包额度筛选只基于 users.quota，避免把套餐消耗混入钱包余额口径。
+	if params.WalletMin != nil {
+		query = query.Where("quota >= ?", *params.WalletMin)
 	}
-	if params.BalanceMax != nil {
-		query = query.Where("(quota + used_quota) <= ?", *params.BalanceMax)
+	if params.WalletMax != nil {
+		query = query.Where("quota <= ?", *params.WalletMax)
 	}
 	if params.UsedBalanceMin != nil {
 		query = query.Where("used_quota >= ?", *params.UsedBalanceMin)
@@ -463,7 +472,7 @@ func SearchUsersWithParams(params UserSearchParams) ([]*User, int64, error) {
 		pageSize = common.ItemsPerPage
 	}
 
-	orderClause := buildUserOrderClause(params.SortBy, params.SortOrder, params.IdSortOrder, params.BalanceSortOrder)
+	orderClause := buildUserOrderClause(params.SortBy, params.SortOrder, params.IdSortOrder, params.WalletSortOrder)
 
 	// 获取分页数据
 	err = query.Omit("password").Order(orderClause).Limit(pageSize).Offset(startIdx).Find(&users).Error
@@ -554,22 +563,20 @@ func AttachUserSubscriptionMetadata(tx *gorm.DB, users []*User) error {
 		user.ActiveSubscriptionCount = 0
 		user.HasActiveSubscription = false
 		user.PendingSubscriptionIssuanceCount = 0
+		user.SubscriptionQuotaRemaining = 0
+		user.SubscriptionQuotaTotal = 0
+		user.SubscriptionQuotaHasUnlimited = false
 	}
 	if len(userIDs) == 0 {
 		return nil
 	}
 
 	now := common.GetTimestamp()
-	type activeSubscriptionCount struct {
-		UserId      int `gorm:"column:user_id"`
-		ActiveCount int `gorm:"column:active_count"`
-	}
-	var counts []activeSubscriptionCount
+
+	var activeSubscriptions []UserSubscription
 	if err := tx.Model(&UserSubscription{}).
-		Select("user_id, COUNT(*) AS active_count").
 		Where("user_id IN ? AND status = ? AND end_time > ?", userIDs, "active", now).
-		Group("user_id").
-		Scan(&counts).Error; err != nil {
+		Find(&activeSubscriptions).Error; err != nil {
 		return err
 	}
 	type pendingIssuanceCount struct {
@@ -587,13 +594,50 @@ func AttachUserSubscriptionMetadata(tx *gorm.DB, users []*User) error {
 		}
 	}
 
-	countByUserID := make(map[int]int, len(counts))
-	for _, row := range counts {
-		countByUserID[row.UserId] = row.ActiveCount
+	planIDs := make([]int, 0, len(activeSubscriptions))
+	seenPlanIDs := make(map[int]struct{}, len(activeSubscriptions))
+	countByUserID := make(map[int]int, len(activeSubscriptions))
+	quotaSummaryByUserID := make(map[int]subscriptionQuotaSummary, len(activeSubscriptions))
+	for _, sub := range activeSubscriptions {
+		countByUserID[sub.UserId]++
+		if sub.PlanId > 0 {
+			if _, ok := seenPlanIDs[sub.PlanId]; !ok {
+				seenPlanIDs[sub.PlanId] = struct{}{}
+				planIDs = append(planIDs, sub.PlanId)
+			}
+		}
 	}
 	pendingByUserID := make(map[int]int, len(pendingCounts))
 	for _, row := range pendingCounts {
 		pendingByUserID[row.UserId] = row.Count
+	}
+
+	planByID := make(map[int]*SubscriptionPlan, len(planIDs))
+	if len(planIDs) > 0 {
+		var plans []SubscriptionPlan
+		if err := tx.Model(&SubscriptionPlan{}).Where("id IN ?", planIDs).Find(&plans).Error; err != nil {
+			return err
+		}
+		for index := range plans {
+			plan := plans[index]
+			planByID[plan.Id] = &plan
+		}
+	}
+	for _, sub := range activeSubscriptions {
+		summary := quotaSummaryByUserID[sub.UserId]
+		remaining, total, hasUnlimited := projectUserSubscriptionQuotaSnapshot(&sub, planByID[sub.PlanId], now)
+		if hasUnlimited {
+			summary.HasUnlimited = true
+			summary.Remaining = 0
+			summary.Total = 0
+			quotaSummaryByUserID[sub.UserId] = summary
+			continue
+		}
+		if !summary.HasUnlimited {
+			summary.Remaining += remaining
+			summary.Total += total
+		}
+		quotaSummaryByUserID[sub.UserId] = summary
 	}
 	for _, user := range users {
 		if user == nil {
@@ -603,8 +647,65 @@ func AttachUserSubscriptionMetadata(tx *gorm.DB, users []*User) error {
 		user.ActiveSubscriptionCount = activeCount
 		user.PendingSubscriptionIssuanceCount = pendingByUserID[user.Id]
 		user.HasActiveSubscription = activeCount > 0 || user.PendingSubscriptionIssuanceCount > 0
+		quotaSummary := quotaSummaryByUserID[user.Id]
+		user.SubscriptionQuotaRemaining = quotaSummary.Remaining
+		user.SubscriptionQuotaTotal = quotaSummary.Total
+		user.SubscriptionQuotaHasUnlimited = quotaSummary.HasUnlimited
 	}
 	return nil
+}
+
+func projectUserSubscriptionQuotaSnapshot(sub *UserSubscription, plan *SubscriptionPlan, now int64) (int64, int64, bool) {
+	if sub == nil {
+		return 0, 0, false
+	}
+	if sub.AmountTotal <= 0 {
+		return 0, 0, true
+	}
+	used := projectUserSubscriptionUsedAtTime(sub, plan, now)
+	if used < 0 {
+		used = 0
+	}
+	remaining := sub.AmountTotal - used
+	if remaining < 0 {
+		remaining = 0
+	}
+	return remaining, sub.AmountTotal, false
+}
+
+func projectUserSubscriptionUsedAtTime(sub *UserSubscription, plan *SubscriptionPlan, now int64) int64 {
+	if sub == nil {
+		return 0
+	}
+	used := sub.AmountUsed
+	if used < 0 {
+		used = 0
+	}
+	if plan == nil || NormalizeResetPeriod(plan.QuotaResetPeriod) == SubscriptionResetNever {
+		return used
+	}
+	if sub.NextResetTime > 0 && sub.NextResetTime > now {
+		return used
+	}
+	baseUnix := sub.LastResetTime
+	if baseUnix <= 0 {
+		baseUnix = sub.StartTime
+	}
+	if baseUnix <= 0 {
+		return used
+	}
+	base := time.Unix(baseUnix, 0)
+	next := calcNextResetTime(base, plan, sub.EndTime)
+	advanced := false
+	for next > 0 && next <= now {
+		advanced = true
+		base = time.Unix(next, 0)
+		next = calcNextResetTime(base, plan, sub.EndTime)
+	}
+	if advanced {
+		return 0
+	}
+	return used
 }
 
 func AttachUserSellableTokenMetadata(tx *gorm.DB, users []*User) error {

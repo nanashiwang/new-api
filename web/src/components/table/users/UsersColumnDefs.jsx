@@ -23,9 +23,6 @@ import {
   Space,
   Tag,
   Tooltip,
-  Progress,
-  Popover,
-  Typography,
   Dropdown,
 } from '@douyinfe/semi-ui';
 import { IconMore } from '@douyinfe/semi-icons';
@@ -133,40 +130,45 @@ const renderStatistics = (text, record, showEnableDisableModal, t) => {
   );
 };
 
-// 渲染独立额度用量列
-const renderQuotaUsage = (text, record, t) => {
-  const { Paragraph } = Typography;
-  const used = parseInt(record.used_quota) || 0;
-  const remain = parseInt(record.quota) || 0;
-  const total = used + remain;
-  const percent = total > 0 ? (remain / total) * 100 : 0;
-  const popoverContent = (
-    <div className='text-xs p-2'>
-      <Paragraph copyable={{ content: renderQuota(used) }}>
-        {t('已用额度')}: {renderQuota(used)}
-      </Paragraph>
-      <Paragraph copyable={{ content: renderQuota(remain) }}>
-        {t('剩余额度')}: {renderQuota(remain)} ({percent.toFixed(0)}%)
-      </Paragraph>
-      <Paragraph copyable={{ content: renderQuota(total) }}>
-        {t('总额度')}: {renderQuota(total)}
-      </Paragraph>
-    </div>
-  );
+const renderWalletQuota = (text, record) => {
+  const walletQuota = Number(record?.quota || 0);
   return (
-    <Popover content={popoverContent} position='top'>
+    <Tag color='white' shape='circle'>
+      {renderQuota(walletQuota)}
+    </Tag>
+  );
+};
+
+const renderSubscriptionQuota = (text, record, t) => {
+  const hasUnlimited = !!record?.subscription_quota_has_unlimited;
+  const total = Number(record?.subscription_quota_total || 0);
+  const remaining = Number(record?.subscription_quota_remaining || 0);
+
+  if (hasUnlimited) {
+    return (
       <Tag color='white' shape='circle'>
-        <div className='flex flex-col items-end'>
-          <span className='text-xs leading-none'>{`${renderQuota(remain)} / ${renderQuota(total)}`}</span>
-          <Progress
-            percent={percent}
-            aria-label='quota usage'
-            format={() => `${percent.toFixed(0)}%`}
-            style={{ width: '100%', marginTop: '1px', marginBottom: 0 }}
-          />
-        </div>
+        {t('不限额')}
       </Tag>
-    </Popover>
+    );
+  }
+
+  if (total <= 0) {
+    return (
+      <Tag color='white' shape='circle'>
+        -
+      </Tag>
+    );
+  }
+
+  return (
+    <Tooltip
+      content={`${t('套餐额度')}: ${renderQuota(remaining)} / ${renderQuota(total)}`}
+      position='top'
+    >
+      <Tag color='white' shape='circle'>
+        {`${renderQuota(remaining)} / ${renderQuota(total)}`}
+      </Tag>
+    </Tooltip>
   );
 };
 
@@ -474,9 +476,15 @@ export const getUsersColumns = ({
         renderSellableTokenStatus(record, t, showUserSellableTokensModal),
     },
     {
-      title: t('剩余额度/总额度'),
-      key: 'quota_usage',
-      render: (text, record) => renderQuotaUsage(text, record, t),
+      title: t('钱包额度'),
+      dataIndex: 'quota',
+      key: 'wallet_quota',
+      render: (text, record) => renderWalletQuota(text, record),
+    },
+    {
+      title: t('套餐额度'),
+      key: 'subscription_quota',
+      render: (text, record) => renderSubscriptionQuota(text, record, t),
     },
     {
       title: t('已使用余额'),

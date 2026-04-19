@@ -293,27 +293,35 @@ func SearchUsers(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	balanceMin, err := parseOptionalIntQuery(c.Query("balance_min"), "balance_min")
+	walletMinRaw := strings.TrimSpace(c.Query("wallet_min"))
+	if walletMinRaw == "" {
+		walletMinRaw = strings.TrimSpace(c.Query("balance_min"))
+	}
+	walletMin, err := parseOptionalIntQuery(walletMinRaw, "wallet_min")
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	balanceMax, err := parseOptionalIntQuery(c.Query("balance_max"), "balance_max")
+	walletMaxRaw := strings.TrimSpace(c.Query("wallet_max"))
+	if walletMaxRaw == "" {
+		walletMaxRaw = strings.TrimSpace(c.Query("balance_max"))
+	}
+	walletMax, err := parseOptionalIntQuery(walletMaxRaw, "wallet_max")
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	if balanceMin != nil && *balanceMin < 0 {
-		common.ApiError(c, errors.New("参数 balance_min 不能小于 0"))
+	if walletMin != nil && *walletMin < 0 {
+		common.ApiError(c, errors.New("参数 wallet_min 不能小于 0"))
 		return
 	}
-	if balanceMax != nil && *balanceMax < 0 {
-		common.ApiError(c, errors.New("参数 balance_max 不能小于 0"))
+	if walletMax != nil && *walletMax < 0 {
+		common.ApiError(c, errors.New("参数 wallet_max 不能小于 0"))
 		return
 	}
 	// 对范围条件做前置校验，避免出现“最小值大于最大值”导致结果不可预期。
-	if balanceMin != nil && balanceMax != nil && *balanceMin > *balanceMax {
-		common.ApiError(c, errors.New("参数 balance_min 不能大于 balance_max"))
+	if walletMin != nil && walletMax != nil && *walletMin > *walletMax {
+		common.ApiError(c, errors.New("参数 wallet_min 不能大于 wallet_max"))
 		return
 	}
 	usedBalanceMin, err := parseOptionalIntQuery(c.Query("used_balance_min"), "used_balance_min")
@@ -357,14 +365,14 @@ func SearchUsers(c *gin.Context) {
 		HasInvitees:           hasInvitees,
 		HasActiveSubscription: hasActiveSubscription,
 		HasSellableToken:      hasSellableToken,
-		BalanceMin:            balanceMin,
-		BalanceMax:            balanceMax,
+		WalletMin:             walletMin,
+		WalletMax:             walletMax,
 		UsedBalanceMin:        usedBalanceMin,
 		UsedBalanceMax:        usedBalanceMax,
 		SortBy:                sortBy,
 		SortOrder:             sortOrder,
 		IdSortOrder:           idSortOrder,
-		BalanceSortOrder:      balanceSortOrder,
+		WalletSortOrder:       balanceSortOrder,
 		StartIdx:              pageInfo.GetStartIdx(),
 		PageSize:              pageInfo.GetPageSize(),
 	})
@@ -499,7 +507,7 @@ func parseUserSortQuery(c *gin.Context) (string, string, string, string, error) 
 
 	// 新增组合排序参数：
 	// - id_sort_order: 控制 ID 的升/降序
-	// - balance_sort_order: 控制余额(quota)的升/降序
+	// - wallet_sort_order: 控制钱包额度(quota)的升/降序
 	// 两者可同时传入，例如 id desc + quota asc。
 	idSortOrder := strings.ToLower(strings.TrimSpace(c.Query("id_sort_order")))
 	switch idSortOrder {
@@ -508,14 +516,17 @@ func parseUserSortQuery(c *gin.Context) (string, string, string, string, error) 
 		return "", "", "", "", errors.New("参数 id_sort_order 仅支持 asc 或 desc")
 	}
 
-	balanceSortOrder := strings.ToLower(strings.TrimSpace(c.Query("balance_sort_order")))
-	switch balanceSortOrder {
+	walletSortOrder := strings.ToLower(strings.TrimSpace(c.Query("wallet_sort_order")))
+	if walletSortOrder == "" {
+		walletSortOrder = strings.ToLower(strings.TrimSpace(c.Query("balance_sort_order")))
+	}
+	switch walletSortOrder {
 	case "", "asc", "desc":
 	default:
-		return "", "", "", "", errors.New("参数 balance_sort_order 仅支持 asc 或 desc")
+		return "", "", "", "", errors.New("参数 wallet_sort_order 仅支持 asc 或 desc")
 	}
 
-	return sortBy, sortOrder, idSortOrder, balanceSortOrder, nil
+	return sortBy, sortOrder, idSortOrder, walletSortOrder, nil
 }
 
 func GetUser(c *gin.Context) {

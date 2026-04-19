@@ -34,15 +34,15 @@ const DEFAULT_ADVANCED_FILTERS = {
   searchHasActiveSubscription: '',
   // 可售令牌筛选：是否有启用中的可售令牌。
   searchHasSellableToken: '',
-  // 剩余额度区间移入高级筛选，与已用额度筛选归并。
-  searchBalanceMin: '',
-  searchBalanceMax: '',
+  // 钱包额度区间筛选，不再混入已使用额度或套餐额度。
+  searchWalletMin: '',
+  searchWalletMax: '',
   // 将已用额度筛选放在高级面板，保持工具栏紧凑。
   searchUsedBalanceMin: '',
   searchUsedBalanceMax: '',
-  // 复合排序支持 ID 与余额同时生效。
+  // 复合排序支持 ID 与钱包额度同时生效。
   searchIdSortOrder: '',
-  searchBalanceSortOrder: '',
+  searchWalletSortOrder: '',
 };
 const USERS_ADVANCED_FILTERS_STORAGE_KEY = 'users-advanced-filters';
 
@@ -127,12 +127,12 @@ export const useUsersData = () => {
       searchHasInvitees: next.searchHasInvitees ?? '',
       searchHasActiveSubscription: next.searchHasActiveSubscription ?? '',
       searchHasSellableToken: next.searchHasSellableToken ?? '',
-      searchBalanceMin: next.searchBalanceMin ?? '',
-      searchBalanceMax: next.searchBalanceMax ?? '',
+      searchWalletMin: next.searchWalletMin ?? '',
+      searchWalletMax: next.searchWalletMax ?? '',
       searchUsedBalanceMin: next.searchUsedBalanceMin ?? '',
       searchUsedBalanceMax: next.searchUsedBalanceMax ?? '',
       searchIdSortOrder: next.searchIdSortOrder ?? '',
-      searchBalanceSortOrder: next.searchBalanceSortOrder ?? '',
+      searchWalletSortOrder: next.searchWalletSortOrder ?? '',
     };
   };
 
@@ -143,10 +143,10 @@ export const useUsersData = () => {
     );
   };
 
-  const hasBalanceFilters = (balanceMin, balanceMax) => {
+  const hasWalletFilters = (walletMin, walletMax) => {
     return (
-      (balanceMin !== '' && balanceMin !== null && balanceMin !== undefined) ||
-      (balanceMax !== '' && balanceMax !== null && balanceMax !== undefined)
+      (walletMin !== '' && walletMin !== null && walletMin !== undefined) ||
+      (walletMax !== '' && walletMax !== null && walletMax !== undefined)
     );
   };
 
@@ -175,7 +175,7 @@ export const useUsersData = () => {
     startIdx,
     pageSize,
     idSortOrder = '',
-    balanceSortOrder = '',
+    walletSortOrder = '',
   ) => {
     const reqId = nextRequestId();
     setLoading(true);
@@ -187,8 +187,8 @@ export const useUsersData = () => {
       if (idSortOrder === 'asc' || idSortOrder === 'desc') {
         params.id_sort_order = idSortOrder;
       }
-      if (balanceSortOrder === 'asc' || balanceSortOrder === 'desc') {
-        params.balance_sort_order = balanceSortOrder;
+      if (walletSortOrder === 'asc' || walletSortOrder === 'desc') {
+        params.wallet_sort_order = walletSortOrder;
       }
       const res = await API.get('/api/user/', { params });
       if (!isLatestRequest(reqId)) {
@@ -221,8 +221,8 @@ export const useUsersData = () => {
     searchKeyword = null,
     searchGroup = null,
     advanced = null,
-    searchBalanceMin = null,
-    searchBalanceMax = null,
+    searchWalletMin = null,
+    searchWalletMax = null,
   ) => {
     // 若未传参数，则从表单读取
     let resolvedAdvanced = normalizeAdvancedFilters(
@@ -236,39 +236,45 @@ export const useUsersData = () => {
       if (searchGroup === null) {
         searchGroup = formValues.searchGroup;
       }
-      if (searchBalanceMin === null) {
-        searchBalanceMin = formValues.searchBalanceMin;
+      if (searchWalletMin === null) {
+        searchWalletMin =
+          advanced === null
+            ? formValues.searchWalletMin
+            : resolvedAdvanced.searchWalletMin;
       }
-      if (searchBalanceMax === null) {
-        searchBalanceMax = formValues.searchBalanceMax;
+      if (searchWalletMax === null) {
+        searchWalletMax =
+          advanced === null
+            ? formValues.searchWalletMax
+            : resolvedAdvanced.searchWalletMax;
       }
       if (advanced === null) {
         resolvedAdvanced = normalizeAdvancedFilters(formValues);
       }
     }
-    if (searchBalanceMin === null) {
-      searchBalanceMin = resolvedAdvanced.searchBalanceMin;
+    if (searchWalletMin === null) {
+      searchWalletMin = resolvedAdvanced.searchWalletMin;
     }
-    if (searchBalanceMax === null) {
-      searchBalanceMax = resolvedAdvanced.searchBalanceMax;
+    if (searchWalletMax === null) {
+      searchWalletMax = resolvedAdvanced.searchWalletMax;
     }
 
     const keyword = (searchKeyword || '').trim();
     const group = (searchGroup || '').trim();
-    const balanceMin = searchBalanceMin;
-    const balanceMax = searchBalanceMax;
+    const walletMin = searchWalletMin;
+    const walletMax = searchWalletMax;
     if (
       keyword === '' &&
       group === '' &&
       !hasAdvancedFilters(resolvedAdvanced) &&
-      !hasBalanceFilters(balanceMin, balanceMax)
+      !hasWalletFilters(walletMin, walletMax)
     ) {
       // 若关键词为空，则改为加载列表数据
       await loadUsers(
         startIdx,
         pageSize,
         resolvedAdvanced.searchIdSortOrder,
-        resolvedAdvanced.searchBalanceSortOrder,
+        resolvedAdvanced.searchWalletSortOrder,
       );
       return;
     }
@@ -293,10 +299,10 @@ export const useUsersData = () => {
         params.id_sort_order = resolvedAdvanced.searchIdSortOrder;
       }
       if (
-        resolvedAdvanced.searchBalanceSortOrder === 'asc' ||
-        resolvedAdvanced.searchBalanceSortOrder === 'desc'
+        resolvedAdvanced.searchWalletSortOrder === 'asc' ||
+        resolvedAdvanced.searchWalletSortOrder === 'desc'
       ) {
-        params.balance_sort_order = resolvedAdvanced.searchBalanceSortOrder;
+        params.wallet_sort_order = resolvedAdvanced.searchWalletSortOrder;
       }
       if (resolvedAdvanced.searchRole !== '') {
         params.role = resolvedAdvanced.searchRole;
@@ -324,11 +330,11 @@ export const useUsersData = () => {
         params.has_sellable_token = resolvedAdvanced.searchHasSellableToken;
       }
       // 额度筛选经 axios params 下发；后端负责区间校验与参数化查询。
-      if (balanceMin !== '' && balanceMin !== null && balanceMin !== undefined) {
-        params.balance_min = balanceMin;
+      if (walletMin !== '' && walletMin !== null && walletMin !== undefined) {
+        params.wallet_min = walletMin;
       }
-      if (balanceMax !== '' && balanceMax !== null && balanceMax !== undefined) {
-        params.balance_max = balanceMax;
+      if (walletMax !== '' && walletMax !== null && walletMax !== undefined) {
+        params.wallet_max = walletMax;
       }
       if (
         resolvedAdvanced.searchUsedBalanceMin !== '' &&
@@ -498,20 +504,20 @@ export const useUsersData = () => {
     const {
       searchKeyword,
       searchGroup,
-      searchBalanceMin,
-      searchBalanceMax,
+      searchWalletMin,
+      searchWalletMax,
     } = getFormValues();
     if (
       searchKeyword === '' &&
       searchGroup === '' &&
       !hasAdvancedFilters(advancedFilters) &&
-      !hasBalanceFilters(searchBalanceMin, searchBalanceMax)
+      !hasWalletFilters(searchWalletMin, searchWalletMax)
     ) {
       loadUsers(
         page,
         pageSize,
         advancedFilters.searchIdSortOrder,
-        advancedFilters.searchBalanceSortOrder,
+        advancedFilters.searchWalletSortOrder,
       ).then();
     } else {
       searchUsers(
@@ -520,8 +526,8 @@ export const useUsersData = () => {
         searchKeyword,
         searchGroup,
         null,
-        searchBalanceMin,
-        searchBalanceMax,
+        searchWalletMin,
+        searchWalletMax,
       ).then();
     }
   };
@@ -534,20 +540,20 @@ export const useUsersData = () => {
     const {
       searchKeyword,
       searchGroup,
-      searchBalanceMin,
-      searchBalanceMax,
+      searchWalletMin,
+      searchWalletMax,
     } = getFormValues();
     if (
       searchKeyword === '' &&
       searchGroup === '' &&
       !hasAdvancedFilters(advancedFilters) &&
-      !hasBalanceFilters(searchBalanceMin, searchBalanceMax)
+      !hasWalletFilters(searchWalletMin, searchWalletMax)
     ) {
       loadUsers(
         1,
         size,
         advancedFilters.searchIdSortOrder,
-        advancedFilters.searchBalanceSortOrder,
+        advancedFilters.searchWalletSortOrder,
       )
         .then()
         .catch((reason) => {
@@ -561,8 +567,8 @@ export const useUsersData = () => {
       null,
       null,
       null,
-      searchBalanceMin,
-      searchBalanceMax,
+      searchWalletMin,
+      searchWalletMax,
     )
       .then()
       .catch((reason) => {
@@ -588,20 +594,20 @@ export const useUsersData = () => {
     const {
       searchKeyword,
       searchGroup,
-      searchBalanceMin,
-      searchBalanceMax,
+      searchWalletMin,
+      searchWalletMax,
     } = getFormValues();
     if (
       searchKeyword === '' &&
       searchGroup === '' &&
       !hasAdvancedFilters(advancedFilters) &&
-      !hasBalanceFilters(searchBalanceMin, searchBalanceMax)
+      !hasWalletFilters(searchWalletMin, searchWalletMax)
     ) {
       await loadUsers(
         page,
         pageSize,
         advancedFilters.searchIdSortOrder,
-        advancedFilters.searchBalanceSortOrder,
+        advancedFilters.searchWalletSortOrder,
       );
     } else {
       await searchUsers(
@@ -610,8 +616,8 @@ export const useUsersData = () => {
         searchKeyword,
         searchGroup,
         null,
-        searchBalanceMin,
-        searchBalanceMax,
+        searchWalletMin,
+        searchWalletMax,
       );
     }
   };

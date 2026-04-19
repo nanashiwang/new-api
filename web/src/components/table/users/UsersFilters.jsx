@@ -102,8 +102,8 @@ const UsersFilters = ({
     ],
     [t],
   );
-  // 两种排序可同时生效（例如 ID 降序 + 余额升序）。
-  // ID 与余额排序使用独立文案，避免 "asc/desc" 歧义。
+  // 两种排序可同时生效（例如 ID 降序 + 钱包额度升序）。
+  // ID 与钱包额度排序使用独立文案，避免 "asc/desc" 歧义。
   const idSortDirectionOptions = useMemo(
     () => [
       { label: t('ID排序：默认'), value: '' },
@@ -112,11 +112,11 @@ const UsersFilters = ({
     ],
     [t],
   );
-  const balanceSortDirectionOptions = useMemo(
+  const walletSortDirectionOptions = useMemo(
     () => [
-      { label: t('余额排序：默认'), value: '' },
-      { label: t('余额排序：升序'), value: 'asc' },
-      { label: t('余额排序：降序'), value: 'desc' },
+      { label: t('钱包额度排序：默认'), value: '' },
+      { label: t('钱包额度排序：升序'), value: 'asc' },
+      { label: t('钱包额度排序：降序'), value: 'desc' },
     ],
     [t],
   );
@@ -384,38 +384,38 @@ const UsersFilters = ({
             <div className='grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2'>
               <InputNumber
                 value={
-                  draftAdvancedFilters.searchBalanceMin === ''
+                  draftAdvancedFilters.searchWalletMin === ''
                     ? undefined
-                    : Number(draftAdvancedFilters.searchBalanceMin)
+                    : Number(draftAdvancedFilters.searchWalletMin)
                 }
                 onChange={(value) =>
                   setDraftAdvancedFilters((prev) => ({
                     ...prev,
-                    searchBalanceMin:
+                    searchWalletMin:
                       value === null || value === undefined ? '' : String(value),
                   }))
                 }
                 min={0}
                 precision={0}
-                placeholder={t('额度最小值')}
+                placeholder={t('钱包额度最小值')}
                 style={{ width: '100%' }}
               />
               <InputNumber
                 value={
-                  draftAdvancedFilters.searchBalanceMax === ''
+                  draftAdvancedFilters.searchWalletMax === ''
                     ? undefined
-                    : Number(draftAdvancedFilters.searchBalanceMax)
+                    : Number(draftAdvancedFilters.searchWalletMax)
                 }
                 onChange={(value) =>
                   setDraftAdvancedFilters((prev) => ({
                     ...prev,
-                    searchBalanceMax:
+                    searchWalletMax:
                       value === null || value === undefined ? '' : String(value),
                   }))
                 }
                 min={0}
                 precision={0}
-                placeholder={t('额度最大值')}
+                placeholder={t('钱包额度最大值')}
                 style={{ width: '100%' }}
               />
               <Divider margin='4px' className='sm:col-span-2' />
@@ -477,16 +477,16 @@ const UsersFilters = ({
                 showClear
               />
               <Select
-                value={draftAdvancedFilters.searchBalanceSortOrder}
+                value={draftAdvancedFilters.searchWalletSortOrder}
                 onChange={(value) =>
                   setDraftAdvancedFilters((prev) => ({
                     ...prev,
-                    searchBalanceSortOrder:
+                    searchWalletSortOrder:
                       value === null || value === undefined ? '' : value,
                   }))
                 }
-                optionList={balanceSortDirectionOptions}
-                placeholder={t('余额排序')}
+                optionList={walletSortDirectionOptions}
+                placeholder={t('钱包额度排序')}
                 showClear
               />
             </div>
