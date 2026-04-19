@@ -22,11 +22,11 @@ import {
   Collapse,
   Descriptions,
   Empty,
-  Input,
   Modal,
   Space,
   Spin,
   Tag,
+  TextArea,
   Toast,
   Typography,
 } from '@douyinfe/semi-ui';
@@ -34,7 +34,6 @@ import { API, timestamp2string } from '../../../helpers';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 
 const { Text } = Typography;
-const { TextArea } = Input;
 
 const RISK_STATUS_CONFIG = {
   open: { color: 'red', label: '待处理' },
