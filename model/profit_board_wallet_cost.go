@@ -88,6 +88,41 @@ func applyProfitBoardObservedWalletCost(report *ProfitBoardReport, aggregate *pr
 			totalBucketRequests += point.RequestCount
 		}
 		if totalBucketRequests <= 0 {
+			// Fallback：活跃 combo 在此桶内没有本站日志请求（例如 wallet observer 走上游扣费、本站无 logs），
+			// 按 combo 数均分成本到 timeseries / batchSummary，保证 trend 图上游费用与 overview 口径一致。
+			activeCount := len(activeBatchIDs)
+			if activeCount == 0 {
+				continue
+			}
+			shareUSD := observedPoint.CostUSD / float64(activeCount)
+			appliedTotalCostUSD += observedPoint.CostUSD
+			for _, batchID := range activeBatchIDs {
+				batch := comboIDSet[batchID]
+				shareCNY := profitBoardConfiguredUpstreamCostCNY(shareUSD, comboPricingMap[batchID])
+				appliedTotalCostCNY += shareCNY
+
+				point := getOrCreateProfitBoardTimeseriesPoint(report, batchID, batch.Name, bucketTimestamp, bucketLabel)
+				point.RemoteObservedCostUSD += shareUSD
+				point.UpstreamCostUSD += shareUSD
+				point.UpstreamCostCNY += shareCNY
+				point.ConfiguredProfitUSD -= shareUSD
+				point.ConfiguredProfitCNY -= shareCNY
+				point.ActualProfitUSD -= shareUSD
+
+				for index := range report.BatchSummaries {
+					summary := &report.BatchSummaries[index]
+					if summary.BatchId != batchID {
+						continue
+					}
+					summary.RemoteObservedCostUSD += shareUSD
+					summary.UpstreamCostUSD += shareUSD
+					summary.UpstreamCostCNY += shareCNY
+					summary.ConfiguredProfitUSD -= shareUSD
+					summary.ConfiguredProfitCNY -= shareCNY
+					summary.ActualProfitUSD -= shareUSD
+					break
+				}
+			}
 			continue
 		}
 

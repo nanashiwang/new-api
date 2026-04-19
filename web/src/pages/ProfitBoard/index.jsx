@@ -575,11 +575,25 @@ const ProfitBoardPage = () => {
         : (report.timeseries || []).filter(
             (row) => row.batch_id === viewBatchId,
           );
-    return filtered.map((row) => ({
-      bucket: row.bucket,
-      value: Number(row[metricKey] || 0),
-      batch_id: row.batch_id,
-    }));
+    const bucketMap = new Map();
+    filtered.forEach((row) => {
+      const bucket = row.bucket;
+      const current = bucketMap.get(bucket) || {
+        bucket,
+        value: 0,
+        batch_id: row.batch_id,
+        __batchCount: 0,
+      };
+      current.value += Number(row[metricKey] || 0);
+      current.__batchCount += 1;
+      if (current.batch_id && current.batch_id !== row.batch_id) {
+        current.batch_id = null;
+      }
+      bucketMap.set(bucket, current);
+    });
+    return Array.from(bucketMap.values())
+      .sort((a, b) => String(a.bucket).localeCompare(String(b.bucket)))
+      .map(({ __batchCount, ...rest }) => rest);
   }, [analysisMode, businessMetrics, metricKey, report, viewBatchId]);
 
   const channelTagMap = useMemo(() => {

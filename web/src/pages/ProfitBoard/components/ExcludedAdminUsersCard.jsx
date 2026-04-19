@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Card, TreeSelect, Typography } from '@douyinfe/semi-ui';
+import { Button, Card, Space, Tag, TreeSelect, Typography } from '@douyinfe/semi-ui';
 import { API } from '../../../helpers';
 
 const { Text } = Typography;
@@ -67,21 +67,46 @@ const groupUsersByRole = (users = []) => {
   return { admin, common };
 };
 
-const buildUserNode = (user) => ({
+const buildUserNode = (user, keyword = '') => ({
   key: `user-${user.id}`,
   value: String(user.id),
-  label: formatUserLabel(user),
+  label: renderHighlightedLabel(formatUserLabel(user), keyword),
   isLeaf: true,
 });
 
-const buildGroupNode = (key, label, users = [], disabled = false) => ({
+const buildGroupNode = (key, label, users = [], disabled = false, keyword = '') => ({
   key,
   value: key,
   label,
   disabled,
   isLeaf: false,
-  children: users.map(buildUserNode),
+  children: users.map((user) => buildUserNode(user, keyword)),
 });
+
+const renderHighlightedLabel = (label, keyword) => {
+  if (!keyword) return label;
+  const text = String(label || '');
+  const lower = text.toLowerCase();
+  const target = keyword.toLowerCase();
+  const idx = lower.indexOf(target);
+  if (idx < 0) return text;
+  return (
+    <span>
+      {text.slice(0, idx)}
+      <span
+        style={{
+          background: 'var(--semi-color-warning-light-default)',
+          color: 'var(--semi-color-warning-hover)',
+          padding: '0 2px',
+          borderRadius: 2,
+        }}
+      >
+        {text.slice(idx, idx + keyword.length)}
+      </span>
+      {text.slice(idx + keyword.length)}
+    </span>
+  );
+};
 
 const ExcludedAdminUsersCard = ({
   adminUsers,
@@ -174,6 +199,15 @@ const ExcludedAdminUsersCard = ({
     };
   }, []);
 
+  // 首次挂载主动拉取普通用户，避免用户需要手动展开
+  useEffect(() => {
+    if (!commonUsersLoaded && !commonUsersLoading) {
+      loadCommonUsers().catch(() => {
+        // 静默失败，展开时会再次尝试
+      });
+    }
+  }, [commonUsersLoaded, commonUsersLoading, loadCommonUsers]);
+
   const selectedUsers = useMemo(
     () =>
       (excludedUserIDs || [])
@@ -203,6 +237,7 @@ const ExcludedAdminUsersCard = ({
             t('管理员'),
             searchResults.admin,
             true,
+            keyword,
           ),
         );
       }
@@ -213,6 +248,7 @@ const ExcludedAdminUsersCard = ({
             t('普通用户'),
             searchResults.common,
             true,
+            keyword,
           ),
         );
       }
@@ -228,7 +264,11 @@ const ExcludedAdminUsersCard = ({
       ),
       buildGroupNode(
         GROUP_COMMON,
-        commonUsersLoaded ? t('普通用户') : t('普通用户（展开加载）'),
+        commonUsersLoading
+          ? t('普通用户（加载中…）')
+          : commonUsersLoaded
+            ? t('普通用户')
+            : t('普通用户'),
         defaultCommonUsers,
         true,
       ),
@@ -236,6 +276,7 @@ const ExcludedAdminUsersCard = ({
   }, [
     adminUsers,
     commonUsersLoaded,
+    commonUsersLoading,
     defaultCommonUsers,
     searchKeyword,
     searchResults.admin,
@@ -326,13 +367,45 @@ const ExcludedAdminUsersCard = ({
     [excludedUserIDs],
   );
 
+  const selectedStats = useMemo(() => {
+    const admin = selectedUsers.filter(isAdminUser).length;
+    const common = selectedUsers.length - admin;
+    const fallback = (excludedUserIDs || []).length - selectedUsers.length;
+    return { admin, common, fallback, total: (excludedUserIDs || []).length };
+  }, [excludedUserIDs, selectedUsers]);
+
+  const handleClearAll = useCallback(() => {
+    onChange([]);
+  }, [onChange]);
+
+  const handleSelectAllAdmins = useCallback(() => {
+    const currentIds = new Set(
+      (excludedUserIDs || []).map((item) => Number(item)).filter(Boolean),
+    );
+    (adminUsers || []).forEach((user) => {
+      const id = Number(user?.id || 0);
+      if (id > 0) currentIds.add(id);
+    });
+    onChange(Array.from(currentIds));
+  }, [adminUsers, excludedUserIDs, onChange]);
+
+  const handleRemoveSelected = useCallback(
+    (id) => {
+      const next = (excludedUserIDs || [])
+        .map((item) => Number(item))
+        .filter((item) => item !== Number(id) && item > 0);
+      onChange(next);
+    },
+    [excludedUserIDs, onChange],
+  );
+
   const emptyContent = searchKeyword.trim()
     ? searching
       ? t('搜索中…')
       : t('未找到匹配用户')
     : commonUsersLoading
       ? t('普通用户加载中…')
-      : t('展开普通用户，或输入 ID / 用户名 / 昵称搜索');
+      : t('输入 ID / 用户名 / 昵称搜索');
 
   return (
     <Card
@@ -340,13 +413,68 @@ const ExcludedAdminUsersCard = ({
       title={t('收入排除')}
       className='rounded-xl'
     >
-      <div className='space-y-2'>
-        <Text type='tertiary' size='small'>
-          {t('选中的用户请求不计入本站配置收入，但上游费用和利润仍继续统计')}
+      <div className='space-y-3'>
+        <div className='flex flex-wrap items-center justify-between gap-2'>
+          <Space spacing={6} wrap>
+            <Tag color='blue' shape='circle'>
+              {t('已排除')} {selectedStats.total}
+            </Tag>
+            <Tag color='violet' shape='circle'>
+              {t('管理员')} {selectedStats.admin}
+            </Tag>
+            <Tag color='cyan' shape='circle'>
+              {t('普通用户')} {selectedStats.common}
+            </Tag>
+            {selectedStats.fallback > 0 ? (
+              <Tag color='grey' shape='circle'>
+                {t('未回填')} {selectedStats.fallback}
+              </Tag>
+            ) : null}
+          </Space>
+          <Space spacing={6} wrap>
+            <Button
+              size='small'
+              theme='light'
+              type='primary'
+              onClick={handleSelectAllAdmins}
+              disabled={!adminUsers?.length}
+            >
+              {t('全选管理员')}
+            </Button>
+            <Button
+              size='small'
+              theme='light'
+              type='danger'
+              onClick={handleClearAll}
+              disabled={selectedStats.total === 0}
+            >
+              {t('清空')}
+            </Button>
+          </Space>
+        </div>
+        <Text type='tertiary' size='small' className='block'>
+          {t(
+            '选中的用户不计入本站配置收入，但上游费用 / 利润仍继续统计（例如内部测试账号可在此排除）',
+          )}
         </Text>
-        <Text type='tertiary' size='small'>
-          {t('支持按 ID / 用户名 / 昵称搜索管理员和普通用户；普通用户默认收拢')}
-        </Text>
+        {selectedUsers.length > 0 ? (
+          <div
+            className='flex flex-wrap gap-1 p-2 rounded-lg'
+            style={{ background: 'var(--semi-color-fill-0)' }}
+          >
+            {selectedUsers.map((user) => (
+              <Tag
+                key={`selected-${user.id}`}
+                closable
+                shape='circle'
+                color={isAdminUser(user) ? 'violet' : 'cyan'}
+                onClose={() => handleRemoveSelected(user.id)}
+              >
+                {formatUserLabel(user)}
+              </Tag>
+            ))}
+          </div>
+        ) : null}
         <TreeSelect
           multiple
           leafOnly

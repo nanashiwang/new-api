@@ -64,16 +64,21 @@ const renderRole = (role, t) => {
  * 渲染用户名，存在备注时一并展示。
  */
 const renderUsername = (text, record) => {
-  const remark = record.remark;
+  const fallback = record?.id ? `#${record.id}` : '';
+  const username = typeof text === 'string' ? text.trim() : text;
+  const displayNameField =
+    typeof record?.display_name === 'string' ? record.display_name.trim() : '';
+  const resolved = username || displayNameField || fallback;
+  const remark = record?.remark;
   if (!remark) {
-    return <span>{text}</span>;
+    return <span>{resolved}</span>;
   }
   const maxLen = 10;
   const displayRemark =
     remark.length > maxLen ? remark.slice(0, maxLen) + '…' : remark;
   return (
     <Space spacing={2}>
-      <span>{text}</span>
+      <span>{resolved}</span>
       <Tooltip content={remark} position='top' showArrow>
         <Tag color='white' shape='circle' className='!text-xs'>
           <div className='flex items-center gap-1'>
@@ -133,7 +138,7 @@ const renderStatistics = (text, record, showEnableDisableModal, t) => {
 const renderWalletQuota = (text, record) => {
   const walletQuota = Number(record?.quota || 0);
   return (
-    <Tag color='white' shape='circle'>
+    <Tag color='light-blue' shape='circle'>
       {renderQuota(walletQuota)}
     </Tag>
   );

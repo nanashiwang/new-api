@@ -154,10 +154,10 @@ export const useUsersData = () => {
   const setUserFormat = (users) => {
     // 每次重载时重置选择，避免跨页批量操作命中陈旧数据。
     setSelectedKeys([]);
-    for (let i = 0; i < users.length; i++) {
-      users[i].key = users[i].id;
-    }
-    setUsers(users);
+    const formatted = Array.isArray(users)
+      ? users.map((user) => ({ ...user, key: user?.id }))
+      : [];
+    setUsers(formatted);
   };
 
   // 批量操作的表格行选择配置。
