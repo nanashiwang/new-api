@@ -31,14 +31,14 @@ import { useTranslation } from 'react-i18next';
 import Text from '@douyinfe/semi-ui/lib/es/typography/text';
 
 const CLAUDE_HEADER = {
-  'claude-sonnet-4-6': {
-    'anthropic-beta': ['context-1m-2025-08-07'],
+  'claude-3-7-sonnet-20250219': {
+    'anthropic-beta': ['your-beta-feature-token'],
   },
 };
 
-const CLAUDE_HEADER_APPEND_BEFORE = `anthropic-beta: output-128k-2025-02-19`;
+const CLAUDE_HEADER_APPEND_BEFORE = `anthropic-beta: existing-feature-token`;
 
-const CLAUDE_HEADER_APPEND_AFTER = `anthropic-beta: output-128k-2025-02-19,context-1m-2025-08-07`;
+const CLAUDE_HEADER_APPEND_AFTER = `anthropic-beta: existing-feature-token,your-beta-feature-token`;
 
 const CLAUDE_DEFAULT_MAX_TOKENS = {
   default: 8192,
@@ -204,6 +204,11 @@ export default function SettingClaudeModel(props) {
                       <div>
                         {t(
                           'Claude 会在已有请求头基础上合并并追加这些值，不会覆盖已有 anthropic-beta；重复值会自动去重。',
+                        )}
+                      </div>
+                      <div className='mt-1'>
+                        {t(
+                          '注意：Claude Sonnet 4.6 / Opus 4.6+ 的 1M context 已不需要再追加 context-1m-2025-08-07。',
                         )}
                       </div>
                       <div className='mt-2 whitespace-pre-wrap font-mono text-xs'>

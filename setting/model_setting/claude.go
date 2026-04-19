@@ -60,6 +60,7 @@ func (c *ClaudeSettings) WriteHeaders(originModel string, httpHeader *http.Heade
 			httpHeader.Set(headerKey, strings.Join(mergedValues, ","))
 		}
 	}
+	sanitizeClaudeHeaders(originModel, httpHeader)
 }
 
 func normalizeHeaderListValues(values []string) []string {
@@ -79,6 +80,49 @@ func normalizeHeaderListValues(values []string) []string {
 		}
 	}
 	return normalizedValues
+}
+
+func sanitizeClaudeHeaders(originModel string, httpHeader *http.Header) {
+	if httpHeader == nil {
+		return
+	}
+
+	sanitizedValue, ok := SanitizeClaudeHeaderValue(originModel, "anthropic-beta", strings.Join(httpHeader.Values("anthropic-beta"), ","))
+	if !ok {
+		httpHeader.Del("anthropic-beta")
+		return
+	}
+	httpHeader.Set("anthropic-beta", sanitizedValue)
+}
+
+func shouldStripClaudeContext1MBeta(originModel string) bool {
+	return strings.HasPrefix(originModel, "claude-sonnet-4-6") ||
+		strings.HasPrefix(originModel, "claude-opus-4-6") ||
+		strings.HasPrefix(originModel, "claude-opus-4-7")
+}
+
+func SanitizeClaudeHeaderValue(originModel string, headerKey string, headerValue string) (string, bool) {
+	if !strings.EqualFold(strings.TrimSpace(headerKey), "anthropic-beta") {
+		trimmed := strings.TrimSpace(headerValue)
+		return trimmed, trimmed != ""
+	}
+
+	normalizedValues := normalizeHeaderListValues([]string{headerValue})
+	if shouldStripClaudeContext1MBeta(originModel) {
+		filteredValues := normalizedValues[:0]
+		for _, value := range normalizedValues {
+			if value == "context-1m-2025-08-07" {
+				continue
+			}
+			filteredValues = append(filteredValues, value)
+		}
+		normalizedValues = filteredValues
+	}
+
+	if len(normalizedValues) == 0 {
+		return "", false
+	}
+	return strings.Join(normalizedValues, ","), true
 }
 
 func (c *ClaudeSettings) GetDefaultMaxTokens(model string) int {

@@ -237,8 +237,8 @@ const HEADER_VALUE_JSONC_EXAMPLE = `{
   // 替换：把旧特性改成兼容特性
   "advanced-tool-use-2025-11-20": "tool-search-tool-2025-10-19",
 
-  // 追加：在末尾补一个需要的特性
-  "$append": ["context-1m-2025-08-07"]
+  // 追加：在末尾补一个需要的特性（示例占位）
+  "$append": ["your-beta-feature-token"]
 }`;
 
 const getModeValuePlaceholder = (mode) => {
@@ -251,7 +251,7 @@ const getModeValuePlaceholder = (mode) => {
       '{',
       '  "files-api-2025-04-14": null,',
       '  "advanced-tool-use-2025-11-20": "tool-search-tool-2025-10-19",',
-      '  "$append": ["context-1m-2025-08-07"]',
+      '  "$append": ["your-beta-feature-token"]',
       '}',
     ].join('\n');
   }

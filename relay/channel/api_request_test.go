@@ -106,3 +106,25 @@ func TestProcessHeaderOverride_PassthroughSkipsAcceptEncoding(t *testing.T) {
 	_, hasAcceptEncoding := headers["Accept-Encoding"]
 	require.False(t, hasAcceptEncoding)
 }
+
+func TestProcessHeaderOverride_StripsDeprecatedContextBetaForClaude46RuntimeOverride(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	info := &relaycommon.RelayInfo{
+		OriginModelName:           "claude-sonnet-4-6",
+		ChannelMeta:               &relaycommon.ChannelMeta{},
+		UseRuntimeHeadersOverride: true,
+		RuntimeHeadersOverride: map[string]any{
+			"anthropic-beta": "context-1m-2025-08-07,computer-use-2025-01-24",
+		},
+	}
+
+	headers, err := processHeaderOverride(info, ctx)
+	require.NoError(t, err)
+	require.Equal(t, "computer-use-2025-01-24", headers["anthropic-beta"])
+}

@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
@@ -260,6 +261,12 @@ func processHeaderOverride(info *common.RelayInfo, c *gin.Context) (map[string]s
 			return nil, types.NewError(err, types.ErrorCodeChannelHeaderOverrideInvalid)
 		}
 		if !include {
+			continue
+		}
+
+		if sanitizedValue, ok := model_setting.SanitizeClaudeHeaderValue(info.OriginModelName, key, value); ok {
+			value = sanitizedValue
+		} else {
 			continue
 		}
 
