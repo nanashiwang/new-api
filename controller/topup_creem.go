@@ -5,10 +5,10 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"io"
 	"log"
@@ -107,12 +107,13 @@ func (*CreemAdaptor) RequestPay(c *gin.Context, req *CreemPayRequest) {
 
 	// 先创建订单记录，使用产品配置的金额和充值额度
 	topUp := &model.TopUp{
-		UserId:     id,
-		Amount:     selectedProduct.Quota, // 充值额度
-		Money:      selectedProduct.Price, // 支付金额
-		TradeNo:    referenceId,
-		CreateTime: time.Now().Unix(),
-		Status:     common.TopUpStatusPending,
+		UserId:        id,
+		Amount:        selectedProduct.Quota, // 充值额度
+		Money:         selectedProduct.Price, // 支付金额
+		TradeNo:       referenceId,
+		PaymentMethod: PaymentMethodCreem,
+		CreateTime:    time.Now().Unix(),
+		Status:        common.TopUpStatusPending,
 	}
 	err = topUp.Insert()
 	if err != nil {
@@ -301,12 +302,31 @@ func handleCheckoutCompleted(c *gin.Context, event *CreemWebhookEvent) {
 	// Try complete subscription order first
 	LockOrder(referenceId)
 	defer UnlockOrder(referenceId)
-	if err := model.CompleteSubscriptionOrder(referenceId, common.GetJsonString(event)); err == nil {
+	payAmount := float64(event.Object.Order.AmountPaid) / 100.0
+	if subscriptionOrder := model.GetSubscriptionOrderByTradeNo(referenceId); subscriptionOrder != nil {
+		checkResult, err := service.ValidateSubscriptionCallback(service.PaymentCallbackValidationInput{
+			TradeNo:         referenceId,
+			PaymentMethod:   PaymentMethodCreem,
+			ProviderAmount:  payAmount,
+			Currency:        event.Object.Order.Currency,
+			Source:          "subscription_creem_webhook",
+			ProviderPayload: common.GetJsonString(event),
+		})
+		if err != nil {
+			log.Printf("Creem订阅订单校验失败: %s, 订单号: %s", err.Error(), referenceId)
+			c.AbortWithStatus(http.StatusBadRequest)
+			return
+		}
+		if checkResult.AlreadyCompleted {
+			c.Status(http.StatusOK)
+			return
+		}
+		if err := model.CompleteSubscriptionOrder(referenceId, common.GetJsonString(event)); err != nil {
+			log.Printf("Creem订阅订单处理失败: %s, 订单号: %s", err.Error(), referenceId)
+			c.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
 		c.Status(http.StatusOK)
-		return
-	} else if err != nil && !errors.Is(err, model.ErrSubscriptionOrderNotFound) {
-		log.Printf("Creem订阅订单处理失败: %s, 订单号: %s", err.Error(), referenceId)
-		c.AbortWithStatus(http.StatusInternalServerError)
 		return
 	}
 
@@ -325,17 +345,28 @@ func handleCheckoutCompleted(c *gin.Context, event *CreemWebhookEvent) {
 		event.Object.Order.Currency,
 		event.Object.Product.Name)
 
-	// 查询本地订单确认存在
+	checkResult, err := service.ValidateTopUpCallback(service.PaymentCallbackValidationInput{
+		TradeNo:         referenceId,
+		PaymentMethod:   PaymentMethodCreem,
+		ProviderAmount:  payAmount,
+		Currency:        event.Object.Order.Currency,
+		Source:          "creem_webhook",
+		ProviderPayload: common.GetJsonString(event),
+	})
+	if err != nil {
+		log.Printf("Creem充值校验失败: %s, 订单号: %s", err.Error(), referenceId)
+		c.AbortWithStatus(http.StatusBadRequest)
+		return
+	}
+	if checkResult.AlreadyCompleted {
+		c.Status(http.StatusOK)
+		return
+	}
+
 	topUp := model.GetTopUpByTradeNo(referenceId)
 	if topUp == nil {
 		log.Printf("Creem充值订单不存在: %s", referenceId)
 		c.AbortWithStatus(http.StatusBadRequest)
-		return
-	}
-
-	if topUp.Status != common.TopUpStatusPending {
-		log.Printf("Creem充值订单状态错误: %s, 当前状态: %s", referenceId, topUp.Status)
-		c.Status(http.StatusOK) // 已处理过的订单，返回成功避免重复处理
 		return
 	}
 
@@ -351,7 +382,7 @@ func handleCheckoutCompleted(c *gin.Context, event *CreemWebhookEvent) {
 		log.Printf("警告：Creem回调中客户姓名为空 - 订单号: %s", referenceId)
 	}
 
-	err := model.RechargeCreem(referenceId, customerEmail, customerName)
+	err = model.RechargeCreem(referenceId, customerEmail, customerName)
 	if err != nil {
 		log.Printf("Creem充值处理失败: %s, 订单号: %s", err.Error(), referenceId)
 		c.AbortWithStatus(http.StatusInternalServerError)

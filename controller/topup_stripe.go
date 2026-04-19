@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -186,29 +186,59 @@ func sessionCompleted(event stripe.Event) {
 		return
 	}
 
-	// Try complete subscription order first
 	LockOrder(referenceId)
 	defer UnlockOrder(referenceId)
+	total, _ := strconv.ParseFloat(event.GetObjectValue("amount_total"), 64)
+	paidAmount := total / 100
 	payload := map[string]any{
 		"customer":     customerId,
 		"amount_total": event.GetObjectValue("amount_total"),
 		"currency":     strings.ToUpper(event.GetObjectValue("currency")),
 		"event_type":   string(event.Type),
 	}
-	if err := model.CompleteSubscriptionOrder(referenceId, common.GetJsonString(payload)); err == nil {
-		return
-	} else if err != nil && !errors.Is(err, model.ErrSubscriptionOrderNotFound) {
-		log.Println("complete subscription order failed:", err.Error(), referenceId)
+	if subscriptionOrder := model.GetSubscriptionOrderByTradeNo(referenceId); subscriptionOrder != nil {
+		checkResult, err := service.ValidateSubscriptionCallback(service.PaymentCallbackValidationInput{
+			TradeNo:         referenceId,
+			PaymentMethod:   PaymentMethodStripe,
+			ProviderAmount:  paidAmount,
+			Currency:        strings.ToUpper(event.GetObjectValue("currency")),
+			Source:          "subscription_stripe_webhook",
+			ProviderPayload: common.GetJsonString(payload),
+		})
+		if err != nil {
+			log.Println("stripe subscription validation failed:", err.Error(), referenceId)
+			return
+		}
+		if checkResult.AlreadyCompleted {
+			return
+		}
+		if err := model.CompleteSubscriptionOrder(referenceId, common.GetJsonString(payload)); err != nil {
+			log.Println("complete subscription order failed:", err.Error(), referenceId)
+		}
 		return
 	}
 
-	err := model.Recharge(referenceId, customerId)
+	checkResult, err := service.ValidateTopUpCallback(service.PaymentCallbackValidationInput{
+		TradeNo:         referenceId,
+		PaymentMethod:   PaymentMethodStripe,
+		ProviderAmount:  paidAmount,
+		Currency:        strings.ToUpper(event.GetObjectValue("currency")),
+		Source:          "stripe_webhook",
+		ProviderPayload: common.GetJsonString(payload),
+	})
+	if err != nil {
+		log.Println("stripe top-up validation failed:", err.Error(), referenceId)
+		return
+	}
+	if checkResult.AlreadyCompleted {
+		return
+	}
+	err = model.Recharge(referenceId, customerId)
 	if err != nil {
 		log.Println(err.Error(), referenceId)
 		return
 	}
 
-	total, _ := strconv.ParseFloat(event.GetObjectValue("amount_total"), 64)
 	currency := strings.ToUpper(event.GetObjectValue("currency"))
 	log.Printf("收到款项：%s, %.2f(%s)", referenceId, total/100, currency)
 }
@@ -226,13 +256,12 @@ func sessionExpired(event stripe.Event) {
 		return
 	}
 
-	// Subscription order expiration
 	LockOrder(referenceId)
 	defer UnlockOrder(referenceId)
-	if err := model.ExpireSubscriptionOrder(referenceId); err == nil {
-		return
-	} else if err != nil && !errors.Is(err, model.ErrSubscriptionOrderNotFound) {
-		log.Println("过期订阅订单失败", referenceId, ", err:", err.Error())
+	if subscriptionOrder := model.GetSubscriptionOrderByTradeNo(referenceId); subscriptionOrder != nil {
+		if err := model.ExpireSubscriptionOrder(referenceId); err != nil {
+			log.Println("过期订阅订单失败", referenceId, ", err:", err.Error())
+		}
 		return
 	}
 
@@ -325,24 +354,7 @@ func GetChargedAmount(count float64, user model.User) float64 {
 }
 
 func getStripePayMoney(amount float64, group string) float64 {
-	originalAmount := amount
-	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
-		amount = amount / common.QuotaPerUnit
-	}
-	// Using float64 for monetary calculations is acceptable here due to the small amounts involved
-	topupGroupRatio := common.GetTopupGroupRatio(group)
-	if topupGroupRatio == 0 {
-		topupGroupRatio = 1
-	}
-	// apply optional preset discount by the original request amount (if configured), default 1.0
-	discount := 1.0
-	if ds, ok := operation_setting.GetPaymentSetting().AmountDiscount[int(originalAmount)]; ok {
-		if ds > 0 {
-			discount = ds
-		}
-	}
-	payMoney := amount * setting.StripeUnitPrice * topupGroupRatio * discount
-	return payMoney
+	return service.CalculateStripeTopUpPayMoney(amount, group)
 }
 
 func getStripeMinTopup() int64 {

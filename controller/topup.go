@@ -86,33 +86,7 @@ func GetEpayClient() *epay.Client {
 }
 
 func getPayMoney(amount int64, group string) float64 {
-	dAmount := decimal.NewFromInt(amount)
-	// 充值金额以“展示类型”为准：
-	// - USD/CNY: 前端传 amount 为金额单位；TOKENS: 前端传 tokens，需要换成 USD 金额
-	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
-		dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-		dAmount = dAmount.Div(dQuotaPerUnit)
-	}
-
-	topupGroupRatio := common.GetTopupGroupRatio(group)
-	if topupGroupRatio == 0 {
-		topupGroupRatio = 1
-	}
-
-	dTopupGroupRatio := decimal.NewFromFloat(topupGroupRatio)
-	dPrice := decimal.NewFromFloat(operation_setting.Price)
-	// apply optional preset discount by the original request amount (if configured), default 1.0
-	discount := 1.0
-	if ds, ok := operation_setting.GetPaymentSetting().AmountDiscount[int(amount)]; ok {
-		if ds > 0 {
-			discount = ds
-		}
-	}
-	dDiscount := decimal.NewFromFloat(discount)
-
-	payMoney := dAmount.Mul(dPrice).Mul(dTopupGroupRatio).Mul(dDiscount)
-
-	return payMoney.InexactFloat64()
+	return service.CalculateEpayTopUpPayMoney(amount, group)
 }
 
 func getMinTopup() int64 {
@@ -286,8 +260,25 @@ func EpayNotify(c *gin.Context) {
 		return
 	}
 
+	payAmount, _ := strconv.ParseFloat(verifyInfo.Money, 64)
 	LockOrder(verifyInfo.ServiceTradeNo)
 	defer UnlockOrder(verifyInfo.ServiceTradeNo)
+	checkResult, err := service.ValidateTopUpCallback(service.PaymentCallbackValidationInput{
+		TradeNo:         verifyInfo.ServiceTradeNo,
+		PaymentMethod:   verifyInfo.Type,
+		ProviderAmount:  payAmount,
+		Source:          "epay_notify",
+		ProviderPayload: common.GetJsonString(verifyInfo),
+	})
+	if err != nil {
+		log.Printf("epay notify validation failed: trade_no=%s err=%s", verifyInfo.ServiceTradeNo, err.Error())
+		_, _ = c.Writer.Write([]byte("fail"))
+		return
+	}
+	if checkResult.AlreadyCompleted {
+		_, _ = c.Writer.Write([]byte("success"))
+		return
+	}
 	if err := model.CompleteTopUpByTradeNo(verifyInfo.ServiceTradeNo, "epay"); err != nil {
 		log.Printf("epay notify complete order failed: trade_no=%s err=%s", verifyInfo.ServiceTradeNo, err.Error())
 		_, _ = c.Writer.Write([]byte("fail"))
@@ -319,8 +310,25 @@ func EpayReturn(c *gin.Context) {
 		return
 	}
 	if verifyInfo.TradeStatus == epay.StatusTradeSuccess {
+		payAmount, _ := strconv.ParseFloat(verifyInfo.Money, 64)
 		LockOrder(verifyInfo.ServiceTradeNo)
 		defer UnlockOrder(verifyInfo.ServiceTradeNo)
+		checkResult, err := service.ValidateTopUpCallback(service.PaymentCallbackValidationInput{
+			TradeNo:         verifyInfo.ServiceTradeNo,
+			PaymentMethod:   verifyInfo.Type,
+			ProviderAmount:  payAmount,
+			Source:          "epay_return",
+			ProviderPayload: common.GetJsonString(verifyInfo),
+		})
+		if err != nil {
+			log.Printf("epay return validation failed: trade_no=%s err=%s", verifyInfo.ServiceTradeNo, err.Error())
+			c.Redirect(http.StatusFound, failURL)
+			return
+		}
+		if checkResult.AlreadyCompleted {
+			c.Redirect(http.StatusFound, successURL)
+			return
+		}
 		if err := model.CompleteTopUpByTradeNo(verifyInfo.ServiceTradeNo, "epay_return"); err != nil {
 			log.Printf("epay return complete order failed: trade_no=%s err=%s", verifyInfo.ServiceTradeNo, err.Error())
 			c.Redirect(http.StatusFound, failURL)

@@ -168,8 +168,24 @@ func SubscriptionEpayNotify(c *gin.Context) {
 		return
 	}
 
+	payAmount, _ := strconv.ParseFloat(verifyInfo.Money, 64)
 	LockOrder(verifyInfo.ServiceTradeNo)
 	defer UnlockOrder(verifyInfo.ServiceTradeNo)
+	checkResult, err := service.ValidateSubscriptionCallback(service.PaymentCallbackValidationInput{
+		TradeNo:         verifyInfo.ServiceTradeNo,
+		PaymentMethod:   verifyInfo.Type,
+		ProviderAmount:  payAmount,
+		Source:          "subscription_epay_notify",
+		ProviderPayload: common.GetJsonString(verifyInfo),
+	})
+	if err != nil {
+		_, _ = c.Writer.Write([]byte("fail"))
+		return
+	}
+	if checkResult.AlreadyCompleted {
+		_, _ = c.Writer.Write([]byte("success"))
+		return
+	}
 
 	if err := model.CompleteSubscriptionOrder(verifyInfo.ServiceTradeNo, common.GetJsonString(verifyInfo)); err != nil {
 		_, _ = c.Writer.Write([]byte("fail"))
@@ -218,8 +234,24 @@ func SubscriptionEpayReturn(c *gin.Context) {
 		return
 	}
 	if verifyInfo.TradeStatus == epay.StatusTradeSuccess {
+		payAmount, _ := strconv.ParseFloat(verifyInfo.Money, 64)
 		LockOrder(verifyInfo.ServiceTradeNo)
 		defer UnlockOrder(verifyInfo.ServiceTradeNo)
+		checkResult, err := service.ValidateSubscriptionCallback(service.PaymentCallbackValidationInput{
+			TradeNo:         verifyInfo.ServiceTradeNo,
+			PaymentMethod:   verifyInfo.Type,
+			ProviderAmount:  payAmount,
+			Source:          "subscription_epay_return",
+			ProviderPayload: common.GetJsonString(verifyInfo),
+		})
+		if err != nil {
+			c.Redirect(http.StatusFound, system_setting.ServerAddress+"/console/subscription?pay=fail")
+			return
+		}
+		if checkResult.AlreadyCompleted {
+			c.Redirect(http.StatusFound, system_setting.ServerAddress+"/console/subscription?pay=success")
+			return
+		}
 		if err := model.CompleteSubscriptionOrder(verifyInfo.ServiceTradeNo, common.GetJsonString(verifyInfo)); err != nil {
 			c.Redirect(http.StatusFound, system_setting.ServerAddress+"/console/subscription?pay=fail")
 			return

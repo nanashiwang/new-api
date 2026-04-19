@@ -3,7 +3,6 @@ package model
 import (
 	"errors"
 	"fmt"
-	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -27,10 +26,12 @@ type TopUp struct {
 }
 
 type TopUpSearchParams struct {
-	Keyword       string
-	Username      string
-	Status        string
-	PaymentMethod string
+	Keyword        string
+	Username       string
+	Status         string
+	PaymentMethod  string
+	StartTimestamp int64
+	EndTimestamp   int64
 }
 
 func (topUp *TopUp) Insert() error {
@@ -141,14 +142,10 @@ func applyTopUpSearch(query *gorm.DB, params TopUpSearchParams, includeUsername 
 		query = query.Where("top_ups.payment_method = ?", params.PaymentMethod)
 	}
 	if includeUsername && params.Username != "" {
-		// 支持按用户ID或用户名搜索
-		if uid, err := strconv.Atoi(params.Username); err == nil {
-			query = query.Where("users.id = ?", uid)
-		} else {
-			like := "%" + params.Username + "%"
-			query = query.Where("users.username LIKE ?", like)
-		}
+		query = applyPaymentRecordUsernameFilter(query, params.Username, "users.id", "users.username")
 	}
+	effectiveTimestampExpr := buildPaymentRecordEffectiveTimestampExpr("top_ups.status", "top_ups.create_time", "top_ups.complete_time")
+	query = applyPaymentRecordTimeRange(query, params.StartTimestamp, params.EndTimestamp, effectiveTimestampExpr)
 	return query
 }
 
@@ -231,6 +228,28 @@ func SearchAllTopUps(keyword string, pageInfo *common.PageInfo) (topups []*TopUp
 	return GetAllTopUpsByParams(TopUpSearchParams{Keyword: keyword}, pageInfo)
 }
 
+func CalculateGrantedQuotaForTopUp(topUp *TopUp) (int, error) {
+	if topUp == nil {
+		return 0, errors.New("top-up is nil")
+	}
+	if topUp.PaymentMethod == "stripe" {
+		dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
+		quotaToAdd := int(decimal.NewFromFloat(topUp.Money).Mul(dQuotaPerUnit).IntPart())
+		if quotaToAdd <= 0 {
+			return 0, errors.New("invalid top-up quota")
+		}
+		return quotaToAdd, nil
+	}
+
+	dAmount := decimal.NewFromInt(topUp.Amount)
+	dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
+	quotaToAdd := int(dAmount.Mul(dQuotaPerUnit).IntPart())
+	if quotaToAdd <= 0 {
+		return 0, errors.New("invalid top-up quota")
+	}
+	return quotaToAdd, nil
+}
+
 func CompleteTopUpByTradeNo(tradeNo string, source string) error {
 	if tradeNo == "" {
 		return errors.New("trade number is required")
@@ -261,17 +280,11 @@ func CompleteTopUpByTradeNo(tradeNo string, source string) error {
 			return errors.New("top-up order is not pending")
 		}
 
-		if topUp.PaymentMethod == "stripe" {
-			dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-			quotaToAdd = int(decimal.NewFromFloat(topUp.Money).Mul(dQuotaPerUnit).IntPart())
-		} else {
-			dAmount := decimal.NewFromInt(topUp.Amount)
-			dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-			quotaToAdd = int(dAmount.Mul(dQuotaPerUnit).IntPart())
+		calculatedQuota, calcErr := CalculateGrantedQuotaForTopUp(topUp)
+		if calcErr != nil {
+			return calcErr
 		}
-		if quotaToAdd <= 0 {
-			return errors.New("invalid top-up quota")
-		}
+		quotaToAdd = calculatedQuota
 
 		topUp.CompleteTime = common.GetTimestamp()
 		topUp.Status = common.TopUpStatusSuccess
