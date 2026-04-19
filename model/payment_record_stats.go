@@ -182,16 +182,19 @@ func applyPaymentDashboardTopUpRiskFilter(query *gorm.DB) *gorm.DB {
 	if query == nil {
 		return nil
 	}
-	// 对账看板默认只统计“干净”订单：一旦进入待处理异常单，就先从看板口径里拿掉。
+	// 对账看板只保留“可结算”订单：待处理、已回退、已作废的异常单都不再计入；
+	// 已确认表示审核通过，仍然保留在看板口径中。
 	return query.Where(
 		`NOT EXISTS (
 			SELECT 1
 			FROM payment_risk_cases
 			WHERE payment_risk_cases.trade_no = top_ups.trade_no
-			  AND payment_risk_cases.status = ?
+			  AND payment_risk_cases.status IN (?, ?, ?)
 			  AND payment_risk_cases.record_type IN (?, ?)
 		)`,
 		PaymentRiskStatusOpen,
+		PaymentRiskStatusReversed,
+		PaymentRiskStatusVoided,
 		PaymentRiskRecordTypeTopUp,
 		PaymentRiskRecordTypeSubscription,
 	)

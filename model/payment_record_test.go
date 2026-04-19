@@ -427,3 +427,62 @@ func TestGetPaymentRecordRankings_ExcludesOpenRiskCasesFromDashboard(t *testing.
 	require.InDelta(t, 20.0, rankings[1].Money, 0.0001)
 	require.Equal(t, int64(1), rankings[1].OrderCount)
 }
+
+func TestGetPaymentRecordStats_ExcludesReversedAndVoidedRiskCasesFromDashboard(t *testing.T) {
+	setupPaymentRecordTestDB(t)
+
+	alice := createPaymentRecordTestUser(t, "alice")
+
+	createPaymentRecordTopUpWithDetail(t, alice.Id, "T-CLEAN-001", 100, 120, common.TopUpStatusSuccess, "stripe", 20)
+	createPaymentRecordTopUpWithDetail(t, alice.Id, "sub-confirmed-001", 200, 0, common.TopUpStatusPending, "wxpay", 40)
+	createPaymentRecordTopUpWithDetail(t, alice.Id, "sub-reversed-001", 300, 0, common.TopUpStatusPending, "creem", 70)
+	createPaymentRecordTopUpWithDetail(t, alice.Id, "sub-voided-001", 400, 0, common.TopUpStatusPending, "alipay", 30)
+
+	createPaymentRecordRiskCase(t, PaymentRiskRecordTypeSubscription, "sub-confirmed-001", alice.Id, "wxpay", PaymentRiskStatusConfirmed)
+	createPaymentRecordRiskCase(t, PaymentRiskRecordTypeSubscription, "sub-reversed-001", alice.Id, "creem", PaymentRiskStatusReversed)
+	createPaymentRecordRiskCase(t, PaymentRiskRecordTypeSubscription, "sub-voided-001", alice.Id, "alipay", PaymentRiskStatusVoided)
+
+	stats, err := GetPaymentRecordStats(PaymentRecordSearchParams{})
+	require.NoError(t, err)
+	require.Equal(t, int64(2), stats.Totals.OrderCount)
+	require.InDelta(t, 60.0, stats.Totals.Money, 0.0001)
+	require.Equal(t, int64(1), stats.Statuses[common.TopUpStatusSuccess].OrderCount)
+	require.InDelta(t, 20.0, stats.Statuses[common.TopUpStatusSuccess].Money, 0.0001)
+	require.Equal(t, int64(1), stats.Statuses[common.TopUpStatusPending].OrderCount)
+	require.InDelta(t, 40.0, stats.Statuses[common.TopUpStatusPending].Money, 0.0001)
+	require.Equal(t, int64(1), stats.PaymentMethods["stripe"].OrderCount)
+	require.Equal(t, int64(1), stats.PaymentMethods["wxpay"].OrderCount)
+	require.Equal(t, int64(0), stats.PaymentMethods["creem"].OrderCount)
+	require.Equal(t, int64(0), stats.PaymentMethods["alipay"].OrderCount)
+}
+
+func TestGetPaymentRecordRankings_KeepConfirmedOrdersButExcludeOtherResolvedRiskCases(t *testing.T) {
+	setupPaymentRecordTestDB(t)
+
+	alice := createPaymentRecordTestUser(t, "alice")
+	bob := createPaymentRecordTestUser(t, "bob")
+
+	createPaymentRecordTopUpWithDetail(t, alice.Id, "T-CLEAN-001", 100, 120, common.TopUpStatusSuccess, "stripe", 20)
+	createPaymentRecordTopUpWithDetail(t, alice.Id, "sub-confirmed-001", 200, 0, common.TopUpStatusPending, "wxpay", 40)
+	createPaymentRecordTopUpWithDetail(t, alice.Id, "sub-reversed-001", 300, 0, common.TopUpStatusPending, "creem", 70)
+	createPaymentRecordTopUpWithDetail(t, alice.Id, "sub-voided-001", 400, 0, common.TopUpStatusPending, "alipay", 30)
+	createPaymentRecordTopUpWithDetail(t, bob.Id, "T-BOB-001", 150, 180, common.TopUpStatusSuccess, "stripe", 50)
+
+	createPaymentRecordRiskCase(t, PaymentRiskRecordTypeSubscription, "sub-confirmed-001", alice.Id, "wxpay", PaymentRiskStatusConfirmed)
+	createPaymentRecordRiskCase(t, PaymentRiskRecordTypeSubscription, "sub-reversed-001", alice.Id, "creem", PaymentRiskStatusReversed)
+	createPaymentRecordRiskCase(t, PaymentRiskRecordTypeSubscription, "sub-voided-001", alice.Id, "alipay", PaymentRiskStatusVoided)
+
+	rankings, err := GetPaymentRecordRankings(PaymentRecordSearchParams{}, 10)
+	require.NoError(t, err)
+	require.Len(t, rankings, 2)
+	require.Equal(t, alice.Id, rankings[0].UserId)
+	require.InDelta(t, 60.0, rankings[0].Money, 0.0001)
+	require.Equal(t, int64(2), rankings[0].OrderCount)
+	require.InDelta(t, 20.0, rankings[0].SuccessMoney, 0.0001)
+	require.InDelta(t, 40.0, rankings[0].PendingMoney, 0.0001)
+	require.InDelta(t, 0.0, rankings[0].ExpiredMoney, 0.0001)
+	require.InDelta(t, 0.0, rankings[0].CancelledMoney, 0.0001)
+	require.Equal(t, bob.Id, rankings[1].UserId)
+	require.InDelta(t, 50.0, rankings[1].Money, 0.0001)
+	require.Equal(t, int64(1), rankings[1].OrderCount)
+}
