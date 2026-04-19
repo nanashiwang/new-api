@@ -13,6 +13,10 @@ import (
 	"github.com/bytedance/gopkg/util/gopool"
 )
 
+var userCacheWriter = updateUserCache
+var userCacheInvalidator = invalidateUserCache
+var tokenCacheInvalidator = cacheDeleteToken
+
 // UserBase struct remains the same as it represents the cached data structure
 type UserBase struct {
 	Id       int    `json:"id"`
@@ -68,6 +72,43 @@ func updateUserCache(user User) error {
 		user.ToBaseUser(),
 		time.Duration(common.RedisKeyCacheSeconds())*time.Second,
 	)
+}
+
+func syncUserCacheByID(userId int) error {
+	if !common.RedisEnabled {
+		return nil
+	}
+
+	user, err := GetUserById(userId, false)
+	if err != nil {
+		return err
+	}
+	return userCacheWriter(*user)
+}
+
+func InvalidateUserAndTokenCaches(userId int) error {
+	if !common.RedisEnabled {
+		return nil
+	}
+
+	var tokens []Token
+	if err := DB.Where("user_id = ?", userId).Find(&tokens).Error; err != nil {
+		return err
+	}
+
+	if err := userCacheInvalidator(userId); err != nil {
+		return err
+	}
+
+	for _, token := range tokens {
+		if token.Key == "" {
+			continue
+		}
+		if err := tokenCacheInvalidator(token.Key); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // GetUserCache gets complete user cache from hash

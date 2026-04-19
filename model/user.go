@@ -1123,7 +1123,7 @@ func (user *User) Update(updatePassword bool) error {
 	}
 
 	// Update cache
-	return updateUserCache(*user)
+	return syncUserCacheByID(user.Id)
 }
 
 func (user *User) Edit(updatePassword bool) error {
@@ -1153,7 +1153,7 @@ func (user *User) Edit(updatePassword bool) error {
 	}
 
 	// Update cache
-	return updateUserCache(*user)
+	return syncUserCacheByID(user.Id)
 }
 
 func (user *User) ClearBinding(bindingType string) error {

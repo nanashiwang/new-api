@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -70,9 +71,16 @@ const (
 	LogTypeRefund  = 6
 )
 
+var userVisibleAdminIdentityPattern = regexp.MustCompile(`管理员\(ID:\d+\)`)
+
+func redactUserVisibleManageContent(content string) string {
+	return userVisibleAdminIdentityPattern.ReplaceAllString(content, "管理员")
+}
+
 func formatUserLogs(logs []*Log, startIdx int) {
 	for i := range logs {
 		logs[i].ChannelName = ""
+		logs[i].Content = redactUserVisibleManageContent(logs[i].Content)
 		var otherMap map[string]interface{}
 		otherMap, _ = common.StrToMap(logs[i].Other)
 		if otherMap != nil {
@@ -157,6 +165,29 @@ func RecordLog(userId int, logType int, content string) {
 		CreatedAt: common.GetTimestamp(),
 		Type:      logType,
 		Content:   content,
+	}
+	err := LOG_DB.Create(log).Error
+	if err != nil {
+		common.SysLog("failed to record log: " + err.Error())
+	}
+}
+
+func RecordLogWithAdminInfo(userId int, logType int, content string, adminInfo map[string]interface{}) {
+	if logType == LogTypeConsume && !common.LogConsumeEnabled {
+		return
+	}
+	username, _ := GetUsernameById(userId, false)
+	log := &Log{
+		UserId:    userId,
+		Username:  username,
+		CreatedAt: common.GetTimestamp(),
+		Type:      logType,
+		Content:   content,
+	}
+	if len(adminInfo) > 0 {
+		log.Other = common.MapToJsonStr(map[string]interface{}{
+			"admin_info": adminInfo,
+		})
 	}
 	err := LOG_DB.Create(log).Error
 	if err != nil {

@@ -28,6 +28,8 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
+var invalidateManagedUserCaches = model.InvalidateUserAndTokenCaches
+
 func Login(c *gin.Context) {
 	if !common.PasswordLoginEnabled {
 		common.ApiErrorI18n(c, i18n.MsgUserPasswordLoginDisabled)
@@ -841,7 +843,13 @@ func UpdateUser(c *gin.Context) {
 		return
 	}
 	if originUser.Quota != updatedUser.Quota {
-		model.RecordLog(originUser.Id, model.LogTypeManage, fmt.Sprintf("管理员将用户额度从 %s修改为 %s", logger.LogQuota(originUser.Quota), logger.LogQuota(updatedUser.Quota)))
+		model.RecordLogWithAdminInfo(originUser.Id, model.LogTypeManage,
+			fmt.Sprintf("管理员将用户额度从 %s修改为 %s", logger.LogQuota(originUser.Quota), logger.LogQuota(updatedUser.Quota)),
+			map[string]interface{}{
+				"admin_id":       c.GetInt("id"),
+				"admin_username": c.GetString("username"),
+			},
+		)
 	}
 
 	// 补充套餐和令牌元数据，确保管理页面执行更新用户操作后，返回的对象带有完整的状态，防止表格因数据覆盖而显示异常。
@@ -1171,6 +1179,15 @@ func applyManageAction(user *model.User, action string, myRole int) error {
 	}
 }
 
+func shouldInvalidateManagedUserCaches(action string) bool {
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "disable", "delete", "promote", "demote":
+		return true
+	default:
+		return false
+	}
+}
+
 // ManageUser Only admin user can do this
 func ManageUser(c *gin.Context) {
 	var req ManageRequest
@@ -1197,6 +1214,12 @@ func ManageUser(c *gin.Context) {
 	if err := applyManageAction(&user, req.Action, myRole); err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	if shouldInvalidateManagedUserCaches(req.Action) {
+		if err := invalidateManagedUserCaches(user.Id); err != nil {
+			common.ApiError(c, err)
+			return
+		}
 	}
 
 	// 补充套餐和令牌元数据，确保管理页面执行单条禁用/启用等操作后，该行的套餐状态不会因数据覆盖而显示为“无套餐”。
@@ -1278,6 +1301,15 @@ func ManageUserBatch(c *gin.Context) {
 				"message": err.Error(),
 			})
 			continue
+		}
+		if shouldInvalidateManagedUserCaches(action) {
+			if err := invalidateManagedUserCaches(user.Id); err != nil {
+				failed = append(failed, gin.H{
+					"id":      id,
+					"message": err.Error(),
+				})
+				continue
+			}
 		}
 
 		updatedUsers = append(updatedUsers, &user)
