@@ -23,7 +23,14 @@ func setupPaymentRecordTestDB(t *testing.T) {
 	common.UsingMySQL = false
 	common.UsingPostgreSQL = false
 
-	require.NoError(t, db.AutoMigrate(&User{}, &TopUp{}, &SellableTokenProduct{}, &SellableTokenOrder{}, &SellableTokenIssuance{}))
+	require.NoError(t, db.AutoMigrate(
+		&User{},
+		&TopUp{},
+		&PaymentRiskCase{},
+		&SellableTokenProduct{},
+		&SellableTokenOrder{},
+		&SellableTokenIssuance{},
+	))
 }
 
 func createPaymentRecordTestUser(t *testing.T, username string) *User {
@@ -40,15 +47,19 @@ func createPaymentRecordTestUser(t *testing.T, username string) *User {
 }
 
 func createPaymentRecordTopUp(t *testing.T, userID int, tradeNo string, createTime int64, status string) *TopUp {
+	return createPaymentRecordTopUpWithDetail(t, userID, tradeNo, createTime, createTime, status, "stripe", 12.5)
+}
+
+func createPaymentRecordTopUpWithDetail(t *testing.T, userID int, tradeNo string, createTime int64, completeTime int64, status string, paymentMethod string, money float64) *TopUp {
 	t.Helper()
 	topup := &TopUp{
 		UserId:        userID,
 		Amount:        120,
-		Money:         12.5,
+		Money:         money,
 		TradeNo:       tradeNo,
-		PaymentMethod: "stripe",
+		PaymentMethod: paymentMethod,
 		CreateTime:    createTime,
-		CompleteTime:  createTime,
+		CompleteTime:  completeTime,
 		Status:        status,
 	}
 	require.NoError(t, topup.Insert())
@@ -223,4 +234,125 @@ func TestGetAllPaymentRecordsByParams_FiltersWalletPurchaseByUnifiedTradeNo(t *t
 	require.Equal(t, int64(1), legacyTotal)
 	require.Len(t, legacyRecords, 1)
 	require.Equal(t, "Gamma", legacyRecords[0].ProductName)
+}
+
+func TestGetAllPaymentRecordsByParams_FiltersNumericUsernameAndExplicitID(t *testing.T) {
+	setupPaymentRecordTestDB(t)
+
+	numericUser := createPaymentRecordTestUser(t, "7399605")
+	otherUser := createPaymentRecordTestUser(t, "alice")
+	createPaymentRecordTopUpWithDetail(t, numericUser.Id, "NUM-001", 100, 120, common.TopUpStatusSuccess, "stripe", 19.9)
+	createPaymentRecordTopUpWithDetail(t, otherUser.Id, "ALICE-001", 100, 120, common.TopUpStatusSuccess, "alipay", 29.9)
+
+	records, total, err := GetAllPaymentRecordsByParams(PaymentRecordSearchParams{
+		Username: "7399605",
+	}, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, records, 1)
+	require.Equal(t, numericUser.Id, records[0].UserId)
+	require.Equal(t, "7399605", records[0].Username)
+
+	idRecords, idTotal, err := GetAllPaymentRecordsByParams(PaymentRecordSearchParams{
+		Username: "ID:7399605",
+	}, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(0), idTotal)
+	require.Len(t, idRecords, 0)
+
+	explicitIDRecords, explicitIDTotal, err := GetAllPaymentRecordsByParams(PaymentRecordSearchParams{
+		Username: "ID:1",
+	}, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), explicitIDTotal)
+	require.Len(t, explicitIDRecords, 1)
+	require.Equal(t, numericUser.Id, explicitIDRecords[0].UserId)
+	require.Equal(t, "7399605", explicitIDRecords[0].Username)
+}
+
+func TestGetPaymentRecordStats_AggregatesStatusesMethodsAndEffectiveTime(t *testing.T) {
+	setupPaymentRecordTestDB(t)
+
+	alice := createPaymentRecordTestUser(t, "alice")
+	bob := createPaymentRecordTestUser(t, "bob")
+
+	createPaymentRecordTopUpWithDetail(t, alice.Id, "T-SUCC-A", 100, 150, common.TopUpStatusSuccess, "stripe", 10)
+	createPaymentRecordTopUpWithDetail(t, alice.Id, "T-PEND-A", 200, 0, common.TopUpStatusPending, "wxpay", 20)
+	createPaymentRecordTopUpWithDetail(t, bob.Id, "T-SUCC-B", 300, 400, common.TopUpStatusSuccess, "alipay", 30)
+	createPaymentRecordTopUpWithDetail(t, alice.Id, "T-EXP-A", 500, 0, common.TopUpStatusExpired, "creem", 40)
+	createPaymentRecordSellablePurchase(t, alice.Id, "Wallet Success", 250, SellableTokenIssuanceStatusIssued)
+	createPaymentRecordSellablePurchase(t, bob.Id, "Wallet Pending", 350, SellableTokenIssuanceStatusPending)
+	createPaymentRecordSellablePurchase(t, bob.Id, "Wallet Cancelled", 550, SellableTokenIssuanceStatusCancelled)
+
+	stats, err := GetPaymentRecordStats(PaymentRecordSearchParams{})
+	require.NoError(t, err)
+	require.Equal(t, int64(7), stats.Totals.OrderCount)
+	require.InDelta(t, 100.0, stats.Totals.Money, 0.0001)
+	require.InDelta(t, 40.0, stats.Statuses[common.TopUpStatusSuccess].Money, 0.0001)
+	require.Equal(t, int64(3), stats.Statuses[common.TopUpStatusSuccess].OrderCount)
+	require.InDelta(t, 20.0, stats.Statuses[common.TopUpStatusPending].Money, 0.0001)
+	require.Equal(t, int64(2), stats.Statuses[common.TopUpStatusPending].OrderCount)
+	require.InDelta(t, 40.0, stats.Statuses[common.TopUpStatusExpired].Money, 0.0001)
+	require.Equal(t, int64(1), stats.Statuses[common.TopUpStatusExpired].OrderCount)
+	require.InDelta(t, 0.0, stats.Statuses[PaymentRecordStatusCancelled].Money, 0.0001)
+	require.Equal(t, int64(1), stats.Statuses[PaymentRecordStatusCancelled].OrderCount)
+	require.InDelta(t, 10.0, stats.PaymentMethods["stripe"].Money, 0.0001)
+	require.Equal(t, int64(1), stats.PaymentMethods["stripe"].OrderCount)
+	require.InDelta(t, 0.0, stats.PaymentMethods[PaymentMethodWallet].Money, 0.0001)
+	require.Equal(t, int64(3), stats.PaymentMethods[PaymentMethodWallet].OrderCount)
+
+	windowedStats, err := GetPaymentRecordStats(PaymentRecordSearchParams{
+		StartTimestamp: 240,
+		EndTimestamp:   420,
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(3), windowedStats.Totals.OrderCount)
+	require.InDelta(t, 30.0, windowedStats.Totals.Money, 0.0001)
+	require.Equal(t, int64(2), windowedStats.Statuses[common.TopUpStatusSuccess].OrderCount)
+	require.Equal(t, int64(1), windowedStats.Statuses[common.TopUpStatusPending].OrderCount)
+	require.Equal(t, int64(0), windowedStats.Statuses[common.TopUpStatusExpired].OrderCount)
+	require.Equal(t, int64(0), windowedStats.Statuses[PaymentRecordStatusCancelled].OrderCount)
+}
+
+func TestGetPaymentRecordRankings_SortsByMoneyAndUsesEffectiveTime(t *testing.T) {
+	setupPaymentRecordTestDB(t)
+
+	alice := createPaymentRecordTestUser(t, "alice")
+	bob := createPaymentRecordTestUser(t, "bob")
+
+	createPaymentRecordTopUpWithDetail(t, alice.Id, "T-SUCC-A", 100, 150, common.TopUpStatusSuccess, "stripe", 10)
+	createPaymentRecordTopUpWithDetail(t, alice.Id, "T-PEND-A", 200, 0, common.TopUpStatusPending, "wxpay", 20)
+	createPaymentRecordTopUpWithDetail(t, bob.Id, "T-SUCC-B", 300, 400, common.TopUpStatusSuccess, "alipay", 30)
+	createPaymentRecordTopUpWithDetail(t, alice.Id, "T-EXP-A", 500, 0, common.TopUpStatusExpired, "creem", 40)
+	createPaymentRecordSellablePurchase(t, alice.Id, "Wallet Success", 250, SellableTokenIssuanceStatusIssued)
+	createPaymentRecordSellablePurchase(t, bob.Id, "Wallet Pending", 350, SellableTokenIssuanceStatusPending)
+	createPaymentRecordSellablePurchase(t, bob.Id, "Wallet Cancelled", 550, SellableTokenIssuanceStatusCancelled)
+
+	rankings, err := GetPaymentRecordRankings(PaymentRecordSearchParams{}, 10)
+	require.NoError(t, err)
+	require.Len(t, rankings, 2)
+	require.Equal(t, alice.Id, rankings[0].UserId)
+	require.Equal(t, "alice", rankings[0].Username)
+	require.InDelta(t, 70.0, rankings[0].Money, 0.0001)
+	require.Equal(t, int64(4), rankings[0].OrderCount)
+	require.InDelta(t, 10.0, rankings[0].SuccessMoney, 0.0001)
+	require.InDelta(t, 20.0, rankings[0].PendingMoney, 0.0001)
+	require.InDelta(t, 40.0, rankings[0].ExpiredMoney, 0.0001)
+	require.InDelta(t, 0.0, rankings[0].CancelledMoney, 0.0001)
+	require.Equal(t, bob.Id, rankings[1].UserId)
+	require.InDelta(t, 30.0, rankings[1].Money, 0.0001)
+	require.Equal(t, int64(3), rankings[1].OrderCount)
+
+	windowedRankings, err := GetPaymentRecordRankings(PaymentRecordSearchParams{
+		StartTimestamp: 240,
+		EndTimestamp:   420,
+	}, 10)
+	require.NoError(t, err)
+	require.Len(t, windowedRankings, 2)
+	require.Equal(t, bob.Id, windowedRankings[0].UserId)
+	require.InDelta(t, 30.0, windowedRankings[0].Money, 0.0001)
+	require.Equal(t, int64(2), windowedRankings[0].OrderCount)
+	require.Equal(t, alice.Id, windowedRankings[1].UserId)
+	require.InDelta(t, 0.0, windowedRankings[1].Money, 0.0001)
+	require.Equal(t, int64(1), windowedRankings[1].OrderCount)
 }

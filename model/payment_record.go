@@ -14,6 +14,7 @@ const (
 	PaymentRecordTypeSellableTokenPurchase = "sellable_token_purchase"
 	PaymentMethodWallet                    = "wallet"
 	PaymentRecordStatusCancelled           = "cancelled"
+	PaymentOrderTypeSubscription           = "subscription"
 )
 
 type PaymentRecord struct {
@@ -31,13 +32,19 @@ type PaymentRecord struct {
 	CompleteTime  int64   `json:"complete_time"`
 	ProductId     int     `json:"product_id,omitempty"`
 	ProductName   string  `json:"product_name,omitempty"`
+	OrderType     string  `json:"order_type,omitempty"`
+	RiskCaseId    int     `json:"risk_case_id,omitempty"`
+	RiskStatus    string  `json:"risk_status,omitempty"`
+	RiskReason    string  `json:"risk_reason,omitempty"`
 }
 
 type PaymentRecordSearchParams struct {
-	Keyword       string
-	Username      string
-	Status        string
-	PaymentMethod string
+	Keyword        string
+	Username       string
+	Status         string
+	PaymentMethod  string
+	StartTimestamp int64
+	EndTimestamp   int64
 }
 
 type sellableTokenPaymentRecordRow struct {
@@ -79,7 +86,11 @@ func GetUserPaymentRecordsByParams(userId int, params PaymentRecordSearchParams,
 	}
 
 	total := topupTotal + walletTotal
-	return mergePaymentRecordPage(pageInfo, topups, walletPurchases), total, nil
+	records := mergePaymentRecordPage(pageInfo, topups, walletPurchases)
+	if err := attachPaymentRiskInfo(records); err != nil {
+		return nil, 0, err
+	}
+	return records, total, nil
 }
 
 func GetAllPaymentRecordsByParams(params PaymentRecordSearchParams, pageInfo *common.PageInfo) ([]*PaymentRecord, int64, error) {
@@ -103,7 +114,11 @@ func GetAllPaymentRecordsByParams(params PaymentRecordSearchParams, pageInfo *co
 	}
 
 	total := topupTotal + walletTotal
-	return mergePaymentRecordPage(pageInfo, topups, walletPurchases), total, nil
+	records := mergePaymentRecordPage(pageInfo, topups, walletPurchases)
+	if err := attachPaymentRiskInfo(records); err != nil {
+		return nil, 0, err
+	}
+	return records, total, nil
 }
 
 func paymentRecordFetchLimit(pageInfo *common.PageInfo) int {
@@ -209,6 +224,7 @@ func listTopUpPaymentRecords(userId *int, params PaymentRecordSearchParams, limi
 			Status:        topup.Status,
 			CreateTime:    topup.CreateTime,
 			CompleteTime:  topup.CompleteTime,
+			OrderType:     resolveTopUpPaymentOrderType(topup),
 		})
 	}
 	return records, nil
@@ -260,17 +276,64 @@ func listSellableTokenPaymentRecords(userId *int, params PaymentRecordSearchPara
 			CompleteTime:  row.CompleteTime,
 			ProductId:     row.ProductId,
 			ProductName:   row.ProductName,
+			OrderType:     PaymentRecordTypeSellableTokenPurchase,
 		})
 	}
 	return records, nil
 }
 
+func resolveTopUpPaymentOrderType(topup *TopUp) string {
+	if topup == nil {
+		return PaymentRecordTypeTopUp
+	}
+	tradeNo := strings.ToLower(strings.TrimSpace(topup.TradeNo))
+	if topup.Amount == 0 && strings.HasPrefix(tradeNo, "sub") {
+		return PaymentOrderTypeSubscription
+	}
+	return PaymentRecordTypeTopUp
+}
+
+func attachPaymentRiskInfo(records []*PaymentRecord) error {
+	refs := make([]PaymentRiskRecordRef, 0, len(records))
+	for _, record := range records {
+		if record == nil || strings.TrimSpace(record.TradeNo) == "" {
+			continue
+		}
+		switch record.OrderType {
+		case PaymentRecordTypeTopUp, PaymentOrderTypeSubscription:
+			refs = append(refs, PaymentRiskRecordRef{
+				RecordType: record.OrderType,
+				TradeNo:    record.TradeNo,
+			})
+		}
+	}
+	cases, err := ListPaymentRiskCasesByRefs(refs)
+	if err != nil {
+		return err
+	}
+	for _, record := range records {
+		if record == nil {
+			continue
+		}
+		riskCase := cases[paymentRiskCaseMapKey(record.OrderType, record.TradeNo)]
+		if riskCase == nil {
+			continue
+		}
+		record.RiskCaseId = riskCase.Id
+		record.RiskStatus = riskCase.Status
+		record.RiskReason = riskCase.Reason
+	}
+	return nil
+}
+
 func toTopUpSearchParams(params PaymentRecordSearchParams) TopUpSearchParams {
 	return TopUpSearchParams{
-		Keyword:       strings.TrimSpace(params.Keyword),
-		Username:      strings.TrimSpace(params.Username),
-		Status:        strings.TrimSpace(params.Status),
-		PaymentMethod: strings.TrimSpace(params.PaymentMethod),
+		Keyword:        strings.TrimSpace(params.Keyword),
+		Username:       strings.TrimSpace(params.Username),
+		Status:         strings.TrimSpace(params.Status),
+		PaymentMethod:  strings.TrimSpace(params.PaymentMethod),
+		StartTimestamp: params.StartTimestamp,
+		EndTimestamp:   params.EndTimestamp,
 	}
 }
 
@@ -336,18 +399,27 @@ func applySellableTokenPaymentSearch(query *gorm.DB, params PaymentRecordSearchP
 	}
 
 	if includeUsername {
-		username := strings.TrimSpace(params.Username)
-		if username != "" {
-			if uid, err := strconv.Atoi(username); err == nil {
-				query = query.Where("users.id = ?", uid)
-			} else {
-				like := "%" + username + "%"
-				query = query.Where("users.username LIKE ?", like)
-			}
+		if strings.TrimSpace(params.Username) != "" {
+			query = applyPaymentRecordUsernameFilter(query, params.Username, "users.id", "users.username")
 		}
 	}
 
+	effectiveTimestampExpr := buildPaymentRecordEffectiveTimestampExpr(
+		sellableTokenPaymentStatusExpr(),
+		"sellable_token_orders.create_time",
+		"sellable_token_orders.complete_time",
+	)
+	query = applyPaymentRecordTimeRange(query, params.StartTimestamp, params.EndTimestamp, effectiveTimestampExpr)
+
 	return query
+}
+
+func sellableTokenPaymentStatusExpr() string {
+	return "CASE " +
+		"WHEN sellable_token_issuances.status = '" + SellableTokenIssuanceStatusPending + "' THEN '" + common.TopUpStatusPending + "' " +
+		"WHEN sellable_token_issuances.status = '" + SellableTokenIssuanceStatusCancelled + "' THEN '" + PaymentRecordStatusCancelled + "' " +
+		"ELSE '" + common.TopUpStatusSuccess + "' " +
+		"END"
 }
 
 func parseSellableTokenOrderKeyword(keyword string) (int, bool) {

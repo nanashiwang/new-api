@@ -129,6 +129,12 @@ func SetApiRouter(router *gin.Engine) {
 			{
 				adminRoute.GET("/", controller.GetAllUsers)
 				adminRoute.GET("/payment-records", controller.GetAllPaymentRecords)
+				adminRoute.GET("/payment-records/stats", controller.GetPaymentRecordStats)
+				adminRoute.GET("/payment-records/rankings", controller.GetPaymentRecordRankings)
+				adminRoute.GET("/payment-risk-cases", controller.GetAllPaymentRiskCases)
+				adminRoute.GET("/payment-risk-cases/:id", controller.GetPaymentRiskCaseDetail)
+				adminRoute.POST("/payment-risk-cases", controller.CreatePaymentRiskCase)
+				adminRoute.POST("/payment-risk-cases/:id/resolve", controller.ResolvePaymentRiskCase)
 				adminRoute.GET("/topup", controller.GetAllTopUps)
 				adminRoute.POST("/topup/complete", controller.AdminCompleteTopUp)
 				adminRoute.GET("/search", controller.SearchUsers)
