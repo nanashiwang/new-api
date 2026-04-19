@@ -587,8 +587,9 @@ func getActiveUserSubscriptionsByPlanTx(tx *gorm.DB, userId int, planId int, tar
 	if tx == nil {
 		tx = DB
 	}
+	session := tx.Session(&gorm.Session{NewDB: true})
 	now := GetDBTimestampTx(tx)
-	query := tx.Where("user_id = ? AND plan_id = ? AND status = ? AND end_time > ?",
+	query := session.Model(&UserSubscription{}).Where("user_id = ? AND plan_id = ? AND status = ? AND end_time > ?",
 		userId, planId, "active", now).
 		Order("end_time asc, id asc")
 	if targetSubscriptionId > 0 {
@@ -673,6 +674,7 @@ func createUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 	if tx == nil {
 		return nil, errors.New("tx is nil")
 	}
+	session := propagateBenefitContextTx(tx, tx.Session(&gorm.Session{NewDB: true}))
 	if plan == nil || plan.Id == 0 {
 		return nil, errors.New("invalid plan")
 	}
@@ -733,8 +735,30 @@ func createUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 		CreatedAt:     common.GetTimestamp(),
 		UpdatedAt:     common.GetTimestamp(),
 	}
-	if err := tx.Create(sub).Error; err != nil {
+	if err := session.Model(&UserSubscription{}).Create(sub).Error; err != nil {
 		return nil, err
+	}
+	if benefitSourceType, benefitSourceRef, purchaseMode, issuanceId, ok := getBenefitContextTx(tx); ok {
+		if err := createBenefitChangeRecordTx(tx, &BenefitChangeRecord{
+			BenefitType: BenefitTypeSubscription,
+			Action:      BenefitActionGrant,
+			SourceType:  benefitSourceType,
+			SourceRef:   benefitSourceRef,
+			UserId:      userId,
+			TargetType:  BenefitTargetUserSubscription,
+			TargetId:    sub.Id,
+			Detail: marshalBenefitDetail(&SubscriptionBenefitDetail{
+				Operation:        SubscriptionBenefitOperationCreate,
+				PurchaseMode:     purchaseMode,
+				IssuanceId:       issuanceId,
+				PlanId:           plan.Id,
+				EndTimeAfter:     sub.EndTime,
+				AmountTotalAfter: sub.AmountTotal,
+				StatusAfter:      sub.Status,
+			}),
+		}); err != nil {
+			return nil, err
+		}
 	}
 	return sub, nil
 }
@@ -750,6 +774,7 @@ func renewUserSubscriptionByPlanTx(tx *gorm.DB, userId int, plan *SubscriptionPl
 	if tx == nil {
 		return nil, false, errors.New("tx is nil")
 	}
+	session := propagateBenefitContextTx(tx, tx.Session(&gorm.Session{NewDB: true}))
 	if plan == nil || plan.Id == 0 {
 		return nil, false, errors.New("invalid plan")
 	}
@@ -757,7 +782,7 @@ func renewUserSubscriptionByPlanTx(tx *gorm.DB, userId int, plan *SubscriptionPl
 		return nil, false, errors.New("invalid user id")
 	}
 	now := GetDBTimestampTx(tx)
-	query := tx.Set("gorm:query_option", "FOR UPDATE").
+	query := session.Model(&UserSubscription{}).Set("gorm:query_option", "FOR UPDATE").
 		Where("user_id = ? AND plan_id = ? AND status = ? AND end_time > ?",
 			userId, plan.Id, "active", now)
 	if targetSubscriptionId > 0 {
@@ -771,6 +796,9 @@ func renewUserSubscriptionByPlanTx(tx *gorm.DB, userId int, plan *SubscriptionPl
 	if result.RowsAffected == 0 {
 		return nil, false, nil
 	}
+	prevEndTime := sub.EndTime
+	prevAmountTotal := sub.AmountTotal
+	prevStatus := sub.Status
 
 	baseEnd := sub.EndTime
 	if baseEnd <= 0 {
@@ -792,11 +820,46 @@ func renewUserSubscriptionByPlanTx(tx *gorm.DB, userId int, plan *SubscriptionPl
 		}
 	}
 
-	if err := tx.Save(&sub).Error; err != nil {
+	if err := session.Save(&sub).Error; err != nil {
 		return nil, false, err
 	}
 	if NormalizeResetPeriod(plan.QuotaResetPeriod) != SubscriptionResetNever {
 		if err := maybeResetUserSubscriptionWithPlanTx(tx, &sub, plan, now); err != nil {
+			return nil, false, err
+		}
+	}
+	if benefitSourceType, benefitSourceRef, purchaseMode, issuanceId, ok := getBenefitContextTx(tx); ok {
+		endTimeDelta := sub.EndTime - prevEndTime
+		amountTotalDelta := sub.AmountTotal - prevAmountTotal
+		if endTimeDelta < 0 {
+			endTimeDelta = 0
+		}
+		if amountTotalDelta < 0 {
+			amountTotalDelta = 0
+		}
+		if err := createBenefitChangeRecordTx(tx, &BenefitChangeRecord{
+			BenefitType: BenefitTypeSubscription,
+			Action:      BenefitActionGrant,
+			SourceType:  benefitSourceType,
+			SourceRef:   benefitSourceRef,
+			UserId:      userId,
+			TargetType:  BenefitTargetUserSubscription,
+			TargetId:    sub.Id,
+			Detail: marshalBenefitDetail(&SubscriptionBenefitDetail{
+				Operation:         SubscriptionBenefitOperationRenew,
+				PurchaseMode:      purchaseMode,
+				IssuanceId:        issuanceId,
+				PlanId:            plan.Id,
+				EndTimeBefore:     prevEndTime,
+				EndTimeAfter:      sub.EndTime,
+				EndTimeDelta:      endTimeDelta,
+				AmountTotalBefore: prevAmountTotal,
+				AmountTotalAfter:  sub.AmountTotal,
+				AmountTotalDelta:  amountTotalDelta,
+				StatusBefore:      prevStatus,
+				StatusAfter:       sub.Status,
+			}),
+		}); err != nil {
 			return nil, false, err
 		}
 	}
@@ -942,23 +1005,25 @@ func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
 	if tx == nil || order == nil {
 		return errors.New("invalid subscription order")
 	}
+	session := tx.Session(&gorm.Session{NewDB: true})
 	now := common.GetTimestamp()
 	var topup TopUp
-	if err := tx.Where("trade_no = ?", order.TradeNo).First(&topup).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			topup = TopUp{
-				UserId:        order.UserId,
-				Amount:        0,
-				Money:         order.Money,
-				TradeNo:       order.TradeNo,
-				PaymentMethod: order.PaymentMethod,
-				CreateTime:    order.CreateTime,
-				CompleteTime:  now,
-				Status:        common.TopUpStatusSuccess,
-			}
-			return tx.Create(&topup).Error
+	result := session.Where("trade_no = ?", order.TradeNo).Limit(1).Find(&topup)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		topup = TopUp{
+			UserId:        order.UserId,
+			Amount:        0,
+			Money:         order.Money,
+			TradeNo:       order.TradeNo,
+			PaymentMethod: order.PaymentMethod,
+			CreateTime:    order.CreateTime,
+			CompleteTime:  now,
+			Status:        common.TopUpStatusSuccess,
 		}
-		return err
+		return session.Create(&topup).Error
 	}
 	topup.Money = order.Money
 	if topup.PaymentMethod == "" {
@@ -969,7 +1034,7 @@ func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
 	}
 	topup.CompleteTime = now
 	topup.Status = common.TopUpStatusSuccess
-	return tx.Save(&topup).Error
+	return session.Save(&topup).Error
 }
 
 func ExpireSubscriptionOrder(tradeNo string) error {
@@ -1777,6 +1842,7 @@ func bindSubscriptionWithOptionsTx(tx *gorm.DB, userId int, plan *SubscriptionPl
 	if tx == nil {
 		return "", errors.New("tx is nil")
 	}
+	session := propagateBenefitContextTx(tx, tx.Session(&gorm.Session{NewDB: true}))
 	if userId <= 0 || plan == nil || plan.Id <= 0 {
 		return "", errors.New("invalid userId or plan")
 	}
@@ -1790,11 +1856,11 @@ func bindSubscriptionWithOptionsTx(tx *gorm.DB, userId int, plan *SubscriptionPl
 	// renew_extend 模式下需要记住第一次创建/命中的订阅，后续份数都顺延到同一条订阅上。
 	renewTargetForExtend := 0
 	// 所有非支付发放入口都先锁用户，避免和支付回调、管理员操作并发改订阅。
-	if err := lockUserForSubscriptionMutationTx(tx, userId); err != nil {
+	if err := lockUserForSubscriptionMutationTx(session, userId); err != nil {
 		return "", err
 	}
 	if mode == SubscriptionPurchaseModeRenewExtend {
-		activeSubs, err := getActiveUserSubscriptionsByPlanTx(tx, userId, plan.Id, 0)
+		activeSubs, err := getActiveUserSubscriptionsByPlanTx(session, userId, plan.Id, 0)
 		if err != nil {
 			return "", err
 		}
@@ -1807,7 +1873,7 @@ func bindSubscriptionWithOptionsTx(tx *gorm.DB, userId int, plan *SubscriptionPl
 		switch mode {
 		case SubscriptionPurchaseModeRenew:
 			// renew 只允许续到现有生效订阅，不允许“没有目标时自动新建”。
-			_, renewed, err := renewUserSubscriptionByPlanTx(tx, userId, plan, renewTargetSubscriptionId)
+			_, renewed, err := renewUserSubscriptionByPlanTx(session, userId, plan, renewTargetSubscriptionId)
 			if err != nil {
 				return "", err
 			}
@@ -1820,7 +1886,7 @@ func bindSubscriptionWithOptionsTx(tx *gorm.DB, userId int, plan *SubscriptionPl
 		case SubscriptionPurchaseModeRenewExtend:
 			if renewTargetForExtend > 0 {
 				// renew_extend 的核心语义是“始终顺到同一条订阅上”。
-				_, renewed, renewErr := renewUserSubscriptionByPlanTx(tx, userId, plan, renewTargetForExtend)
+				_, renewed, renewErr := renewUserSubscriptionByPlanTx(session, userId, plan, renewTargetForExtend)
 				if renewErr != nil {
 					return "", renewErr
 				}
@@ -1829,7 +1895,7 @@ func bindSubscriptionWithOptionsTx(tx *gorm.DB, userId int, plan *SubscriptionPl
 				}
 				continue
 			}
-			createdSub, createErr := createUserSubscriptionFromPlanTx(tx, userId, plan, source, true)
+			createdSub, createErr := createUserSubscriptionFromPlanTx(session, userId, plan, source, true)
 			if createErr != nil {
 				return "", createErr
 			}
@@ -1837,7 +1903,7 @@ func bindSubscriptionWithOptionsTx(tx *gorm.DB, userId int, plan *SubscriptionPl
 			renewTargetForExtend = createdSub.Id
 		default:
 			// stack 语义最直接：每份都新增一条订阅实例。
-			if _, err := createUserSubscriptionFromPlanTx(tx, userId, plan, source, true); err != nil {
+			if _, err := createUserSubscriptionFromPlanTx(session, userId, plan, source, true); err != nil {
 				return "", err
 			}
 		}

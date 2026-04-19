@@ -101,6 +101,9 @@ func Recharge(referenceId string, customerId string) (err error) {
 		if err != nil {
 			return err
 		}
+		if err := recordQuotaBenefitGrantTx(tx, topUp, int(quota), "stripe"); err != nil {
+			return err
+		}
 
 		return nil
 	})
@@ -250,6 +253,26 @@ func CalculateGrantedQuotaForTopUp(topUp *TopUp) (int, error) {
 	return quotaToAdd, nil
 }
 
+func recordQuotaBenefitGrantTx(tx *gorm.DB, topUp *TopUp, quotaDelta int, context string) error {
+	if tx == nil || topUp == nil || quotaDelta <= 0 {
+		return nil
+	}
+	return createBenefitChangeRecordTx(tx, &BenefitChangeRecord{
+		BenefitType: BenefitTypeQuota,
+		Action:      BenefitActionGrant,
+		SourceType:  BenefitSourceTopUpOrder,
+		SourceRef:   topUp.TradeNo,
+		UserId:      topUp.UserId,
+		TargetType:  BenefitTargetUserQuota,
+		TargetId:    topUp.UserId,
+		Detail: marshalBenefitDetail(&QuotaBenefitDetail{
+			QuotaDelta:    quotaDelta,
+			PaymentMethod: topUp.PaymentMethod,
+			Context:       context,
+		}),
+	})
+}
+
 func CompleteTopUpByTradeNo(tradeNo string, source string) error {
 	if tradeNo == "" {
 		return errors.New("trade number is required")
@@ -293,6 +316,9 @@ func CompleteTopUpByTradeNo(tradeNo string, source string) error {
 		}
 
 		if err := tx.Model(&User{}).Where("id = ?", topUp.UserId).Update("quota", gorm.Expr("quota + ?", quotaToAdd)).Error; err != nil {
+			return err
+		}
+		if err := recordQuotaBenefitGrantTx(tx, topUp, quotaToAdd, source); err != nil {
 			return err
 		}
 
@@ -386,6 +412,9 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 
 		err = tx.Model(&User{}).Where("id = ?", topUp.UserId).Updates(updateFields).Error
 		if err != nil {
+			return err
+		}
+		if err := recordQuotaBenefitGrantTx(tx, topUp, int(quota), "creem"); err != nil {
 			return err
 		}
 

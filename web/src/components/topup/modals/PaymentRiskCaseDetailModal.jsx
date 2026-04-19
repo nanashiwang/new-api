@@ -65,13 +65,13 @@ const ORDER_STATUS_LABELS = {
 
 const ACTION_LABELS = {
   confirm: '确认放行',
-  reverse: '回退额度',
+  reverse: '回退权益',
   void: '作废订单',
 };
 
 const ACTION_DESCRIPTIONS = {
   confirm: '确认该回调有效，并按订单类型补发或放行本地订单状态。',
-  reverse: '撤销这笔异常充值已经发放的额度，适合已到账异常单。',
+  reverse: '撤销这笔异常单已经发放的权益；充值单回退额度，套餐单回退本次新增套餐。',
   void: '将异常单直接作废，不再允许后续补单。',
 };
 

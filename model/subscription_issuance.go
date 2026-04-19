@@ -9,8 +9,9 @@ import (
 )
 
 const (
-	SubscriptionIssuanceStatusPending = "pending"
-	SubscriptionIssuanceStatusIssued  = "issued"
+	SubscriptionIssuanceStatusPending   = "pending"
+	SubscriptionIssuanceStatusIssued    = "issued"
+	SubscriptionIssuanceStatusCancelled = "cancelled"
 
 	SubscriptionIssuanceSourceRedeem = "redeem"
 	SubscriptionIssuanceSourceOrder  = "order"
@@ -198,6 +199,11 @@ func ConfirmSubscriptionIssuanceTx(tx *gorm.DB, issuanceId int, userId int, purc
 		} else {
 			return nil, "", ErrSubscriptionRenewTargetSelectionNeed
 		}
+	}
+
+	benefitSourceType := normalizeSubscriptionBenefitSource(issuance.SourceType)
+	if benefitSourceType != "" {
+		tx = withBenefitContextTx(tx, benefitSourceType, issuance.SourceRef, mode, issuance.Id)
 	}
 
 	summary, err := bindSubscriptionWithOptionsTx(

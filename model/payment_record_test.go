@@ -66,6 +66,28 @@ func createPaymentRecordTopUpWithDetail(t *testing.T, userID int, tradeNo string
 	return topup
 }
 
+func createPaymentRecordRiskCase(t *testing.T, recordType string, tradeNo string, userID int, paymentMethod string, status string) *PaymentRiskCase {
+	t.Helper()
+	riskCase, err := UpsertPaymentRiskCase(PaymentRiskCaseUpsertInput{
+		RecordType:            recordType,
+		TradeNo:               tradeNo,
+		UserId:                userID,
+		PaymentMethod:         paymentMethod,
+		ProviderPaymentMethod: paymentMethod,
+		Source:                "test",
+		Reason:                PaymentRiskReasonManualReview,
+	})
+	require.NoError(t, err)
+	if status != "" && status != PaymentRiskStatusOpen {
+		require.NoError(t, DB.Model(&PaymentRiskCase{}).Where("id = ?", riskCase.Id).Updates(map[string]any{
+			"status":      status,
+			"resolved_at": 123,
+		}).Error)
+		require.NoError(t, DB.First(riskCase, "id = ?", riskCase.Id).Error)
+	}
+	return riskCase
+}
+
 func createPaymentRecordSellablePurchase(t *testing.T, userID int, productName string, createTime int64, issuanceStatus string) *SellableTokenOrder {
 	return createPaymentRecordSellablePurchaseWithTradeNo(t, userID, productName, createTime, issuanceStatus, "")
 }
@@ -355,4 +377,53 @@ func TestGetPaymentRecordRankings_SortsByMoneyAndUsesEffectiveTime(t *testing.T)
 	require.Equal(t, alice.Id, windowedRankings[1].UserId)
 	require.InDelta(t, 0.0, windowedRankings[1].Money, 0.0001)
 	require.Equal(t, int64(1), windowedRankings[1].OrderCount)
+}
+
+func TestGetPaymentRecordStats_ExcludesOpenRiskCasesFromDashboard(t *testing.T) {
+	setupPaymentRecordTestDB(t)
+
+	alice := createPaymentRecordTestUser(t, "alice")
+
+	createPaymentRecordTopUpWithDetail(t, alice.Id, "T-CLEAN-001", 100, 120, common.TopUpStatusSuccess, "stripe", 20)
+	createPaymentRecordTopUpWithDetail(t, alice.Id, "sub-open-001", 200, 0, common.TopUpStatusPending, "alipay", 85)
+	createPaymentRecordTopUpWithDetail(t, alice.Id, "sub-confirmed-001", 300, 0, common.TopUpStatusPending, "wxpay", 40)
+
+	createPaymentRecordRiskCase(t, PaymentRiskRecordTypeSubscription, "sub-open-001", alice.Id, "alipay", PaymentRiskStatusOpen)
+	createPaymentRecordRiskCase(t, PaymentRiskRecordTypeSubscription, "sub-confirmed-001", alice.Id, "wxpay", PaymentRiskStatusConfirmed)
+
+	stats, err := GetPaymentRecordStats(PaymentRecordSearchParams{})
+	require.NoError(t, err)
+	require.Equal(t, int64(2), stats.Totals.OrderCount)
+	require.InDelta(t, 60.0, stats.Totals.Money, 0.0001)
+	require.Equal(t, int64(1), stats.Statuses[common.TopUpStatusSuccess].OrderCount)
+	require.InDelta(t, 20.0, stats.Statuses[common.TopUpStatusSuccess].Money, 0.0001)
+	require.Equal(t, int64(1), stats.Statuses[common.TopUpStatusPending].OrderCount)
+	require.InDelta(t, 40.0, stats.Statuses[common.TopUpStatusPending].Money, 0.0001)
+	require.Equal(t, int64(0), stats.Statuses[common.TopUpStatusExpired].OrderCount)
+	require.Equal(t, int64(1), stats.PaymentMethods["stripe"].OrderCount)
+	require.Equal(t, int64(1), stats.PaymentMethods["wxpay"].OrderCount)
+	require.Equal(t, int64(0), stats.PaymentMethods["alipay"].OrderCount)
+}
+
+func TestGetPaymentRecordRankings_ExcludesOpenRiskCasesFromDashboard(t *testing.T) {
+	setupPaymentRecordTestDB(t)
+
+	alice := createPaymentRecordTestUser(t, "alice")
+	bob := createPaymentRecordTestUser(t, "bob")
+
+	createPaymentRecordTopUpWithDetail(t, alice.Id, "T-CLEAN-001", 100, 120, common.TopUpStatusSuccess, "stripe", 20)
+	createPaymentRecordTopUpWithDetail(t, alice.Id, "sub-open-001", 200, 0, common.TopUpStatusPending, "alipay", 85)
+	createPaymentRecordTopUpWithDetail(t, bob.Id, "T-BOB-001", 150, 180, common.TopUpStatusSuccess, "creem", 50)
+
+	createPaymentRecordRiskCase(t, PaymentRiskRecordTypeSubscription, "sub-open-001", alice.Id, "alipay", PaymentRiskStatusOpen)
+
+	rankings, err := GetPaymentRecordRankings(PaymentRecordSearchParams{}, 10)
+	require.NoError(t, err)
+	require.Len(t, rankings, 2)
+	require.Equal(t, bob.Id, rankings[0].UserId)
+	require.InDelta(t, 50.0, rankings[0].Money, 0.0001)
+	require.Equal(t, int64(1), rankings[0].OrderCount)
+	require.Equal(t, alice.Id, rankings[1].UserId)
+	require.InDelta(t, 20.0, rankings[1].Money, 0.0001)
+	require.Equal(t, int64(1), rankings[1].OrderCount)
 }

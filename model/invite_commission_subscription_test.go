@@ -54,6 +54,12 @@ func setupInviteCommissionSubscriptionTest(t *testing.T) {
 		if !migrateIfNotExists("user_subscriptions", &UserSubscription{}) {
 			return
 		}
+		if !migrateIfNotExists("benefit_change_records", &BenefitChangeRecord{}) {
+			return
+		}
+		if !migrateIfNotExists("benefit_rollback_operations", &BenefitRollbackOperation{}) {
+			return
+		}
 		if !migrateIfNotExists("top_ups", &TopUp{}) {
 			return
 		}
@@ -67,6 +73,8 @@ func setupInviteCommissionSubscriptionTest(t *testing.T) {
 	clear(&SubscriptionOrder{})
 	clear(&SubscriptionIssuance{})
 	clear(&UserSubscription{})
+	clear(&BenefitChangeRecord{})
+	clear(&BenefitRollbackOperation{})
 	clear(&SubscriptionPlan{})
 	clear(&InviteCommissionLedger{})
 	clear(&InviteCommissionDailyCapState{})
@@ -122,6 +130,38 @@ func requireIssuedSubscriptionIssuanceBySourceRef(t *testing.T, sourceType strin
 	require.NoError(t, DB.Where("source_type = ? AND source_ref = ?", sourceType, sourceRef).First(&issuance).Error)
 	require.Equal(t, SubscriptionIssuanceStatusIssued, issuance.Status)
 	return &issuance
+}
+
+func TestConfirmSubscriptionIssuanceTx_StackDoesNotPolluteIssuanceSaveStatement(t *testing.T) {
+	setupInviteCommissionSubscriptionTest(t)
+
+	user := createInviteCommissionTestUser(t, "issue_tx_clean_stack", 0)
+	plan := createSubscriptionPlanForInviteCommissionTest(t, "直接发放月卡", 88, 1000)
+	issuance := &SubscriptionIssuance{
+		UserId:           user.Id,
+		PlanId:           plan.Id,
+		PlanTitle:        plan.Title,
+		SourceType:       SubscriptionIssuanceSourceOrder,
+		SourceRef:        "issue_tx_clean_stack_001",
+		Status:           SubscriptionIssuanceStatusPending,
+		PurchaseMode:     SubscriptionPurchaseModeStack,
+		PurchaseQuantity: 1,
+	}
+	require.NoError(t, DB.Create(issuance).Error)
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		_, _, err := ConfirmSubscriptionIssuanceTx(tx, issuance.Id, user.Id, SubscriptionPurchaseModeStack, 0)
+		return err
+	})
+	require.NoError(t, err)
+
+	var refreshedIssuance SubscriptionIssuance
+	require.NoError(t, DB.First(&refreshedIssuance, issuance.Id).Error)
+	assert.Equal(t, SubscriptionIssuanceStatusIssued, refreshedIssuance.Status)
+
+	var subCount int64
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("user_id = ? AND plan_id = ?", user.Id, plan.Id).Count(&subCount).Error)
+	assert.EqualValues(t, 1, subCount)
 }
 
 func TestCompleteSubscriptionOrder_EnqueueInviteCommissionByPaidAmount_StackAndIdempotent(t *testing.T) {

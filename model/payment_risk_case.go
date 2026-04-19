@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/logger"
 	"gorm.io/gorm"
 )
 
@@ -31,10 +30,9 @@ const (
 )
 
 var (
-	ErrPaymentRiskCaseNotFound       = errors.New("payment risk case not found")
-	ErrPaymentRiskCaseResolved       = errors.New("payment risk case already resolved")
-	ErrPaymentRiskActionInvalid      = errors.New("invalid payment risk action")
-	ErrPaymentRiskReverseUnsupported = errors.New("reverse is only supported for top-up orders")
+	ErrPaymentRiskCaseNotFound  = errors.New("payment risk case not found")
+	ErrPaymentRiskCaseResolved  = errors.New("payment risk case already resolved")
+	ErrPaymentRiskActionInvalid = errors.New("invalid payment risk action")
 )
 
 type PaymentRiskCase struct {
@@ -351,7 +349,7 @@ func PaymentRiskAvailableActions(riskCase *PaymentRiskCase) []string {
 		if riskCase.OrderStatus == common.TopUpStatusPending {
 			return []string{PaymentRiskActionConfirm, PaymentRiskActionVoid}
 		}
-		return []string{PaymentRiskActionConfirm}
+		return []string{PaymentRiskActionConfirm, PaymentRiskActionReverse}
 	}
 	if riskCase.OrderStatus == common.TopUpStatusPending {
 		return []string{PaymentRiskActionConfirm, PaymentRiskActionVoid}
@@ -483,25 +481,23 @@ func reversePaymentRiskCase(riskCase *PaymentRiskCase) (int, error) {
 	if riskCase == nil {
 		return 0, ErrPaymentRiskCaseNotFound
 	}
-	if riskCase.RecordType != PaymentRiskRecordTypeTopUp {
-		return 0, ErrPaymentRiskReverseUnsupported
+	sourceType := BenefitSourceTopUpOrder
+	if riskCase.RecordType == PaymentRiskRecordTypeSubscription {
+		sourceType = BenefitSourceSubscriptionOrder
 	}
-	topUp := GetTopUpByTradeNo(riskCase.TradeNo)
-	if topUp == nil {
-		return 0, ErrPaymentRiskCaseNotFound
-	}
-	if topUp.Status != common.TopUpStatusSuccess {
-		return 0, errors.New("only successful top-up orders can be reversed")
-	}
-	quotaToReverse, err := CalculateGrantedQuotaForTopUp(topUp)
+	quotaDelta, summary, err := RollbackBenefitsBySource(
+		BenefitRollbackBusinessPaymentRiskCase,
+		riskCase.Id,
+		sourceType,
+		riskCase.TradeNo,
+	)
 	if err != nil {
 		return 0, err
 	}
-	if err := DecreaseUserQuota(topUp.UserId, quotaToReverse); err != nil {
-		return 0, err
+	if strings.TrimSpace(summary) != "" && riskCase.UserId > 0 {
+		RecordLog(riskCase.UserId, LogTypeTopup, "payment risk reversal succeeded: "+summary)
 	}
-	RecordLog(topUp.UserId, LogTypeTopup, "payment risk reversal succeeded, quota deducted: "+logger.FormatQuota(quotaToReverse))
-	return -quotaToReverse, nil
+	return quotaDelta, nil
 }
 
 func voidPaymentRiskCase(riskCase *PaymentRiskCase) error {

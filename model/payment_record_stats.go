@@ -172,8 +172,29 @@ func GetPaymentRecordRankings(params PaymentRecordSearchParams, limit int) ([]Pa
 }
 
 func paymentRecordTopUpAggregateQuery() *gorm.DB {
-	return DB.Table("top_ups").
-		Joins("LEFT JOIN users ON users.id = top_ups.user_id")
+	return applyPaymentDashboardTopUpRiskFilter(
+		DB.Table("top_ups").
+			Joins("LEFT JOIN users ON users.id = top_ups.user_id"),
+	)
+}
+
+func applyPaymentDashboardTopUpRiskFilter(query *gorm.DB) *gorm.DB {
+	if query == nil {
+		return nil
+	}
+	// 对账看板默认只统计“干净”订单：一旦进入待处理异常单，就先从看板口径里拿掉。
+	return query.Where(
+		`NOT EXISTS (
+			SELECT 1
+			FROM payment_risk_cases
+			WHERE payment_risk_cases.trade_no = top_ups.trade_no
+			  AND payment_risk_cases.status = ?
+			  AND payment_risk_cases.record_type IN (?, ?)
+		)`,
+		PaymentRiskStatusOpen,
+		PaymentRiskRecordTypeTopUp,
+		PaymentRiskRecordTypeSubscription,
+	)
 }
 
 func queryTopUpPaymentRecordAggregateRows(params PaymentRecordSearchParams, keyExpr string, groupExpr string) ([]paymentRecordAggregateRow, error) {

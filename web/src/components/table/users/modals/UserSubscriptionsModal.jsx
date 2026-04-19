@@ -895,11 +895,11 @@ const UserSubscriptionsModal = ({ visible, onCancel, user, t, onSuccess }) => {
                 width: 100,
                 render: (text) => (
                   <Tag
-                    color={text === 'pending' ? 'orange' : 'green'}
+                    color={text === 'pending' ? 'orange' : text === 'cancelled' ? 'grey' : 'green'}
                     shape='circle'
                     size='small'
                   >
-                    {text === 'pending' ? t('待发放') : t('已发放')}
+                    {text === 'pending' ? t('待发放') : text === 'cancelled' ? t('已取消') : t('已发放')}
                   </Tag>
                 ),
               },
