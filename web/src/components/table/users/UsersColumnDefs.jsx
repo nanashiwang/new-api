@@ -143,6 +143,7 @@ const renderSubscriptionQuota = (text, record, t) => {
   const hasUnlimited = !!record?.subscription_quota_has_unlimited;
   const total = Number(record?.subscription_quota_total || 0);
   const remaining = Number(record?.subscription_quota_remaining || 0);
+  const items = record?.subscription_quota_items || [];
 
   if (hasUnlimited) {
     return (
@@ -160,13 +161,94 @@ const renderSubscriptionQuota = (text, record, t) => {
     );
   }
 
+  const pct = Math.min(100, Math.max(0, (remaining / total) * 100));
+  const barColor =
+    pct > 30 ? '#10b981' : pct > 10 ? '#f59e0b' : '#ef4444';
+
+  const formatResetPeriod = (period) => {
+    const map = {
+      never: t('不重置'),
+      daily: t('每天'),
+      weekly: t('每周'),
+      monthly: t('每月'),
+      custom: t('自定义'),
+    };
+    return map[period] || period || t('不重置');
+  };
+
+  const formatDate = (ts) => {
+    if (!ts) return '-';
+    return new Date(ts * 1000).toLocaleDateString();
+  };
+
+  const tooltipContent = (
+    <div style={{ minWidth: 180, maxWidth: 260 }}>
+      {items.map((item, idx) => {
+        const planName = item.plan_title || `#${idx + 1}`;
+        return (
+          <div
+            key={idx}
+            style={{
+              paddingBottom: idx < items.length - 1 ? 8 : 0,
+              marginBottom: idx < items.length - 1 ? 8 : 0,
+              borderBottom:
+                idx < items.length - 1 ? '1px solid rgba(255,255,255,0.1)' : 'none',
+            }}
+          >
+            <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 12 }}>
+              {planName}
+            </div>
+            <div style={{ fontSize: 11, opacity: 0.85, lineHeight: 1.6 }}>
+              {item.has_unlimited ? (
+                <div>{t('额度')}: {t('不限额')}</div>
+              ) : (
+                <div>
+                  {t('额度')}: {renderQuota(item.remaining)} / {renderQuota(item.total)}
+                </div>
+              )}
+              <div>{t('刷新周期')}: {formatResetPeriod(item.reset_period)}</div>
+              {item.next_reset_time > 0 && (
+                <div>{t('下次刷新')}: {formatDate(item.next_reset_time)}</div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+      {items.length === 0 && (
+        <div style={{ fontSize: 11 }}>
+          {t('套餐额度')}: {renderQuota(remaining)} / {renderQuota(total)}
+        </div>
+      )}
+    </div>
+  );
+
   return (
-    <Tooltip
-      content={`${t('套餐额度')}: ${renderQuota(remaining)} / ${renderQuota(total)}`}
-      position='top'
-    >
-      <Tag color='white' shape='circle'>
-        {`${renderQuota(remaining)} / ${renderQuota(total)}`}
+    <Tooltip content={tooltipContent} position='top'>
+      <Tag color='white' shape='circle' style={{ cursor: 'default' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+          <span style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+            {renderQuota(remaining)} / {renderQuota(total)}
+          </span>
+          <div
+            style={{
+              width: '100%',
+              height: 3,
+              borderRadius: 2,
+              background: 'rgba(0,0,0,0.12)',
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                width: `${pct}%`,
+                height: '100%',
+                borderRadius: 2,
+                background: barColor,
+                transition: 'width 0.3s ease',
+              }}
+            />
+          </div>
+        </div>
       </Tag>
     </Tooltip>
   );

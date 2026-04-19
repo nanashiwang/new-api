@@ -59,9 +59,10 @@ type User struct {
 	HasActiveSubscription            bool  `json:"has_active_subscription" gorm:"-"`
 	ActiveSubscriptionCount          int   `json:"active_subscription_count" gorm:"-"`
 	PendingSubscriptionIssuanceCount int   `json:"pending_subscription_issuance_count" gorm:"-"`
-	SubscriptionQuotaRemaining       int64 `json:"subscription_quota_remaining" gorm:"-"`
-	SubscriptionQuotaTotal           int64 `json:"subscription_quota_total" gorm:"-"`
-	SubscriptionQuotaHasUnlimited    bool  `json:"subscription_quota_has_unlimited" gorm:"-"`
+	SubscriptionQuotaRemaining       int64                    `json:"subscription_quota_remaining" gorm:"-"`
+	SubscriptionQuotaTotal           int64                    `json:"subscription_quota_total" gorm:"-"`
+	SubscriptionQuotaHasUnlimited    bool                     `json:"subscription_quota_has_unlimited" gorm:"-"`
+	SubscriptionQuotaItems           []SubscriptionQuotaItem  `json:"subscription_quota_items,omitempty" gorm:"-"`
 	// 可售令牌元数据（仅用于用户管理列表响应，不落库）
 	HasSellableToken             bool `json:"has_sellable_token" gorm:"-"`
 	ActiveSellableTokenCount     int  `json:"active_sellable_token_count" gorm:"-"`
@@ -336,6 +337,16 @@ type subscriptionQuotaSummary struct {
 	HasUnlimited bool
 }
 
+// SubscriptionQuotaItem 是单条生效套餐的额度快照，用于用户管理列表的悬停详情。
+type SubscriptionQuotaItem struct {
+	PlanTitle     string `json:"plan_title"`
+	Remaining     int64  `json:"remaining"`
+	Total         int64  `json:"total"`
+	HasUnlimited  bool   `json:"has_unlimited"`
+	NextResetTime int64  `json:"next_reset_time"`
+	ResetPeriod   string `json:"reset_period"`
+}
+
 func SearchUsers(keyword string, group string, startIdx int, num int) ([]*User, int64, error) {
 	return SearchUsersWithParams(UserSearchParams{
 		Keyword:   keyword,
@@ -598,6 +609,7 @@ func AttachUserSubscriptionMetadata(tx *gorm.DB, users []*User) error {
 	seenPlanIDs := make(map[int]struct{}, len(activeSubscriptions))
 	countByUserID := make(map[int]int, len(activeSubscriptions))
 	quotaSummaryByUserID := make(map[int]subscriptionQuotaSummary, len(activeSubscriptions))
+	itemsByUserID := make(map[int][]SubscriptionQuotaItem, len(activeSubscriptions))
 	for _, sub := range activeSubscriptions {
 		countByUserID[sub.UserId]++
 		if sub.PlanId > 0 {
@@ -625,7 +637,25 @@ func AttachUserSubscriptionMetadata(tx *gorm.DB, users []*User) error {
 	}
 	for _, sub := range activeSubscriptions {
 		summary := quotaSummaryByUserID[sub.UserId]
-		remaining, total, hasUnlimited := projectUserSubscriptionQuotaSnapshot(&sub, planByID[sub.PlanId], now)
+		plan := planByID[sub.PlanId]
+		remaining, total, hasUnlimited := projectUserSubscriptionQuotaSnapshot(&sub, plan, now)
+
+		planTitle := ""
+		resetPeriod := "never"
+		if plan != nil {
+			planTitle = plan.Title
+			resetPeriod = plan.QuotaResetPeriod
+		}
+		item := SubscriptionQuotaItem{
+			PlanTitle:     planTitle,
+			Remaining:     remaining,
+			Total:         total,
+			HasUnlimited:  hasUnlimited,
+			NextResetTime: sub.NextResetTime,
+			ResetPeriod:   resetPeriod,
+		}
+		itemsByUserID[sub.UserId] = append(itemsByUserID[sub.UserId], item)
+
 		if hasUnlimited {
 			summary.HasUnlimited = true
 			summary.Remaining = 0
@@ -651,6 +681,7 @@ func AttachUserSubscriptionMetadata(tx *gorm.DB, users []*User) error {
 		user.SubscriptionQuotaRemaining = quotaSummary.Remaining
 		user.SubscriptionQuotaTotal = quotaSummary.Total
 		user.SubscriptionQuotaHasUnlimited = quotaSummary.HasUnlimited
+		user.SubscriptionQuotaItems = itemsByUserID[user.Id]
 	}
 	return nil
 }
