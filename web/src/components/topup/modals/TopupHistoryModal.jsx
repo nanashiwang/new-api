@@ -127,7 +127,6 @@ const DASHBOARD_PRESET_OPTIONS = [
   { key: 'today', label: '今天' },
   { key: 'week', label: '近7天' },
   { key: 'month', label: '近30天' },
-  { key: 'custom', label: '自定义' },
 ];
 
 const DASHBOARD_RANK_LIMIT_OPTIONS = [
