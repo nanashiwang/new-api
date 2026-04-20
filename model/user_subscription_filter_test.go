@@ -158,7 +158,7 @@ func TestGetAllUsers_AttachesActiveSubscriptionMetadata(t *testing.T) {
 		Page:     1,
 		PageSize: 20,
 	}
-	users, total, err := GetAllUsers(pageInfo, "id", "asc", "", "")
+	users, total, err := GetAllUsers(pageInfo, "id", "asc", "", "", "")
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, total)
 
@@ -266,7 +266,7 @@ func TestGetAllUsers_AggregatesSubscriptionQuotaWithResetAwareView(t *testing.T)
 		Page:     1,
 		PageSize: 20,
 	}
-	users, total, err := GetAllUsers(pageInfo, "id", "asc", "", "")
+	users, total, err := GetAllUsers(pageInfo, "id", "asc", "", "", "")
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, users, 1)
@@ -287,7 +287,7 @@ func TestGetAllUsers_AggregatesSubscriptionQuotaWithResetAwareView(t *testing.T)
 		0,
 	)
 
-	users, total, err = GetAllUsers(pageInfo, "id", "asc", "", "")
+	users, total, err = GetAllUsers(pageInfo, "id", "asc", "", "", "")
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, users, 1)

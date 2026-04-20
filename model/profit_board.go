@@ -670,7 +670,7 @@ func getProfitBoardOverviewCache() *cachex.HybridCache[ProfitBoardReport] {
 	profitBoardOverviewCacheOnce.Do(func() {
 		ttl := profitBoardReportCacheTTL()
 		profitBoardOverviewCache = cachex.NewHybridCache[ProfitBoardReport](cachex.HybridCacheConfig[ProfitBoardReport]{
-			Namespace: cachex.Namespace("profit_board_overview:v1"),
+			Namespace: cachex.Namespace("profit_board_overview:v2"),
 			Redis:     common.RDB,
 			RedisEnabled: func() bool {
 				return common.RedisEnabled && common.RDB != nil
@@ -691,7 +691,7 @@ func getProfitBoardOverviewStaleCache() *cachex.HybridCache[ProfitBoardReport] {
 	profitBoardOverviewStaleCacheOnce.Do(func() {
 		staleTTL := 10 * time.Minute
 		profitBoardOverviewStaleCache = cachex.NewHybridCache[ProfitBoardReport](cachex.HybridCacheConfig[ProfitBoardReport]{
-			Namespace: cachex.Namespace("profit_board_overview_stale:v1"),
+			Namespace: cachex.Namespace("profit_board_overview_stale:v2"),
 			Redis:     common.RDB,
 			RedisEnabled: func() bool {
 				return common.RedisEnabled && common.RDB != nil
@@ -3381,6 +3381,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 			comboIDs,
 			normalizedQuery.Granularity,
 			normalizedQuery.CustomIntervalMinutes,
+			false,
 		)
 	}
 	for index := range report.BatchSummaries {
@@ -3827,6 +3828,7 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 			comboIDs,
 			"day",
 			0,
+			true,
 		)
 	}
 	applyProfitBoardComboFixedTotals(

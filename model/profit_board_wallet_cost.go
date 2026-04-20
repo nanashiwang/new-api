@@ -30,7 +30,33 @@ func profitBoardWalletObserverCombosByAccount(comboPricingMap map[string]profitB
 	return accountCombos
 }
 
-func applyProfitBoardObservedWalletCost(report *ProfitBoardReport, aggregate *profitBoardUpstreamAccountObservedAggregate, comboPricingMap map[string]profitBoardResolvedComboPricing, batches []ProfitBoardBatchInfo, comboIDs []string, granularity string, customIntervalMinutes int) {
+func applyWalletCostToBatchSummary(summary *ProfitBoardBatchSummary, shareUSD float64, shareCNY float64) {
+	summary.RemoteObservedCostUSD += shareUSD
+	summary.UpstreamCostUSD += shareUSD
+	summary.UpstreamCostCNY += shareCNY
+	summary.ConfiguredProfitUSD -= shareUSD
+	summary.ConfiguredProfitCNY -= shareCNY
+	summary.ActualProfitUSD -= shareUSD
+}
+
+func applyWalletCostToTimeseriesPoint(point *ProfitBoardTimeseriesPoint, shareUSD float64, shareCNY float64) {
+	point.RemoteObservedCostUSD += shareUSD
+	point.UpstreamCostUSD += shareUSD
+	point.UpstreamCostCNY += shareCNY
+	point.ConfiguredProfitUSD -= shareUSD
+	point.ConfiguredProfitCNY -= shareCNY
+	point.ActualProfitUSD -= shareUSD
+}
+
+func applyWalletCostToBreakdownItem(item *ProfitBoardBreakdownItem, shareUSD float64, shareCNY float64) {
+	item.UpstreamCostUSD += shareUSD
+	item.UpstreamCostCNY += shareCNY
+	item.ConfiguredProfitUSD -= shareUSD
+	item.ConfiguredProfitCNY -= shareCNY
+	item.ActualProfitUSD -= shareUSD
+}
+
+func applyProfitBoardObservedWalletCost(report *ProfitBoardReport, aggregate *profitBoardUpstreamAccountObservedAggregate, comboPricingMap map[string]profitBoardResolvedComboPricing, batches []ProfitBoardBatchInfo, comboIDs []string, granularity string, customIntervalMinutes int, cumulative bool) {
 	if report == nil || aggregate == nil {
 		return
 	}
@@ -60,6 +86,15 @@ func applyProfitBoardObservedWalletCost(report *ProfitBoardReport, aggregate *pr
 		return
 	}
 
+	if cumulative {
+		applyProfitBoardObservedWalletCostCumulative(report, aggregate, comboPricingMap, comboIDSet)
+		return
+	}
+
+	applyProfitBoardObservedWalletCostPerBucket(report, aggregate, comboPricingMap, comboIDSet, granularity, customIntervalMinutes)
+}
+
+func applyProfitBoardObservedWalletCostPerBucket(report *ProfitBoardReport, aggregate *profitBoardUpstreamAccountObservedAggregate, comboPricingMap map[string]profitBoardResolvedComboPricing, comboIDSet map[string]ProfitBoardBatchInfo, granularity string, customIntervalMinutes int) {
 	appliedTotalCostUSD := 0.0
 	appliedTotalCostCNY := 0.0
 	for _, observedPoint := range aggregate.Points {
@@ -102,24 +137,14 @@ func applyProfitBoardObservedWalletCost(report *ProfitBoardReport, aggregate *pr
 				appliedTotalCostCNY += shareCNY
 
 				point := getOrCreateProfitBoardTimeseriesPoint(report, batchID, batch.Name, bucketTimestamp, bucketLabel)
-				point.RemoteObservedCostUSD += shareUSD
-				point.UpstreamCostUSD += shareUSD
-				point.UpstreamCostCNY += shareCNY
-				point.ConfiguredProfitUSD -= shareUSD
-				point.ConfiguredProfitCNY -= shareCNY
-				point.ActualProfitUSD -= shareUSD
+				applyWalletCostToTimeseriesPoint(point, shareUSD, shareCNY)
 
 				for index := range report.BatchSummaries {
 					summary := &report.BatchSummaries[index]
 					if summary.BatchId != batchID {
 						continue
 					}
-					summary.RemoteObservedCostUSD += shareUSD
-					summary.UpstreamCostUSD += shareUSD
-					summary.UpstreamCostCNY += shareCNY
-					summary.ConfiguredProfitUSD -= shareUSD
-					summary.ConfiguredProfitCNY -= shareCNY
-					summary.ActualProfitUSD -= shareUSD
+					applyWalletCostToBatchSummary(summary, shareUSD, shareCNY)
 					break
 				}
 			}
@@ -135,12 +160,7 @@ func applyProfitBoardObservedWalletCost(report *ProfitBoardReport, aggregate *pr
 			}
 			share := profitBoardFixedAllocationShare(observedPoint.CostUSD, totalBucketRequests, requests)
 			shareCNY := profitBoardConfiguredUpstreamCostCNY(share, comboPricingMap[summary.BatchId])
-			summary.RemoteObservedCostUSD += share
-			summary.UpstreamCostUSD += share
-			summary.UpstreamCostCNY += shareCNY
-			summary.ConfiguredProfitUSD -= share
-			summary.ConfiguredProfitCNY -= shareCNY
-			summary.ActualProfitUSD -= share
+			applyWalletCostToBatchSummary(summary, share, shareCNY)
 			appliedTotalCostCNY += shareCNY
 		}
 
@@ -152,12 +172,7 @@ func applyProfitBoardObservedWalletCost(report *ProfitBoardReport, aggregate *pr
 			}
 			share := profitBoardFixedAllocationShare(observedPoint.CostUSD, totalBucketRequests, point.RequestCount)
 			shareCNY := profitBoardConfiguredUpstreamCostCNY(share, comboPricingMap[point.BatchId])
-			point.RemoteObservedCostUSD += share
-			point.UpstreamCostUSD += share
-			point.UpstreamCostCNY += shareCNY
-			point.ConfiguredProfitUSD -= share
-			point.ConfiguredProfitCNY -= shareCNY
-			point.ActualProfitUSD -= share
+			applyWalletCostToTimeseriesPoint(point, share, shareCNY)
 		}
 
 		for _, batchID := range activeBatchIDs {
@@ -176,11 +191,7 @@ func applyProfitBoardObservedWalletCost(report *ProfitBoardReport, aggregate *pr
 			}
 			share := profitBoardFixedAllocationShare(observedPoint.CostUSD, totalBucketRequests, item.RequestCount)
 			shareCNY := profitBoardConfiguredUpstreamCostCNY(share, comboPricingMap[item.BatchId])
-			item.UpstreamCostUSD += share
-			item.UpstreamCostCNY += shareCNY
-			item.ConfiguredProfitUSD -= share
-			item.ConfiguredProfitCNY -= shareCNY
-			item.ActualProfitUSD -= share
+			applyWalletCostToBreakdownItem(item, share, shareCNY)
 		}
 		for index := range report.ModelBreakdown {
 			item := &report.ModelBreakdown[index]
@@ -190,11 +201,7 @@ func applyProfitBoardObservedWalletCost(report *ProfitBoardReport, aggregate *pr
 			}
 			share := profitBoardFixedAllocationShare(observedPoint.CostUSD, totalBucketRequests, item.RequestCount)
 			shareCNY := profitBoardConfiguredUpstreamCostCNY(share, comboPricingMap[item.BatchId])
-			item.UpstreamCostUSD += share
-			item.UpstreamCostCNY += shareCNY
-			item.ConfiguredProfitUSD -= share
-			item.ConfiguredProfitCNY -= shareCNY
-			item.ActualProfitUSD -= share
+			applyWalletCostToBreakdownItem(item, share, shareCNY)
 		}
 	}
 	report.Summary.RemoteObservedCostUSD += appliedTotalCostUSD
@@ -203,4 +210,105 @@ func applyProfitBoardObservedWalletCost(report *ProfitBoardReport, aggregate *pr
 	report.Summary.ConfiguredProfitUSD -= appliedTotalCostUSD
 	report.Summary.ConfiguredProfitCNY -= appliedTotalCostCNY
 	report.Summary.ActualProfitUSD -= appliedTotalCostUSD
+}
+
+// applyProfitBoardObservedWalletCostCumulative 按累计窗口按组合请求量加权分摊钱包观测成本。
+// 累计总览下快照 SyncedAt 通常只落在少数日期，若按桶分摊会让大多数有请求的组合分不到成本。
+// 这里改为：对每个观测点，取其 SyncedAt 时刻仍有效的组合（尊重 CreatedAt），按各组合整窗请求数加权分摊。
+func applyProfitBoardObservedWalletCostCumulative(report *ProfitBoardReport, aggregate *profitBoardUpstreamAccountObservedAggregate, comboPricingMap map[string]profitBoardResolvedComboPricing, comboIDSet map[string]ProfitBoardBatchInfo) {
+	batchRequests := make(map[string]int, len(comboIDSet))
+	for index := range report.BatchSummaries {
+		summary := &report.BatchSummaries[index]
+		if _, ok := comboIDSet[summary.BatchId]; !ok {
+			continue
+		}
+		batchRequests[summary.BatchId] = summary.RequestCount
+	}
+
+	appliedTotalCostUSD := 0.0
+	appliedTotalCostCNY := 0.0
+	for _, observedPoint := range aggregate.Points {
+		if observedPoint.CostUSD <= 0 {
+			continue
+		}
+		activeBatchIDs := make([]string, 0, len(comboIDSet))
+		activeTotalRequests := 0
+		for comboID, batch := range comboIDSet {
+			if batch.CreatedAt > 0 && observedPoint.SyncedAt < batch.CreatedAt {
+				continue
+			}
+			activeBatchIDs = append(activeBatchIDs, comboID)
+			activeTotalRequests += batchRequests[comboID]
+		}
+		if len(activeBatchIDs) == 0 {
+			continue
+		}
+
+		appliedTotalCostUSD += observedPoint.CostUSD
+
+		if activeTotalRequests <= 0 {
+			// 所有活跃组合均无请求，退回按组合数均分，沿用 per-bucket 路径的 fallback 口径。
+			activeCount := len(activeBatchIDs)
+			shareUSD := observedPoint.CostUSD / float64(activeCount)
+			for _, batchID := range activeBatchIDs {
+				shareCNY := profitBoardConfiguredUpstreamCostCNY(shareUSD, comboPricingMap[batchID])
+				appliedTotalCostCNY += shareCNY
+				applyWalletCostCumulativeToReport(report, batchID, shareUSD, shareCNY, batchRequests[batchID])
+			}
+			continue
+		}
+
+		for _, batchID := range activeBatchIDs {
+			requests := batchRequests[batchID]
+			if requests <= 0 {
+				continue
+			}
+			share := profitBoardFixedAllocationShare(observedPoint.CostUSD, activeTotalRequests, requests)
+			if share == 0 {
+				continue
+			}
+			shareCNY := profitBoardConfiguredUpstreamCostCNY(share, comboPricingMap[batchID])
+			appliedTotalCostCNY += shareCNY
+			applyWalletCostCumulativeToReport(report, batchID, share, shareCNY, requests)
+		}
+	}
+
+	report.Summary.RemoteObservedCostUSD += appliedTotalCostUSD
+	report.Summary.UpstreamCostUSD += appliedTotalCostUSD
+	report.Summary.UpstreamCostCNY += appliedTotalCostCNY
+	report.Summary.ConfiguredProfitUSD -= appliedTotalCostUSD
+	report.Summary.ConfiguredProfitCNY -= appliedTotalCostCNY
+	report.Summary.ActualProfitUSD -= appliedTotalCostUSD
+}
+
+func applyWalletCostCumulativeToReport(report *ProfitBoardReport, batchID string, shareUSD float64, shareCNY float64, batchTotalRequests int) {
+	for index := range report.BatchSummaries {
+		summary := &report.BatchSummaries[index]
+		if summary.BatchId != batchID {
+			continue
+		}
+		applyWalletCostToBatchSummary(summary, shareUSD, shareCNY)
+		break
+	}
+	if batchTotalRequests <= 0 {
+		return
+	}
+	for index := range report.ChannelBreakdown {
+		item := &report.ChannelBreakdown[index]
+		if item.BatchId != batchID || item.RequestCount <= 0 {
+			continue
+		}
+		itemShareUSD := profitBoardFixedAllocationShare(shareUSD, batchTotalRequests, item.RequestCount)
+		itemShareCNY := profitBoardFixedAllocationShare(shareCNY, batchTotalRequests, item.RequestCount)
+		applyWalletCostToBreakdownItem(item, itemShareUSD, itemShareCNY)
+	}
+	for index := range report.ModelBreakdown {
+		item := &report.ModelBreakdown[index]
+		if item.BatchId != batchID || item.RequestCount <= 0 {
+			continue
+		}
+		itemShareUSD := profitBoardFixedAllocationShare(shareUSD, batchTotalRequests, item.RequestCount)
+		itemShareCNY := profitBoardFixedAllocationShare(shareCNY, batchTotalRequests, item.RequestCount)
+		applyWalletCostToBreakdownItem(item, itemShareUSD, itemShareCNY)
+	}
 }

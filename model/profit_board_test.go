@@ -2903,8 +2903,8 @@ func TestProfitBoardReportCombinesAggregateAndRawWhileBackfillPending(t *testing
 			SiteRules:     []ProfitBoardModelPricingRule{{IsDefault: true, InputPrice: 5, OutputPrice: 8}},
 			UpstreamRules: []ProfitBoardModelPricingRule{{IsDefault: true, InputPrice: 2, OutputPrice: 4}},
 		}},
-		Upstream: ProfitBoardTokenPricingConfig{CostSource: ProfitBoardCostSourceReturnedFirst},
-		Site:     ProfitBoardTokenPricingConfig{PricingMode: ProfitBoardSitePricingManual},
+		Upstream:       ProfitBoardTokenPricingConfig{CostSource: ProfitBoardCostSourceReturnedFirst},
+		Site:           ProfitBoardTokenPricingConfig{PricingMode: ProfitBoardSitePricingManual},
 		StartTimestamp: now - 7200,
 		EndTimestamp:   now,
 		Granularity:    "hour",
@@ -2983,5 +2983,300 @@ func TestSyncProfitBoardAggregateLiveToLatestUpdatesCursor(t *testing.T) {
 	}
 	if updatedState.LiveCursorLogID != 2 {
 		t.Fatalf("unexpected updated live cursor: got=%d want=2", updatedState.LiveCursorLogID)
+	}
+}
+
+// TestProfitBoardOverviewWalletCostDistributesAcrossAllDaysWhenSnapshotsAreSparse
+// 回归：累计总览下，快照集中在单日、不同组合的请求分散在不同日时，所有有请求的组合都应获得非零上游费用，
+// 按组合整窗请求数比例分摊。修复前按快照当天桶分配，会导致"请求不落在快照日"的组合分到 0。
+func TestProfitBoardOverviewWalletCostDistributesAcrossAllDaysWhenSnapshotsAreSparse(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	originQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 1000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originQuotaPerUnit
+	})
+
+	channels := []Channel{
+		{Id: 1, Name: "alpha", Status: common.ChannelStatusEnabled},
+		{Id: 2, Name: "beta", Status: common.ChannelStatusEnabled},
+	}
+	for _, channel := range channels {
+		if err := db.Create(&channel).Error; err != nil {
+			t.Fatalf("seed channel: %v", err)
+		}
+	}
+
+	now := common.GetTimestamp()
+	daySeconds := int64(86400)
+	account := ProfitBoardUpstreamAccount{
+		Name:        "共享钱包账户",
+		AccountType: ProfitBoardUpstreamAccountTypeNewAPI,
+		BaseURL:     "https://remote.example.com",
+		UserID:      9,
+		Enabled:     true,
+		CreatedAt:   now - 10*daySeconds,
+		UpdatedAt:   now - 10*daySeconds,
+	}
+	encryptedToken, err := encryptProfitBoardRemoteSecret("wallet-token")
+	if err != nil {
+		t.Fatalf("encrypt token: %v", err)
+	}
+	account.AccessTokenEncrypted = encryptedToken
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatalf("create wallet account: %v", err)
+	}
+
+	config := account.remoteObserverConfig()
+	signature := profitBoardUpstreamAccountSnapshotSignature(account.Id)
+	// 三个快照都落在"今天"这一天，形成两段 delta，各 0.1 USD，总观测成本 0.2 USD。
+	seedProfitBoardRemoteSnapshot(t, signature, profitBoardUpstreamAccountSnapshotComboID, config, now-240, 1000, 0, nil)
+	seedProfitBoardRemoteSnapshot(t, signature, profitBoardUpstreamAccountSnapshotComboID, config, now-180, 900, 100, nil)
+	seedProfitBoardRemoteSnapshot(t, signature, profitBoardUpstreamAccountSnapshotComboID, config, now-60, 800, 200, nil)
+
+	// 组合 A 的请求分布在 7 天前，组合 B 的请求分布在 3 天前——都远离快照日。
+	// 修复前：两者都落不进快照当天桶 → 按组合数均分（各 0.1）。
+	// 修复后：按请求数加权分摊（A=2 请求 → 0.2 * 2/5 = 0.08；B=3 请求 → 0.2 * 3/5 = 0.12）。
+	logs := []Log{
+		{Id: 1, Type: LogTypeConsume, CreatedAt: now - 7*daySeconds, ChannelId: 1, ModelName: "gpt-4.1", PromptTokens: 1000, CompletionTokens: 0, Quota: 5},
+		{Id: 2, Type: LogTypeConsume, CreatedAt: now - 7*daySeconds + 60, ChannelId: 1, ModelName: "gpt-4.1", PromptTokens: 1000, CompletionTokens: 0, Quota: 5},
+		{Id: 3, Type: LogTypeConsume, CreatedAt: now - 3*daySeconds, ChannelId: 2, ModelName: "gpt-4.1", PromptTokens: 1000, CompletionTokens: 0, Quota: 5},
+		{Id: 4, Type: LogTypeConsume, CreatedAt: now - 3*daySeconds + 60, ChannelId: 2, ModelName: "gpt-4.1", PromptTokens: 1000, CompletionTokens: 0, Quota: 5},
+		{Id: 5, Type: LogTypeConsume, CreatedAt: now - 3*daySeconds + 120, ChannelId: 2, ModelName: "gpt-4.1", PromptTokens: 1000, CompletionTokens: 0, Quota: 5},
+	}
+	for _, logRow := range logs {
+		if err := db.Create(&logRow).Error; err != nil {
+			t.Fatalf("seed log: %v", err)
+		}
+	}
+
+	overview, err := GenerateProfitBoardOverview(ProfitBoardConfigPayload{
+		Batches: []ProfitBoardBatch{
+			{Id: "wallet-a", Name: "钱包组合 A", ScopeType: ProfitBoardScopeChannel, ChannelIDs: []int{1}, CreatedAt: now - 10*daySeconds},
+			{Id: "wallet-b", Name: "钱包组合 B", ScopeType: ProfitBoardScopeChannel, ChannelIDs: []int{2}, CreatedAt: now - 10*daySeconds},
+		},
+		ComboConfigs: []ProfitBoardComboPricingConfig{
+			{
+				ComboId:           "wallet-a",
+				UpstreamMode:      ProfitBoardUpstreamModeWallet,
+				UpstreamAccountID: account.Id,
+				SiteRules:         []ProfitBoardModelPricingRule{{IsDefault: true, InputPrice: 5}},
+			},
+			{
+				ComboId:           "wallet-b",
+				UpstreamMode:      ProfitBoardUpstreamModeWallet,
+				UpstreamAccountID: account.Id,
+				SiteRules:         []ProfitBoardModelPricingRule{{IsDefault: true, InputPrice: 5}},
+			},
+		},
+		Upstream: ProfitBoardTokenPricingConfig{CostSource: ProfitBoardCostSourceManualOnly},
+		Site:     ProfitBoardTokenPricingConfig{PricingMode: ProfitBoardSitePricingManual},
+	})
+	if err != nil {
+		t.Fatalf("GenerateProfitBoardOverview: %v", err)
+	}
+
+	// 总成本不变：0.1 + 0.1 = 0.2
+	if math.Abs(overview.Summary.UpstreamCostUSD-0.2) > 1e-6 {
+		t.Fatalf("unexpected overview summary upstream cost: got %.6f want 0.2; summary=%+v", overview.Summary.UpstreamCostUSD, overview.Summary)
+	}
+
+	batchCosts := map[string]float64{}
+	for _, summary := range overview.BatchSummaries {
+		batchCosts[summary.BatchId] = summary.UpstreamCostUSD
+	}
+	if len(batchCosts) != 2 {
+		t.Fatalf("unexpected batch summaries count: %+v", overview.BatchSummaries)
+	}
+	// A 有 2 请求、B 有 3 请求，按请求数加权：A=0.08、B=0.12。
+	if math.Abs(batchCosts["wallet-a"]-0.08) > 1e-6 {
+		t.Fatalf("wallet-a should receive proportional cost, got %.6f want 0.08; batches=%+v", batchCosts["wallet-a"], overview.BatchSummaries)
+	}
+	if math.Abs(batchCosts["wallet-b"]-0.12) > 1e-6 {
+		t.Fatalf("wallet-b should receive proportional cost, got %.6f want 0.12; batches=%+v", batchCosts["wallet-b"], overview.BatchSummaries)
+	}
+	// 关键断言：两个组合的 upstream cost 都 > 0（修复前 B 会是 0，因为请求没落在快照日）。
+	if batchCosts["wallet-a"] <= 0 || batchCosts["wallet-b"] <= 0 {
+		t.Fatalf("both wallet combos should receive non-zero cost, got %+v", batchCosts)
+	}
+}
+
+// TestProfitBoardOverviewWalletCostRespectsBatchCreatedAtInCumulativeMode 确认累计模式下晚创建的组合不会吃早快照的份额。
+func TestProfitBoardOverviewWalletCostRespectsBatchCreatedAtInCumulativeMode(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	originQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 1000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originQuotaPerUnit
+	})
+
+	channels := []Channel{
+		{Id: 1, Name: "alpha", Status: common.ChannelStatusEnabled},
+		{Id: 2, Name: "beta", Status: common.ChannelStatusEnabled},
+	}
+	for _, channel := range channels {
+		if err := db.Create(&channel).Error; err != nil {
+			t.Fatalf("seed channel: %v", err)
+		}
+	}
+
+	now := common.GetTimestamp()
+	daySeconds := int64(86400)
+	account := ProfitBoardUpstreamAccount{
+		Name:        "账户",
+		AccountType: ProfitBoardUpstreamAccountTypeNewAPI,
+		BaseURL:     "https://remote.example.com",
+		UserID:      9,
+		Enabled:     true,
+		CreatedAt:   now - 30*daySeconds,
+		UpdatedAt:   now - 30*daySeconds,
+	}
+	encryptedToken, err := encryptProfitBoardRemoteSecret("wallet-token")
+	if err != nil {
+		t.Fatalf("encrypt token: %v", err)
+	}
+	account.AccessTokenEncrypted = encryptedToken
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatalf("create wallet account: %v", err)
+	}
+
+	config := account.remoteObserverConfig()
+	signature := profitBoardUpstreamAccountSnapshotSignature(account.Id)
+	// 第一组快照（早期，只有 early 组合在时）：0.1 USD。
+	seedProfitBoardRemoteSnapshot(t, signature, profitBoardUpstreamAccountSnapshotComboID, config, now-20*daySeconds, 900, 100, nil)
+	seedProfitBoardRemoteSnapshot(t, signature, profitBoardUpstreamAccountSnapshotComboID, config, now-20*daySeconds+1800, 800, 200, nil)
+	// 中间基线不增加 used quota，确保跨阶段不会额外多算一段 delta。
+	seedProfitBoardRemoteSnapshot(t, signature, profitBoardUpstreamAccountSnapshotComboID, config, now-120, 700, 200, nil)
+	// 第二组快照（晚期，两个组合都在）：再产生 0.1 USD。
+	seedProfitBoardRemoteSnapshot(t, signature, profitBoardUpstreamAccountSnapshotComboID, config, now-60, 600, 300, nil)
+
+	// early 组合：从 25 天前开始；late 组合：从 5 天前才开始。两个组合各有 1 条日志。
+	logs := []Log{
+		{Id: 1, Type: LogTypeConsume, CreatedAt: now - 15*daySeconds, ChannelId: 1, ModelName: "gpt-4.1", PromptTokens: 1000, CompletionTokens: 0, Quota: 5},
+		{Id: 2, Type: LogTypeConsume, CreatedAt: now - 1*daySeconds, ChannelId: 2, ModelName: "gpt-4.1", PromptTokens: 1000, CompletionTokens: 0, Quota: 5},
+	}
+	for _, logRow := range logs {
+		if err := db.Create(&logRow).Error; err != nil {
+			t.Fatalf("seed log: %v", err)
+		}
+	}
+
+	overview, err := GenerateProfitBoardOverview(ProfitBoardConfigPayload{
+		Batches: []ProfitBoardBatch{
+			{Id: "early", Name: "早期组合", ScopeType: ProfitBoardScopeChannel, ChannelIDs: []int{1}, CreatedAt: now - 25*daySeconds},
+			{Id: "late", Name: "晚期组合", ScopeType: ProfitBoardScopeChannel, ChannelIDs: []int{2}, CreatedAt: now - 5*daySeconds},
+		},
+		ComboConfigs: []ProfitBoardComboPricingConfig{
+			{ComboId: "early", UpstreamMode: ProfitBoardUpstreamModeWallet, UpstreamAccountID: account.Id, SiteRules: []ProfitBoardModelPricingRule{{IsDefault: true, InputPrice: 5}}},
+			{ComboId: "late", UpstreamMode: ProfitBoardUpstreamModeWallet, UpstreamAccountID: account.Id, SiteRules: []ProfitBoardModelPricingRule{{IsDefault: true, InputPrice: 5}}},
+		},
+		Upstream: ProfitBoardTokenPricingConfig{CostSource: ProfitBoardCostSourceManualOnly},
+		Site:     ProfitBoardTokenPricingConfig{PricingMode: ProfitBoardSitePricingManual},
+	})
+	if err != nil {
+		t.Fatalf("GenerateProfitBoardOverview: %v", err)
+	}
+
+	batchCosts := map[string]float64{}
+	for _, summary := range overview.BatchSummaries {
+		batchCosts[summary.BatchId] = summary.UpstreamCostUSD
+	}
+	// early 组合在两段快照都有效；late 只在第二段有效（CreatedAt=now-5d，SyncedAt=now-20d 时 late 还未创建）。
+	// 第一段快照 0.1 USD 全归 early，第二段快照 0.1 USD 按请求数均分（两边各 1 条）：各 0.05。
+	// early 最终：0.1 + 0.05 = 0.15；late 最终：0.05。
+	if math.Abs(batchCosts["early"]-0.15) > 1e-6 {
+		t.Fatalf("early combo should get 0.15, got %.6f; batches=%+v", batchCosts["early"], overview.BatchSummaries)
+	}
+	if math.Abs(batchCosts["late"]-0.05) > 1e-6 {
+		t.Fatalf("late combo should get 0.05, got %.6f; batches=%+v", batchCosts["late"], overview.BatchSummaries)
+	}
+}
+
+// TestGenerateProfitBoardReportWalletCostKeepsPerBucketAllocation 确认时间范围查询（趋势路径）仍走按桶分配，Timeseries 不受累计模式影响。
+func TestGenerateProfitBoardReportWalletCostKeepsPerBucketAllocation(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	originQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 1000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originQuotaPerUnit
+	})
+
+	channel := Channel{Id: 1, Name: "alpha", Status: common.ChannelStatusEnabled}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+
+	now := common.GetTimestamp()
+	account := ProfitBoardUpstreamAccount{
+		Name:        "钱包账户",
+		AccountType: ProfitBoardUpstreamAccountTypeNewAPI,
+		BaseURL:     "https://remote.example.com",
+		UserID:      9,
+		Enabled:     true,
+		CreatedAt:   now - 300,
+		UpdatedAt:   now - 300,
+	}
+	encryptedToken, err := encryptProfitBoardRemoteSecret("wallet-token")
+	if err != nil {
+		t.Fatalf("encrypt token: %v", err)
+	}
+	account.AccessTokenEncrypted = encryptedToken
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatalf("create wallet account: %v", err)
+	}
+
+	config := account.remoteObserverConfig()
+	signature := profitBoardUpstreamAccountSnapshotSignature(account.Id)
+	seedProfitBoardRemoteSnapshot(t, signature, profitBoardUpstreamAccountSnapshotComboID, config, now-180, 900, 100, nil)
+	seedProfitBoardRemoteSnapshot(t, signature, profitBoardUpstreamAccountSnapshotComboID, config, now-60, 800, 200, nil)
+
+	logs := []Log{
+		{Id: 1, Type: LogTypeConsume, CreatedAt: now - 120, ChannelId: 1, ModelName: "gpt-4.1", PromptTokens: 1000, CompletionTokens: 0, Quota: 5},
+		{Id: 2, Type: LogTypeConsume, CreatedAt: now - 110, ChannelId: 1, ModelName: "gpt-4.1", PromptTokens: 1000, CompletionTokens: 0, Quota: 5},
+	}
+	for _, logRow := range logs {
+		if err := db.Create(&logRow).Error; err != nil {
+			t.Fatalf("seed log: %v", err)
+		}
+	}
+
+	report, err := GenerateProfitBoardReport(ProfitBoardQuery{
+		Batches: []ProfitBoardBatch{
+			{Id: "wallet-batch", Name: "钱包组合", ScopeType: ProfitBoardScopeChannel, ChannelIDs: []int{1}},
+		},
+		ComboConfigs: []ProfitBoardComboPricingConfig{
+			{
+				ComboId:           "wallet-batch",
+				UpstreamMode:      ProfitBoardUpstreamModeWallet,
+				UpstreamAccountID: account.Id,
+				SiteRules:         []ProfitBoardModelPricingRule{{IsDefault: true, InputPrice: 5}},
+			},
+		},
+		Upstream:       ProfitBoardTokenPricingConfig{CostSource: ProfitBoardCostSourceManualOnly},
+		Site:           ProfitBoardTokenPricingConfig{PricingMode: ProfitBoardSitePricingManual},
+		StartTimestamp: now - 200,
+		EndTimestamp:   now,
+		Granularity:    "day",
+	})
+	if err != nil {
+		t.Fatalf("GenerateProfitBoardReport: %v", err)
+	}
+
+	if math.Abs(report.Summary.UpstreamCostUSD-0.1) > 1e-6 {
+		t.Fatalf("trend path summary cost should remain 0.1, got %.6f; summary=%+v", report.Summary.UpstreamCostUSD, report.Summary)
+	}
+	// 趋势路径下 Timeseries 应该有带 UpstreamCostUSD 的点（按桶分配，非 nil/非全零）。
+	if len(report.Timeseries) == 0 {
+		t.Fatalf("trend path should keep Timeseries populated")
+	}
+	totalTimeseriesCost := 0.0
+	for _, point := range report.Timeseries {
+		totalTimeseriesCost += point.UpstreamCostUSD
+	}
+	if math.Abs(totalTimeseriesCost-0.1) > 1e-6 {
+		t.Fatalf("trend path Timeseries total should equal summary cost 0.1, got %.6f; timeseries=%+v", totalTimeseriesCost, report.Timeseries)
 	}
 }

@@ -21,32 +21,32 @@ const (
 )
 
 type ProfitBoardHourlyStat struct {
-	BucketStart                   int64   `json:"bucket_start" gorm:"bigint;uniqueIndex:idx_profit_board_hourly_stats_bucket_channel_model_user,priority:1;index:idx_profit_board_hourly_stats_channel_bucket,priority:2"`
-	ChannelId                     int     `json:"channel_id" gorm:"uniqueIndex:idx_profit_board_hourly_stats_bucket_channel_model_user,priority:2;index:idx_profit_board_hourly_stats_channel_bucket,priority:1"`
-	ModelName                     string  `json:"model_name" gorm:"type:varchar(255);uniqueIndex:idx_profit_board_hourly_stats_bucket_channel_model_user,priority:3"`
-	UserId                        int     `json:"user_id" gorm:"uniqueIndex:idx_profit_board_hourly_stats_bucket_channel_model_user,priority:4"`
-	RequestCount                  int     `json:"request_count" gorm:"default:0"`
-	QuotaSum                      int64   `json:"quota_sum" gorm:"bigint;default:0"`
-	InputTokensSum                int64   `json:"input_tokens_sum" gorm:"bigint;default:0"`
-	CompletionTokensSum           int64   `json:"completion_tokens_sum" gorm:"bigint;default:0"`
-	CacheReadTokensSum            int64   `json:"cache_read_tokens_sum" gorm:"bigint;default:0"`
-	CacheCreationTokensSum        int64   `json:"cache_creation_tokens_sum" gorm:"bigint;default:0"`
-	ReturnedRequestCount          int     `json:"returned_request_count" gorm:"default:0"`
-	ReturnedQuotaSum              int64   `json:"returned_quota_sum" gorm:"bigint;default:0"`
-	ReturnedInputTokensSum        int64   `json:"returned_input_tokens_sum" gorm:"bigint;default:0"`
-	ReturnedCompletionTokensSum   int64   `json:"returned_completion_tokens_sum" gorm:"bigint;default:0"`
-	ReturnedCacheReadTokensSum    int64   `json:"returned_cache_read_tokens_sum" gorm:"bigint;default:0"`
-	ReturnedCacheCreationTokensSum int64  `json:"returned_cache_creation_tokens_sum" gorm:"bigint;default:0"`
-	ReturnedCostSumUSD            float64 `json:"returned_cost_sum_usd" gorm:"default:0"`
+	BucketStart                    int64   `json:"bucket_start" gorm:"bigint;uniqueIndex:idx_profit_board_hourly_stats_bucket_channel_model_user,priority:1;index:idx_profit_board_hourly_stats_channel_bucket,priority:2"`
+	ChannelId                      int     `json:"channel_id" gorm:"uniqueIndex:idx_profit_board_hourly_stats_bucket_channel_model_user,priority:2;index:idx_profit_board_hourly_stats_channel_bucket,priority:1"`
+	ModelName                      string  `json:"model_name" gorm:"type:varchar(255);uniqueIndex:idx_profit_board_hourly_stats_bucket_channel_model_user,priority:3"`
+	UserId                         int     `json:"user_id" gorm:"uniqueIndex:idx_profit_board_hourly_stats_bucket_channel_model_user,priority:4"`
+	RequestCount                   int     `json:"request_count" gorm:"default:0"`
+	QuotaSum                       int64   `json:"quota_sum" gorm:"bigint;default:0"`
+	InputTokensSum                 int64   `json:"input_tokens_sum" gorm:"bigint;default:0"`
+	CompletionTokensSum            int64   `json:"completion_tokens_sum" gorm:"bigint;default:0"`
+	CacheReadTokensSum             int64   `json:"cache_read_tokens_sum" gorm:"bigint;default:0"`
+	CacheCreationTokensSum         int64   `json:"cache_creation_tokens_sum" gorm:"bigint;default:0"`
+	ReturnedRequestCount           int     `json:"returned_request_count" gorm:"default:0"`
+	ReturnedQuotaSum               int64   `json:"returned_quota_sum" gorm:"bigint;default:0"`
+	ReturnedInputTokensSum         int64   `json:"returned_input_tokens_sum" gorm:"bigint;default:0"`
+	ReturnedCompletionTokensSum    int64   `json:"returned_completion_tokens_sum" gorm:"bigint;default:0"`
+	ReturnedCacheReadTokensSum     int64   `json:"returned_cache_read_tokens_sum" gorm:"bigint;default:0"`
+	ReturnedCacheCreationTokensSum int64   `json:"returned_cache_creation_tokens_sum" gorm:"bigint;default:0"`
+	ReturnedCostSumUSD             float64 `json:"returned_cost_sum_usd" gorm:"default:0"`
 }
 
 type ProfitBoardAggregateState struct {
-	Key               string `json:"key" gorm:"primaryKey;type:varchar(32)"`
-	CutoverLogID      int    `json:"cutover_log_id" gorm:"default:0"`
-	LiveCursorLogID   int    `json:"live_cursor_log_id" gorm:"default:0"`
-	BackfillCursorLogID int  `json:"backfill_cursor_log_id" gorm:"default:0"`
-	BackfillDone      bool   `json:"backfill_done" gorm:"default:false"`
-	UpdatedAt         int64  `json:"updated_at" gorm:"bigint;default:0"`
+	Key                 string `json:"key" gorm:"primaryKey;type:varchar(32)"`
+	CutoverLogID        int    `json:"cutover_log_id" gorm:"default:0"`
+	LiveCursorLogID     int    `json:"live_cursor_log_id" gorm:"default:0"`
+	BackfillCursorLogID int    `json:"backfill_cursor_log_id" gorm:"default:0"`
+	BackfillDone        bool   `json:"backfill_done" gorm:"default:false"`
+	UpdatedAt           int64  `json:"updated_at" gorm:"bigint;default:0"`
 }
 
 type profitBoardAggregateLogRow struct {
@@ -62,25 +62,25 @@ type profitBoardAggregateLogRow struct {
 }
 
 type profitBoardUsageSegment struct {
-	CreatedAt                   int64
-	ChannelId                   int
-	UserId                      int
-	ModelName                   string
-	RequestCount                int
-	QuotaSum                    int64
-	InputTokensSum              int64
-	CompletionTokensSum         int64
-	CacheReadTokensSum          int64
-	CacheCreationTokensSum      int64
-	ReturnedRequestCount        int
-	ReturnedQuotaSum            int64
-	ReturnedInputTokensSum      int64
-	ReturnedCompletionTokensSum int64
-	ReturnedCacheReadTokensSum  int64
+	CreatedAt                      int64
+	ChannelId                      int
+	UserId                         int
+	ModelName                      string
+	RequestCount                   int
+	QuotaSum                       int64
+	InputTokensSum                 int64
+	CompletionTokensSum            int64
+	CacheReadTokensSum             int64
+	CacheCreationTokensSum         int64
+	ReturnedRequestCount           int
+	ReturnedQuotaSum               int64
+	ReturnedInputTokensSum         int64
+	ReturnedCompletionTokensSum    int64
+	ReturnedCacheReadTokensSum     int64
 	ReturnedCacheCreationTokensSum int64
-	ReturnedCostSumUSD          float64
-	LatestLogId                 int
-	LatestLogCreatedAt          int64
+	ReturnedCostSumUSD             float64
+	LatestLogId                    int
+	LatestLogCreatedAt             int64
 }
 
 type profitBoardUsageSlice struct {
@@ -208,11 +208,11 @@ func persistProfitBoardAggregateState(tx *gorm.DB, state *ProfitBoardAggregateSt
 	state.UpdatedAt = common.GetTimestamp()
 	return profitBoardAggregateStateByKeyQuery(tx.Model(&ProfitBoardAggregateState{}), state.Key).
 		Updates(map[string]any{
-			"cutover_log_id":        state.CutoverLogID,
-			"live_cursor_log_id":    state.LiveCursorLogID,
+			"cutover_log_id":         state.CutoverLogID,
+			"live_cursor_log_id":     state.LiveCursorLogID,
 			"backfill_cursor_log_id": state.BackfillCursorLogID,
-			"backfill_done":         state.BackfillDone,
-			"updated_at":            state.UpdatedAt,
+			"backfill_done":          state.BackfillDone,
+			"updated_at":             state.UpdatedAt,
 		}).Error
 }
 
@@ -335,19 +335,19 @@ func saveProfitBoardHourlyStats(tx *gorm.DB, stats map[string]*ProfitBoardHourly
 				current.UserId,
 			).
 			Updates(map[string]any{
-				"request_count":                    current.RequestCount,
-				"quota_sum":                        current.QuotaSum,
-				"input_tokens_sum":                 current.InputTokensSum,
-				"completion_tokens_sum":            current.CompletionTokensSum,
-				"cache_read_tokens_sum":            current.CacheReadTokensSum,
-				"cache_creation_tokens_sum":        current.CacheCreationTokensSum,
-				"returned_request_count":           current.ReturnedRequestCount,
-				"returned_quota_sum":               current.ReturnedQuotaSum,
-				"returned_input_tokens_sum":        current.ReturnedInputTokensSum,
-				"returned_completion_tokens_sum":   current.ReturnedCompletionTokensSum,
-				"returned_cache_read_tokens_sum":   current.ReturnedCacheReadTokensSum,
+				"request_count":                      current.RequestCount,
+				"quota_sum":                          current.QuotaSum,
+				"input_tokens_sum":                   current.InputTokensSum,
+				"completion_tokens_sum":              current.CompletionTokensSum,
+				"cache_read_tokens_sum":              current.CacheReadTokensSum,
+				"cache_creation_tokens_sum":          current.CacheCreationTokensSum,
+				"returned_request_count":             current.ReturnedRequestCount,
+				"returned_quota_sum":                 current.ReturnedQuotaSum,
+				"returned_input_tokens_sum":          current.ReturnedInputTokensSum,
+				"returned_completion_tokens_sum":     current.ReturnedCompletionTokensSum,
+				"returned_cache_read_tokens_sum":     current.ReturnedCacheReadTokensSum,
 				"returned_cache_creation_tokens_sum": current.ReturnedCacheCreationTokensSum,
-				"returned_cost_sum_usd":            current.ReturnedCostSumUSD,
+				"returned_cost_sum_usd":              current.ReturnedCostSumUSD,
 			}).Error; err != nil {
 			return err
 		}
@@ -667,23 +667,23 @@ func iterateProfitBoardAggregateSegments(query ProfitBoardQuery, batches []Profi
 		}
 		for _, stat := range stats {
 			segment := profitBoardUsageSegment{
-				CreatedAt:                   stat.BucketStart,
-				ChannelId:                   stat.ChannelId,
-				UserId:                      stat.UserId,
-				ModelName:                   stat.ModelName,
-				RequestCount:                stat.RequestCount,
-				QuotaSum:                    stat.QuotaSum,
-				InputTokensSum:              stat.InputTokensSum,
-				CompletionTokensSum:         stat.CompletionTokensSum,
-				CacheReadTokensSum:          stat.CacheReadTokensSum,
-				CacheCreationTokensSum:      stat.CacheCreationTokensSum,
-				ReturnedRequestCount:        stat.ReturnedRequestCount,
-				ReturnedQuotaSum:            stat.ReturnedQuotaSum,
-				ReturnedInputTokensSum:      stat.ReturnedInputTokensSum,
-				ReturnedCompletionTokensSum: stat.ReturnedCompletionTokensSum,
-				ReturnedCacheReadTokensSum:  stat.ReturnedCacheReadTokensSum,
+				CreatedAt:                      stat.BucketStart,
+				ChannelId:                      stat.ChannelId,
+				UserId:                         stat.UserId,
+				ModelName:                      stat.ModelName,
+				RequestCount:                   stat.RequestCount,
+				QuotaSum:                       stat.QuotaSum,
+				InputTokensSum:                 stat.InputTokensSum,
+				CompletionTokensSum:            stat.CompletionTokensSum,
+				CacheReadTokensSum:             stat.CacheReadTokensSum,
+				CacheCreationTokensSum:         stat.CacheCreationTokensSum,
+				ReturnedRequestCount:           stat.ReturnedRequestCount,
+				ReturnedQuotaSum:               stat.ReturnedQuotaSum,
+				ReturnedInputTokensSum:         stat.ReturnedInputTokensSum,
+				ReturnedCompletionTokensSum:    stat.ReturnedCompletionTokensSum,
+				ReturnedCacheReadTokensSum:     stat.ReturnedCacheReadTokensSum,
 				ReturnedCacheCreationTokensSum: stat.ReturnedCacheCreationTokensSum,
-				ReturnedCostSumUSD:          stat.ReturnedCostSumUSD,
+				ReturnedCostSumUSD:             stat.ReturnedCostSumUSD,
 			}
 			if err = callback(segment); err != nil {
 				return err
@@ -1194,9 +1194,18 @@ func accumulateProfitBoardSegment(
 }
 
 func generateProfitBoardSummaryReport(query ProfitBoardQuery) (*ProfitBoardReport, error) {
+	return generateProfitBoardSummaryReportInternal(query, false)
+}
+
+func generateProfitBoardSummaryReportInternal(query ProfitBoardQuery, cumulativeOverview bool) (*ProfitBoardReport, error) {
 	normalizedQuery, signature, err := normalizeProfitBoardQuery(query)
 	if err != nil {
 		return nil, err
+	}
+	if cumulativeOverview && query.StartTimestamp <= 0 {
+		// Cumulative overview is explicitly all-time; do not let query normalization
+		// silently rewrite the range to the default recent window.
+		normalizedQuery.StartTimestamp = 0
 	}
 	if cacheKey := buildProfitBoardReportCacheKey(normalizedQuery); cacheKey != "" {
 		if cached, found, cacheErr := getProfitBoardReportCache().Get(cacheKey); cacheErr == nil && found {
@@ -1463,6 +1472,7 @@ func generateProfitBoardSummaryReport(query ProfitBoardQuery) (*ProfitBoardRepor
 			comboIDs,
 			normalizedQuery.Granularity,
 			normalizedQuery.CustomIntervalMinutes,
+			cumulativeOverview,
 		)
 	}
 	for index := range report.BatchSummaries {
@@ -1530,7 +1540,7 @@ func generateProfitBoardOverviewSummary(payload ProfitBoardConfigPayload) (*Prof
 			return &cached, nil
 		}
 	}
-	report, err := generateProfitBoardSummaryReport(ProfitBoardQuery{
+	report, err := generateProfitBoardSummaryReportInternal(ProfitBoardQuery{
 		Batches:         normalizedBatches,
 		SharedSite:      payload.SharedSite,
 		ComboConfigs:    payload.ComboConfigs,
@@ -1546,7 +1556,7 @@ func generateProfitBoardOverviewSummary(payload ProfitBoardConfigPayload) (*Prof
 			profitBoardSectionModelBreakdown,
 			profitBoardSectionWarningItems,
 		},
-	})
+	}, true)
 	if err != nil {
 		return nil, err
 	}
