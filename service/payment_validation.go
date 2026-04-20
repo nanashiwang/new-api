@@ -63,7 +63,7 @@ func ValidateTopUpCallback(input PaymentCallbackValidationInput) (PaymentCallbac
 			expectedMoney = CalculateStripeTopUpPayMoney(float64(topUp.Amount), group)
 		}
 	}
-	if input.ProviderAmount > 0 && !paymentAmountsMatch(expectedMoney, input.ProviderAmount) {
+	if input.ProviderAmount <= 0 || !paymentAmountsMatch(expectedMoney, input.ProviderAmount) {
 		recordTopUpRiskCase(topUp, input, model.PaymentRiskReasonAmountMismatch, expectedMoney)
 		return PaymentCallbackValidationResult{}, ErrPaymentCallbackRejected
 	}
@@ -100,7 +100,7 @@ func ValidateSubscriptionCallback(input PaymentCallbackValidationInput) (Payment
 		recordSubscriptionRiskCase(order, input, model.PaymentRiskReasonPaymentMethodMismatch)
 		return PaymentCallbackValidationResult{}, ErrPaymentCallbackRejected
 	}
-	if input.ProviderAmount > 0 && !paymentAmountsMatch(order.Money, input.ProviderAmount) {
+	if input.ProviderAmount <= 0 || !paymentAmountsMatch(order.Money, input.ProviderAmount) {
 		recordSubscriptionRiskCase(order, input, model.PaymentRiskReasonAmountMismatch)
 		return PaymentCallbackValidationResult{}, ErrPaymentCallbackRejected
 	}

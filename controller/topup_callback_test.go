@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -9,6 +10,7 @@ import (
 	"github.com/Calcium-Ion/go-epay/epay"
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -132,4 +134,29 @@ func TestEpayNotify_RejectsAmountMismatch(t *testing.T) {
 	require.Equal(t, topup.UserId, riskCase.UserId)
 	require.Equal(t, topup.PaymentMethod, riskCase.PaymentMethod)
 	require.Equal(t, 0.01, riskCase.ReceivedMoney)
+}
+
+func TestStripeWebhook_ForbiddenWhenDisabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	originStripeAPISecret := setting.StripeApiSecret
+	originStripeWebhookSecret := setting.StripeWebhookSecret
+	originStripePriceID := setting.StripePriceId
+	setting.StripeApiSecret = ""
+	setting.StripeWebhookSecret = "whsec_test"
+	setting.StripePriceId = ""
+	t.Cleanup(func() {
+		setting.StripeApiSecret = originStripeAPISecret
+		setting.StripeWebhookSecret = originStripeWebhookSecret
+		setting.StripePriceId = originStripePriceID
+	})
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/stripe/webhook", bytes.NewBufferString(`{"id":"evt_test"}`))
+	ctx.Request.Header.Set("Stripe-Signature", "t=123,v1=invalid")
+
+	StripeWebhook(ctx)
+
+	require.Equal(t, http.StatusForbidden, recorder.Code)
 }

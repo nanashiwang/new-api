@@ -146,6 +146,11 @@ func RequestStripePay(c *gin.Context) {
 }
 
 func StripeWebhook(c *gin.Context) {
+	if !isStripeWebhookEnabled() {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+
 	payload, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		log.Printf("解析Stripe Webhook参数失败: %v\n", err)
