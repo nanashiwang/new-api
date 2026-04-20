@@ -26,13 +26,13 @@ type CRSSite struct {
 	Scheme            string `json:"scheme" gorm:"type:varchar(16);not null;default:'https';uniqueIndex:idx_crs_site_host_scheme,priority:2"`
 	Group             string `json:"group" gorm:"column:group_name;type:varchar(128);not null;default:'';index:idx_crs_site_group"`
 	Username          string `json:"-" gorm:"type:varchar(255);not null;default:''"`
-	PasswordEncrypted string `json:"-" gorm:"type:text;not null;default:''"`
-	TokenEncrypted    string `json:"-" gorm:"type:text;not null;default:''"`
+	PasswordEncrypted string `json:"-" gorm:"type:text;not null"`
+	TokenEncrypted    string `json:"-" gorm:"type:text;not null"`
 	TokenExpiresAt    int64  `json:"token_expires_at" gorm:"bigint;not null;default:0"`
 	Status            int    `json:"status" gorm:"not null;default:0;index:idx_crs_site_status"`
 	LastSyncedAt      int64  `json:"last_synced_at" gorm:"bigint;not null;default:0"`
-	LastSyncError     string `json:"last_sync_error" gorm:"type:text;not null;default:''"`
-	CachedStats       string `json:"-" gorm:"type:text;not null;default:''"`
+	LastSyncError     string `json:"last_sync_error" gorm:"type:text;not null"`
+	CachedStats       string `json:"-" gorm:"type:text;not null"`
 	SortOrder         int    `json:"sort_order" gorm:"not null;default:0"`
 	CreatedTime       int64  `json:"created_time" gorm:"bigint;not null;default:0"`
 	UpdatedTime       int64  `json:"updated_time" gorm:"bigint;not null;default:0"`
@@ -331,10 +331,12 @@ func PersistCRSSiteStats(id int, tokenEncrypted string, tokenExpiresAt int64, st
 	now := common.GetTimestamp()
 	updates := map[string]any{
 		"status":          status,
-		"cached_stats":    stats,
 		"last_synced_at":  now,
 		"last_sync_error": syncErr,
 		"updated_time":    now,
+	}
+	if stats != "" {
+		updates["cached_stats"] = stats
 	}
 	if tokenEncrypted != "" {
 		updates["token_encrypted"] = tokenEncrypted
