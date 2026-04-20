@@ -309,7 +309,9 @@ func SetApiRouter(router *gin.Engine) {
 		crsRoute.Use(middleware.AdminAuth())
 		{
 			crsRoute.GET("/overview", controller.GetCRSOverview)
+			crsRoute.GET("/accounts", controller.GetCRSAccounts)
 			crsRoute.GET("/sites", controller.GetCRSSites)
+			crsRoute.GET("/sites/:id/accounts", controller.GetCRSSiteAccounts)
 			crsRoute.POST("/sites", controller.CreateCRSSite)
 			crsRoute.PUT("/sites/:id", controller.UpdateCRSSite)
 			crsRoute.DELETE("/sites/:id", controller.DeleteCRSSite)

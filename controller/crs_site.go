@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
@@ -49,6 +50,51 @@ type crsSiteVO struct {
 	UpdatedTime   int64  `json:"updated_time"`
 }
 
+type crsAccountVO struct {
+	Id                        int            `json:"id"`
+	SiteID                    int            `json:"site_id"`
+	SiteName                  string         `json:"site_name"`
+	RemoteAccountID           string         `json:"remote_account_id"`
+	Platform                  string         `json:"platform"`
+	Name                      string         `json:"name"`
+	Description               string         `json:"description"`
+	AccountType               string         `json:"account_type"`
+	AuthType                  string         `json:"auth_type"`
+	Status                    string         `json:"status"`
+	ErrorMessage              string         `json:"error_message"`
+	IsActive                  bool           `json:"is_active"`
+	Schedulable               bool           `json:"schedulable"`
+	Priority                  int            `json:"priority"`
+	RateLimited               bool           `json:"rate_limited"`
+	RateLimitMinutesRemaining int            `json:"rate_limit_minutes_remaining"`
+	RateLimitResetAt          string         `json:"rate_limit_reset_at"`
+	SessionWindowActive       bool           `json:"session_window_active"`
+	SessionWindowStatus       string         `json:"session_window_status"`
+	SessionWindowProgress     float64        `json:"session_window_progress"`
+	SessionWindowRemaining    string         `json:"session_window_remaining"`
+	SessionWindowEndAt        string         `json:"session_window_end_at"`
+	SubscriptionPlan          string         `json:"subscription_plan"`
+	SubscriptionInfo          map[string]any `json:"subscription_info,omitempty"`
+	Quota                     map[string]any `json:"quota,omitempty"`
+	QuotaUnlimited            bool           `json:"quota_unlimited"`
+	QuotaTotal                float64        `json:"quota_total"`
+	QuotaUsed                 float64        `json:"quota_used"`
+	QuotaRemaining            float64        `json:"quota_remaining"`
+	QuotaPercentage           float64        `json:"quota_percentage"`
+	QuotaResetAt              string         `json:"quota_reset_at"`
+	BalanceAmount             float64        `json:"balance_amount"`
+	BalanceCurrency           string         `json:"balance_currency"`
+	UsageDailyRequests        int64          `json:"usage_daily_requests"`
+	UsageTotalRequests        int64          `json:"usage_total_requests"`
+	UsageDailyTokens          int64          `json:"usage_daily_tokens"`
+	UsageTotalTokens          int64          `json:"usage_total_tokens"`
+	UsageRPM                  float64        `json:"usage_rpm"`
+	UsageTPM                  float64        `json:"usage_tpm"`
+	SyncError                 string         `json:"sync_error"`
+	LastSyncedAt              int64          `json:"last_synced_at"`
+	UpdatedTime               int64          `json:"updated_time"`
+}
+
 func siteToVO(s *model.CRSSite) crsSiteVO {
 	return crsSiteVO{
 		Id:            s.Id,
@@ -64,6 +110,75 @@ func siteToVO(s *model.CRSSite) crsSiteVO {
 		SortOrder:     s.SortOrder,
 		CreatedTime:   s.CreatedTime,
 		UpdatedTime:   s.UpdatedTime,
+	}
+}
+
+func siteDisplayName(s *model.CRSSite) string {
+	if s == nil {
+		return ""
+	}
+	if strings.TrimSpace(s.Name) != "" {
+		return strings.TrimSpace(s.Name)
+	}
+	return strings.TrimSpace(s.Host)
+}
+
+func decodeJSONMap(raw string) map[string]any {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	result := make(map[string]any)
+	if err := common.UnmarshalJsonStr(raw, &result); err != nil {
+		return nil
+	}
+	return result
+}
+
+func accountSnapshotToVO(snapshot *model.CRSAccountSnapshot, siteName string) crsAccountVO {
+	return crsAccountVO{
+		Id:                        snapshot.Id,
+		SiteID:                    snapshot.SiteID,
+		SiteName:                  siteName,
+		RemoteAccountID:           snapshot.RemoteAccountID,
+		Platform:                  snapshot.Platform,
+		Name:                      snapshot.Name,
+		Description:               snapshot.Description,
+		AccountType:               snapshot.AccountType,
+		AuthType:                  snapshot.AuthType,
+		Status:                    snapshot.Status,
+		ErrorMessage:              snapshot.ErrorMessage,
+		IsActive:                  snapshot.IsActive,
+		Schedulable:               snapshot.Schedulable,
+		Priority:                  snapshot.Priority,
+		RateLimited:               snapshot.RateLimited,
+		RateLimitMinutesRemaining: snapshot.RateLimitMinutesRemaining,
+		RateLimitResetAt:          snapshot.RateLimitResetAt,
+		SessionWindowActive:       snapshot.SessionWindowActive,
+		SessionWindowStatus:       snapshot.SessionWindowStatus,
+		SessionWindowProgress:     snapshot.SessionWindowProgress,
+		SessionWindowRemaining:    snapshot.SessionWindowRemaining,
+		SessionWindowEndAt:        snapshot.SessionWindowEndAt,
+		SubscriptionPlan:          snapshot.SubscriptionPlan,
+		SubscriptionInfo:          decodeJSONMap(snapshot.SubscriptionInfo),
+		Quota:                     decodeJSONMap(snapshot.QuotaJSON),
+		QuotaUnlimited:            snapshot.QuotaUnlimited,
+		QuotaTotal:                snapshot.QuotaTotal,
+		QuotaUsed:                 snapshot.QuotaUsed,
+		QuotaRemaining:            snapshot.QuotaRemaining,
+		QuotaPercentage:           snapshot.QuotaPercentage,
+		QuotaResetAt:              snapshot.QuotaResetAt,
+		BalanceAmount:             snapshot.BalanceAmount,
+		BalanceCurrency:           snapshot.BalanceCurrency,
+		UsageDailyRequests:        snapshot.UsageDailyRequests,
+		UsageTotalRequests:        snapshot.UsageTotalRequests,
+		UsageDailyTokens:          snapshot.UsageDailyTokens,
+		UsageTotalTokens:          snapshot.UsageTotalTokens,
+		UsageRPM:                  snapshot.UsageRPM,
+		UsageTPM:                  snapshot.UsageTPM,
+		SyncError:                 snapshot.SyncError,
+		LastSyncedAt:              snapshot.LastSyncedAt,
+		UpdatedTime:               snapshot.UpdatedTime,
 	}
 }
 
@@ -222,7 +337,9 @@ func RefreshCRSSiteByID(c *gin.Context) {
 		return
 	}
 
-	dashData, refreshErr := service.RefreshCRSSite(site)
+	refreshErr := service.SyncCRSObserverSite(site)
+	site, _ = model.GetCRSSiteByID(id)
+	dashData, _ := service.GetSiteDashboardFromCache(site)
 	resp := gin.H{
 		"success": refreshErr == nil,
 		"site":    siteToVO(site),
@@ -260,24 +377,160 @@ func GetCRSOverview(c *gin.Context) {
 	}
 
 	agg := service.AggregateCRSStats(sites)
+	accounts, err := model.ListAllCRSAccountSnapshots()
+	if err != nil {
+		crsError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	observerSummary := service.BuildCRSObserverSummary(sites, accounts)
 
 	type siteDetail struct {
 		crsSiteVO
 		Dashboard *service.CRSDashboardData `json:"dashboard,omitempty"`
+		AccountCount       int `json:"account_count"`
+		RateLimitedCount   int `json:"rate_limited_count"`
+		LowQuotaCount      int `json:"low_quota_count"`
+		EmptyQuotaCount    int `json:"empty_quota_count"`
+	}
+
+	accountStatsBySite := make(map[int]gin.H)
+	for _, account := range accounts {
+		if account == nil {
+			continue
+		}
+		stat, ok := accountStatsBySite[account.SiteID]
+		if !ok {
+			stat = gin.H{
+				"total":        0,
+				"rate_limited": 0,
+				"low_quota":    0,
+				"empty_quota":  0,
+			}
+		}
+		stat["total"] = stat["total"].(int) + 1
+		if account.RateLimited {
+			stat["rate_limited"] = stat["rate_limited"].(int) + 1
+		}
+		if !account.QuotaUnlimited && account.QuotaTotal > 0 {
+			if account.QuotaRemaining <= 0 {
+				stat["empty_quota"] = stat["empty_quota"].(int) + 1
+			} else if account.QuotaRemaining <= 10 {
+				stat["low_quota"] = stat["low_quota"].(int) + 1
+			}
+		}
+		accountStatsBySite[account.SiteID] = stat
 	}
 
 	details := make([]siteDetail, 0, len(sites))
 	for _, s := range sites {
 		dash, _ := service.GetSiteDashboardFromCache(s)
+		stat := accountStatsBySite[s.Id]
+		accountCount := 0
+		rateLimitedCount := 0
+		lowQuotaCount := 0
+		emptyQuotaCount := 0
+		if stat != nil {
+			accountCount = stat["total"].(int)
+			rateLimitedCount = stat["rate_limited"].(int)
+			lowQuotaCount = stat["low_quota"].(int)
+			emptyQuotaCount = stat["empty_quota"].(int)
+		}
 		details = append(details, siteDetail{
 			crsSiteVO: siteToVO(s),
 			Dashboard: dash,
+			AccountCount: accountCount,
+			RateLimitedCount: rateLimitedCount,
+			LowQuotaCount: lowQuotaCount,
+			EmptyQuotaCount: emptyQuotaCount,
 		})
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success":   true,
 		"aggregate": agg,
+		"observer":  observerSummary,
 		"sites":     details,
+	})
+}
+
+// GetCRSAccounts GET /api/crs/accounts
+func GetCRSAccounts(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
+	siteID, _ := strconv.Atoi(c.DefaultQuery("site_id", "0"))
+
+	rows, total, err := model.QueryCRSAccountSnapshots(model.CRSAccountSnapshotQuery{
+		SiteID:     siteID,
+		Platform:   c.Query("platform"),
+		Status:     c.Query("status"),
+		Keyword:    c.Query("keyword"),
+		QuotaState: c.Query("quota_state"),
+		Page:       page,
+		PageSize:   pageSize,
+	})
+	if err != nil {
+		crsError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	sites, err := model.ListCRSSites()
+	if err != nil {
+		crsError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	siteNames := make(map[int]string, len(sites))
+	for _, site := range sites {
+		siteNames[site.Id] = siteDisplayName(site)
+	}
+
+	data := make([]crsAccountVO, 0, len(rows))
+	for _, row := range rows {
+		data = append(data, accountSnapshotToVO(row, siteNames[row.SiteID]))
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":   true,
+		"data":      data,
+		"total":     total,
+		"page":      page,
+		"page_size": pageSize,
+	})
+}
+
+// GetCRSSiteAccounts GET /api/crs/sites/:id/accounts
+func GetCRSSiteAccounts(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		crsError(c, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	site, err := model.GetCRSSiteByID(id)
+	if err != nil {
+		if crsSiteNotFound(err) {
+			crsError(c, http.StatusNotFound, "site not found")
+		} else {
+			crsError(c, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	accounts, err := model.ListCRSAccountSnapshotsBySite(id)
+	if err != nil {
+		crsError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	dashboard, _ := service.GetSiteDashboardFromCache(site)
+	data := make([]crsAccountVO, 0, len(accounts))
+	for _, row := range accounts {
+		data = append(data, accountSnapshotToVO(row, siteDisplayName(site)))
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":  true,
+		"site":     siteToVO(site),
+		"dashboard": dashboard,
+		"observer": service.BuildCRSObserverSummary([]*model.CRSSite{site}, accounts),
+		"accounts": data,
 	})
 }

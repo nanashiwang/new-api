@@ -1,11 +1,5 @@
 import { useEffect, useState } from 'react';
-import {
-  Button,
-  Form,
-  Modal,
-  Select,
-  Switch,
-} from '@douyinfe/semi-ui';
+import { Form, Modal, Switch } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 
 const SCHEME_OPTIONS = [
@@ -13,7 +7,14 @@ const SCHEME_OPTIONS = [
   { label: 'http', value: 'http' },
 ];
 
-export default function CRSSiteModal({ visible, site, onOk, onCancel, saving }) {
+export default function CRSSiteModal({
+  visible,
+  site,
+  onOk,
+  onCancel,
+  saving,
+  groupOptions = [],
+}) {
   const { t } = useTranslation();
   const isEditing = !!site;
 
@@ -107,18 +108,23 @@ export default function CRSSiteModal({ visible, site, onOk, onCancel, saving }) 
             <Form.Input
               field='host'
               label={t('Host')}
-              placeholder='crs-example.meta-api.vip'
+              placeholder='crs-example.meta-api.vip:8443'
               value={form.host}
               onChange={(v) => handleChange('host', v)}
+              extraText={t('支持 host:port，用于接入远端 CRS 站点')}
               required
             />
           </div>
         </div>
-        <Form.Input
+        <Form.Select
           field='group'
           label={t('分组')}
-          placeholder={t('如 codex、crs-pro-max（可选）')}
+          placeholder={t('选择已有分组或直接输入，例如 codex、shared-crs')}
           value={form.group}
+          optionList={groupOptions}
+          allowCreate
+          filter
+          showClear
           onChange={(v) => handleChange('group', v)}
         />
         <Form.Input

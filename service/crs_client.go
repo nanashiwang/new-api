@@ -105,6 +105,10 @@ func newCRSHTTPClient() *http.Client {
 
 func validateCRSURL(rawURL string) error {
 	fetchSetting := system_setting.GetFetchSetting()
+	allowedPorts := fetchSetting.AllowedPorts
+	if len(allowedPorts) > 0 {
+		allowedPorts = nil
+	}
 	return common.ValidateURLWithFetchSetting(
 		rawURL,
 		fetchSetting.EnableSSRFProtection,
@@ -113,7 +117,7 @@ func validateCRSURL(rawURL string) error {
 		fetchSetting.IpFilterMode,
 		fetchSetting.DomainList,
 		fetchSetting.IpList,
-		fetchSetting.AllowedPorts,
+		allowedPorts,
 		fetchSetting.ApplyIPFilterForDomain,
 	)
 }
@@ -306,7 +310,7 @@ func RefreshAllCRSSites() map[int]error {
 	ch := make(chan pair, len(sites))
 	for _, s := range sites {
 		go func(site *model.CRSSite) {
-			_, refreshErr := RefreshCRSSite(site)
+			refreshErr := SyncCRSObserverSite(site)
 			ch <- pair{id: site.Id, err: refreshErr}
 		}(s)
 	}
