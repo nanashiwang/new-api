@@ -362,9 +362,215 @@ func normalizeCRSRemoteAccountSnapshot(siteID int, platform string, account map[
 		snapshot.SyncError = syncErr
 	}
 
+	snapshot.UsageWindowsJSON = marshalCRSUsageWindows(buildCRSUsageWindows(account, snapshot))
 	snapshot.RawAccount = marshalCRSObserverValue(account)
 	snapshot.RawBalance = marshalCRSObserverValue(balance)
 	return snapshot, nil
+}
+
+func buildCRSUsageWindows(account map[string]any, snapshot *model.CRSAccountSnapshot) []model.CRSUsageWindow {
+	if windows := buildCRSClaudeUsageWindows(getMapOrJSONValue(account["claudeUsage"])); len(windows) > 0 {
+		return windows
+	}
+	if windows := buildCRSCodexUsageWindows(getMapOrJSONValue(account["codexUsage"])); len(windows) > 0 {
+		return windows
+	}
+	if sessionWindow, ok := buildCRSSessionUsageWindow(getMapOrJSONValue(account["sessionWindow"])); ok {
+		return []model.CRSUsageWindow{sessionWindow}
+	}
+	if quotaWindow, ok := buildCRSQuotaUsageWindow(snapshot); ok {
+		return []model.CRSUsageWindow{quotaWindow}
+	}
+	return []model.CRSUsageWindow{}
+}
+
+func buildCRSClaudeUsageWindows(raw map[string]any) []model.CRSUsageWindow {
+	definitions := []struct {
+		field string
+		key   string
+		label string
+	}{
+		{field: "fiveHour", key: "five_hour", label: "5h"},
+		{field: "sevenDay", key: "seven_day", label: "7d"},
+		{field: "sevenDayOpus", key: "seven_day_opus", label: "Opus 周限"},
+	}
+
+	windows := make([]model.CRSUsageWindow, 0, len(definitions))
+	for _, definition := range definitions {
+		window, ok := normalizeCRSUsageWindow(
+			definition.key,
+			definition.label,
+			"claude_usage",
+			getMapOrJSONValue(raw[definition.field]),
+		)
+		if ok {
+			windows = append(windows, window)
+		}
+	}
+	return windows
+}
+
+func buildCRSCodexUsageWindows(raw map[string]any) []model.CRSUsageWindow {
+	definitions := []struct {
+		field string
+		key   string
+		label string
+	}{
+		{field: "primary", key: "primary", label: "5h"},
+		{field: "secondary", key: "secondary", label: "周限"},
+	}
+
+	windows := make([]model.CRSUsageWindow, 0, len(definitions))
+	for _, definition := range definitions {
+		window, ok := normalizeCRSUsageWindow(
+			definition.key,
+			definition.label,
+			"codex_usage",
+			getMapOrJSONValue(raw[definition.field]),
+		)
+		if ok {
+			windows = append(windows, window)
+		}
+	}
+	return windows
+}
+
+func buildCRSSessionUsageWindow(raw map[string]any) (model.CRSUsageWindow, bool) {
+	return normalizeCRSUsageWindow("session_window", "5h", "session_window", raw)
+}
+
+func buildCRSQuotaUsageWindow(snapshot *model.CRSAccountSnapshot) (model.CRSUsageWindow, bool) {
+	if snapshot == nil {
+		return model.CRSUsageWindow{}, false
+	}
+
+	progress := snapshot.QuotaPercentage
+	hasProgress := false
+	if progress > 0 || snapshot.QuotaTotal > 0 || snapshot.QuotaUsed > 0 {
+		hasProgress = true
+	}
+	if !hasProgress && snapshot.QuotaTotal > 0 {
+		progress = clampCRSUsageWindowProgress((snapshot.QuotaUsed / snapshot.QuotaTotal) * 100)
+		hasProgress = true
+	}
+
+	remainingText := ""
+	switch {
+	case snapshot.QuotaRemaining > 0:
+		remainingText = formatCRSUsageWindowNumber(snapshot.QuotaRemaining)
+	case snapshot.BalanceAmount > 0:
+		remainingText = formatCRSUsageWindowNumber(snapshot.BalanceAmount)
+	}
+
+	if !hasProgress && remainingText == "" && strings.TrimSpace(snapshot.QuotaResetAt) == "" {
+		return model.CRSUsageWindow{}, false
+	}
+
+	return model.CRSUsageWindow{
+		Key:           "quota",
+		Label:         "额度",
+		Progress:      clampCRSUsageWindowProgress(progress),
+		RemainingText: remainingText,
+		ResetAt:       strings.TrimSpace(snapshot.QuotaResetAt),
+		Tone:          resolveCRSUsageWindowTone(progress, hasProgress, remainingText, snapshot.QuotaResetAt),
+		Source:        "quota_balance",
+	}, true
+}
+
+func normalizeCRSUsageWindow(key, label, source string, raw map[string]any) (model.CRSUsageWindow, bool) {
+	if len(raw) == 0 {
+		return model.CRSUsageWindow{}, false
+	}
+
+	progress, hasProgress := firstCRSUsageWindowNumber(raw, "progress", "percentage")
+	remainingText := firstCRSUsageWindowText(raw, "remainingText", "remainingTime", "remaining")
+	resetAt := firstCRSUsageWindowText(raw, "resetAt", "windowEnd", "windowEndAt")
+	if !hasProgress && remainingText == "" && resetAt == "" {
+		return model.CRSUsageWindow{}, false
+	}
+
+	return model.CRSUsageWindow{
+		Key:           key,
+		Label:         label,
+		Progress:      progress,
+		RemainingText: remainingText,
+		ResetAt:       resetAt,
+		Tone:          resolveCRSUsageWindowTone(progress, hasProgress, remainingText, resetAt),
+		Source:        source,
+	}, true
+}
+
+func firstCRSUsageWindowNumber(raw map[string]any, keys ...string) (float64, bool) {
+	for _, key := range keys {
+		value, ok := raw[key]
+		if !ok {
+			continue
+		}
+		return clampCRSUsageWindowProgress(getFloatValue(value)), true
+	}
+	return 0, false
+}
+
+func firstCRSUsageWindowText(raw map[string]any, keys ...string) string {
+	for _, key := range keys {
+		value, ok := raw[key]
+		if !ok {
+			continue
+		}
+		text := getStringValue(value)
+		if text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func resolveCRSUsageWindowTone(progress float64, hasProgress bool, remainingText, resetAt string) string {
+	if !hasProgress {
+		if strings.TrimSpace(remainingText) != "" {
+			return "success"
+		}
+		if strings.TrimSpace(resetAt) != "" {
+			return "info"
+		}
+		return "muted"
+	}
+	switch {
+	case progress >= 90:
+		return "danger"
+	case progress >= 80:
+		return "warning"
+	case progress >= 45:
+		return "info"
+	default:
+		return "success"
+	}
+}
+
+func clampCRSUsageWindowProgress(progress float64) float64 {
+	switch {
+	case progress < 0:
+		return 0
+	case progress > 100:
+		return 100
+	default:
+		return progress
+	}
+}
+
+func formatCRSUsageWindowNumber(value float64) string {
+	return strconv.FormatFloat(value, 'f', -1, 64)
+}
+
+func marshalCRSUsageWindows(windows []model.CRSUsageWindow) string {
+	if windows == nil {
+		windows = []model.CRSUsageWindow{}
+	}
+	raw, err := common.Marshal(windows)
+	if err != nil {
+		return "[]"
+	}
+	return string(raw)
 }
 
 func marshalCRSObserverValue(value any) string {

@@ -51,48 +51,49 @@ type crsSiteVO struct {
 }
 
 type crsAccountVO struct {
-	Id                        int            `json:"id"`
-	SiteID                    int            `json:"site_id"`
-	SiteName                  string         `json:"site_name"`
-	RemoteAccountID           string         `json:"remote_account_id"`
-	Platform                  string         `json:"platform"`
-	Name                      string         `json:"name"`
-	Description               string         `json:"description"`
-	AccountType               string         `json:"account_type"`
-	AuthType                  string         `json:"auth_type"`
-	Status                    string         `json:"status"`
-	ErrorMessage              string         `json:"error_message"`
-	IsActive                  bool           `json:"is_active"`
-	Schedulable               bool           `json:"schedulable"`
-	Priority                  int            `json:"priority"`
-	RateLimited               bool           `json:"rate_limited"`
-	RateLimitMinutesRemaining int            `json:"rate_limit_minutes_remaining"`
-	RateLimitResetAt          string         `json:"rate_limit_reset_at"`
-	SessionWindowActive       bool           `json:"session_window_active"`
-	SessionWindowStatus       string         `json:"session_window_status"`
-	SessionWindowProgress     float64        `json:"session_window_progress"`
-	SessionWindowRemaining    string         `json:"session_window_remaining"`
-	SessionWindowEndAt        string         `json:"session_window_end_at"`
-	SubscriptionPlan          string         `json:"subscription_plan"`
-	SubscriptionInfo          map[string]any `json:"subscription_info,omitempty"`
-	Quota                     map[string]any `json:"quota,omitempty"`
-	QuotaUnlimited            bool           `json:"quota_unlimited"`
-	QuotaTotal                float64        `json:"quota_total"`
-	QuotaUsed                 float64        `json:"quota_used"`
-	QuotaRemaining            float64        `json:"quota_remaining"`
-	QuotaPercentage           float64        `json:"quota_percentage"`
-	QuotaResetAt              string         `json:"quota_reset_at"`
-	BalanceAmount             float64        `json:"balance_amount"`
-	BalanceCurrency           string         `json:"balance_currency"`
-	UsageDailyRequests        int64          `json:"usage_daily_requests"`
-	UsageTotalRequests        int64          `json:"usage_total_requests"`
-	UsageDailyTokens          int64          `json:"usage_daily_tokens"`
-	UsageTotalTokens          int64          `json:"usage_total_tokens"`
-	UsageRPM                  float64        `json:"usage_rpm"`
-	UsageTPM                  float64        `json:"usage_tpm"`
-	SyncError                 string         `json:"sync_error"`
-	LastSyncedAt              int64          `json:"last_synced_at"`
-	UpdatedTime               int64          `json:"updated_time"`
+	Id                        int                    `json:"id"`
+	SiteID                    int                    `json:"site_id"`
+	SiteName                  string                 `json:"site_name"`
+	RemoteAccountID           string                 `json:"remote_account_id"`
+	Platform                  string                 `json:"platform"`
+	Name                      string                 `json:"name"`
+	Description               string                 `json:"description"`
+	AccountType               string                 `json:"account_type"`
+	AuthType                  string                 `json:"auth_type"`
+	Status                    string                 `json:"status"`
+	ErrorMessage              string                 `json:"error_message"`
+	IsActive                  bool                   `json:"is_active"`
+	Schedulable               bool                   `json:"schedulable"`
+	Priority                  int                    `json:"priority"`
+	RateLimited               bool                   `json:"rate_limited"`
+	RateLimitMinutesRemaining int                    `json:"rate_limit_minutes_remaining"`
+	RateLimitResetAt          string                 `json:"rate_limit_reset_at"`
+	SessionWindowActive       bool                   `json:"session_window_active"`
+	SessionWindowStatus       string                 `json:"session_window_status"`
+	SessionWindowProgress     float64                `json:"session_window_progress"`
+	SessionWindowRemaining    string                 `json:"session_window_remaining"`
+	SessionWindowEndAt        string                 `json:"session_window_end_at"`
+	UsageWindows              []model.CRSUsageWindow `json:"usage_windows"`
+	SubscriptionPlan          string                 `json:"subscription_plan"`
+	SubscriptionInfo          map[string]any         `json:"subscription_info,omitempty"`
+	Quota                     map[string]any         `json:"quota,omitempty"`
+	QuotaUnlimited            bool                   `json:"quota_unlimited"`
+	QuotaTotal                float64                `json:"quota_total"`
+	QuotaUsed                 float64                `json:"quota_used"`
+	QuotaRemaining            float64                `json:"quota_remaining"`
+	QuotaPercentage           float64                `json:"quota_percentage"`
+	QuotaResetAt              string                 `json:"quota_reset_at"`
+	BalanceAmount             float64                `json:"balance_amount"`
+	BalanceCurrency           string                 `json:"balance_currency"`
+	UsageDailyRequests        int64                  `json:"usage_daily_requests"`
+	UsageTotalRequests        int64                  `json:"usage_total_requests"`
+	UsageDailyTokens          int64                  `json:"usage_daily_tokens"`
+	UsageTotalTokens          int64                  `json:"usage_total_tokens"`
+	UsageRPM                  float64                `json:"usage_rpm"`
+	UsageTPM                  float64                `json:"usage_tpm"`
+	SyncError                 string                 `json:"sync_error"`
+	LastSyncedAt              int64                  `json:"last_synced_at"`
+	UpdatedTime               int64                  `json:"updated_time"`
 }
 
 func siteToVO(s *model.CRSSite) crsSiteVO {
@@ -135,6 +136,18 @@ func decodeJSONMap(raw string) map[string]any {
 	return result
 }
 
+func decodeCRSUsageWindows(raw string) []model.CRSUsageWindow {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return []model.CRSUsageWindow{}
+	}
+	windows := make([]model.CRSUsageWindow, 0)
+	if err := common.UnmarshalJsonStr(raw, &windows); err != nil {
+		return []model.CRSUsageWindow{}
+	}
+	return windows
+}
+
 func accountSnapshotToVO(snapshot *model.CRSAccountSnapshot, siteName string) crsAccountVO {
 	return crsAccountVO{
 		Id:                        snapshot.Id,
@@ -159,6 +172,7 @@ func accountSnapshotToVO(snapshot *model.CRSAccountSnapshot, siteName string) cr
 		SessionWindowProgress:     snapshot.SessionWindowProgress,
 		SessionWindowRemaining:    snapshot.SessionWindowRemaining,
 		SessionWindowEndAt:        snapshot.SessionWindowEndAt,
+		UsageWindows:              decodeCRSUsageWindows(snapshot.UsageWindowsJSON),
 		SubscriptionPlan:          snapshot.SubscriptionPlan,
 		SubscriptionInfo:          decodeJSONMap(snapshot.SubscriptionInfo),
 		Quota:                     decodeJSONMap(snapshot.QuotaJSON),
@@ -386,11 +400,11 @@ func GetCRSOverview(c *gin.Context) {
 
 	type siteDetail struct {
 		crsSiteVO
-		Dashboard *service.CRSDashboardData `json:"dashboard,omitempty"`
-		AccountCount       int `json:"account_count"`
-		RateLimitedCount   int `json:"rate_limited_count"`
-		LowQuotaCount      int `json:"low_quota_count"`
-		EmptyQuotaCount    int `json:"empty_quota_count"`
+		Dashboard        *service.CRSDashboardData `json:"dashboard,omitempty"`
+		AccountCount     int                       `json:"account_count"`
+		RateLimitedCount int                       `json:"rate_limited_count"`
+		LowQuotaCount    int                       `json:"low_quota_count"`
+		EmptyQuotaCount  int                       `json:"empty_quota_count"`
 	}
 
 	accountStatsBySite := make(map[int]gin.H)
@@ -436,12 +450,12 @@ func GetCRSOverview(c *gin.Context) {
 			emptyQuotaCount = stat["empty_quota"].(int)
 		}
 		details = append(details, siteDetail{
-			crsSiteVO: siteToVO(s),
-			Dashboard: dash,
-			AccountCount: accountCount,
+			crsSiteVO:        siteToVO(s),
+			Dashboard:        dash,
+			AccountCount:     accountCount,
 			RateLimitedCount: rateLimitedCount,
-			LowQuotaCount: lowQuotaCount,
-			EmptyQuotaCount: emptyQuotaCount,
+			LowQuotaCount:    lowQuotaCount,
+			EmptyQuotaCount:  emptyQuotaCount,
 		})
 	}
 
@@ -527,10 +541,10 @@ func GetCRSSiteAccounts(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"success":  true,
-		"site":     siteToVO(site),
+		"success":   true,
+		"site":      siteToVO(site),
 		"dashboard": dashboard,
-		"observer": service.BuildCRSObserverSummary([]*model.CRSSite{site}, accounts),
-		"accounts": data,
+		"observer":  service.BuildCRSObserverSummary([]*model.CRSSite{site}, accounts),
+		"accounts":  data,
 	})
 }

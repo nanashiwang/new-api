@@ -19,6 +19,11 @@ For commercial licensing, please contact support@quantumnous.com
 import { useMemo, useRef } from 'react';
 import { Form, Modal } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
+import {
+  isValidCRSPort,
+  joinCRSHostPort,
+  splitCRSHostPort,
+} from './crsDashboard.utils';
 
 const SCHEME_OPTIONS = [
   { label: 'https', value: 'https' },
@@ -37,24 +42,27 @@ export default function CRSSiteModal({
   const isEditing = !!site;
   const formApiRef = useRef(null);
 
-  const initialValues = useMemo(
-    () => ({
+  const initialValues = useMemo(() => {
+    const { host, port } = splitCRSHostPort(site?.host ?? '');
+    return {
       name: site?.name ?? '',
-      host: site?.host ?? '',
+      host,
+      port,
       scheme: site?.scheme ?? 'https',
       group: site?.group ?? '',
       username: site?.username ?? '',
       password: '',
       password_change: false,
-    }),
-    [site],
-  );
+    };
+  }, [site]);
 
   const handleOk = async () => {
     if (!formApiRef.current) return;
     try {
       const values = await formApiRef.current.validate();
       const payload = { ...values };
+      payload.host = joinCRSHostPort(values.host, values.port);
+      delete payload.port;
       if (!isEditing) delete payload.password_change;
       onOk(payload);
     } catch {
@@ -105,9 +113,27 @@ export default function CRSSiteModal({
                     <Form.Input
                       field='host'
                       label='Host'
-                      placeholder='crs-example.meta-api.vip:8443'
-                      extraText={t('仅填写域名或域名:端口，无需 http(s)://')}
+                      placeholder='crs-example.meta-api.vip'
+                      extraText={t('仅填写域名，无需 http(s)://')}
                       rules={[{ required: true, message: t('请填写 Host') }]}
+                    />
+                  </div>
+                  <div style={{ width: 120 }}>
+                    <Form.Input
+                      field='port'
+                      label={t('端口')}
+                      placeholder='8443'
+                      extraText={t('可选，范围 1-65535')}
+                      rules={[
+                        {
+                          validator: (rule, value) => {
+                            if (!value || isValidCRSPort(value)) {
+                              return Promise.resolve();
+                            }
+                            return Promise.reject(t('端口必须是 1-65535 的整数'));
+                          },
+                        },
+                      ]}
                     />
                   </div>
                 </div>

@@ -32,9 +32,10 @@ import { RefreshCw, Search } from 'lucide-react';
 import { useIsMobile } from '@/hooks/common/useIsMobile';
 import { timestamp2string } from '../../../helpers/date';
 import {
+  buildCRSUsageWindows,
   filterCRSAccounts,
+  getCRSPlatformBadgeLabel,
   getCRSPlatformOptions,
-  getCRSQuotaState,
 } from './crsDashboard.utils';
 
 const { Text, Title } = Typography;
@@ -51,6 +52,34 @@ const QUOTA_FILTER_OPTIONS = [
   { label: '空额度', value: 'empty' },
   { label: '不限额', value: 'unlimited' },
 ];
+
+const USAGE_WINDOW_TONE_CLASSES = {
+  success: {
+    card: 'border-emerald-200 bg-emerald-50/80',
+    bar: 'bg-emerald-500',
+    text: 'text-emerald-700',
+  },
+  info: {
+    card: 'border-sky-200 bg-sky-50/80',
+    bar: 'bg-sky-500',
+    text: 'text-sky-700',
+  },
+  warning: {
+    card: 'border-amber-200 bg-amber-50/90',
+    bar: 'bg-amber-500',
+    text: 'text-amber-700',
+  },
+  danger: {
+    card: 'border-red-200 bg-red-50/90',
+    bar: 'bg-red-500',
+    text: 'text-red-700',
+  },
+  muted: {
+    card: 'border-slate-200 bg-slate-50/80',
+    bar: 'bg-slate-400',
+    text: 'text-slate-600',
+  },
+};
 
 const SummaryItem = ({ label, value, subText = '', tone = '' }) => (
   <div className='rounded-xl border border-semi-color-border bg-semi-color-fill-0 p-3'>
@@ -77,48 +106,59 @@ const renderSiteStatusTag = (status, t) => {
   );
 };
 
-const renderQuotaTag = (account, t) => {
-  const quotaState = getCRSQuotaState(account);
-  if (quotaState === 'unlimited') {
-    return (
-      <Tag color='blue' size='small'>
-        {t('不限额')}
-      </Tag>
-    );
+const formatUsageWindowProgress = (value) => {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return '--';
   }
-  if (quotaState === 'empty') {
-    return (
-      <Tag color='red' size='small'>
-        {t('已耗尽')}
-      </Tag>
-    );
-  }
-  if (quotaState === 'low') {
-    return (
-      <Tag color='orange' size='small'>
-        {t('低额度')}
-      </Tag>
-    );
-  }
-  return (
-    <Tag color='green' size='small'>
-      {t('正常')}
-    </Tag>
-  );
+  const normalized = Number(value);
+  const displayValue = Number.isInteger(normalized)
+    ? normalized
+    : Number(normalized.toFixed(1));
+  return `${displayValue}%`;
 };
 
-const formatQuotaValue = (account, t) => {
-  if (!account) return '-';
-  if (account.quota_unlimited) return t('不限额');
-  const total = Number(account.quota_total || 0);
-  const remaining = Number(account.quota_remaining || 0);
-  if (total <= 0 && remaining <= 0) return '-';
-  if (total <= 0) return `${remaining}`;
-  return `${remaining} / ${total}`;
+const UsageWindowCard = ({ window, t }) => {
+  const toneClasses =
+    USAGE_WINDOW_TONE_CLASSES[window?.tone] || USAGE_WINDOW_TONE_CLASSES.muted;
+  const progress = Number.isFinite(window?.progress) ? window.progress : 0;
+  const remainingText = window?.remainingText || window?.resetAt || t('待同步');
+
+  return (
+    <div
+      className={`rounded-xl border px-3 py-2 ${toneClasses.card}`}
+      key={window?.key}
+    >
+      <div className='flex items-center justify-between gap-2'>
+        <span className='text-[11px] font-semibold uppercase tracking-wide text-semi-color-text-2'>
+          {window?.label || '-'}
+        </span>
+        <span className={`text-xs font-semibold tabular-nums ${toneClasses.text}`}>
+          {formatUsageWindowProgress(window?.progress)}
+        </span>
+      </div>
+      <div className='mt-2 h-1.5 overflow-hidden rounded-full bg-white/70'>
+        <div
+          className={`h-full rounded-full transition-all ${toneClasses.bar}`}
+          style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
+        />
+      </div>
+      <div className='mt-2 text-xs text-semi-color-text-1'>{remainingText}</div>
+      {window?.resetAt ? (
+        <div className='mt-1 text-[11px] text-semi-color-text-2 break-all'>
+          {window.resetAt}
+        </div>
+      ) : null}
+    </div>
+  );
 };
 
 const renderAccountSignals = (account, t) => {
   const tags = [];
+  tags.push(
+    <Tag key='platform_badge' color='cyan' size='small'>
+      {getCRSPlatformBadgeLabel(account)}
+    </Tag>,
+  );
   if (account?.is_active) {
     tags.push(
       <Tag key='active' color='green' size='small'>
@@ -200,16 +240,6 @@ const CRSSiteDetailSideSheet = ({
 
   const columns = [
     {
-      title: t('平台'),
-      dataIndex: 'platform',
-      width: 120,
-      render: (value) => (
-        <Tag color='cyan' size='small'>
-          {value || '-'}
-        </Tag>
-      ),
-    },
-    {
       title: t('账号'),
       dataIndex: 'name',
       render: (_, record) => (
@@ -236,26 +266,26 @@ const CRSSiteDetailSideSheet = ({
     {
       title: t('状态'),
       dataIndex: 'status',
-      width: 220,
+      width: 280,
       render: (_, record) => renderAccountSignals(record, t),
     },
     {
       title: t('额度'),
       dataIndex: 'quota_remaining',
-      width: 180,
-      render: (_, record) => (
-        <div className='space-y-1'>
-          <div>{renderQuotaTag(record, t)}</div>
-          <div className='text-xs text-semi-color-text-1'>
-            {formatQuotaValue(record, t)}
+      width: 240,
+      render: (_, record) => {
+        const windows = buildCRSUsageWindows(record);
+        if (windows.length === 0) {
+          return <Text type='tertiary'>-</Text>;
+        }
+        return (
+          <div className='space-y-2'>
+            {windows.map((window) => (
+              <UsageWindowCard key={window.key} window={window} t={t} />
+            ))}
           </div>
-          {record.quota_reset_at ? (
-            <div className='text-xs text-semi-color-text-2'>
-              {t('重置')}: {record.quota_reset_at}
-            </div>
-          ) : null}
-        </div>
-      ),
+        );
+      },
     },
     {
       title: t('限速'),

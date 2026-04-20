@@ -20,9 +20,14 @@ import assert from 'node:assert/strict';
 
 import {
   buildCRSGroupOptions,
+  buildCRSUsageWindows,
   filterCRSAccounts,
   getCRSLatestSyncAt,
+  getCRSPlatformBadgeLabel,
   getCRSQuotaState,
+  isValidCRSPort,
+  joinCRSHostPort,
+  splitCRSHostPort,
 } from './crsDashboard.utils.js';
 
 assert.deepEqual(
@@ -172,4 +177,115 @@ assert.deepEqual(
     },
   ).map((item) => item.id),
   [3],
+);
+
+assert.deepEqual(splitCRSHostPort('example.com:3000'), {
+  host: 'example.com',
+  port: '3000',
+});
+
+assert.deepEqual(splitCRSHostPort('example.com:not-a-port'), {
+  host: 'example.com:not-a-port',
+  port: '',
+});
+
+assert.equal(joinCRSHostPort('example.com', '3000'), 'example.com:3000');
+assert.equal(joinCRSHostPort('example.com', ''), 'example.com');
+assert.equal(isValidCRSPort('1'), true);
+assert.equal(isValidCRSPort('65535'), true);
+assert.equal(isValidCRSPort('0'), false);
+assert.equal(isValidCRSPort('65536'), false);
+
+assert.equal(
+  getCRSPlatformBadgeLabel({
+    platform: 'claude',
+    account_type: 'shared',
+    subscription_info: {
+      accountType: 'max',
+    },
+  }),
+  'Claude Max / 共享',
+);
+
+assert.equal(
+  getCRSPlatformBadgeLabel({
+    platform: 'azure_openai',
+    account_type: 'dedicated',
+  }),
+  'Azure OpenAI / 专属',
+);
+
+assert.equal(
+  getCRSPlatformBadgeLabel({
+    platform: 'openai-responses',
+    account_type: 'group',
+  }),
+  'OpenAI Responses / 分组',
+);
+
+assert.deepEqual(
+  buildCRSUsageWindows({
+    usage_windows: [
+      {
+        key: 'seven_day',
+        label: '7d',
+        progress: 82,
+        remaining_text: '余 2 天',
+        reset_at: '2026-04-27T00:00:00Z',
+        tone: 'warning',
+      },
+    ],
+    session_window_progress: 10,
+    quota_percentage: 20,
+  }),
+  [
+    {
+      key: 'seven_day',
+      label: '7d',
+      progress: 82,
+      remainingText: '余 2 天',
+      resetAt: '2026-04-27T00:00:00Z',
+      tone: 'warning',
+      source: 'usage_windows',
+    },
+  ],
+);
+
+assert.deepEqual(
+  buildCRSUsageWindows({
+    session_window_active: true,
+    session_window_progress: 64.5,
+    session_window_remaining: '5h 12m',
+    session_window_end_at: '2026-04-20T15:00:00Z',
+  }),
+  [
+    {
+      key: 'session_window',
+      label: '5h',
+      progress: 64.5,
+      remainingText: '5h 12m',
+      resetAt: '2026-04-20T15:00:00Z',
+      tone: 'info',
+      source: 'session_window',
+    },
+  ],
+);
+
+assert.deepEqual(
+  buildCRSUsageWindows({
+    quota_percentage: 42.5,
+    quota_remaining: 11.5,
+    quota_reset_at: '2026-04-21T00:00:00Z',
+  }),
+  [
+    {
+      key: 'quota',
+      label: '额度',
+      progress: 42.5,
+      remainingText: '11.5',
+      resetAt: '2026-04-21T00:00:00Z',
+      tone: 'success',
+      source: 'quota',
+    },
+  ],
 );
