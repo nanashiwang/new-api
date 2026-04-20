@@ -350,9 +350,6 @@ const CRSSiteDetailSideSheet = ({
                   {t('刷新站点')}
                 </Button>
               </div>
-              <div className='mt-3 rounded-xl bg-blue-500/5 px-3 py-2 text-xs text-blue-600 dark:bg-blue-500/10 dark:text-blue-300'>
-                {t('这里只做远端 CRS 的只读观察，不会写回或修改远端账号状态。')}
-              </div>
             </div>
 
             <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-4'>

@@ -1,12 +1,27 @@
-import { useEffect, useMemo, useState } from 'react';
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+import { useMemo, useState } from 'react';
 import {
   Badge,
   Button,
   Card,
-  Empty,
-  Input,
   Modal,
-  Select,
   Spin,
   Table,
   Tag,
@@ -21,7 +36,6 @@ import {
   Pencil,
   Plus,
   RefreshCw,
-  Search,
   Server,
   ShieldAlert,
   Trash2,
@@ -32,47 +46,9 @@ import { timestamp2string } from '../../../helpers/date';
 import { useCRSData } from '../hooks/useCRSData';
 import CRSSiteDetailSideSheet from './CRSSiteDetailSideSheet';
 import CRSSiteModal from './CRSSiteModal';
-import {
-  buildCRSGroupOptions,
-  getCRSLatestSyncAt,
-  getCRSPlatformOptions,
-  getCRSQuotaState,
-} from './crsDashboard.utils';
+import { buildCRSGroupOptions, getCRSLatestSyncAt } from './crsDashboard.utils';
 
 const { Title, Text } = Typography;
-
-const DEFAULT_ACCOUNT_QUERY = {
-  page: 1,
-  page_size: 20,
-  site_id: 0,
-  platform: '',
-  status: '',
-  quota_state: '',
-  keyword: '',
-};
-
-const KNOWN_PLATFORM_OPTIONS = [
-  'azure_openai',
-  'bedrock',
-  'ccr',
-  'claude',
-  'claude-console',
-  'droid',
-  'gemini',
-  'gemini-api',
-  'openai',
-  'openai-responses',
-].map((platform) => ({
-  label: platform,
-  value: platform,
-}));
-
-const QUOTA_STATE_OPTIONS = [
-  { label: '全部额度', value: '' },
-  { label: '低额度', value: 'low' },
-  { label: '空额度', value: 'empty' },
-  { label: '不限额', value: 'unlimited' },
-];
 
 function formatBigNumber(n) {
   if (n == null || Number.isNaN(Number(n))) return '-';
@@ -84,78 +60,6 @@ function formatBigNumber(n) {
 function healthPercent(stat) {
   if (!stat || stat.total === 0) return null;
   return Math.round((stat.normal / stat.total) * 100);
-}
-
-function formatQuotaSummary(account, t) {
-  const quotaState = getCRSQuotaState(account);
-  if (quotaState === 'unlimited') {
-    return {
-      color: 'blue',
-      label: t('不限额'),
-      detail: account.quota_reset_at || '-',
-    };
-  }
-  const total = Number(account.quota_total || 0);
-  const remaining = Number(account.quota_remaining || 0);
-  const detail = total > 0 ? `${remaining} / ${total}` : `${remaining || 0}`;
-  if (quotaState === 'empty') {
-    return {
-      color: 'red',
-      label: t('已耗尽'),
-      detail,
-    };
-  }
-  if (quotaState === 'low') {
-    return {
-      color: 'orange',
-      label: t('低额度'),
-      detail,
-    };
-  }
-  return {
-    color: 'green',
-    label: t('正常'),
-    detail,
-  };
-}
-
-function renderAccountStatus(record, t) {
-  const tags = [];
-  if (record.is_active) {
-    tags.push(
-      <Tag key='active' color='green' size='small'>
-        {t('活跃')}
-      </Tag>,
-    );
-  } else {
-    tags.push(
-      <Tag key='inactive' color='grey' size='small'>
-        {t('未激活')}
-      </Tag>,
-    );
-  }
-  if (record.schedulable) {
-    tags.push(
-      <Tag key='schedulable' color='blue' size='small'>
-        {t('可调度')}
-      </Tag>,
-    );
-  }
-  if (record.rate_limited) {
-    tags.push(
-      <Tag key='rate_limited' color='orange' size='small'>
-        {t('限速中')}
-      </Tag>,
-    );
-  }
-  if (record.status) {
-    tags.push(
-      <Tag key='status' color='white' size='small'>
-        {record.status}
-      </Tag>,
-    );
-  }
-  return <div className='flex flex-wrap gap-1'>{tags}</div>;
 }
 
 function SiteMetric({ label, value, tone = '' }) {
@@ -490,10 +394,7 @@ export default function CRSDashboardCard({ t: tProp }) {
     sites,
     aggregate,
     observer,
-    accounts,
-    accountsTotal,
     loadingOverview,
-    loadingAccounts,
     refreshingAll,
     refreshingSiteId,
     savingSite,
@@ -501,7 +402,6 @@ export default function CRSDashboardCard({ t: tProp }) {
     siteDetail,
     loadingSiteDetail,
     loadOverview,
-    loadAccounts,
     loadSiteAccounts,
     setSiteDetail,
     refreshSite,
@@ -514,21 +414,6 @@ export default function CRSDashboardCard({ t: tProp }) {
   const [modalVisible, setModalVisible] = useState(false);
   const [editingSite, setEditingSite] = useState(null);
   const [siteDetailVisible, setSiteDetailVisible] = useState(false);
-  const [accountQuery, setAccountQuery] = useState(DEFAULT_ACCOUNT_QUERY);
-  const [keywordDraft, setKeywordDraft] = useState('');
-
-  useEffect(() => {
-    loadAccounts(accountQuery);
-  }, [
-    accountQuery.keyword,
-    accountQuery.page,
-    accountQuery.page_size,
-    accountQuery.platform,
-    accountQuery.quota_state,
-    accountQuery.site_id,
-    accountQuery.status,
-    loadAccounts,
-  ]);
 
   const openCreate = () => {
     setEditingSite(null);
@@ -569,112 +454,16 @@ export default function CRSDashboardCard({ t: tProp }) {
     setModalVisible(false);
   };
 
-  const applyFilters = () => {
-    setAccountQuery((current) => ({
-      ...current,
-      page: 1,
-      keyword: keywordDraft.trim(),
-    }));
-  };
-
-  const resetFilters = () => {
-    setKeywordDraft('');
-    setAccountQuery(DEFAULT_ACCOUNT_QUERY);
-  };
-
   const groupOptions = useMemo(
     () => buildCRSGroupOptions(sites, editingSite?.group),
     [editingSite?.group, sites],
   );
-
-  const siteOptions = useMemo(
-    () =>
-      sites.map((site) => ({
-        label: site.name || site.host,
-        value: site.id,
-      })),
-    [sites],
-  );
-
-  const platformOptions = useMemo(() => {
-    const map = new Map();
-    [...KNOWN_PLATFORM_OPTIONS, ...getCRSPlatformOptions(accounts)].forEach(
-      (item) => {
-        map.set(item.value, item);
-      },
-    );
-    return [{ label: tFn('全部平台'), value: '' }, ...Array.from(map.values())];
-  }, [accounts, tFn]);
-
-  const statusOptions = useMemo(() => {
-    const values = Array.from(
-      new Set(
-        accounts
-          .map((account) => String(account.status || '').trim())
-          .filter(Boolean),
-      ),
-    ).sort((left, right) => left.localeCompare(right, 'en'));
-    return values.map((value) => ({ label: value, value }));
-  }, [accounts]);
 
   const latestSyncAt = useMemo(() => getCRSLatestSyncAt(sites), [sites]);
   const siteMap = useMemo(
     () => new Map(sites.map((site) => [site.id, site])),
     [sites],
   );
-
-  const activeFilterTags = useMemo(() => {
-    const tags = [];
-    if (accountQuery.site_id > 0) {
-      const matchedSite = siteMap.get(accountQuery.site_id);
-      tags.push({
-        key: 'site_id',
-        label: tFn('站点'),
-        value:
-          matchedSite?.name || matchedSite?.host || `#${accountQuery.site_id}`,
-      });
-    }
-    if (accountQuery.platform) {
-      tags.push({
-        key: 'platform',
-        label: tFn('平台'),
-        value: accountQuery.platform,
-      });
-    }
-    if (accountQuery.status) {
-      tags.push({
-        key: 'status',
-        label: tFn('状态'),
-        value: accountQuery.status,
-      });
-    }
-    if (accountQuery.quota_state) {
-      const quotaLabel = QUOTA_STATE_OPTIONS.find(
-        (item) => item.value === accountQuery.quota_state,
-      )?.label;
-      tags.push({
-        key: 'quota_state',
-        label: tFn('额度'),
-        value: tFn(quotaLabel || accountQuery.quota_state),
-      });
-    }
-    if (accountQuery.keyword) {
-      tags.push({
-        key: 'keyword',
-        label: tFn('关键词'),
-        value: accountQuery.keyword,
-      });
-    }
-    return tags;
-  }, [
-    accountQuery.keyword,
-    accountQuery.platform,
-    accountQuery.quota_state,
-    accountQuery.site_id,
-    accountQuery.status,
-    siteMap,
-    tFn,
-  ]);
 
   const ov = aggregate?.overview ?? {};
   const ra = aggregate?.recentActivity ?? {};
@@ -754,103 +543,6 @@ export default function CRSDashboardCard({ t: tProp }) {
     },
   ];
 
-  const accountColumns = useMemo(
-    () => [
-      {
-        title: tFn('站点'),
-        dataIndex: 'site_name',
-        width: 180,
-        render: (_, record) => (
-          <div className='min-w-0'>
-            <div className='font-medium text-semi-color-text-0'>
-              {record.site_name || '-'}
-            </div>
-            <div className='mt-1 text-xs text-semi-color-text-2'>
-              #{record.site_id}
-            </div>
-          </div>
-        ),
-      },
-      {
-        title: tFn('平台'),
-        dataIndex: 'platform',
-        width: 130,
-        render: (value) => (
-          <Tag color='cyan' size='small'>
-            {value || '-'}
-          </Tag>
-        ),
-      },
-      {
-        title: tFn('账号'),
-        dataIndex: 'name',
-        render: (_, record) => (
-          <div className='min-w-0'>
-            <div className='font-medium text-semi-color-text-0'>
-              {record.name || record.remote_account_id}
-            </div>
-            <div className='mt-1 break-all text-xs text-semi-color-text-2'>
-              {record.remote_account_id}
-            </div>
-            {record.subscription_plan ? (
-              <div className='mt-1 text-xs text-semi-color-text-2'>
-                {tFn('计划')}: {record.subscription_plan}
-              </div>
-            ) : null}
-          </div>
-        ),
-      },
-      {
-        title: tFn('状态'),
-        dataIndex: 'status',
-        width: 220,
-        render: (_, record) => renderAccountStatus(record, tFn),
-      },
-      {
-        title: tFn('额度'),
-        dataIndex: 'quota_remaining',
-        width: 160,
-        render: (_, record) => {
-          const quota = formatQuotaSummary(record, tFn);
-          return (
-            <div className='space-y-1'>
-              <Tag color={quota.color} size='small'>
-                {quota.label}
-              </Tag>
-              <div className='text-xs text-semi-color-text-1'>
-                {quota.detail}
-              </div>
-            </div>
-          );
-        },
-      },
-      {
-        title: tFn('最近同步'),
-        dataIndex: 'last_synced_at',
-        width: 170,
-        render: (value) => (value ? timestamp2string(value) : '-'),
-      },
-      {
-        title: tFn('操作'),
-        dataIndex: 'actions',
-        width: 120,
-        fixed: 'right',
-        render: (_, record) => (
-          <Button
-            type='tertiary'
-            size='small'
-            onClick={() =>
-              openSiteDetail({ id: record.site_id, name: record.site_name })
-            }
-          >
-            {tFn('站点详情')}
-          </Button>
-        ),
-      },
-    ],
-    [openSiteDetail, tFn],
-  );
-
   return (
     <div className='space-y-5'>
       <div className='flex flex-wrap items-center justify-between gap-2'>
@@ -859,7 +551,7 @@ export default function CRSDashboardCard({ t: tProp }) {
             {tFn('CRS 账号概览')}
           </Title>
           <Text type='tertiary' size='small'>
-            {tFn('先看统一账号面，再按站点下钻排查额度、限速和异常')}
+            {tFn('汇总所有 CRS 站点的账号状态，按站点查看额度、限速与异常')}
           </Text>
         </div>
         <div className='flex items-center gap-2'>
@@ -893,11 +585,6 @@ export default function CRSDashboardCard({ t: tProp }) {
 
       <div className='flex flex-wrap items-center gap-2 rounded-xl border border-gray-200 bg-gradient-to-r from-sky-50 via-white to-white px-3 py-2 dark:border-gray-700 dark:from-sky-950/20 dark:via-gray-900 dark:to-gray-900'>
         <HintPill
-          label={tFn('模式')}
-          value={tFn('只读观察')}
-          tone='text-sky-600 dark:text-sky-400'
-        />
-        <HintPill
           label={tFn('最近同步')}
           value={
             latestSyncAt ? timestamp2string(latestSyncAt) : tFn('尚未同步')
@@ -923,159 +610,6 @@ export default function CRSDashboardCard({ t: tProp }) {
         </div>
       </Spin>
 
-      <Card
-        bordered={false}
-        className='rounded-xl'
-        title={
-          <span className='text-sm font-semibold'>{tFn('跨站点账号总览')}</span>
-        }
-        headerExtraContent={
-          <Text type='tertiary' size='small'>
-            {tFn('共 {{count}} 个账号', { count: accountsTotal })}
-          </Text>
-        }
-      >
-        <div className='space-y-3'>
-          <Text type='tertiary' size='small'>
-            {tFn(
-              '这里是统一筛选入口；刷新会重新拉取远端 CRS，再更新本地观察快照。',
-            )}
-          </Text>
-          <div className='grid gap-2 lg:grid-cols-[minmax(0,1.2fr),repeat(4,minmax(0,180px)),auto,auto]'>
-            <Input
-              prefix={<Search size={14} />}
-              placeholder={tFn('搜索站点名、账号名、远端 ID')}
-              value={keywordDraft}
-              onChange={setKeywordDraft}
-              onEnterPress={applyFilters}
-              showClear
-            />
-            <Select
-              value={accountQuery.site_id || ''}
-              optionList={[
-                { label: tFn('全部站点'), value: '' },
-                ...siteOptions,
-              ]}
-              onChange={(value) =>
-                setAccountQuery((current) => ({
-                  ...current,
-                  page: 1,
-                  site_id: Number(value || 0),
-                }))
-              }
-              placeholder={tFn('站点')}
-              showClear
-            />
-            <Select
-              value={accountQuery.platform}
-              optionList={platformOptions}
-              onChange={(value) =>
-                setAccountQuery((current) => ({
-                  ...current,
-                  page: 1,
-                  platform: value || '',
-                }))
-              }
-              placeholder={tFn('平台')}
-              showClear
-            />
-            <Select
-              value={accountQuery.status}
-              optionList={statusOptions}
-              allowCreate
-              filter
-              onChange={(value) =>
-                setAccountQuery((current) => ({
-                  ...current,
-                  page: 1,
-                  status: value || '',
-                }))
-              }
-              placeholder={tFn('状态')}
-              showClear
-            />
-            <Select
-              value={accountQuery.quota_state}
-              optionList={QUOTA_STATE_OPTIONS}
-              onChange={(value) =>
-                setAccountQuery((current) => ({
-                  ...current,
-                  page: 1,
-                  quota_state: value || '',
-                }))
-              }
-              placeholder={tFn('额度状态')}
-            />
-            <Button onClick={applyFilters}>{tFn('搜索')}</Button>
-            <Button theme='borderless' onClick={resetFilters}>
-              {tFn('重置')}
-            </Button>
-          </div>
-
-          {activeFilterTags.length > 0 ? (
-            <div className='flex flex-wrap gap-2'>
-              {activeFilterTags.map((item) => (
-                <Tag
-                  key={item.key}
-                  closable
-                  color='blue'
-                  onClose={() => {
-                    setAccountQuery((current) => ({
-                      ...current,
-                      page: 1,
-                      [item.key]: item.key === 'site_id' ? 0 : '',
-                    }));
-                    if (item.key === 'keyword') {
-                      setKeywordDraft('');
-                    }
-                  }}
-                >
-                  {item.label}: {item.value}
-                </Tag>
-              ))}
-            </div>
-          ) : null}
-
-          <Table
-            dataSource={accounts}
-            columns={accountColumns}
-            rowKey={(record) =>
-              record.id || `${record.site_id}-${record.remote_account_id}`
-            }
-            loading={loadingAccounts}
-            size='small'
-            scroll={{ x: 1180 }}
-            empty={
-              <Empty
-                image={null}
-                description={
-                  accountsTotal > 0
-                    ? tFn('当前页没有数据')
-                    : tFn('暂无跨站点账号快照')
-                }
-              />
-            }
-            pagination={{
-              currentPage: accountQuery.page,
-              pageSize: accountQuery.page_size,
-              total: accountsTotal,
-              pageSizeOpts: [20, 50, 100],
-              onPageChange: (page) =>
-                setAccountQuery((current) => ({
-                  ...current,
-                  page,
-                })),
-              onPageSizeChange: (pageSize) =>
-                setAccountQuery((current) => ({
-                  ...current,
-                  page: 1,
-                  page_size: pageSize,
-                })),
-            }}
-          />
-        </div>
-      </Card>
-
       {ov.accountsByPlatform &&
       Object.keys(ov.accountsByPlatform).length > 0 ? (
         <Card
@@ -1094,10 +628,10 @@ export default function CRSDashboardCard({ t: tProp }) {
       <div>
         <div className='mb-2 flex flex-wrap items-center gap-1.5 text-sm font-semibold text-gray-600 dark:text-gray-400'>
           <Server size={14} />
-          {tFn('按站点下钻')}
+          {tFn('CRS 站点列表')}
           <Badge count={sites.length} overflowCount={99} className='ml-1' />
           <Text type='tertiary' size='small'>
-            {tFn('适合逐站排查同步错误、额度耗尽和限速情况')}
+            {tFn('按站点查看账号详情、同步状态与限速情况')}
           </Text>
         </div>
 

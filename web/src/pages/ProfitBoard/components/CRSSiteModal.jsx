@@ -1,5 +1,23 @@
-import { useEffect, useState } from 'react';
-import { Form, Modal, Switch } from '@douyinfe/semi-ui';
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+import { useMemo, useRef } from 'react';
+import { Form, Modal } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 
 const SCHEME_OPTIONS = [
@@ -17,55 +35,32 @@ export default function CRSSiteModal({
 }) {
   const { t } = useTranslation();
   const isEditing = !!site;
+  const formApiRef = useRef(null);
 
-  const [form, setForm] = useState({
-    name: '',
-    host: '',
-    scheme: 'https',
-    group: '',
-    username: '',
-    password: '',
-    password_change: false,
-  });
+  const initialValues = useMemo(
+    () => ({
+      name: site?.name ?? '',
+      host: site?.host ?? '',
+      scheme: site?.scheme ?? 'https',
+      group: site?.group ?? '',
+      username: site?.username ?? '',
+      password: '',
+      password_change: false,
+    }),
+    [site],
+  );
 
-  useEffect(() => {
-    if (!visible) return;
-    if (site) {
-      setForm({
-        name: site.name ?? '',
-        host: site.host ?? '',
-        scheme: site.scheme ?? 'https',
-        group: site.group ?? '',
-        username: site.username ?? '',
-        password: '',
-        password_change: false,
-      });
-    } else {
-      setForm({
-        name: '',
-        host: '',
-        scheme: 'https',
-        group: '',
-        username: '',
-        password: '',
-        password_change: false,
-      });
+  const handleOk = async () => {
+    if (!formApiRef.current) return;
+    try {
+      const values = await formApiRef.current.validate();
+      const payload = { ...values };
+      if (!isEditing) delete payload.password_change;
+      onOk(payload);
+    } catch {
+      /* validation failed; Semi shows inline errors */
     }
-  }, [visible, site]);
-
-  const handleChange = (field, value) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
   };
-
-  const handleOk = () => {
-    const payload = { ...form };
-    if (isEditing) {
-      payload.password_change = form.password_change;
-    }
-    onOk(payload);
-  };
-
-  const showPasswordField = !isEditing || form.password_change;
 
   return (
     <Modal
@@ -75,86 +70,93 @@ export default function CRSSiteModal({
       onCancel={onCancel}
       okButtonProps={{ loading: saving, disabled: saving }}
       cancelButtonProps={{ disabled: saving }}
-      okText={t('保存')}
+      okText={isEditing ? t('保存') : t('创建')}
       cancelText={t('取消')}
-      width={520}
+      width={580}
       maskClosable={false}
+      bodyStyle={{ padding: '16px 24px 8px' }}
     >
       <Form
-        labelPosition='left'
-        labelWidth={100}
-        style={{ padding: '8px 0' }}
-        onSubmit={handleOk}
+        key={site?.id ?? 'new'}
+        initValues={initialValues}
+        labelPosition='top'
+        getFormApi={(api) => {
+          formApiRef.current = api;
+        }}
       >
-        <Form.Input
-          field='name'
-          label={t('显示名称')}
-          placeholder={t('可选，便于识别的名称')}
-          value={form.name}
-          onChange={(v) => handleChange('name', v)}
-        />
-        <div className='flex gap-2 items-start'>
-          <div style={{ width: 90 }} className='flex-shrink-0'>
-            <Form.Select
-              field='scheme'
-              label={t('协议')}
-              value={form.scheme}
-              onChange={(v) => handleChange('scheme', v)}
-              optionList={SCHEME_OPTIONS}
-              style={{ width: 90 }}
-            />
-          </div>
-          <div className='flex-1 min-w-0'>
-            <Form.Input
-              field='host'
-              label={t('Host')}
-              placeholder='crs-example.meta-api.vip:8443'
-              value={form.host}
-              onChange={(v) => handleChange('host', v)}
-              extraText={t('支持 host:port，用于接入远端 CRS 站点')}
-              required
-            />
-          </div>
-        </div>
-        <Form.Select
-          field='group'
-          label={t('分组')}
-          placeholder={t('选择已有分组或直接输入，例如 codex、shared-crs')}
-          value={form.group}
-          optionList={groupOptions}
-          allowCreate
-          filter
-          showClear
-          onChange={(v) => handleChange('group', v)}
-        />
-        <Form.Input
-          field='username'
-          label={t('用户名')}
-          placeholder={t('CRS 管理员用户名')}
-          value={form.username}
-          onChange={(v) => handleChange('username', v)}
-          required
-        />
-        {isEditing && (
-          <Form.Slot label={t('更改密码')}>
-            <Switch
-              checked={form.password_change}
-              onChange={(v) => handleChange('password_change', v)}
-              size='small'
-            />
-          </Form.Slot>
-        )}
-        {showPasswordField && (
-          <Form.Input
-            field='password'
-            label={t('密码')}
-            type='password'
-            placeholder={isEditing ? t('输入新密码') : t('CRS 管理员密码')}
-            value={form.password}
-            onChange={(v) => handleChange('password', v)}
-            required={!isEditing}
-          />
-        )}
+        {({ values }) => {
+          const showPasswordField = !isEditing || values.password_change;
+          return (
+            <>
+              <Form.Section text={t('基础信息')}>
+                <Form.Input
+                  field='name'
+                  label={t('显示名称')}
+                  placeholder={t('给站点起一个好识别的名字')}
+                />
+                <div className='flex gap-2 items-start'>
+                  <Form.Select
+                    field='scheme'
+                    label={t('协议')}
+                    optionList={SCHEME_OPTIONS}
+                    style={{ width: 100 }}
+                  />
+                  <div className='flex-1 min-w-0'>
+                    <Form.Input
+                      field='host'
+                      label='Host'
+                      placeholder='crs-example.meta-api.vip:8443'
+                      extraText={t('仅填写域名或域名:端口，无需 http(s)://')}
+                      rules={[{ required: true, message: t('请填写 Host') }]}
+                    />
+                  </div>
+                </div>
+                <Form.Select
+                  field='group'
+                  label={t('分组')}
+                  placeholder={t('例如 codex、shared-crs，可直接输入新值')}
+                  optionList={groupOptions}
+                  allowCreate
+                  filter
+                  showClear
+                  style={{ width: '100%' }}
+                />
+              </Form.Section>
+
+              <Form.Section text={t('登录凭证')}>
+                <Form.Input
+                  field='username'
+                  label={t('用户名')}
+                  placeholder={t('CRS 管理员用户名')}
+                  rules={[{ required: true, message: t('请填写用户名') }]}
+                />
+                {isEditing && (
+                  <Form.Switch
+                    field='password_change'
+                    label={t('更改密码')}
+                    size='small'
+                    extraText={t('默认不修改密码；打开后会用新密码替换')}
+                  />
+                )}
+                {showPasswordField && (
+                  <Form.Input
+                    field='password'
+                    label={t('密码')}
+                    type='password'
+                    placeholder={
+                      isEditing ? t('输入新密码') : t('CRS 管理员密码')
+                    }
+                    rules={
+                      !isEditing
+                        ? [{ required: true, message: t('请填写密码') }]
+                        : undefined
+                    }
+                  />
+                )}
+              </Form.Section>
+            </>
+          );
+        }}
       </Form>
     </Modal>
   );
