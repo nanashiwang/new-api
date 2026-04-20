@@ -27,7 +27,7 @@ import React, {
 } from 'react';
 import { Empty, Skeleton, Tabs } from '@douyinfe/semi-ui';
 import { initVChartSemiTheme } from '@visactor/vchart-semi-theme';
-import { BadgeDollarSign, BarChart3, CircleDollarSign } from 'lucide-react';
+import { BadgeDollarSign, BarChart3, CircleDollarSign, Server } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { CHART_CONFIG } from '../../constants/dashboard.constants';
 import { StatusContext } from '../../context/Status';
@@ -35,6 +35,7 @@ import { showError, timestamp2string } from '../../helpers';
 import { useIsMobile } from '@/hooks/common/useIsMobile';
 import ChartAnalysisCard from './components/ChartAnalysisCard';
 import ComboManagerCard from './components/ComboManagerCard';
+import CRSDashboardCard from './components/CRSDashboardCard';
 import ExcludedAdminUsersCard from './components/ExcludedAdminUsersCard';
 import OverviewPanel from './components/OverviewPanel';
 import PricingConfigModal from './components/PricingConfigModal';
@@ -1056,6 +1057,53 @@ const ProfitBoardPage = () => {
           className='profit-board-tabs'
           activeKey={activeTab}
           onChange={setActiveTab}
+          renderTabBar={(tabBarProps, DefaultTabBar) => {
+            const groups = [
+              {
+                label: t('收益管理'),
+                tabs: ['wallet', 'analysis', 'config'],
+              },
+              {
+                label: t('CRS'),
+                tabs: ['crs'],
+              },
+            ];
+            return (
+              <div className='flex items-center gap-1 border-b border-gray-200 dark:border-gray-700 pb-0 flex-wrap'>
+                {groups.map((group, gi) => (
+                  <React.Fragment key={group.label}>
+                    {gi > 0 && (
+                      <div className='w-px h-5 bg-gray-200 dark:bg-gray-700 mx-1 self-center flex-shrink-0' />
+                    )}
+                    <div className='flex items-center gap-0.5'>
+                      <span className='text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider px-1 select-none hidden sm:inline'>
+                        {group.label}
+                      </span>
+                      {tabBarProps.list
+                        .filter((item) => group.tabs.includes(item.itemKey))
+                        .map((item) => {
+                          const active = activeTab === item.itemKey;
+                          return (
+                            <button
+                              key={item.itemKey}
+                              onClick={() => setActiveTab(item.itemKey)}
+                              className={[
+                                'flex items-center gap-1.5 px-3 py-2 rounded-t text-sm font-medium transition-colors select-none border-b-2',
+                                active
+                                  ? 'border-blue-500 text-blue-600 dark:text-blue-400 bg-blue-50/60 dark:bg-blue-900/20'
+                                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800',
+                              ].join(' ')}
+                            >
+                              {item.tab}
+                            </button>
+                          );
+                        })}
+                    </div>
+                  </React.Fragment>
+                ))}
+              </div>
+            );
+          }}
         >
           <Tabs.TabPane
             tab={
@@ -1216,6 +1264,19 @@ const ProfitBoardPage = () => {
                   />
                 </>
               )}
+            </div>
+          </Tabs.TabPane>
+          <Tabs.TabPane
+            tab={
+              <span className='flex items-center gap-1.5'>
+                <Server size={16} />
+                {t('CRS 账号')}
+              </span>
+            }
+            itemKey='crs'
+          >
+            <div className='mt-3'>
+              <CRSDashboardCard t={t} />
             </div>
           </Tabs.TabPane>
         </Tabs>

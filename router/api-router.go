@@ -305,6 +305,17 @@ func SetApiRouter(router *gin.Engine) {
 			profitBoardRoute.POST("/details", middleware.ProfitBoardQueryRateLimit(), controller.QueryProfitBoardDetails)
 			profitBoardRoute.POST("/activity", controller.GetProfitBoardActivity)
 		}
+		crsRoute := apiRouter.Group("/crs")
+		crsRoute.Use(middleware.AdminAuth())
+		{
+			crsRoute.GET("/overview", controller.GetCRSOverview)
+			crsRoute.GET("/sites", controller.GetCRSSites)
+			crsRoute.POST("/sites", controller.CreateCRSSite)
+			crsRoute.PUT("/sites/:id", controller.UpdateCRSSite)
+			crsRoute.DELETE("/sites/:id", controller.DeleteCRSSite)
+			crsRoute.POST("/sites/:id/refresh", controller.RefreshCRSSiteByID)
+			crsRoute.POST("/refresh_all", controller.RefreshAllCRSSites)
+		}
 		tokenRoute := apiRouter.Group("/token")
 		tokenRoute.Use(middleware.UserAuth())
 		{
