@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"strings"
 
 	"gorm.io/gorm"
@@ -34,6 +35,22 @@ func buildContainsLikePattern(input string) string {
 	input = strings.ReplaceAll(input, "%", "!%")
 	input = strings.ReplaceAll(input, "_", "!_")
 	return "%" + input + "%"
+}
+
+// sanitizeContainsLikePattern 校验并生成带通配的模糊匹配 LIKE 模式。
+// 返回值：
+//   - ("", nil)：输入为空，调用方应跳过 LIKE 过滤
+//   - (pattern, nil)：已转义并前后追加 %，配合 `LIKE ? ESCAPE '!'` 使用
+//   - ("", error)：输入不合法（少于 2 个有效字符），错误消息可直接展示给用户
+func sanitizeContainsLikePattern(input string) (string, error) {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return "", nil
+	}
+	if len([]rune(trimmed)) < 2 {
+		return "", errors.New("搜索关键词至少需要 2 个字符")
+	}
+	return buildContainsLikePattern(trimmed), nil
 }
 
 func applyAdminLogFilters(tx *gorm.DB, filters AdminLogQueryFilters, fuzzyUsername bool) *gorm.DB {

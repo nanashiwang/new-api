@@ -203,7 +203,10 @@ func applyPaymentDashboardTopUpRiskFilter(query *gorm.DB) *gorm.DB {
 func queryTopUpPaymentRecordAggregateRows(params PaymentRecordSearchParams, keyExpr string, groupExpr string) ([]paymentRecordAggregateRow, error) {
 	rows := make([]paymentRecordAggregateRow, 0)
 	query := paymentRecordTopUpAggregateQuery()
-	query = applyTopUpSearch(query, toTopUpSearchParams(params), true)
+	query, err := applyTopUpSearch(query, toTopUpSearchParams(params), true)
+	if err != nil {
+		return nil, err
+	}
 	if err := query.
 		Select(keyExpr + " AS metric_key, COALESCE(SUM(top_ups.money), 0) AS money, COUNT(*) AS order_count").
 		Group(groupExpr).
@@ -217,7 +220,10 @@ func querySellableTokenPaymentStatusRows(params PaymentRecordSearchParams) ([]pa
 	rows := make([]paymentRecordAggregateRow, 0)
 	statusExpr := sellableTokenPaymentStatusExpr()
 	query := sellableTokenPaymentQuery(true)
-	query = applySellableTokenPaymentSearch(query, params, true)
+	query, err := applySellableTokenPaymentSearch(query, params, true)
+	if err != nil {
+		return nil, err
+	}
 	if err := query.
 		Select(statusExpr + " AS metric_key, 0 AS money, COUNT(*) AS order_count").
 		Group(statusExpr).
@@ -230,7 +236,10 @@ func querySellableTokenPaymentStatusRows(params PaymentRecordSearchParams) ([]pa
 func querySellableTokenPaymentMethodRows(params PaymentRecordSearchParams) ([]paymentRecordAggregateRow, error) {
 	rows := make([]paymentRecordAggregateRow, 0)
 	query := sellableTokenPaymentQuery(true)
-	query = applySellableTokenPaymentSearch(query, params, true)
+	query, err := applySellableTokenPaymentSearch(query, params, true)
+	if err != nil {
+		return nil, err
+	}
 	total := paymentRecordAggregateTotalRow{}
 	if err := query.
 		Select("0 AS money, COUNT(*) AS order_count").
@@ -251,7 +260,10 @@ func querySellableTokenPaymentMethodRows(params PaymentRecordSearchParams) ([]pa
 func queryTopUpPaymentRecordRankingRows(params PaymentRecordSearchParams) ([]paymentRecordRankingRow, error) {
 	rows := make([]paymentRecordRankingRow, 0)
 	query := paymentRecordTopUpAggregateQuery()
-	query = applyTopUpSearch(query, toTopUpSearchParams(params), true)
+	query, err := applyTopUpSearch(query, toTopUpSearchParams(params), true)
+	if err != nil {
+		return nil, err
+	}
 	if err := query.
 		Select(
 			"top_ups.user_id AS user_id, users.username AS username, users.display_name AS display_name, " +
@@ -271,7 +283,10 @@ func queryTopUpPaymentRecordRankingRows(params PaymentRecordSearchParams) ([]pay
 func querySellableTokenPaymentRankingRows(params PaymentRecordSearchParams) ([]paymentRecordRankingRow, error) {
 	rows := make([]paymentRecordRankingRow, 0)
 	query := sellableTokenPaymentQuery(true)
-	query = applySellableTokenPaymentSearch(query, params, true)
+	query, err := applySellableTokenPaymentSearch(query, params, true)
+	if err != nil {
+		return nil, err
+	}
 	if err := query.
 		Select(
 			"sellable_token_orders.user_id AS user_id, users.username AS username, users.display_name AS display_name, " +

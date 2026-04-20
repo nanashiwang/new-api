@@ -65,6 +65,9 @@ func GetUserPaymentRecordsByParams(userId int, params PaymentRecordSearchParams,
 	if userId <= 0 {
 		return []*PaymentRecord{}, 0, nil
 	}
+	if err := ValidateUserTopUpQueryRange(params.StartTimestamp); err != nil {
+		return nil, 0, err
+	}
 
 	topupTotal, err := countTopUpPaymentRecords(&userId, params, false)
 	if err != nil {
@@ -180,9 +183,13 @@ func paymentRecordLess(left *PaymentRecord, right *PaymentRecord) bool {
 func countTopUpPaymentRecords(userId *int, params PaymentRecordSearchParams, includeUser bool) (int64, error) {
 	query := DB.Model(&TopUp{})
 	if userId != nil {
-		query = query.Where("user_id = ?", *userId)
+		query = query.Where("user_id = ? AND top_ups.create_time >= ?", *userId, topUpUserQueryCutoff())
 	}
-	query = applyTopUpSearch(query, toTopUpSearchParams(params), includeUser)
+	var err error
+	query, err = applyTopUpSearch(query, toTopUpSearchParams(params), includeUser)
+	if err != nil {
+		return 0, err
+	}
 	if includeUser {
 		query = query.Joins("LEFT JOIN users ON users.id = top_ups.user_id")
 	}
@@ -196,9 +203,13 @@ func countTopUpPaymentRecords(userId *int, params PaymentRecordSearchParams, inc
 func listTopUpPaymentRecords(userId *int, params PaymentRecordSearchParams, limit int, includeUser bool) ([]*PaymentRecord, error) {
 	query := topUpBaseQuery(DB, includeUser)
 	if userId != nil {
-		query = query.Where("top_ups.user_id = ?", *userId)
+		query = query.Where("top_ups.user_id = ? AND top_ups.create_time >= ?", *userId, topUpUserQueryCutoff())
 	}
-	query = applyTopUpSearch(query, toTopUpSearchParams(params), includeUser)
+	var err error
+	query, err = applyTopUpSearch(query, toTopUpSearchParams(params), includeUser)
+	if err != nil {
+		return nil, err
+	}
 	query = query.Order("top_ups.create_time desc, top_ups.id desc")
 	if limit > 0 {
 		query = query.Limit(limit)
@@ -233,9 +244,13 @@ func listTopUpPaymentRecords(userId *int, params PaymentRecordSearchParams, limi
 func countSellableTokenPaymentRecords(userId *int, params PaymentRecordSearchParams, includeUser bool) (int64, error) {
 	query := sellableTokenPaymentQuery(includeUser)
 	if userId != nil {
-		query = query.Where("sellable_token_orders.user_id = ?", *userId)
+		query = query.Where("sellable_token_orders.user_id = ? AND sellable_token_orders.create_time >= ?", *userId, topUpUserQueryCutoff())
 	}
-	query = applySellableTokenPaymentSearch(query, params, includeUser)
+	var err error
+	query, err = applySellableTokenPaymentSearch(query, params, includeUser)
+	if err != nil {
+		return 0, err
+	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return 0, err
@@ -246,9 +261,13 @@ func countSellableTokenPaymentRecords(userId *int, params PaymentRecordSearchPar
 func listSellableTokenPaymentRecords(userId *int, params PaymentRecordSearchParams, limit int, includeUser bool) ([]*PaymentRecord, error) {
 	query := sellableTokenPaymentSelectQuery(includeUser)
 	if userId != nil {
-		query = query.Where("sellable_token_orders.user_id = ?", *userId)
+		query = query.Where("sellable_token_orders.user_id = ? AND sellable_token_orders.create_time >= ?", *userId, topUpUserQueryCutoff())
 	}
-	query = applySellableTokenPaymentSearch(query, params, includeUser)
+	var err error
+	query, err = applySellableTokenPaymentSearch(query, params, includeUser)
+	if err != nil {
+		return nil, err
+	}
 	query = query.Order("sellable_token_orders.create_time desc, sellable_token_orders.id desc")
 	if limit > 0 {
 		query = query.Limit(limit)
@@ -368,15 +387,20 @@ func sellableTokenPaymentSelectQuery(includeUser bool) *gorm.DB {
 	return sellableTokenPaymentQuery(includeUser).Select(strings.Join(selectClause, ", "))
 }
 
-func applySellableTokenPaymentSearch(query *gorm.DB, params PaymentRecordSearchParams, includeUsername bool) *gorm.DB {
+func applySellableTokenPaymentSearch(query *gorm.DB, params PaymentRecordSearchParams, includeUsername bool) (*gorm.DB, error) {
 	keyword := strings.TrimSpace(params.Keyword)
 	if keyword != "" {
-		like := "%" + keyword + "%"
-		keywordQuery := DB.Where("sellable_token_products.name LIKE ? OR sellable_token_orders.trade_no LIKE ?", like, like)
-		if orderID, ok := parseSellableTokenOrderKeyword(keyword); ok {
-			keywordQuery = keywordQuery.Or("sellable_token_orders.id = ?", orderID)
+		pattern, err := sanitizeContainsLikePattern(keyword)
+		if err != nil {
+			return nil, err
 		}
-		query = query.Where(keywordQuery)
+		if pattern != "" {
+			keywordQuery := DB.Where("sellable_token_products.name LIKE ? ESCAPE '!' OR sellable_token_orders.trade_no LIKE ? ESCAPE '!'", pattern, pattern)
+			if orderID, ok := parseSellableTokenOrderKeyword(keyword); ok {
+				keywordQuery = keywordQuery.Or("sellable_token_orders.id = ?", orderID)
+			}
+			query = query.Where(keywordQuery)
+		}
 	}
 
 	status := strings.TrimSpace(params.Status)
@@ -394,7 +418,7 @@ func applySellableTokenPaymentSearch(query *gorm.DB, params PaymentRecordSearchP
 	paymentMethod := strings.TrimSpace(params.PaymentMethod)
 	if paymentMethod != "" {
 		if paymentMethod != PaymentMethodWallet {
-			return query.Where("1 = 0")
+			return query.Where("1 = 0"), nil
 		}
 	}
 
@@ -411,7 +435,7 @@ func applySellableTokenPaymentSearch(query *gorm.DB, params PaymentRecordSearchP
 	)
 	query = applyPaymentRecordTimeRange(query, params.StartTimestamp, params.EndTimestamp, effectiveTimestampExpr)
 
-	return query
+	return query, nil
 }
 
 func sellableTokenPaymentStatusExpr() string {

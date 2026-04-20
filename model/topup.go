@@ -133,10 +133,37 @@ func topUpBaseQuery(tx *gorm.DB, includeUser bool) *gorm.DB {
 	return tx.Model(&TopUp{})
 }
 
-func applyTopUpSearch(query *gorm.DB, params TopUpSearchParams, includeUsername bool) *gorm.DB {
+// topUpUserQueryWindowSeconds 限制普通用户查询充值记录的时间窗口（90 天）。
+// 管理员路径（GetAllTopUps / countTopUpPaymentRecords(nil, ...)）不受限。
+const topUpUserQueryWindowSeconds int64 = 90 * 24 * 60 * 60
+
+// searchUserTopUpCountHardLimit 普通用户 COUNT 的安全上限，
+// 防止对表执行无界 COUNT 触发 DoS。
+const searchUserTopUpCountHardLimit = 500
+
+// topUpUserQueryCutoff 返回普通用户允许查询的最早 create_time（秒级 Unix 时间戳）。
+func topUpUserQueryCutoff() int64 {
+	return common.GetTimestamp() - topUpUserQueryWindowSeconds
+}
+
+// ValidateUserTopUpQueryRange 校验普通用户传入的查询起始时间是否在 90 天窗口内。
+// 管理员调用不需要此校验。
+func ValidateUserTopUpQueryRange(startTimestamp int64) error {
+	if startTimestamp > 0 && startTimestamp < topUpUserQueryCutoff() {
+		return errors.New("查询时间范围不能超过 90 天")
+	}
+	return nil
+}
+
+func applyTopUpSearch(query *gorm.DB, params TopUpSearchParams, includeUsername bool) (*gorm.DB, error) {
 	if params.Keyword != "" {
-		like := "%" + params.Keyword + "%"
-		query = query.Where("top_ups.trade_no LIKE ?", like)
+		pattern, err := sanitizeContainsLikePattern(params.Keyword)
+		if err != nil {
+			return nil, err
+		}
+		if pattern != "" {
+			query = query.Where("top_ups.trade_no LIKE ? ESCAPE '!'", pattern)
+		}
 	}
 	if params.Status != "" {
 		query = query.Where("top_ups.status = ?", params.Status)
@@ -149,7 +176,7 @@ func applyTopUpSearch(query *gorm.DB, params TopUpSearchParams, includeUsername 
 	}
 	effectiveTimestampExpr := buildPaymentRecordEffectiveTimestampExpr("top_ups.status", "top_ups.create_time", "top_ups.complete_time")
 	query = applyPaymentRecordTimeRange(query, params.StartTimestamp, params.EndTimestamp, effectiveTimestampExpr)
-	return query
+	return query, nil
 }
 
 func GetUserTopUps(userId int, pageInfo *common.PageInfo) (topups []*TopUp, total int64, err error) {
@@ -157,6 +184,11 @@ func GetUserTopUps(userId int, pageInfo *common.PageInfo) (topups []*TopUp, tota
 }
 
 func GetUserTopUpsByParams(userId int, params TopUpSearchParams, pageInfo *common.PageInfo) (topups []*TopUp, total int64, err error) {
+	if err = ValidateUserTopUpQueryRange(params.StartTimestamp); err != nil {
+		return nil, 0, err
+	}
+	cutoff := topUpUserQueryCutoff()
+
 	tx := DB.Begin()
 	if tx.Error != nil {
 		return nil, 0, tx.Error
@@ -167,13 +199,21 @@ func GetUserTopUpsByParams(userId int, params TopUpSearchParams, pageInfo *commo
 		}
 	}()
 
-	countQuery := applyTopUpSearch(tx.Model(&TopUp{}).Where("user_id = ?", userId), params, false)
-	if err = countQuery.Count(&total).Error; err != nil {
+	countQuery, err := applyTopUpSearch(tx.Model(&TopUp{}).Where("user_id = ? AND top_ups.create_time >= ?", userId, cutoff), params, false)
+	if err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
+	if err = countQuery.Limit(searchUserTopUpCountHardLimit).Count(&total).Error; err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
 
-	dataQuery := applyTopUpSearch(tx.Model(&TopUp{}).Where("user_id = ?", userId), params, false)
+	dataQuery, err := applyTopUpSearch(tx.Model(&TopUp{}).Where("user_id = ? AND top_ups.create_time >= ?", userId, cutoff), params, false)
+	if err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
 	if err = dataQuery.Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&topups).Error; err != nil {
 		tx.Rollback()
 		return nil, 0, err
@@ -202,13 +242,21 @@ func GetAllTopUpsByParams(params TopUpSearchParams, pageInfo *common.PageInfo) (
 		}
 	}()
 
-	countQuery := applyTopUpSearch(tx.Table("top_ups").Joins("LEFT JOIN users ON users.id = top_ups.user_id"), params, true)
+	countQuery, err := applyTopUpSearch(tx.Table("top_ups").Joins("LEFT JOIN users ON users.id = top_ups.user_id"), params, true)
+	if err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
 	if err = countQuery.Count(&total).Error; err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
 
-	dataQuery := applyTopUpSearch(topUpBaseQuery(tx, true), params, true)
+	dataQuery, err := applyTopUpSearch(topUpBaseQuery(tx, true), params, true)
+	if err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
 	if err = dataQuery.Order("top_ups.id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&topups).Error; err != nil {
 		tx.Rollback()
 		return nil, 0, err
