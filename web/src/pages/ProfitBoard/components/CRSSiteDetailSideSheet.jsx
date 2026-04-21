@@ -274,7 +274,9 @@ const CRSSiteDetailSideSheet = ({
   };
 
   const displayAccounts = useMemo(() => {
-    if (!sortProblematic) return filteredAccounts;
+    if (!sortProblematic) {
+      return [...filteredAccounts].sort((a, b) => problemScore(a) - problemScore(b));
+    }
     return [...filteredAccounts].sort(
       (a, b) => problemScore(b) - problemScore(a),
     );
