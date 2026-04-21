@@ -1125,12 +1125,13 @@ const ProfitBoardPage = () => {
                           return (
                             <button
                               key={item.itemKey}
+                              type='button'
                               onClick={() => setActiveTab(item.itemKey)}
                               className={[
-                                'flex items-center gap-1.5 px-3 py-2 rounded-t text-sm font-medium transition-colors select-none border-b-2',
+                                'relative flex items-center gap-1.5 px-3 py-2 rounded-t bg-transparent text-sm font-medium transition-colors select-none appearance-none border-0 after:absolute after:bottom-0 after:left-3 after:right-3 after:h-0.5 after:rounded-full after:transition-opacity',
                                 active
-                                  ? 'border-blue-500 text-blue-600 dark:text-blue-400 bg-blue-50/60 dark:bg-blue-900/20'
-                                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600',
+                                  ? 'text-blue-600 dark:text-blue-400 bg-blue-50/60 dark:bg-blue-900/20 after:bg-blue-500 after:opacity-100'
+                                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 after:bg-gray-300 dark:after:bg-gray-600 after:opacity-0 hover:after:opacity-100',
                               ].join(' ')}
                             >
                               {item.tab}
