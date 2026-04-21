@@ -186,6 +186,115 @@ func TestConfirmSubscriptionIssuanceTx_StackDoesNotPolluteIssuanceSaveStatement(
 	assert.EqualValues(t, 1, subCount)
 }
 
+func TestConfirmSubscriptionIssuanceTx_StackUsesCleanUserQueriesForUpgradeGroup(t *testing.T) {
+	setupInviteCommissionSubscriptionTest(t)
+
+	user := createInviteCommissionTestUser(t, "issue_tx_clean_user_query", 0)
+	plan := createSubscriptionPlanForInviteCommissionTest(t, "升级分组月卡", 88, 1000)
+	plan.UpgradeGroup = "vip"
+	require.NoError(t, DB.Model(&SubscriptionPlan{}).Where("id = ?", plan.Id).Update("upgrade_group", plan.UpgradeGroup).Error)
+
+	issuance := &SubscriptionIssuance{
+		UserId:           user.Id,
+		PlanId:           plan.Id,
+		PlanTitle:        plan.Title,
+		SourceType:       SubscriptionIssuanceSourceOrder,
+		SourceRef:        "issue_tx_clean_user_query_001",
+		Status:           SubscriptionIssuanceStatusPending,
+		PurchaseMode:     SubscriptionPurchaseModeStack,
+		PurchaseQuantity: 1,
+	}
+	require.NoError(t, DB.Create(issuance).Error)
+
+	var sqlLogs bytes.Buffer
+	originDB := DB
+	originLogDB := LOG_DB
+	testLogger := gormlogger.New(log.New(&sqlLogs, "", 0), gormlogger.Config{
+		LogLevel: gormlogger.Info,
+		Colorful: false,
+	})
+	DB = DB.Session(&gorm.Session{Logger: testLogger})
+	LOG_DB = LOG_DB.Session(&gorm.Session{Logger: testLogger})
+	t.Cleanup(func() {
+		DB = originDB
+		LOG_DB = originLogDB
+	})
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		sqlLogs.Reset()
+		_, _, err := ConfirmSubscriptionIssuanceTx(tx, issuance.Id, user.Id, SubscriptionPurchaseModeStack, 0)
+		return err
+	})
+	require.NoError(t, err)
+
+	userSQLLines := make([]string, 0)
+	for _, line := range strings.Split(sqlLogs.String(), "\n") {
+		lowerLine := strings.ToLower(line)
+		if strings.Contains(lowerLine, " from `users`") ||
+			strings.Contains(lowerLine, " update `users`") ||
+			strings.Contains(lowerLine, " into `users`") ||
+			strings.Contains(lowerLine, " from users ") ||
+			strings.Contains(lowerLine, " update users ") ||
+			strings.Contains(lowerLine, " into users ") {
+			userSQLLines = append(userSQLLines, line)
+		}
+	}
+	require.NotEmpty(t, userSQLLines, sqlLogs.String())
+
+	for _, line := range userSQLLines {
+		assert.NotContains(t, strings.ToLower(line), "user_id", line)
+		assert.LessOrEqual(t, strings.Count(line, fmt.Sprintf("id = %d", user.Id)), 1, line)
+	}
+}
+
+func TestCompleteSubscriptionOrder_AutoIssueUsesCleanUserQueriesForUpgradeGroup(t *testing.T) {
+	setupInviteCommissionSubscriptionTest(t)
+
+	user := createInviteCommissionTestUser(t, "sub_order_clean_user_query", 0)
+	plan := createSubscriptionPlanForInviteCommissionTest(t, "自动发放升级月卡", 88, 1000)
+	plan.UpgradeGroup = "vip"
+	require.NoError(t, DB.Model(&SubscriptionPlan{}).Where("id = ?", plan.Id).Update("upgrade_group", plan.UpgradeGroup).Error)
+
+	tradeNo := "sub_order_clean_user_query_001"
+	createSubscriptionOrderForInviteCommissionTest(t, user.Id, plan.Id, tradeNo, 88, SubscriptionPurchaseModeStack, 0)
+
+	var sqlLogs bytes.Buffer
+	originDB := DB
+	originLogDB := LOG_DB
+	testLogger := gormlogger.New(log.New(&sqlLogs, "", 0), gormlogger.Config{
+		LogLevel: gormlogger.Info,
+		Colorful: false,
+	})
+	DB = DB.Session(&gorm.Session{Logger: testLogger})
+	LOG_DB = LOG_DB.Session(&gorm.Session{Logger: testLogger})
+	t.Cleanup(func() {
+		DB = originDB
+		LOG_DB = originLogDB
+	})
+
+	sqlLogs.Reset()
+	require.NoError(t, CompleteSubscriptionOrder(tradeNo, `{"status":"success"}`))
+
+	userSQLLines := make([]string, 0)
+	for _, line := range strings.Split(sqlLogs.String(), "\n") {
+		lowerLine := strings.ToLower(line)
+		if strings.Contains(lowerLine, " from `users`") ||
+			strings.Contains(lowerLine, " update `users`") ||
+			strings.Contains(lowerLine, " into `users`") ||
+			strings.Contains(lowerLine, " from users ") ||
+			strings.Contains(lowerLine, " update users ") ||
+			strings.Contains(lowerLine, " into users ") {
+			userSQLLines = append(userSQLLines, line)
+		}
+	}
+	require.NotEmpty(t, userSQLLines, sqlLogs.String())
+
+	for _, line := range userSQLLines {
+		assert.NotContains(t, strings.ToLower(line), "user_id", line)
+		assert.LessOrEqual(t, strings.Count(line, fmt.Sprintf("id = %d", user.Id)), 1, line)
+	}
+}
+
 func TestCompleteSubscriptionOrder_EnqueueInviteCommissionByPaidAmount_StackAndIdempotent(t *testing.T) {
 	setupInviteCommissionSubscriptionTest(t)
 

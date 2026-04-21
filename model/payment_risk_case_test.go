@@ -1,12 +1,18 @@
 package model
 
 import (
+	"bytes"
+	"fmt"
+	"log"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 func setupPaymentRiskCaseTestDB(t *testing.T) {
@@ -347,4 +353,54 @@ func TestResolvePaymentRiskCase_ReverseSubscriptionPendingIssuanceCancelsPending
 
 	require.NoError(t, DB.First(&issuance, issuance.Id).Error)
 	require.Equal(t, SubscriptionIssuanceStatusCancelled, issuance.Status)
+}
+
+func TestResolvePaymentRiskCase_ReverseSubscriptionUsesCleanUserQueriesForUpgradeGroup(t *testing.T) {
+	setupPaymentRiskCaseTestDB(t)
+
+	user := createPaymentRiskCaseTestUser(t, "grace")
+	plan := createPaymentRiskCaseSubscriptionPlan(t, "reverse clean group plan", 1000, 3600)
+	plan.UpgradeGroup = "vip"
+	require.NoError(t, DB.Model(&SubscriptionPlan{}).Where("id = ?", plan.Id).Update("upgrade_group", plan.UpgradeGroup).Error)
+
+	order := createPaymentRiskCaseSubscriptionOrder(t, user.Id, plan.Id, "RISK-SUB-CLEAN-GROUP-001", SubscriptionPurchaseModeStack, 0)
+	require.NoError(t, CompleteSubscriptionOrder(order.TradeNo, `{"status":"success"}`))
+
+	riskCase := createSubscriptionPaymentRiskCaseRecord(t, order, PaymentRiskReasonManualReview)
+
+	var sqlLogs bytes.Buffer
+	originDB := DB
+	originLogDB := LOG_DB
+	testLogger := gormlogger.New(log.New(&sqlLogs, "", 0), gormlogger.Config{
+		LogLevel: gormlogger.Info,
+		Colorful: false,
+	})
+	DB = DB.Session(&gorm.Session{Logger: testLogger})
+	LOG_DB = LOG_DB.Session(&gorm.Session{Logger: testLogger})
+	t.Cleanup(func() {
+		DB = originDB
+		LOG_DB = originLogDB
+	})
+
+	sqlLogs.Reset()
+	require.NoError(t, ResolvePaymentRiskCase(riskCase.Id, 55, PaymentRiskActionReverse, "reverse clean group"))
+
+	userSQLLines := make([]string, 0)
+	for _, line := range strings.Split(sqlLogs.String(), "\n") {
+		lowerLine := strings.ToLower(line)
+		if strings.Contains(lowerLine, " from `users`") ||
+			strings.Contains(lowerLine, " update `users`") ||
+			strings.Contains(lowerLine, " into `users`") ||
+			strings.Contains(lowerLine, " from users ") ||
+			strings.Contains(lowerLine, " update users ") ||
+			strings.Contains(lowerLine, " into users ") {
+			userSQLLines = append(userSQLLines, line)
+		}
+	}
+	require.NotEmpty(t, userSQLLines, sqlLogs.String())
+
+	for _, line := range userSQLLines {
+		assert.NotContains(t, strings.ToLower(line), "user_id", line)
+		assert.LessOrEqual(t, strings.Count(line, fmt.Sprintf("id = %d", user.Id)), 1, line)
+	}
 }
