@@ -9,6 +9,7 @@ import (
 	neturl "net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -483,7 +484,7 @@ func normalizeCRSUsageWindow(key, label, source string, raw map[string]any) (mod
 		return model.CRSUsageWindow{}, false
 	}
 
-	progress, hasProgress := firstCRSUsageWindowNumber(raw, "utilization", "progress", "percentage")
+	progress, hasProgress := firstCRSUsageWindowNumber(raw, "utilization", "usedPercent", "progress", "percentage")
 	remainingText := firstCRSUsageWindowText(raw, "remainingText", "remainingTime", "remaining")
 	if remainingText == "" {
 		if value, ok := raw["remainingSeconds"]; ok {
@@ -493,6 +494,13 @@ func normalizeCRSUsageWindow(key, label, source string, raw map[string]any) (mod
 		}
 	}
 	resetAt := firstCRSUsageWindowText(raw, "resetsAt", "resetAt", "windowEnd", "windowEndAt")
+	if remainingText == "" && resetAt != "" {
+		if t, err := time.Parse(time.RFC3339, resetAt); err == nil {
+			if remaining := time.Until(t); remaining > 0 {
+				remainingText = formatCRSRemainingDuration(remaining.Seconds())
+			}
+		}
+	}
 	if !hasProgress && remainingText == "" && resetAt == "" {
 		return model.CRSUsageWindow{}, false
 	}

@@ -62,7 +62,7 @@ function healthPercent(stat) {
 function healthTone(value) {
   if (value == null) return { textType: 'tertiary', stroke: 'grey' };
   if (value >= 90) return { textType: 'success', stroke: 'green' };
-  if (value >= 70) return { textType: 'warning', stroke: 'amber' };
+  if (value >= 30) return { textType: 'warning', stroke: 'amber' };
   return { textType: 'danger', stroke: 'red' };
 }
 

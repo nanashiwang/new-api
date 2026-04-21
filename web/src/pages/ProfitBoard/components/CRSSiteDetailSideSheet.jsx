@@ -30,9 +30,10 @@ import {
   Spin,
   Table,
   Tag,
+  Tooltip,
   Typography,
 } from '@douyinfe/semi-ui';
-import { RefreshCw, Search } from 'lucide-react';
+import { RefreshCw, Search, AlertTriangle } from 'lucide-react';
 import { useIsMobile } from '@/hooks/common/useIsMobile';
 import { timestamp2string } from '../../../helpers/date';
 import {
@@ -238,11 +239,13 @@ const CRSSiteDetailSideSheet = ({
   const [keyword, setKeyword] = useState('');
   const [platform, setPlatform] = useState('');
   const [quotaState, setQuotaState] = useState('');
+  const [sortProblematic, setSortProblematic] = useState(false);
 
   useEffect(() => {
     setKeyword('');
     setPlatform('');
     setQuotaState('');
+    setSortProblematic(false);
   }, [site?.id, visible]);
 
   const platformOptions = useMemo(
@@ -262,6 +265,20 @@ const CRSSiteDetailSideSheet = ({
       }),
     [accounts, keyword, platform, quotaState],
   );
+
+  const problemScore = (account) => {
+    if (account?.rate_limited) return 3;
+    if (account?.sync_error || account?.error_message) return 2;
+    if (!account?.is_active) return 1;
+    return 0;
+  };
+
+  const displayAccounts = useMemo(() => {
+    if (!sortProblematic) return filteredAccounts;
+    return [...filteredAccounts].sort(
+      (a, b) => problemScore(b) - problemScore(a),
+    );
+  }, [filteredAccounts, sortProblematic]);
 
   const columns = [
     {
@@ -306,7 +323,7 @@ const CRSSiteDetailSideSheet = ({
       render: (_, record) => <AccountStatusTags account={record} t={t} />,
     },
     {
-      title: t('额度使用'),
+      title: t('会话窗口'),
       dataIndex: 'usage_windows',
       render: (_, record) => {
         const windows = buildCRSUsageWindows(record);
@@ -468,7 +485,7 @@ const CRSSiteDetailSideSheet = ({
                   </div>
                   <Text type='tertiary' size='small'>
                     {t('显示 {{filtered}} / {{total}}', {
-                      filtered: filteredAccounts.length,
+                      filtered: displayAccounts.length,
                       total: accounts.length,
                     })}
                   </Text>
@@ -476,35 +493,54 @@ const CRSSiteDetailSideSheet = ({
               }
             >
               {accounts.length > 0 ? (
-                <div className='mb-3 grid gap-2 lg:grid-cols-[minmax(0,1.2fr),200px,200px]'>
-                  <Input
-                    prefix={<Search size={14} />}
-                    placeholder={t('搜索账号名、远端 ID、订阅计划')}
-                    value={keyword}
-                    onChange={setKeyword}
-                    showClear
-                  />
-                  <Select
-                    value={platform}
-                    optionList={platformOptions}
-                    onChange={(value) => setPlatform(value || '')}
-                    placeholder={t('平台')}
-                    showClear
-                  />
-                  <Select
-                    value={quotaState}
-                    optionList={QUOTA_FILTER_OPTIONS.map((item) => ({
-                      ...item,
-                      label: t(item.label),
-                    }))}
-                    onChange={(value) => setQuotaState(value || '')}
-                    placeholder={t('额度状态')}
-                  />
+                <div className='mb-3 flex flex-col gap-2'>
+                  <div className='grid gap-2 lg:grid-cols-[minmax(0,1.2fr),200px,200px]'>
+                    <Input
+                      prefix={<Search size={14} />}
+                      placeholder={t('搜索账号名、远端 ID、订阅计划')}
+                      value={keyword}
+                      onChange={setKeyword}
+                      showClear
+                    />
+                    <Select
+                      value={platform}
+                      optionList={platformOptions}
+                      onChange={(value) => setPlatform(value || '')}
+                      placeholder={t('平台')}
+                      showClear
+                    />
+                    <Tooltip
+                      content={t(
+                        '额度过滤仅对有 credit 配额的平台（如 OpenAI API）有效；Claude 会话窗口账号不适用',
+                      )}
+                    >
+                      <Select
+                        value={quotaState}
+                        optionList={QUOTA_FILTER_OPTIONS.map((item) => ({
+                          ...item,
+                          label: t(item.label),
+                        }))}
+                        onChange={(value) => setQuotaState(value || '')}
+                        placeholder={t('额度状态')}
+                      />
+                    </Tooltip>
+                  </div>
+                  <div className='flex items-center justify-end'>
+                    <Button
+                      size='small'
+                      theme={sortProblematic ? 'solid' : 'borderless'}
+                      type={sortProblematic ? 'warning' : 'tertiary'}
+                      icon={<AlertTriangle size={13} />}
+                      onClick={() => setSortProblematic((prev) => !prev)}
+                    >
+                      {t('问题优先')}
+                    </Button>
+                  </div>
                 </div>
               ) : null}
               {accounts.length > 0 ? (
                 <Table
-                  dataSource={filteredAccounts}
+                  dataSource={displayAccounts}
                   columns={columns}
                   rowKey={(record) =>
                     `${record.site_id}-${record.remote_account_id}`

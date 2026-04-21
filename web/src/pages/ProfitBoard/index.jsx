@@ -1108,7 +1108,7 @@ const ProfitBoardPage = () => {
               },
             ];
             return (
-              <div className='flex items-center gap-1 border-b border-gray-200 dark:border-gray-700 pb-0 flex-wrap'>
+              <div className='flex items-center gap-1 pb-0 flex-wrap'>
                 {groups.map((group, gi) => (
                   <React.Fragment key={group.label}>
                     {gi > 0 && (
@@ -1130,7 +1130,7 @@ const ProfitBoardPage = () => {
                                 'flex items-center gap-1.5 px-3 py-2 rounded-t text-sm font-medium transition-colors select-none border-b-2',
                                 active
                                   ? 'border-blue-500 text-blue-600 dark:text-blue-400 bg-blue-50/60 dark:bg-blue-900/20'
-                                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800',
+                                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600',
                               ].join(' ')}
                             >
                               {item.tab}
