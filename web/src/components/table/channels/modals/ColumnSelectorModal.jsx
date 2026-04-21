@@ -36,6 +36,7 @@ const ColumnSelectorModal = ({
   manageTag,
   submitTagEdit,
   testChannel,
+  openTagTestModal,
   setCurrentTestChannel,
   setShowModelTestModal,
   setEditingChannel,
@@ -46,6 +47,11 @@ const ColumnSelectorModal = ({
   refresh,
   activePage,
   channels,
+  checkOllamaVersion,
+  setShowMultiKeyManageModal,
+  setCurrentMultiKeyChannel,
+  openUpstreamUpdateModal,
+  detectChannelUpstreamUpdates,
 }) => {
   // Get all columns for display in selector
   const allColumns = getChannelsColumns({
@@ -56,6 +62,7 @@ const ColumnSelectorModal = ({
     manageTag,
     submitTagEdit,
     testChannel,
+    openTagTestModal,
     setCurrentTestChannel,
     setShowModelTestModal,
     setEditingChannel,
@@ -66,6 +73,11 @@ const ColumnSelectorModal = ({
     refresh,
     activePage,
     channels,
+    checkOllamaVersion,
+    setShowMultiKeyManageModal,
+    setCurrentMultiKeyChannel,
+    openUpstreamUpdateModal,
+    detectChannelUpstreamUpdates,
   });
 
   return (

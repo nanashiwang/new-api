@@ -29,6 +29,7 @@ import { useChannelsData } from '../../../hooks/channels/useChannelsData';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 import BatchTagModal from './modals/BatchTagModal';
 import ModelTestModal from './modals/ModelTestModal';
+import TagTestModal from './modals/TagTestModal';
 import ColumnSelectorModal from './modals/ColumnSelectorModal';
 import EditChannelModal from './modals/EditChannelModal';
 import EditTagModal from './modals/EditTagModal';
@@ -58,6 +59,26 @@ const ChannelsPage = () => {
       />
       <BatchTagModal {...channelsData} />
       <ModelTestModal {...channelsData} />
+      <TagTestModal
+        visible={channelsData.showTagTestModal}
+        currentTagTestGroup={channelsData.currentTagTestGroup}
+        tagTestMode={channelsData.tagTestMode}
+        tagTestScope={channelsData.tagTestScope}
+        setTagTestScope={channelsData.setTagTestScope}
+        tagTestChannels={channelsData.tagTestChannels}
+        tagTestLoading={channelsData.tagTestLoading}
+        tagTestSubmitting={channelsData.tagTestSubmitting}
+        selectedTagTestChannelIds={channelsData.selectedTagTestChannelIds}
+        setSelectedTagTestChannelIds={
+          channelsData.setSelectedTagTestChannelIds
+        }
+        tagTestModelOptions={channelsData.tagTestModelOptions}
+        selectedTagTestModel={channelsData.selectedTagTestModel}
+        setSelectedTagTestModel={channelsData.setSelectedTagTestModel}
+        onCancel={channelsData.closeTagTestModal}
+        onConfirm={channelsData.runTagChannelsTest}
+        t={channelsData.t}
+      />
       <MultiKeyManageModal
         visible={channelsData.showMultiKeyManageModal}
         onCancel={() => channelsData.setShowMultiKeyManageModal(false)}

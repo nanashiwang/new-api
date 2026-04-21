@@ -398,6 +398,7 @@ export const getChannelsColumns = ({
   manageTag,
   submitTagEdit,
   testChannel,
+  openTagTestModal,
   setCurrentTestChannel,
   setShowModelTestModal,
   setEditingChannel,
@@ -868,7 +869,11 @@ export const getChannelsColumns = ({
                 <Button
                   size='small'
                   type='tertiary'
-                  onClick={() => testChannel(record, '')}
+                  onClick={() =>
+                    testChannel(record, '', '', false, {
+                      promptEnableOnSuccess: true,
+                    })
+                  }
                 >
                   {t('测试')}
                 </Button>
@@ -959,6 +964,24 @@ export const getChannelsColumns = ({
           // 标签操作按钮
           return (
             <Space wrap>
+              <SplitButtonGroup
+                className='overflow-hidden'
+                aria-label={t('测试标签渠道操作项目组')}
+              >
+                <Button
+                  size='small'
+                  type='tertiary'
+                  onClick={() => openTagTestModal(record, 'default')}
+                >
+                  {t('测试')}
+                </Button>
+                <Button
+                  size='small'
+                  type='tertiary'
+                  icon={<IconTreeTriangleDown />}
+                  onClick={() => openTagTestModal(record, 'model')}
+                />
+              </SplitButtonGroup>
               <Button
                 type='tertiary'
                 size='small'

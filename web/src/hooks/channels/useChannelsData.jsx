@@ -38,7 +38,13 @@ import { useTableCompactMode } from '../common/useTableCompactMode';
 import { useChannelUpstreamUpdates } from './useChannelUpstreamUpdates';
 import { parseUpstreamUpdateMeta } from './upstreamUpdateUtils';
 import { getTagAggregationStatus } from '../../components/table/channels/tagAggregationStatus';
-import { Modal, Button } from '@douyinfe/semi-ui';
+import {
+  buildTagTestSummary,
+  collectTagTestModels,
+  resolveTagTestTargets,
+  shouldPromptEnableChannelAfterManualTest,
+} from '../../components/table/channels/tagTestUtils';
+import { Modal, Button, Checkbox } from '@douyinfe/semi-ui';
 import { openCodexUsageModal } from '../../components/table/channels/modals/CodexUsageModal';
 
 export const useChannelsData = () => {
@@ -91,6 +97,17 @@ export const useChannelsData = () => {
   const [modelTablePage, setModelTablePage] = useState(1);
   const [selectedEndpointType, setSelectedEndpointType] = useState('');
   const [isStreamTest, setIsStreamTest] = useState(false);
+  const [showTagTestModal, setShowTagTestModal] = useState(false);
+  const [currentTagTestGroup, setCurrentTagTestGroup] = useState(null);
+  const [tagTestMode, setTagTestMode] = useState('default');
+  const [tagTestScope, setTagTestScope] = useState('all');
+  const [tagTestLoading, setTagTestLoading] = useState(false);
+  const [tagTestSubmitting, setTagTestSubmitting] = useState(false);
+  const [tagTestChannels, setTagTestChannels] = useState([]);
+  const [selectedTagTestChannelIds, setSelectedTagTestChannelIds] = useState(
+    [],
+  );
+  const [selectedTagTestModel, setSelectedTagTestModel] = useState('');
   const [globalPassThroughEnabled, setGlobalPassThroughEnabled] =
     useState(false);
 
@@ -780,6 +797,154 @@ export const useChannelsData = () => {
     setLoading(false);
   };
 
+  const tagTestModelOptions = useMemo(
+    () =>
+      collectTagTestModels(tagTestChannels).map((model) => ({
+        label: model,
+        value: model,
+      })),
+    [tagTestChannels],
+  );
+
+  const closeTagTestModal = () => {
+    setShowTagTestModal(false);
+    setCurrentTagTestGroup(null);
+    setTagTestMode('default');
+    setTagTestScope('all');
+    setTagTestLoading(false);
+    setTagTestSubmitting(false);
+    setTagTestChannels([]);
+    setSelectedTagTestChannelIds([]);
+    setSelectedTagTestModel('');
+  };
+
+  const openTagTestModal = async (record, mode = 'default') => {
+    const tag = record?.tag || record?.key;
+    if (!tag) {
+      showError(t('标签不能为空'));
+      return;
+    }
+
+    setCurrentTagTestGroup(record);
+    setTagTestMode(mode);
+    setTagTestScope('all');
+    setSelectedTagTestChannelIds([]);
+    setSelectedTagTestModel('');
+    setTagTestChannels([]);
+    setTagTestLoading(true);
+    setShowTagTestModal(true);
+
+    try {
+      const res = await API.get(
+        `/api/channel/tag/channels?tag=${encodeURIComponent(tag)}`,
+      );
+      const { success, message, data } = res?.data || {};
+      if (!success) {
+        showError(message || t('获取标签渠道失败'));
+        closeTagTestModal();
+        return;
+      }
+      const channelList = Array.isArray(data)
+        ? data.map((channel) => decorateChannelRecord(channel))
+        : [];
+      setTagTestChannels(channelList);
+    } catch (error) {
+      showError(
+        error?.response?.data?.message ||
+          error?.message ||
+          t('获取标签渠道失败'),
+      );
+      closeTagTestModal();
+    } finally {
+      setTagTestLoading(false);
+    }
+  };
+
+  const manualEnableChannelsByIds = async (channelIds = []) => {
+    let enabledCount = 0;
+
+    for (const channelId of channelIds) {
+      try {
+        const res = await API.post(`/api/channel/${channelId}/manual_enable`);
+        const { success, message } = res?.data || {};
+        if (success) {
+          enabledCount++;
+        } else {
+          showError(message || t('开启渠道失败'));
+        }
+      } catch (error) {
+        showError(
+          error?.response?.data?.message ||
+            error?.message ||
+            t('开启渠道失败'),
+        );
+      }
+    }
+
+    if (enabledCount > 0) {
+      showSuccess(
+        t('已开启 ${count} 个渠道').replace('${count}', enabledCount),
+      );
+      await refresh();
+    }
+
+    return enabledCount;
+  };
+
+  const promptEnableChannelsAfterSuccess = async (channelsToEnable = []) => {
+    if (channelsToEnable.length === 0) {
+      return false;
+    }
+
+    if (channelsToEnable.length === 1) {
+      const channel = channelsToEnable[0];
+      return new Promise((resolve) => {
+        Modal.confirm({
+          title: t('测试成功，是否开启该渠道？'),
+          content: channel.name || `#${channel.id}`,
+          centered: true,
+          onOk: async () => {
+            const enabledCount = await manualEnableChannelsByIds([channel.id]);
+            resolve(enabledCount > 0);
+          },
+          onCancel: () => resolve(false),
+        });
+      });
+    }
+
+    let selectedIds = channelsToEnable.map((channel) => String(channel.id));
+    return new Promise((resolve) => {
+      Modal.confirm({
+        title: t('以下渠道测试成功，是否开启？'),
+        centered: true,
+        content: (
+          <Checkbox.Group
+            defaultValue={selectedIds}
+            onChange={(values) => {
+              selectedIds = values.map((value) => String(value));
+            }}
+          >
+            <div
+              className='flex flex-col gap-2 overflow-y-auto'
+              style={{ maxHeight: 280 }}
+            >
+              {channelsToEnable.map((channel) => (
+                <Checkbox key={channel.id} value={String(channel.id)}>
+                  {channel.name || `#${channel.id}`}
+                </Checkbox>
+              ))}
+            </div>
+          </Checkbox.Group>
+        ),
+        onOk: async () => {
+          const enabledCount = await manualEnableChannelsByIds(selectedIds);
+          resolve(enabledCount > 0);
+        },
+        onCancel: () => resolve(false),
+      });
+    });
+  };
+
   // Channel operations
   const testAllChannels = async () => {
     const res = await API.get(`/api/channel/test`);
@@ -919,25 +1084,31 @@ export const useChannelsData = () => {
     }
   };
 
-  // Test channel - 单个模型测试，参考旧版实现
-  const testChannel = async (
+  const performChannelTest = async (
     record,
     model,
     endpointType = '',
     stream = false,
+    options = {},
   ) => {
-    const testKey = `${record.id}-${model}`;
+    const {
+      silent = false,
+      trackModelState = true,
+      promptEnableOnSuccess = false,
+    } = options;
+    const normalizedModel = model || '';
+    const testKey = `${record.id}-${normalizedModel}`;
 
-    // 检查是否应该停止批量测试
     if (shouldStopBatchTestingRef.current && isBatchTesting) {
-      return Promise.resolve();
+      return Promise.resolve({ success: false, skipped: true, channel: record });
     }
 
-    // 添加到正在测试的模型集合
-    setTestingModels((prev) => new Set([...prev, model]));
+    if (trackModelState) {
+      setTestingModels((prev) => new Set([...prev, normalizedModel]));
+    }
 
     try {
-      let url = `/api/channel/test/${record.id}?model=${model}`;
+      let url = `/api/channel/test/${record.id}?model=${normalizedModel}`;
       if (endpointType) {
         url += `&endpoint_type=${endpointType}`;
       }
@@ -946,72 +1117,182 @@ export const useChannelsData = () => {
       }
       const res = await API.get(url);
 
-      // 检查是否在请求期间被停止
       if (shouldStopBatchTestingRef.current && isBatchTesting) {
-        return Promise.resolve();
+        return Promise.resolve({ success: false, skipped: true, channel: record });
       }
 
       const { success, message, time, error_code } = res.data;
+      const result = {
+        success,
+        message,
+        time: time || 0,
+        errorCode: error_code || null,
+        channel: record,
+        model: normalizedModel,
+      };
 
-      // 更新测试结果
-      setModelTestResults((prev) => ({
-        ...prev,
-        [testKey]: {
-          success,
-          message,
-          time: time || 0,
-          timestamp: Date.now(),
-          errorCode: error_code || null,
-        },
-      }));
+      if (trackModelState) {
+        setModelTestResults((prev) => ({
+          ...prev,
+          [testKey]: {
+            success,
+            message,
+            time: time || 0,
+            timestamp: Date.now(),
+            errorCode: error_code || null,
+          },
+        }));
+      }
 
       if (success) {
-        // 更新渠道响应时间
         updateChannelProperty(record.id, (channel) => {
           channel.response_time = time * 1000;
           channel.test_time = Date.now() / 1000;
         });
 
-        if (!model || model === '') {
-          showInfo(
-            t('通道 ${name} 测试成功，耗时 ${time.toFixed(2)} 秒。')
-              .replace('${name}', record.name)
-              .replace('${time.toFixed(2)}', time.toFixed(2)),
-          );
-        } else {
-          showInfo(
-            t(
-              '通道 ${name} 测试成功，模型 ${model} 耗时 ${time.toFixed(2)} 秒。',
-            )
-              .replace('${name}', record.name)
-              .replace('${model}', model)
-              .replace('${time.toFixed(2)}', time.toFixed(2)),
-          );
+        if (!silent) {
+          if (!normalizedModel) {
+            showInfo(
+              t('通道 ${name} 测试成功，耗时 ${time.toFixed(2)} 秒。')
+                .replace('${name}', record.name)
+                .replace('${time.toFixed(2)}', time.toFixed(2)),
+            );
+          } else {
+            showInfo(
+              t(
+                '通道 ${name} 测试成功，模型 ${model} 耗时 ${time.toFixed(2)} 秒。',
+              )
+                .replace('${name}', record.name)
+                .replace('${model}', normalizedModel)
+                .replace('${time.toFixed(2)}', time.toFixed(2)),
+            );
+          }
         }
-      } else {
+
+        if (
+          promptEnableOnSuccess &&
+          shouldPromptEnableChannelAfterManualTest(record)
+        ) {
+          await promptEnableChannelsAfterSuccess([record]);
+        }
+      } else if (!silent) {
         showError(message);
       }
+
+      return result;
     } catch (error) {
-      // 处理网络错误
-      const testKey = `${record.id}-${model}`;
-      setModelTestResults((prev) => ({
-        ...prev,
-        [testKey]: {
-          success: false,
-          message: error.message || t('网络错误'),
-          time: 0,
-          timestamp: Date.now(),
-          errorCode: null,
-        },
-      }));
-      showError(error.message || t('测试失败'));
+      const failedResult = {
+        success: false,
+        message: error.message || t('网络错误'),
+        time: 0,
+        errorCode: null,
+        channel: record,
+        model: normalizedModel,
+      };
+
+      if (trackModelState) {
+        setModelTestResults((prev) => ({
+          ...prev,
+          [testKey]: {
+            success: false,
+            message: failedResult.message,
+            time: 0,
+            timestamp: Date.now(),
+            errorCode: null,
+          },
+        }));
+      }
+
+      if (!silent) {
+        showError(error.message || t('测试失败'));
+      }
+
+      return failedResult;
     } finally {
-      // 从正在测试的模型集合中移除
-      setTestingModels((prev) => {
-        const newSet = new Set(prev);
-        newSet.delete(model);
-        return newSet;
-      });
+      if (trackModelState) {
+        setTestingModels((prev) => {
+          const newSet = new Set(prev);
+          newSet.delete(normalizedModel);
+          return newSet;
+        });
+      }
+    }
+  };
+
+  // Test channel - 单个模型测试，参考旧版实现
+  const testChannel = async (
+    record,
+    model,
+    endpointType = '',
+    stream = false,
+    options = {},
+  ) => performChannelTest(record, model, endpointType, stream, options);
+
+  const runTagChannelsTest = async () => {
+    const targets = resolveTagTestTargets(
+      tagTestChannels,
+      tagTestScope,
+      selectedTagTestChannelIds,
+    );
+
+    if (targets.length === 0) {
+      showError(t('请先选择要测试的渠道'));
+      return;
+    }
+
+    if (tagTestMode === 'model' && !selectedTagTestModel) {
+      showError(t('请选择要测试的模型'));
+      return;
+    }
+
+    setTagTestSubmitting(true);
+    try {
+      const results = [];
+      for (const channel of targets) {
+        const result = await performChannelTest(
+          channel,
+          tagTestMode === 'model' ? selectedTagTestModel : '',
+          '',
+          false,
+          {
+            silent: true,
+            trackModelState: false,
+            promptEnableOnSuccess: false,
+          },
+        );
+        results.push(result);
+      }
+
+      const successChannels = results
+        .filter((result) => result.success)
+        .map((result) => result.channel);
+      const summary = buildTagTestSummary(
+        currentTagTestGroup?.tag || currentTagTestGroup?.key || currentTagTestGroup?.name,
+        successChannels.length,
+        targets.length,
+      );
+
+      if (summary.tone === 'success') {
+        showSuccess(summary.message);
+      } else if (summary.tone === 'error') {
+        showError(summary.message);
+      } else {
+        showInfo(summary.message);
+      }
+
+      closeTagTestModal();
+      if (successChannels.length > 0) {
+        await refresh();
+      }
+
+      const channelsToEnable = successChannels.filter((channel) =>
+        shouldPromptEnableChannelAfterManualTest(channel),
+      );
+      if (channelsToEnable.length > 0) {
+        await promptEnableChannelsAfterSuccess(channelsToEnable);
+      }
+    } finally {
+      setTagTestSubmitting(false);
     }
   };
 
@@ -1263,6 +1544,19 @@ export const useChannelsData = () => {
     isStreamTest,
     setIsStreamTest,
     allSelectingRef,
+    showTagTestModal,
+    currentTagTestGroup,
+    tagTestMode,
+    tagTestScope,
+    setTagTestScope,
+    tagTestLoading,
+    tagTestSubmitting,
+    tagTestChannels,
+    selectedTagTestChannelIds,
+    setSelectedTagTestChannelIds,
+    tagTestModelOptions,
+    selectedTagTestModel,
+    setSelectedTagTestModel,
 
     // Multi-key management states
     showMultiKeyManageModal,
@@ -1304,6 +1598,9 @@ export const useChannelsData = () => {
     fixChannelsAbilities,
     checkOllamaVersion,
     testChannel,
+    openTagTestModal,
+    closeTagTestModal,
+    runTagChannelsTest,
     batchTestModels,
     handleCloseModal,
     getFormValues,

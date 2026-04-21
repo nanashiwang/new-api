@@ -1338,6 +1338,33 @@ func GetTagModels(c *gin.Context) {
 	return
 }
 
+func GetTagChannels(c *gin.Context) {
+	tag := c.Query("tag")
+	if tag == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "tag不能为空",
+		})
+		return
+	}
+
+	channels, err := model.GetChannelsByTag(tag, false, false)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	for _, channel := range channels {
+		populateChannelRuntimeState(channel)
+		clearChannelInfo(channel)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    channels,
+	})
+}
+
 // CopyChannel handles cloning an existing channel with its key.
 // POST /api/channel/copy/:id
 // Optional query params:
@@ -1863,6 +1890,35 @@ func ManageMultiKeys(c *gin.Context) {
 		})
 		return
 	}
+}
+
+func ManualEnableChannel(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	if err = model.RecoverChannelForManualEnable(id); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	model.InitChannelCache()
+	service.ResetProxyClientCache()
+
+	channel, err := model.GetChannelById(id, false)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	populateChannelRuntimeState(channel)
+	clearChannelInfo(channel)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    channel,
+	})
 }
 
 // OllamaPullModel 拉取 Ollama 模型
