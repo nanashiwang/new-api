@@ -144,6 +144,7 @@ const ProfitBoardPage = () => {
     !!restoredState.hasUnsavedConfigChanges,
   );
   const [activeTab, setActiveTab] = useState('wallet');
+  const [hoveredTab, setHoveredTab] = useState('');
   const [builderOptionsReady, setBuilderOptionsReady] = useState(false);
   const [configReady, setConfigReady] = useState(false);
   const serverRestoredRef = useRef(false);
@@ -1127,23 +1128,23 @@ const ProfitBoardPage = () => {
                               key={item.itemKey}
                               type='button'
                               onClick={() => setActiveTab(item.itemKey)}
+                              onMouseEnter={() => setHoveredTab(item.itemKey)}
+                              onMouseLeave={() => setHoveredTab((current) => current === item.itemKey ? '' : current)}
                               className={[
-                                'group relative flex items-center gap-1.5 px-3 py-2 rounded-t bg-transparent text-sm font-medium transition-colors select-none appearance-none border-0',
+                                'flex items-center gap-1.5 px-3 py-2 rounded-t bg-transparent text-sm font-medium transition-colors select-none appearance-none border-0 border-b-2',
                                 active
                                   ? 'text-blue-600 dark:text-blue-400 bg-blue-50/60 dark:bg-blue-900/20'
                                   : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800',
                               ].join(' ')}
+                              style={{
+                                borderBottomColor: active
+                                  ? 'var(--semi-color-primary)'
+                                  : hoveredTab === item.itemKey
+                                    ? 'var(--semi-color-border)'
+                                    : 'transparent',
+                              }}
                             >
                               {item.tab}
-                              <span
-                                aria-hidden='true'
-                                className={[
-                                  'pointer-events-none absolute bottom-0 left-3 right-3 h-0.5 rounded-full transition-opacity',
-                                  active
-                                    ? 'bg-blue-500 opacity-100'
-                                    : 'bg-gray-300 opacity-0 group-hover:opacity-100 dark:bg-gray-600',
-                                ].join(' ')}
-                              />
                             </button>
                           );
                         })}
