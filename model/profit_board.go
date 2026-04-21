@@ -1467,6 +1467,9 @@ func SaveProfitBoardConfig(payload ProfitBoardConfigPayload) (*ProfitBoardConfig
 	if err := validateProfitBoardComboConfigs(payload.ComboConfigs); err != nil {
 		return nil, "", err
 	}
+	if err := validateProfitBoardBatchSelections(normalized); err != nil {
+		return nil, "", err
+	}
 	payload.ComboConfigs, err = prepareProfitBoardRemoteObserverConfigsForStorage(signature, payload.ComboConfigs)
 	if err != nil {
 		return nil, "", err
@@ -1868,7 +1871,63 @@ func buildProfitBoardWalletSnapshotWatermark(comboPricingMap map[string]profitBo
 	return strings.Join(parts, ","), nil
 }
 
-func resolveProfitBoardChannels(selection ProfitBoardSelection) ([]ProfitBoardChannelOption, []int, error) {
+func profitBoardBatchDisplayName(batch ProfitBoardBatch) string {
+	name := strings.TrimSpace(batch.Name)
+	if name != "" {
+		return name
+	}
+	if id := strings.TrimSpace(batch.Id); id != "" {
+		return id
+	}
+	return "未命名组合"
+}
+
+func profitBoardJoinQuotedItems(items []string) string {
+	if len(items) == 0 {
+		return ""
+	}
+	quoted := make([]string, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		quoted = append(quoted, fmt.Sprintf("「%s」", item))
+	}
+	return strings.Join(quoted, "、")
+}
+
+func profitBoardJoinChannelRefs(ids []int) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	refs := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		refs = append(refs, fmt.Sprintf("#%d", id))
+	}
+	return strings.Join(refs, "、")
+}
+
+func profitBoardMissingTagWarning(batchName string, tags []string) string {
+	return fmt.Sprintf(
+		"组合「%s」引用的标签 %s 当前没有任何渠道，已跳过；请到配置管理修复",
+		batchName,
+		profitBoardJoinQuotedItems(tags),
+	)
+}
+
+func profitBoardMissingChannelWarning(batchName string, channelIDs []int) string {
+	return fmt.Sprintf(
+		"组合「%s」引用的渠道 %s 已不存在，已跳过；请到配置管理修复",
+		batchName,
+		profitBoardJoinChannelRefs(channelIDs),
+	)
+}
+
+func resolveProfitBoardChannels(selection ProfitBoardSelection, batchName string, strict bool) ([]ProfitBoardChannelOption, []int, []string, error) {
 	switch selection.ScopeType {
 	case ProfitBoardScopeChannel:
 		channels := make([]ProfitBoardChannelOption, 0, len(selection.ChannelIDs))
@@ -1877,16 +1936,34 @@ func resolveProfitBoardChannels(selection ProfitBoardSelection) ([]ProfitBoardCh
 			Where("id IN ?", selection.ChannelIDs).
 			Order("id asc").
 			Scan(&channels).Error; err != nil {
-			return nil, nil, err
-		}
-		if len(channels) == 0 {
-			return nil, nil, ErrProfitBoardChannelNotExist
+			return nil, nil, nil, err
 		}
 		ids := make([]int, 0, len(channels))
+		matchedIDs := make(map[int]struct{}, len(channels))
 		for _, channel := range channels {
 			ids = append(ids, channel.Id)
+			matchedIDs[channel.Id] = struct{}{}
 		}
-		return channels, ids, nil
+		missingChannelIDs := make([]int, 0)
+		for _, channelID := range selection.ChannelIDs {
+			if _, ok := matchedIDs[channelID]; ok {
+				continue
+			}
+			missingChannelIDs = append(missingChannelIDs, channelID)
+		}
+		if strict && len(missingChannelIDs) > 0 {
+			return nil, nil, nil, fmt.Errorf(
+				"%w: 组合「%s」引用的渠道 %s 已不存在",
+				ErrProfitBoardChannelNotExist,
+				batchName,
+				profitBoardJoinChannelRefs(missingChannelIDs),
+			)
+		}
+		warnings := make([]string, 0, 1)
+		if len(missingChannelIDs) > 0 {
+			warnings = append(warnings, profitBoardMissingChannelWarning(batchName, missingChannelIDs))
+		}
+		return channels, ids, warnings, nil
 	case ProfitBoardScopeTag:
 		channels := make([]ProfitBoardChannelOption, 0)
 		if err := DB.Model(&Channel{}).
@@ -1894,35 +1971,53 @@ func resolveProfitBoardChannels(selection ProfitBoardSelection) ([]ProfitBoardCh
 			Where("tag IN ?", selection.Tags).
 			Order("tag asc, priority desc, id desc").
 			Scan(&channels).Error; err != nil {
-			return nil, nil, err
-		}
-		if len(channels) == 0 {
-			return nil, nil, ErrProfitBoardTagNoChannel
+			return nil, nil, nil, err
 		}
 		ids := make([]int, 0, len(channels))
 		exists := make(map[int]struct{}, len(channels))
+		matchedTags := make(map[string]struct{}, len(selection.Tags))
 		for _, channel := range channels {
 			if _, ok := exists[channel.Id]; ok {
 				continue
 			}
 			exists[channel.Id] = struct{}{}
 			ids = append(ids, channel.Id)
+			matchedTags[strings.TrimSpace(channel.Tag)] = struct{}{}
+		}
+		missingTags := make([]string, 0)
+		for _, tag := range selection.Tags {
+			if _, ok := matchedTags[tag]; ok {
+				continue
+			}
+			missingTags = append(missingTags, tag)
+		}
+		if strict && len(missingTags) > 0 {
+			return nil, nil, nil, fmt.Errorf(
+				"%w: 组合「%s」引用的标签 %s 当前没有任何渠道",
+				ErrProfitBoardTagNoChannel,
+				batchName,
+				profitBoardJoinQuotedItems(missingTags),
+			)
+		}
+		warnings := make([]string, 0, 1)
+		if len(missingTags) > 0 {
+			warnings = append(warnings, profitBoardMissingTagWarning(batchName, missingTags))
 		}
 		sort.Ints(ids)
-		return channels, ids, nil
+		return channels, ids, warnings, nil
 	default:
-		return nil, nil, ErrProfitBoardInvalidScopeType
+		return nil, nil, nil, ErrProfitBoardInvalidScopeType
 	}
 }
 
-func resolveProfitBoardBatch(batch ProfitBoardBatch) (ProfitBoardBatchInfo, error) {
-	resolvedChannels, channelIDs, err := resolveProfitBoardChannels(ProfitBoardSelection{
+func resolveProfitBoardBatch(batch ProfitBoardBatch, strict bool) (ProfitBoardBatchInfo, []string, error) {
+	resolvedChannels, channelIDs, warnings, err := resolveProfitBoardChannels(ProfitBoardSelection{
 		ScopeType:  batch.ScopeType,
 		ChannelIDs: batch.ChannelIDs,
 		Tags:       batch.Tags,
-	})
+	}, profitBoardBatchDisplayName(batch), strict)
 	if err != nil {
-		return ProfitBoardBatchInfo{}, err
+		return ProfitBoardBatchInfo{}, nil, err
 	}
 	_, signature, err := normalizeProfitBoardSelection(ProfitBoardSelection{
 		ScopeType:  batch.ScopeType,
@@ -1930,7 +2025,7 @@ func resolveProfitBoardBatch(batch ProfitBoardBatch) (ProfitBoardBatchInfo, erro
 		Tags:       batch.Tags,
 	})
 	if err != nil {
-		return ProfitBoardBatchInfo{}, err
+		return ProfitBoardBatchInfo{}, nil, err
 	}
 	return ProfitBoardBatchInfo{
 		Id:               batch.Id,
@@ -1941,18 +2036,23 @@ func resolveProfitBoardBatch(batch ProfitBoardBatch) (ProfitBoardBatchInfo, erro
 		Tags:             batch.Tags,
 		CreatedAt:        batch.CreatedAt,
 		ResolvedChannels: resolvedChannels,
-	}, nil
+	}, warnings, nil
 }
 
-func resolveProfitBoardBatches(batches []ProfitBoardBatch) ([]ProfitBoardBatchInfo, error) {
+func resolveProfitBoardBatchesWithMode(batches []ProfitBoardBatch, strict bool) ([]ProfitBoardBatchInfo, []string, error) {
 	resolved := make([]ProfitBoardBatchInfo, 0, len(batches))
+	warnings := make([]string, 0)
 	channelOwners := make(map[int]string)
 	channelNames := make(map[int]string)
 
 	for _, batch := range batches {
-		current, err := resolveProfitBoardBatch(batch)
+		current, currentWarnings, err := resolveProfitBoardBatch(batch, strict)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
+		}
+		warnings = append(warnings, currentWarnings...)
+		if len(current.ChannelIDs) == 0 {
+			continue
 		}
 		for _, channel := range current.ResolvedChannels {
 			name := strings.TrimSpace(channel.Name)
@@ -1961,13 +2061,22 @@ func resolveProfitBoardBatches(batches []ProfitBoardBatch) ([]ProfitBoardBatchIn
 			}
 			channelNames[channel.Id] = name
 			if owner, ok := channelOwners[channel.Id]; ok {
-				return nil, fmt.Errorf("%w: %s -> %s, %s", ErrProfitBoardChannelDuplicateBatch, name, owner, current.Name)
+				return nil, nil, fmt.Errorf("%w: %s -> %s, %s", ErrProfitBoardChannelDuplicateBatch, name, owner, current.Name)
 			}
 			channelOwners[channel.Id] = current.Name
 		}
 		resolved = append(resolved, current)
 	}
-	return resolved, nil
+	return resolved, uniqueProfitBoardWarnings(warnings), nil
+}
+
+func resolveProfitBoardBatches(batches []ProfitBoardBatch) ([]ProfitBoardBatchInfo, []string, error) {
+	return resolveProfitBoardBatchesWithMode(batches, false)
+}
+
+func validateProfitBoardBatchSelections(batches []ProfitBoardBatch) error {
+	_, _, err := resolveProfitBoardBatchesWithMode(batches, true)
+	return err
 }
 
 func buildProfitBoardBucket(timestamp int64, granularity string, customIntervalMinutes int) (int64, string) {
@@ -2213,7 +2322,7 @@ func GetProfitBoardActivity(query ProfitBoardQuery) (*ProfitBoardActivity, error
 		return nil, err
 	}
 
-	resolvedBatches, err := resolveProfitBoardBatches(normalizedQuery.Batches)
+	resolvedBatches, _, err := resolveProfitBoardBatches(normalizedQuery.Batches)
 	if err != nil {
 		return nil, err
 	}
@@ -2609,7 +2718,24 @@ func profitBoardSharedSiteMeta(comboPricingMap map[string]profitBoardResolvedCom
 	return false, 0, "不同组合使用了不同的本站价格口径：部分按原价/套餐价/充值价"
 }
 
-func buildProfitBoardReportCacheKey(query ProfitBoardQuery) string {
+func buildProfitBoardResolvedBatchFingerprint(batches []ProfitBoardBatchInfo, warnings []string) string {
+	normalizedWarnings := append([]string(nil), warnings...)
+	sort.Strings(normalizedWarnings)
+	payloadBytes, err := common.Marshal(struct {
+		Batches  []ProfitBoardBatchInfo `json:"batches"`
+		Warnings []string               `json:"warnings,omitempty"`
+	}{
+		Batches:  batches,
+		Warnings: normalizedWarnings,
+	})
+	if err != nil {
+		return ""
+	}
+	hash := sha1.Sum(payloadBytes)
+	return hex.EncodeToString(hash[:])
+}
+
+func buildProfitBoardReportCacheKey(query ProfitBoardQuery, batchFingerprint string) string {
 	if profitBoardHasEnabledRemoteObserver(query.ComboConfigs) {
 		return ""
 	}
@@ -2628,6 +2754,7 @@ func buildProfitBoardReportCacheKey(query ProfitBoardQuery) string {
 		Granularity           string                             `json:"granularity,omitempty"`
 		CustomIntervalMinutes int                                `json:"custom_interval_minutes,omitempty"`
 		Sections              []string                           `json:"sections,omitempty"`
+		BatchFingerprint      string                             `json:"batch_fingerprint,omitempty"`
 	}{
 		Batches:               query.Batches,
 		SharedSite:            query.SharedSite,
@@ -2640,6 +2767,7 @@ func buildProfitBoardReportCacheKey(query ProfitBoardQuery) string {
 		Granularity:           query.Granularity,
 		CustomIntervalMinutes: query.CustomIntervalMinutes,
 		Sections:              query.Sections,
+		BatchFingerprint:      batchFingerprint,
 	})
 	if err != nil {
 		return ""
@@ -2648,7 +2776,7 @@ func buildProfitBoardReportCacheKey(query ProfitBoardQuery) string {
 	return hex.EncodeToString(hash[:])
 }
 
-func buildProfitBoardOverviewCacheKey(payload ProfitBoardConfigPayload) string {
+func buildProfitBoardOverviewCacheKey(payload ProfitBoardConfigPayload, batchFingerprint string) string {
 	if profitBoardHasEnabledRemoteObserver(payload.ComboConfigs) {
 		return ""
 	}
@@ -2661,19 +2789,21 @@ func buildProfitBoardOverviewCacheKey(payload ProfitBoardConfigPayload) string {
 		return ""
 	}
 	payloadBytes, err := common.Marshal(struct {
-		Batches         []ProfitBoardBatch                 `json:"batches"`
-		SharedSite      ProfitBoardSharedSitePricingConfig `json:"shared_site"`
-		ComboConfigs    []ProfitBoardComboPricingConfig    `json:"combo_configs"`
-		ExcludedUserIDs []int                              `json:"excluded_user_ids"`
-		Upstream        ProfitBoardTokenPricingConfig      `json:"upstream"`
-		Site            ProfitBoardTokenPricingConfig      `json:"site"`
+		Batches          []ProfitBoardBatch                 `json:"batches"`
+		SharedSite       ProfitBoardSharedSitePricingConfig `json:"shared_site"`
+		ComboConfigs     []ProfitBoardComboPricingConfig    `json:"combo_configs"`
+		ExcludedUserIDs  []int                              `json:"excluded_user_ids"`
+		Upstream         ProfitBoardTokenPricingConfig      `json:"upstream"`
+		Site             ProfitBoardTokenPricingConfig      `json:"site"`
+		BatchFingerprint string                             `json:"batch_fingerprint,omitempty"`
 	}{
-		Batches:         payload.Batches,
-		SharedSite:      payload.SharedSite,
-		ComboConfigs:    payload.ComboConfigs,
-		ExcludedUserIDs: payload.ExcludedUserIDs,
-		Upstream:        payload.Upstream,
-		Site:            payload.Site,
+		Batches:          payload.Batches,
+		SharedSite:       payload.SharedSite,
+		ComboConfigs:     payload.ComboConfigs,
+		ExcludedUserIDs:  payload.ExcludedUserIDs,
+		Upstream:         payload.Upstream,
+		Site:             payload.Site,
+		BatchFingerprint: batchFingerprint,
 	})
 	if err != nil {
 		return ""
@@ -2773,13 +2903,18 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 	if err != nil {
 		return nil, err
 	}
+	resolvedBatches, resolvedBatchWarnings, err := resolveProfitBoardBatches(normalizedQuery.Batches)
+	if err != nil {
+		return nil, err
+	}
+	resolvedBatchFingerprint := buildProfitBoardResolvedBatchFingerprint(resolvedBatches, resolvedBatchWarnings)
 
 	requestedGranularity := normalizedQuery.Granularity
 	requestedCustomInterval := normalizedQuery.CustomIntervalMinutes
 	useHourlyBase := profitBoardShouldUseHourlyBase(requestedGranularity, requestedCustomInterval)
 
 	if !normalizedQuery.IncludeDetails {
-		cacheKey := buildProfitBoardReportCacheKey(normalizedQuery)
+		cacheKey := buildProfitBoardReportCacheKey(normalizedQuery, resolvedBatchFingerprint)
 		if cacheKey != "" {
 			if cached, found, cacheErr := getProfitBoardReportCache().Get(cacheKey); cacheErr == nil && found {
 				rebucketProfitBoardTimeseries(&cached, requestedGranularity, requestedCustomInterval)
@@ -2791,11 +2926,6 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 	if useHourlyBase {
 		normalizedQuery.Granularity = "hour"
 		normalizedQuery.CustomIntervalMinutes = 0
-	}
-
-	resolvedBatches, err := resolveProfitBoardBatches(normalizedQuery.Batches)
-	if err != nil {
-		return nil, err
 	}
 
 	pricingMap := make(map[string]Pricing)
@@ -2812,6 +2942,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		Signature:      signature,
 		Batches:        resolvedBatches,
 		BatchSummaries: make([]ProfitBoardBatchSummary, 0, len(resolvedBatches)),
+		Warnings:       append([]string(nil), resolvedBatchWarnings...),
 		Meta: ProfitBoardMeta{
 			SiteUseRechargePrice:      siteUseRechargePrice,
 			SitePriceFactor:           roundProfitBoardAmount(sitePriceFactor),
@@ -3460,7 +3591,7 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 		report.Warnings = uniqueProfitBoardWarnings(report.Warnings)
 	}
 	if !normalizedQuery.IncludeDetails {
-		if cacheKey := buildProfitBoardReportCacheKey(normalizedQuery); cacheKey != "" {
+		if cacheKey := buildProfitBoardReportCacheKey(normalizedQuery, resolvedBatchFingerprint); cacheKey != "" {
 			_ = getProfitBoardReportCache().SetWithTTL(cacheKey, *report, profitBoardReportCacheTTL())
 		}
 	}
@@ -3492,28 +3623,25 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 	if err := validateProfitBoardComboConfigs(payload.ComboConfigs); err != nil {
 		return nil, err
 	}
+	resolvedBatches, resolvedBatchWarnings, err := resolveProfitBoardBatches(normalizedBatches)
+	if err != nil {
+		return nil, err
+	}
+	resolvedBatchFingerprint := buildProfitBoardResolvedBatchFingerprint(resolvedBatches, resolvedBatchWarnings)
 
-	overviewCacheKey := buildProfitBoardOverviewCacheKey(payload)
+	overviewCacheKey := buildProfitBoardOverviewCacheKey(payload, resolvedBatchFingerprint)
 	if overviewCacheKey != "" {
 		if cached, found, cacheErr := getProfitBoardOverviewCache().Get(overviewCacheKey); cacheErr == nil && found {
 			return &cached, nil
 		}
 		if stale, found, cacheErr := getProfitBoardOverviewStaleCache().Get(overviewCacheKey); cacheErr == nil && found {
-			resolvedForCheck, resolveErr := resolveProfitBoardBatches(normalizedBatches)
-			if resolveErr == nil {
-				channelIDs := collectProfitBoardChannelIDs(resolvedForCheck)
-				currentMaxId := profitBoardLatestLogIdForChannels(channelIDs)
-				if currentMaxId > 0 && currentMaxId == stale.Meta.LatestLogId {
-					_ = getProfitBoardOverviewCache().SetWithTTL(overviewCacheKey, stale, profitBoardReportCacheTTL())
-					return &stale, nil
-				}
+			channelIDs := collectProfitBoardChannelIDs(resolvedBatches)
+			currentMaxId := profitBoardLatestLogIdForChannels(channelIDs)
+			if currentMaxId > 0 && currentMaxId == stale.Meta.LatestLogId {
+				_ = getProfitBoardOverviewCache().SetWithTTL(overviewCacheKey, stale, profitBoardReportCacheTTL())
+				return &stale, nil
 			}
 		}
-	}
-
-	resolvedBatches, err := resolveProfitBoardBatches(normalizedBatches)
-	if err != nil {
-		return nil, err
 	}
 	pricingMap := make(map[string]Pricing)
 	for _, pricing := range GetPricing() {
@@ -3537,6 +3665,7 @@ func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoard
 		Signature:      signature,
 		Batches:        resolvedBatches,
 		BatchSummaries: make([]ProfitBoardBatchSummary, 0, len(resolvedBatches)),
+		Warnings:       append([]string(nil), resolvedBatchWarnings...),
 		Meta: ProfitBoardMeta{
 			SiteUseRechargePrice:      siteUseRechargePrice,
 			SitePriceFactor:           roundProfitBoardAmount(sitePriceFactor),

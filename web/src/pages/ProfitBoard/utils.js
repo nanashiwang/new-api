@@ -177,7 +177,8 @@ export const groupWarningDetailsByScope = (details) => {
       };
     })
     .sort((left, right) => {
-      if (right.totalCount !== left.totalCount) return right.totalCount - left.totalCount;
+      if (right.totalCount !== left.totalCount)
+        return right.totalCount - left.totalCount;
       if (left.scopeLabel !== right.scopeLabel) {
         return left.scopeLabel.localeCompare(right.scopeLabel);
       }
@@ -185,7 +186,11 @@ export const groupWarningDetailsByScope = (details) => {
     });
 };
 
-export const computePackageEffectiveRate = (plan, quotaPerUnit, usdExchangeRate) => {
+export const computePackageEffectiveRate = (
+  plan,
+  quotaPerUnit,
+  usdExchangeRate,
+) => {
   const totalAmount = Number(plan?.total_amount || 0);
   if (!plan || totalAmount <= 0) return null;
 
@@ -193,11 +198,21 @@ export const computePackageEffectiveRate = (plan, quotaPerUnit, usdExchangeRate)
 
   let durationSeconds = 0;
   switch (plan.duration_unit) {
-    case 'year':  durationSeconds = plan.duration_value * 365 * 86400; break;
-    case 'month': durationSeconds = plan.duration_value * 30 * 86400; break;
-    case 'day':   durationSeconds = plan.duration_value * 86400; break;
-    case 'hour':  durationSeconds = plan.duration_value * 3600; break;
-    case 'custom': durationSeconds = plan.custom_seconds || 0; break;
+    case 'year':
+      durationSeconds = plan.duration_value * 365 * 86400;
+      break;
+    case 'month':
+      durationSeconds = plan.duration_value * 30 * 86400;
+      break;
+    case 'day':
+      durationSeconds = plan.duration_value * 86400;
+      break;
+    case 'hour':
+      durationSeconds = plan.duration_value * 3600;
+      break;
+    case 'custom':
+      durationSeconds = plan.custom_seconds || 0;
+      break;
   }
 
   let totalQuotaUSD;
@@ -206,13 +221,26 @@ export const computePackageEffectiveRate = (plan, quotaPerUnit, usdExchangeRate)
   } else {
     let resetSeconds;
     switch (plan.quota_reset_period) {
-      case 'daily':   resetSeconds = 86400; break;
-      case 'weekly':  resetSeconds = 7 * 86400; break;
-      case 'monthly': resetSeconds = 30 * 86400; break;
-      case 'custom':  resetSeconds = plan.quota_reset_custom_seconds || durationSeconds; break;
-      default:        resetSeconds = durationSeconds; break;
+      case 'daily':
+        resetSeconds = 86400;
+        break;
+      case 'weekly':
+        resetSeconds = 7 * 86400;
+        break;
+      case 'monthly':
+        resetSeconds = 30 * 86400;
+        break;
+      case 'custom':
+        resetSeconds = plan.quota_reset_custom_seconds || durationSeconds;
+        break;
+      default:
+        resetSeconds = durationSeconds;
+        break;
     }
-    const numPeriods = resetSeconds > 0 ? Math.max(1, Math.floor(durationSeconds / resetSeconds)) : 1;
+    const numPeriods =
+      resetSeconds > 0
+        ? Math.max(1, Math.floor(durationSeconds / resetSeconds))
+        : 1;
     totalQuotaUSD = quotaPerResetUSD * numPeriods;
   }
 
@@ -231,7 +259,11 @@ export const pickBestValuePlan = (plans, quotaPerUnit, usdExchangeRate) => {
   let bestPlan = null;
   let bestRate = Infinity;
   for (const plan of plans) {
-    const rate = computePackageEffectiveRate(plan, quotaPerUnit, usdExchangeRate);
+    const rate = computePackageEffectiveRate(
+      plan,
+      quotaPerUnit,
+      usdExchangeRate,
+    );
     if (rate != null && rate < bestRate) {
       bestRate = rate;
       bestPlan = plan;
@@ -609,7 +641,8 @@ const RESOURCE_RISK_TONES = {
   critical: {
     accentBorderColor: '#ef4444',
     amountTone: 'text-red-600 dark:text-red-400',
-    badgeTone: 'bg-red-500/10 text-red-700 dark:bg-red-500/15 dark:text-red-300',
+    badgeTone:
+      'bg-red-500/10 text-red-700 dark:bg-red-500/15 dark:text-red-300',
     statusBarTone:
       'border border-red-200 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200',
     priority: 40,
@@ -758,7 +791,8 @@ export const buildAccountResourceMetrics = (account, status, t) => {
       kind: 'wallet',
       risk,
       title: t('钱包余额'),
-      value: overrides.value ?? formatMoney(account?.wallet_balance_usd, status),
+      value:
+        overrides.value ?? formatMoney(account?.wallet_balance_usd, status),
       valueTone: overrides.valueTone || tone.amountTone,
       badgeTone: overrides.badgeTone || tone.badgeTone,
       statusLabel: overrides.statusLabel || t(risk?.statusLabel || '正常'),
@@ -923,9 +957,10 @@ export const buildAccountResourceMetrics = (account, status, t) => {
     account?.subscription_earliest_expire_at,
     t,
   );
-  const topAccent = metrics
-    .map((item) => getResourceRiskTone(item.risk?.level))
-    .sort((left, right) => right.priority - left.priority)[0] ||
+  const topAccent =
+    metrics
+      .map((item) => getResourceRiskTone(item.risk?.level))
+      .sort((left, right) => right.priority - left.priority)[0] ||
     getResourceRiskTone('healthy');
 
   let sharedRiskText = '';
@@ -966,7 +1001,8 @@ export const getAccountBalanceVisualMeta = (account, status, t) => {
     helper: '',
     accentColor: accentBorderColor,
     amountTone: walletMetric?.valueTone || 'text-semi-color-text-0',
-    badgeTone: walletMetric?.badgeTone || 'bg-semi-color-fill-1 text-semi-color-text-1',
+    badgeTone:
+      walletMetric?.badgeTone || 'bg-semi-color-fill-1 text-semi-color-text-1',
     noticeTone: statusBar?.tone || '',
     showNotice: !!statusBar,
   };
@@ -974,9 +1010,8 @@ export const getAccountBalanceVisualMeta = (account, status, t) => {
 
 export const getAccountResourceSummaryTones = (account) => ({
   wallet: getResourceRiskTone(getWalletRiskMeta(account).level).amountTone,
-  subscription: getResourceRiskTone(
-    getSubscriptionRiskMeta(account).level,
-  ).amountTone,
+  subscription: getResourceRiskTone(getSubscriptionRiskMeta(account).level)
+    .amountTone,
 });
 
 export const createDefaultState = () => {
@@ -1130,7 +1165,8 @@ export const normalizeRestoredState = (state) => {
   } else if (next.metricKey === 'upstream_cost_usd') {
     next.metricKey = 'upstream_cost_cny';
   }
-  if (!BOARD_METRIC_KEYS.includes(next.metricKey)) next.metricKey = defaults.metricKey;
+  if (!BOARD_METRIC_KEYS.includes(next.metricKey))
+    next.metricKey = defaults.metricKey;
   next.viewBatchId = next.viewBatchId || 'all';
   next.lastQueryKey = next.lastQueryKey || '';
   next.analysisMode = next.analysisMode || 'business_compare';
@@ -1599,3 +1635,50 @@ export const buildBatchOverlapError = (batches, channelMap, tagChannelMap) => {
   }
   return '';
 };
+
+const getBatchDisplayName = (batch, t = (value) => value) =>
+  batch?.name?.trim() || t('未命名组合');
+
+export const buildInvalidBatchSelectionError = (
+  batch,
+  channelMap,
+  tagChannelMap,
+  t = (value) => value,
+) => {
+  if (!batch) return '';
+
+  const batchName = getBatchDisplayName(batch, t);
+  if (batch.scope_type === 'tag') {
+    const missingTags = (batch.tags || []).filter(
+      (tag) => !(tagChannelMap.get(tag) || []).length,
+    );
+    if (missingTags.length > 0) {
+      return `组合「${batchName}」引用的标签 ${missingTags.map((tag) => `「${tag}」`).join('、')} 当前没有任何渠道，请修改后再保存`;
+    }
+    return '';
+  }
+
+  const missingChannelIds = (batch.channel_ids || []).filter(
+    (channelId) => !channelMap.has(String(channelId)),
+  );
+  if (missingChannelIds.length > 0) {
+    return `组合「${batchName}」引用的渠道 ${missingChannelIds.map((channelId) => `#${channelId}`).join('、')} 已不存在，请修改后再保存`;
+  }
+  return '';
+};
+
+export const buildInvalidBatchSelectionErrors = (
+  batches,
+  channelMap,
+  tagChannelMap,
+  t = (value) => value,
+) =>
+  Array.from(
+    new Set(
+      (batches || [])
+        .map((batch) =>
+          buildInvalidBatchSelectionError(batch, channelMap, tagChannelMap, t),
+        )
+        .filter(Boolean),
+    ),
+  );

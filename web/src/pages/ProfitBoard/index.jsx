@@ -27,7 +27,12 @@ import React, {
 } from 'react';
 import { Empty, Skeleton, Tabs } from '@douyinfe/semi-ui';
 import { initVChartSemiTheme } from '@visactor/vchart-semi-theme';
-import { BadgeDollarSign, BarChart3, CircleDollarSign, Server } from 'lucide-react';
+import {
+  BadgeDollarSign,
+  BarChart3,
+  CircleDollarSign,
+  Server,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { CHART_CONFIG } from '../../constants/dashboard.constants';
 import { StatusContext } from '../../context/Status';
@@ -52,6 +57,7 @@ import {
   aggregateBreakdownRows,
   aggregateChannelRowsByTag,
   buildBatchOverlapError,
+  buildInvalidBatchSelectionErrors,
   clampNumber,
   combineBreakdownMetrics,
   combineChannelMetricsByTag,
@@ -265,7 +271,7 @@ const ProfitBoardPage = () => {
     );
   }, [batches, siteConfig, upstreamConfig]);
 
-  const validationErrors = useMemo(() => {
+  const queryValidationErrors = useMemo(() => {
     const errors = [];
     if (configReady && !batches.length) errors.push(t('请至少添加一个组合'));
     if (duplicateBatchError) errors.push(duplicateBatchError);
@@ -298,6 +304,27 @@ const ProfitBoardPage = () => {
     t,
   ]);
 
+  const invalidBatchSelectionErrors = useMemo(
+    () =>
+      builderOptionsReady
+        ? buildInvalidBatchSelectionErrors(
+            batches,
+            channelMap,
+            tagChannelMap,
+            t,
+          )
+        : [],
+    [batches, builderOptionsReady, channelMap, t, tagChannelMap],
+  );
+
+  const saveValidationErrors = useMemo(
+    () =>
+      Array.from(
+        new Set([...queryValidationErrors, ...invalidBatchSelectionErrors]),
+      ),
+    [invalidBatchSelectionErrors, queryValidationErrors],
+  );
+
   const queryReady = configReady && batchPayload.length > 0;
 
   const queryHook = useProfitBoardQuery({
@@ -305,7 +332,7 @@ const ProfitBoardPage = () => {
     cachedBundle,
     configPayload,
     batchPayload,
-    validationErrors,
+    validationErrors: queryValidationErrors,
     persistReportCache,
     queryReady,
     activeTab,
@@ -384,11 +411,10 @@ const ProfitBoardPage = () => {
 
   useEffect(() => {
     let cancelled = false;
-    loadUpstreamAccounts()
-      .catch((error) => {
-        if (cancelled) return;
-        showError(error);
-      });
+    loadUpstreamAccounts().catch((error) => {
+      if (cancelled) return;
+      showError(error);
+    });
     if (!serverRestoredRef.current) {
       serverRestoredRef.current = true;
       (async () => {
@@ -523,11 +549,12 @@ const ProfitBoardPage = () => {
   useEffect(() => {
     if (!pendingAutoSaveRef.current || !configReady) return;
     pendingAutoSaveRef.current = false;
+    if (saveValidationErrors.length > 0) return;
     (async () => {
       const saved = await saveConfig([]);
       if (saved) setHasUnsavedConfigChanges(false);
     })();
-  }, [configPayload, configReady, saveConfig]);
+  }, [configPayload, configReady, saveConfig, saveValidationErrors.length]);
 
   // --- Derived data for charts ---
 
@@ -712,13 +739,7 @@ const ProfitBoardPage = () => {
     [channelGroupMode, channelRows, chartSubtitle, t],
   );
   const modelSpec = useMemo(
-    () =>
-      createBarSpec(
-        t('模型分布'),
-        modelRows,
-        chartSubtitle,
-        t,
-      ),
+    () => createBarSpec(t('模型分布'), modelRows, chartSubtitle, t),
     [chartSubtitle, modelRows, t],
   );
 
@@ -738,38 +759,43 @@ const ProfitBoardPage = () => {
 
   const chartContent = useMemo(
     () => ({
-      trend: !activeChartSectionLoaded && chartTab === 'trend' ? (
-        <Empty description={t('当前收益分析正在加载')} />
-      ) : trendRows.length ? (
-        renderChart(
-          `trend-${analysisMode}-${viewBatchId}-${metricKey}-${granularity}-${customIntervalMinutes}-${lastQueryKey}-${trendRows.length}`,
-          trendSpec,
-        )
-      ) : (
-        <Empty description={t('当前没有趋势数据')} />
-      ),
-      channel: !activeChartSectionLoaded && chartTab === 'channel' ? (
-        <Empty description={t('当前收益分析正在加载')} />
-      ) : channelRows.length ? (
-        renderChart(
-          `channel-${analysisMode}-${viewBatchId}-${metricKey}-${channelGroupMode}-${granularity}-${customIntervalMinutes}-${lastQueryKey}-${channelRows.length}`,
-          channelSpec,
-        )
-      ) : (
-        <Empty
-          description={tagAggregationMeta.emptyReason || t('当前没有渠道数据')}
-        />
-      ),
-      model: !activeChartSectionLoaded && chartTab === 'model' ? (
-        <Empty description={t('当前收益分析正在加载')} />
-      ) : modelRows.length ? (
-        renderChart(
-          `model-${analysisMode}-${viewBatchId}-${metricKey}-${granularity}-${customIntervalMinutes}-${lastQueryKey}-${modelRows.length}`,
-          modelSpec,
-        )
-      ) : (
-        <Empty description={t('当前没有模型数据')} />
-      ),
+      trend:
+        !activeChartSectionLoaded && chartTab === 'trend' ? (
+          <Empty description={t('当前收益分析正在加载')} />
+        ) : trendRows.length ? (
+          renderChart(
+            `trend-${analysisMode}-${viewBatchId}-${metricKey}-${granularity}-${customIntervalMinutes}-${lastQueryKey}-${trendRows.length}`,
+            trendSpec,
+          )
+        ) : (
+          <Empty description={t('当前没有趋势数据')} />
+        ),
+      channel:
+        !activeChartSectionLoaded && chartTab === 'channel' ? (
+          <Empty description={t('当前收益分析正在加载')} />
+        ) : channelRows.length ? (
+          renderChart(
+            `channel-${analysisMode}-${viewBatchId}-${metricKey}-${channelGroupMode}-${granularity}-${customIntervalMinutes}-${lastQueryKey}-${channelRows.length}`,
+            channelSpec,
+          )
+        ) : (
+          <Empty
+            description={
+              tagAggregationMeta.emptyReason || t('当前没有渠道数据')
+            }
+          />
+        ),
+      model:
+        !activeChartSectionLoaded && chartTab === 'model' ? (
+          <Empty description={t('当前收益分析正在加载')} />
+        ) : modelRows.length ? (
+          renderChart(
+            `model-${analysisMode}-${viewBatchId}-${metricKey}-${granularity}-${customIntervalMinutes}-${lastQueryKey}-${modelRows.length}`,
+            modelSpec,
+          )
+        ) : (
+          <Empty description={t('当前没有模型数据')} />
+        ),
     }),
     [
       analysisMode,
@@ -894,7 +920,8 @@ const ProfitBoardPage = () => {
 
     const pushMessage = (message) => {
       if (!message?.text) return;
-      const key = message.key || `${message.type}:${message.code || message.text}`;
+      const key =
+        message.key || `${message.type}:${message.code || message.text}`;
       if (seenKeys.has(key)) return;
       seenKeys.add(key);
       messages.push(message);
@@ -929,9 +956,17 @@ const ProfitBoardPage = () => {
       },
     );
 
-    validationErrors.forEach((warningText) => {
+    queryValidationErrors.forEach((warningText) => {
       pushMessage({
         key: `validation:${warningText}`,
+        type: 'warning',
+        text: warningText,
+      });
+    });
+
+    invalidBatchSelectionErrors.forEach((warningText) => {
+      pushMessage({
+        key: `invalid-selection:${warningText}`,
         type: 'warning',
         text: warningText,
       });
@@ -951,7 +986,8 @@ const ProfitBoardPage = () => {
     report?.warning_items,
     overviewReport?.warnings,
     report?.warnings,
-    validationErrors,
+    invalidBatchSelectionErrors,
+    queryValidationErrors,
     sitePriceFactorNote,
   ]);
 
@@ -1005,17 +1041,20 @@ const ProfitBoardPage = () => {
   }, [overviewReport?.batch_summaries]);
 
   const handleSaveConfig = useCallback(async () => {
-    const saved = await saveConfig(validationErrors);
+    const saved = await saveConfig(saveValidationErrors);
     if (saved) {
       setHasUnsavedConfigChanges(false);
     }
-  }, [saveConfig, validationErrors]);
+  }, [saveConfig, saveValidationErrors]);
 
-  const handleExcludedUserIDsChange = useCallback((nextIDs) => {
-    setExcludedUserIDs(nextIDs);
-    setHasUnsavedConfigChanges(true);
-    pendingAutoSaveRef.current = true;
-  }, [setExcludedUserIDs]);
+  const handleExcludedUserIDsChange = useCallback(
+    (nextIDs) => {
+      setExcludedUserIDs(nextIDs);
+      setHasUnsavedConfigChanges(true);
+      pendingAutoSaveRef.current = true;
+    },
+    [setExcludedUserIDs],
+  );
 
   const handleMoveBatch = useCallback(
     (index, direction) => {
@@ -1214,7 +1253,7 @@ const ProfitBoardPage = () => {
                 chartContent={chartContent}
                 trendBucketCount={trendBucketCount}
                 tagAggregationHint={tagAggregationMeta.emptyReason}
-                validationErrors={validationErrors}
+                validationErrors={queryValidationErrors}
                 onNavigateToConfig={() => setActiveTab('config')}
                 t={t}
               />
@@ -1254,6 +1293,7 @@ const ProfitBoardPage = () => {
                       getUpstreamSummaryText(comboConfig, options, t)
                     }
                     batchValidationError={duplicateBatchError}
+                    invalidSelectionWarnings={invalidBatchSelectionErrors}
                     batchMetrics={batchMetrics}
                     isMobile={isMobile}
                     onCreateBatch={editorHook.openCreateBatchModal}

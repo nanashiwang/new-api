@@ -22,6 +22,7 @@ import { Modal } from '@douyinfe/semi-ui';
 import { showError, showSuccess } from '../../../helpers';
 import {
   buildBatchOverlapError,
+  buildInvalidBatchSelectionError,
   clampNumber,
   clampPositiveNumber,
   createBatchId,
@@ -105,8 +106,18 @@ export const useComboEditor = ({
           ? (draft.channel_ids || []).length
           : (draft.tags || []).length;
       if (!selectedCount) return t('请先选择渠道或标签');
+      const invalidSelectionError = buildInvalidBatchSelectionError(
+        draft,
+        channelMap,
+        tagChannelMap,
+        t,
+      );
+      if (invalidSelectionError) {
+        return invalidSelectionError;
+      }
       if (
-        (draft.site_mode === 'shared_site_model' || draft.site_mode === 'log_quota') &&
+        (draft.site_mode === 'shared_site_model' ||
+          draft.site_mode === 'log_quota') &&
         !(draft.shared_site?.model_names || []).length
       ) {
         return t('启用了本站模型价格或智能模式的组合必须至少选择一个模型');
@@ -317,7 +328,13 @@ export const useComboEditor = ({
         showError(error);
       }
     },
-    [builderOptionsReady, channelMap, loadBuilderOptions, resolveComboConfig, t],
+    [
+      builderOptionsReady,
+      channelMap,
+      loadBuilderOptions,
+      resolveComboConfig,
+      t,
+    ],
   );
 
   const handleApplyRecommendedModes = useCallback(() => {
@@ -479,7 +496,14 @@ export const useComboEditor = ({
         },
       });
     },
-    [closeEditor, editingBatchId, onConfigChanged, removeBatch, setComboConfigs, t],
+    [
+      closeEditor,
+      editingBatchId,
+      onConfigChanged,
+      removeBatch,
+      setComboConfigs,
+      t,
+    ],
   );
 
   const editorSmartSuggestions = useMemo(() => {

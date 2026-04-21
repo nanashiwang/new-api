@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -37,6 +38,18 @@ func requireProfitBoardFloat(t *testing.T, value any, expected float64, field st
 	if math.Abs(actual-expected) > 0.000001 {
 		t.Fatalf("unexpected %s: got %.6f want %.6f", field, actual, expected)
 	}
+}
+
+func requireProfitBoardWarningContains(t *testing.T, warnings []string, needle string) {
+	t.Helper()
+
+	for _, warning := range warnings {
+		if strings.Contains(warning, needle) {
+			return
+		}
+	}
+
+	t.Fatalf("expected warnings to contain %q, got %+v", needle, warnings)
 }
 
 func findProfitBoardWarningItem(items []ProfitBoardWarningItem, code string) *ProfitBoardWarningItem {
@@ -91,6 +104,25 @@ func setupProfitBoardTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db
+}
+
+func seedProfitBoardChannels(t *testing.T, ids ...int) {
+	t.Helper()
+
+	channels := make([]Channel, 0, len(ids))
+	for _, id := range ids {
+		channels = append(channels, Channel{
+			Id:     id,
+			Name:   fmt.Sprintf("channel-%d", id),
+			Status: common.ChannelStatusEnabled,
+		})
+	}
+	if len(channels) == 0 {
+		return
+	}
+	if err := DB.Create(&channels).Error; err != nil {
+		t.Fatalf("seed channels: %v", err)
+	}
 }
 
 func TestProfitBoardAggregateStateQueryUsesQuotedKeyColumn(t *testing.T) {
@@ -385,6 +417,7 @@ func seedProfitBoardRemoteSnapshot(t *testing.T, selectionSignature string, comb
 
 func TestSaveProfitBoardConfigUsesStableSignature(t *testing.T) {
 	setupProfitBoardTestDB(t)
+	seedProfitBoardChannels(t, 1, 3, 9)
 
 	payload := ProfitBoardConfigPayload{
 		Batches: []ProfitBoardBatch{
@@ -432,6 +465,7 @@ func TestSaveProfitBoardConfigUsesStableSignature(t *testing.T) {
 
 func TestSaveProfitBoardConfigAssignsBatchCreatedAtWhenMissing(t *testing.T) {
 	setupProfitBoardTestDB(t)
+	seedProfitBoardChannels(t, 1)
 
 	before := common.GetTimestamp()
 	saved, _, err := SaveProfitBoardConfig(ProfitBoardConfigPayload{
@@ -473,6 +507,7 @@ func TestSaveProfitBoardConfigAssignsBatchCreatedAtWhenMissing(t *testing.T) {
 
 func TestGetProfitBoardConfigRemapsComboConfigToCurrentBatchID(t *testing.T) {
 	setupProfitBoardTestDB(t)
+	seedProfitBoardChannels(t, 1, 3)
 
 	payload := ProfitBoardConfigPayload{
 		Batches: []ProfitBoardBatch{
@@ -905,23 +940,28 @@ func TestBuildProfitBoardReportCacheKeyIncludesPricingAndGranularity(t *testing.
 		Sections:              []string{"timeseries", "warning_items"},
 	}
 
-	keyA := buildProfitBoardReportCacheKey(base)
+	keyA := buildProfitBoardReportCacheKey(base, "fingerprint-a")
 	if keyA == "" {
 		t.Fatal("expected non-empty cache key")
 	}
 
 	withDifferentSite := base
 	withDifferentSite.Site.InputPrice = 2
-	keyB := buildProfitBoardReportCacheKey(withDifferentSite)
+	keyB := buildProfitBoardReportCacheKey(withDifferentSite, "fingerprint-a")
 	if keyA == keyB {
 		t.Fatalf("expected cache key to change when site pricing changes: %q", keyA)
 	}
 
 	withDifferentGranularity := base
 	withDifferentGranularity.CustomIntervalMinutes = 30
-	keyC := buildProfitBoardReportCacheKey(withDifferentGranularity)
+	keyC := buildProfitBoardReportCacheKey(withDifferentGranularity, "fingerprint-a")
 	if keyA == keyC {
 		t.Fatalf("expected cache key to change when custom interval changes: %q", keyA)
+	}
+
+	keyD := buildProfitBoardReportCacheKey(base, "fingerprint-b")
+	if keyA == keyD {
+		t.Fatalf("expected cache key to change when resolved batch fingerprint changes: %q", keyA)
 	}
 }
 
@@ -1120,6 +1160,7 @@ func TestCollectProfitBoardUpstreamAccountObservedAggregateIncludesLatestSnapsho
 
 func TestSaveProfitBoardConfigMasksRemoteObserverToken(t *testing.T) {
 	db := setupProfitBoardTestDB(t)
+	seedProfitBoardChannels(t, 1)
 
 	payload := ProfitBoardConfigPayload{
 		Batches: []ProfitBoardBatch{{
@@ -1218,6 +1259,7 @@ func TestGetProfitBoardConfigMigratesGlobalSharedSiteIntoComboConfig(t *testing.
 
 func TestSaveProfitBoardConfigKeepsComboSharedSiteIndependent(t *testing.T) {
 	setupProfitBoardTestDB(t)
+	seedProfitBoardChannels(t, 1, 2)
 
 	payload := ProfitBoardConfigPayload{
 		Batches: []ProfitBoardBatch{
@@ -1286,6 +1328,7 @@ func TestSaveProfitBoardConfigKeepsComboSharedSiteIndependent(t *testing.T) {
 
 func TestSaveProfitBoardConfigKeepsComboWalletModeIndependent(t *testing.T) {
 	setupProfitBoardTestDB(t)
+	seedProfitBoardChannels(t, 1, 2)
 
 	payload := ProfitBoardConfigPayload{
 		Batches: []ProfitBoardBatch{
@@ -3278,5 +3321,148 @@ func TestGenerateProfitBoardReportWalletCostKeepsPerBucketAllocation(t *testing.
 	}
 	if math.Abs(totalTimeseriesCost-0.1) > 1e-6 {
 		t.Fatalf("trend path Timeseries total should equal summary cost 0.1, got %.6f; timeseries=%+v", totalTimeseriesCost, report.Timeseries)
+	}
+}
+
+func TestGenerateProfitBoardReportSkipsInvalidTagBatchAfterChannelTagChanges(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	channel := Channel{
+		Id:     1,
+		Name:   "alpha",
+		Tag:    common.GetPointer("tag-a"),
+		Status: common.ChannelStatusEnabled,
+	}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+
+	now := common.GetTimestamp()
+	logRow := Log{
+		Id:               1,
+		Type:             LogTypeConsume,
+		CreatedAt:        now - 60,
+		ChannelId:        1,
+		ModelName:        "gpt-4.1",
+		PromptTokens:     1000,
+		CompletionTokens: 100,
+		Quota:            10,
+	}
+	if err := db.Create(&logRow).Error; err != nil {
+		t.Fatalf("seed log: %v", err)
+	}
+
+	query := ProfitBoardQuery{
+		Batches: []ProfitBoardBatch{{
+			Id:        "tag-batch",
+			Name:      "标签组合",
+			ScopeType: ProfitBoardScopeTag,
+			Tags:      []string{"tag-a"},
+			CreatedAt: now - 3600,
+		}},
+		Upstream: ProfitBoardTokenPricingConfig{
+			CostSource: ProfitBoardCostSourceManualOnly,
+		},
+		Site: ProfitBoardTokenPricingConfig{
+			PricingMode: ProfitBoardSitePricingManual,
+		},
+		StartTimestamp: now - 3600,
+		EndTimestamp:   now,
+		Granularity:    "day",
+	}
+
+	firstReport, err := GenerateProfitBoardReport(query)
+	if err != nil {
+		t.Fatalf("GenerateProfitBoardReport first: %v", err)
+	}
+	if firstReport.Summary.RequestCount != 1 {
+		t.Fatalf("expected first report to include the tag channel, got %+v", firstReport.Summary)
+	}
+
+	if err := db.Model(&Channel{}).Where("id = ?", channel.Id).Update("tag", "").Error; err != nil {
+		t.Fatalf("clear channel tag: %v", err)
+	}
+
+	secondReport, err := GenerateProfitBoardReport(query)
+	if err != nil {
+		t.Fatalf("GenerateProfitBoardReport second: %v", err)
+	}
+	if secondReport.Summary.RequestCount != 0 {
+		t.Fatalf("expected invalid tag batch to be skipped after tag change, got %+v", secondReport.Summary)
+	}
+	requireProfitBoardWarningContains(t, secondReport.Warnings, "tag-a")
+	requireProfitBoardWarningContains(t, secondReport.Warnings, "标签组合")
+}
+
+func TestGenerateProfitBoardOverviewSkipsInvalidTagBatchWithWarning(t *testing.T) {
+	setupProfitBoardTestDB(t)
+
+	overview, err := GenerateProfitBoardOverview(ProfitBoardConfigPayload{
+		Batches: []ProfitBoardBatch{{
+			Id:        "missing-tag-batch",
+			Name:      "失效标签组合",
+			ScopeType: ProfitBoardScopeTag,
+			Tags:      []string{"missing-tag"},
+			CreatedAt: common.GetTimestamp() - 300,
+		}},
+		Upstream: ProfitBoardTokenPricingConfig{
+			CostSource: ProfitBoardCostSourceManualOnly,
+		},
+		Site: ProfitBoardTokenPricingConfig{
+			PricingMode: ProfitBoardSitePricingManual,
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateProfitBoardOverview: %v", err)
+	}
+	if overview.Summary.RequestCount != 0 {
+		t.Fatalf("expected invalid tag batch to be skipped, got %+v", overview.Summary)
+	}
+	requireProfitBoardWarningContains(t, overview.Warnings, "missing-tag")
+	requireProfitBoardWarningContains(t, overview.Warnings, "失效标签组合")
+}
+
+func TestGetProfitBoardActivitySkipsInvalidTagBatchWithWarning(t *testing.T) {
+	setupProfitBoardTestDB(t)
+
+	activity, err := GetProfitBoardActivity(ProfitBoardQuery{
+		Batches: []ProfitBoardBatch{{
+			Id:        "missing-tag-batch",
+			Name:      "失效标签组合",
+			ScopeType: ProfitBoardScopeTag,
+			Tags:      []string{"missing-tag"},
+			CreatedAt: common.GetTimestamp() - 300,
+		}},
+		StartTimestamp: common.GetTimestamp() - 300,
+		EndTimestamp:   common.GetTimestamp(),
+		Granularity:    "day",
+	})
+	if err != nil {
+		t.Fatalf("GetProfitBoardActivity: %v", err)
+	}
+	if activity.ActivityWatermark == "" {
+		t.Fatalf("expected empty activity result to still produce a watermark: %+v", activity)
+	}
+}
+
+func TestSaveProfitBoardConfigRejectsInvalidTagBatch(t *testing.T) {
+	setupProfitBoardTestDB(t)
+
+	_, _, err := SaveProfitBoardConfig(ProfitBoardConfigPayload{
+		Batches: []ProfitBoardBatch{{
+			Id:        "missing-tag-batch",
+			Name:      "失效标签组合",
+			ScopeType: ProfitBoardScopeTag,
+			Tags:      []string{"missing-tag"},
+		}},
+		Upstream: ProfitBoardTokenPricingConfig{
+			CostSource: ProfitBoardCostSourceManualOnly,
+		},
+		Site: ProfitBoardTokenPricingConfig{
+			PricingMode: ProfitBoardSitePricingManual,
+		},
+	})
+	if !errors.Is(err, ErrProfitBoardTagNoChannel) {
+		t.Fatalf("expected ErrProfitBoardTagNoChannel, got %v", err)
 	}
 }

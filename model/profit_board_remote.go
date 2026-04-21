@@ -952,7 +952,7 @@ func SyncProfitBoardRemoteObservers(payload ProfitBoardConfigPayload, force bool
 	if err := validateProfitBoardComboConfigs(payload.ComboConfigs); err != nil {
 		return nil, err
 	}
-	resolvedBatches, err := resolveProfitBoardBatches(normalizedBatches)
+	resolvedBatches, _, err := resolveProfitBoardBatches(normalizedBatches)
 	if err != nil {
 		return nil, err
 	}

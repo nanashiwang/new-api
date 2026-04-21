@@ -18,7 +18,11 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict';
 
-import { groupWarningDetailsByScope } from './utils.js';
+import {
+  buildInvalidBatchSelectionError,
+  buildInvalidBatchSelectionErrors,
+  groupWarningDetailsByScope,
+} from './utils.js';
 
 const grouped = groupWarningDetailsByScope([
   {
@@ -82,15 +86,27 @@ assert.deepEqual(grouped[0], {
       modelName: 'claude-sonnet-4-6',
       count: 17,
       reasons: [
-        { reasonCode: 'site_model_not_found_with_manual_missing', reasonLabel: '智能定价没找到这个模型，手动规则也没匹配到', count: 14 },
-        { reasonCode: 'log_quota_zero', reasonLabel: '命中的价格是 0', count: 3 },
+        {
+          reasonCode: 'site_model_not_found_with_manual_missing',
+          reasonLabel: '智能定价没找到这个模型，手动规则也没匹配到',
+          count: 14,
+        },
+        {
+          reasonCode: 'log_quota_zero',
+          reasonLabel: '命中的价格是 0',
+          count: 3,
+        },
       ],
     },
     {
       modelName: 'claude-opus-4-6',
       count: 10,
       reasons: [
-        { reasonCode: 'site_model_group_unmatched_with_manual_missing', reasonLabel: '智能定价分组不匹配，手动规则也没匹配到', count: 10 },
+        {
+          reasonCode: 'site_model_group_unmatched_with_manual_missing',
+          reasonLabel: '智能定价分组不匹配，手动规则也没匹配到',
+          count: 10,
+        },
       ],
     },
   ],
@@ -98,16 +114,87 @@ assert.deepEqual(grouped[0], {
 
 assert.equal(grouped[1].scopeKey, 'channel:101');
 assert.equal(grouped[1].displayHint, '#101');
-assert.deepEqual(grouped[1].models, [{
-  modelName: 'gpt-5.4',
-  count: 3,
-  reasons: [{ reasonCode: 'manual_missing', reasonLabel: '手动规则没匹配到，也没有默认规则', count: 3 }],
-}]);
+assert.deepEqual(grouped[1].models, [
+  {
+    modelName: 'gpt-5.4',
+    count: 3,
+    reasons: [
+      {
+        reasonCode: 'manual_missing',
+        reasonLabel: '手动规则没匹配到，也没有默认规则',
+        count: 3,
+      },
+    ],
+  },
+]);
 
 assert.equal(grouped[2].scopeKey, 'channel:202');
 assert.equal(grouped[2].displayHint, '#202');
-assert.deepEqual(grouped[2].models, [{
-  modelName: 'gpt-5.3',
-  count: 2,
-  reasons: [{ reasonCode: 'returned_cost_missing', reasonLabel: '上游没返回费用', count: 2 }],
-}]);
+assert.deepEqual(grouped[2].models, [
+  {
+    modelName: 'gpt-5.3',
+    count: 2,
+    reasons: [
+      {
+        reasonCode: 'returned_cost_missing',
+        reasonLabel: '上游没返回费用',
+        count: 2,
+      },
+    ],
+  },
+]);
+
+const channelMap = new Map([
+  ['1', { id: 1, name: 'alpha' }],
+  ['2', { id: 2, name: 'beta' }],
+]);
+const tagChannelMap = new Map([['tag-valid', ['1']]]);
+
+assert.equal(
+  buildInvalidBatchSelectionError(
+    {
+      name: '失效标签组合',
+      scope_type: 'tag',
+      tags: ['tag-valid', 'tag-missing'],
+    },
+    channelMap,
+    tagChannelMap,
+  ),
+  '组合「失效标签组合」引用的标签 「tag-missing」 当前没有任何渠道，请修改后再保存',
+);
+
+assert.equal(
+  buildInvalidBatchSelectionError(
+    {
+      name: '失效渠道组合',
+      scope_type: 'channel',
+      channel_ids: ['1', '3'],
+    },
+    channelMap,
+    tagChannelMap,
+  ),
+  '组合「失效渠道组合」引用的渠道 #3 已不存在，请修改后再保存',
+);
+
+assert.deepEqual(
+  buildInvalidBatchSelectionErrors(
+    [
+      {
+        name: '失效标签组合',
+        scope_type: 'tag',
+        tags: ['tag-missing'],
+      },
+      {
+        name: '失效渠道组合',
+        scope_type: 'channel',
+        channel_ids: ['3'],
+      },
+    ],
+    channelMap,
+    tagChannelMap,
+  ),
+  [
+    '组合「失效标签组合」引用的标签 「tag-missing」 当前没有任何渠道，请修改后再保存',
+    '组合「失效渠道组合」引用的渠道 #3 已不存在，请修改后再保存',
+  ],
+);

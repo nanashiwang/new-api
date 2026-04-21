@@ -26,7 +26,14 @@ import {
   Tag,
   Typography,
 } from '@douyinfe/semi-ui';
-import { ArrowDown, ArrowUp, Layers3, Pencil, Plus, Trash2 } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowUp,
+  Layers3,
+  Pencil,
+  Plus,
+  Trash2,
+} from 'lucide-react';
 
 const { Text } = Typography;
 
@@ -46,6 +53,7 @@ const ComboManagerCard = ({
   getSiteSummary,
   getUpstreamSummary,
   batchValidationError,
+  invalidSelectionWarnings,
   batchMetrics,
   isMobile,
   onCreateBatch,
@@ -123,7 +131,9 @@ const ComboManagerCard = ({
                       {batchMetrics?.[batch.id] && (
                         <div className='mt-2 flex flex-wrap gap-x-4 gap-y-1 px-1 text-xs'>
                           <span>
-                            <span className='text-semi-color-text-2'>{t('收入')}</span>{' '}
+                            <span className='text-semi-color-text-2'>
+                              {t('收入')}
+                            </span>{' '}
                             <span className='inline-flex flex-col align-top'>
                               <span className='font-medium text-emerald-600 dark:text-emerald-400'>
                                 {batchMetrics[batch.id].revenue.primary}
@@ -134,7 +144,9 @@ const ComboManagerCard = ({
                             </span>
                           </span>
                           <span>
-                            <span className='text-semi-color-text-2'>{t('成本')}</span>{' '}
+                            <span className='text-semi-color-text-2'>
+                              {t('成本')}
+                            </span>{' '}
                             <span className='inline-flex flex-col align-top'>
                               <span className='font-medium text-amber-600 dark:text-amber-400'>
                                 {batchMetrics[batch.id].cost.primary}
@@ -145,7 +157,9 @@ const ComboManagerCard = ({
                             </span>
                           </span>
                           <span>
-                            <span className='text-semi-color-text-2'>{t('利润')}</span>{' '}
+                            <span className='text-semi-color-text-2'>
+                              {t('利润')}
+                            </span>{' '}
                             <span className='inline-flex flex-col align-top'>
                               <span className='font-medium text-sky-600 dark:text-sky-400'>
                                 {batchMetrics[batch.id].profit.primary}
@@ -224,6 +238,19 @@ const ComboManagerCard = ({
           type='danger'
           description={batchValidationError}
           closeIcon={null}
+        />
+      ) : null}
+      {invalidSelectionWarnings?.length ? (
+        <Banner
+          type='warning'
+          closeIcon={null}
+          description={
+            <div className='space-y-1'>
+              {invalidSelectionWarnings.map((warningText) => (
+                <div key={warningText}>{warningText}</div>
+              ))}
+            </div>
+          }
         />
       ) : null}
     </div>

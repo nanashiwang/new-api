@@ -1207,17 +1207,18 @@ func generateProfitBoardSummaryReportInternal(query ProfitBoardQuery, cumulative
 		// silently rewrite the range to the default recent window.
 		normalizedQuery.StartTimestamp = 0
 	}
-	if cacheKey := buildProfitBoardReportCacheKey(normalizedQuery); cacheKey != "" {
+	resolvedBatches, resolvedBatchWarnings, err := resolveProfitBoardBatches(normalizedQuery.Batches)
+	if err != nil {
+		return nil, err
+	}
+	resolvedBatchFingerprint := buildProfitBoardResolvedBatchFingerprint(resolvedBatches, resolvedBatchWarnings)
+	if cacheKey := buildProfitBoardReportCacheKey(normalizedQuery, resolvedBatchFingerprint); cacheKey != "" {
 		if cached, found, cacheErr := getProfitBoardReportCache().Get(cacheKey); cacheErr == nil && found {
 			rebucketProfitBoardTimeseries(&cached, normalizedQuery.Granularity, normalizedQuery.CustomIntervalMinutes)
 			return &cached, nil
 		}
 	}
 
-	resolvedBatches, err := resolveProfitBoardBatches(normalizedQuery.Batches)
-	if err != nil {
-		return nil, err
-	}
 	pricingMap := make(map[string]Pricing)
 	for _, pricing := range GetPricing() {
 		pricingMap[pricing.ModelName] = pricing
@@ -1236,6 +1237,7 @@ func generateProfitBoardSummaryReportInternal(query ProfitBoardQuery, cumulative
 		Signature:      signature,
 		Batches:        resolvedBatches,
 		BatchSummaries: make([]ProfitBoardBatchSummary, 0, len(resolvedBatches)),
+		Warnings:       append([]string(nil), resolvedBatchWarnings...),
 		Meta: ProfitBoardMeta{
 			SiteUseRechargePrice:      siteUseRechargePrice,
 			SitePriceFactor:           roundProfitBoardAmount(sitePriceFactor),
@@ -1509,7 +1511,7 @@ func generateProfitBoardSummaryReportInternal(query ProfitBoardQuery, cumulative
 		}, profitBoardWarningReasonLabels())
 		report.Warnings = uniqueProfitBoardWarnings(report.Warnings)
 	}
-	if cacheKey := buildProfitBoardReportCacheKey(normalizedQuery); cacheKey != "" {
+	if cacheKey := buildProfitBoardReportCacheKey(normalizedQuery, resolvedBatchFingerprint); cacheKey != "" {
 		_ = getProfitBoardReportCache().SetWithTTL(cacheKey, *report, profitBoardReportCacheTTL())
 	}
 	return report, nil
@@ -1534,7 +1536,12 @@ func generateProfitBoardOverviewSummary(payload ProfitBoardConfigPayload) (*Prof
 	if err = validateProfitBoardComboConfigs(payload.ComboConfigs); err != nil {
 		return nil, err
 	}
-	overviewCacheKey := buildProfitBoardOverviewCacheKey(payload)
+	resolvedBatches, resolvedBatchWarnings, err := resolveProfitBoardBatches(normalizedBatches)
+	if err != nil {
+		return nil, err
+	}
+	resolvedBatchFingerprint := buildProfitBoardResolvedBatchFingerprint(resolvedBatches, resolvedBatchWarnings)
+	overviewCacheKey := buildProfitBoardOverviewCacheKey(payload, resolvedBatchFingerprint)
 	if overviewCacheKey != "" {
 		if cached, found, cacheErr := getProfitBoardOverviewCache().Get(overviewCacheKey); cacheErr == nil && found {
 			return &cached, nil
