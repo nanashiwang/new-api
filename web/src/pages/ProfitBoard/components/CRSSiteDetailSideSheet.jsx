@@ -19,10 +19,14 @@ For commercial licensing, please contact support@quantumnous.com
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Button,
+  Card,
+  Divider,
   Empty,
   Input,
+  Progress,
   Select,
   SideSheet,
+  Space,
   Spin,
   Table,
   Tag,
@@ -34,6 +38,9 @@ import { timestamp2string } from '../../../helpers/date';
 import {
   buildCRSUsageWindows,
   filterCRSAccounts,
+  formatCRSDailyCost,
+  formatCRSRequestCount,
+  formatCRSTokenCount,
   getCRSPlatformBadgeLabel,
   getCRSPlatformOptions,
 } from './crsDashboard.utils';
@@ -53,58 +60,24 @@ const QUOTA_FILTER_OPTIONS = [
   { label: '不限额', value: 'unlimited' },
 ];
 
-const USAGE_WINDOW_TONE_CLASSES = {
-  success: {
-    card: 'border-emerald-200 bg-emerald-50/80',
-    bar: 'bg-emerald-500',
-    text: 'text-emerald-700',
-  },
-  info: {
-    card: 'border-sky-200 bg-sky-50/80',
-    bar: 'bg-sky-500',
-    text: 'text-sky-700',
-  },
-  warning: {
-    card: 'border-amber-200 bg-amber-50/90',
-    bar: 'bg-amber-500',
-    text: 'text-amber-700',
-  },
-  danger: {
-    card: 'border-red-200 bg-red-50/90',
-    bar: 'bg-red-500',
-    text: 'text-red-700',
-  },
-  muted: {
-    card: 'border-slate-200 bg-slate-50/80',
-    bar: 'bg-slate-400',
-    text: 'text-slate-600',
-  },
+const TONE_TO_SEMI_COLOR = {
+  success: 'green',
+  info: 'blue',
+  warning: 'amber',
+  danger: 'red',
+  muted: 'grey',
 };
 
-const SummaryItem = ({ label, value, subText = '', tone = '' }) => (
-  <div className='rounded-xl border border-semi-color-border bg-semi-color-fill-0 p-3'>
-    <Text type='tertiary' size='small'>
-      {label}
-    </Text>
-    <div className={`mt-2 text-2xl font-semibold tabular-nums ${tone}`}>
-      {value}
-    </div>
-    {subText ? (
-      <Text type='tertiary' size='small' className='mt-1 block'>
-        {subText}
-      </Text>
-    ) : null}
-  </div>
-);
-
-const renderSiteStatusTag = (status, t) => {
-  const meta = SITE_STATUS_MAP[status] || SITE_STATUS_MAP[0];
-  return (
-    <Tag color={meta.color} size='small'>
-      {t(meta.labelKey)}
-    </Tag>
-  );
+const TONE_TO_TEXT_TYPE = {
+  success: 'success',
+  info: 'primary',
+  warning: 'warning',
+  danger: 'danger',
+  muted: 'tertiary',
 };
+
+const toneToSemiColor = (tone) => TONE_TO_SEMI_COLOR[tone] || 'grey';
+const toneToTextType = (tone) => TONE_TO_TEXT_TYPE[tone] || 'tertiary';
 
 const formatUsageWindowProgress = (value) => {
   if (value === null || value === undefined || Number.isNaN(Number(value))) {
@@ -117,84 +90,136 @@ const formatUsageWindowProgress = (value) => {
   return `${displayValue}%`;
 };
 
-const UsageWindowCard = ({ window, t }) => {
-  const toneClasses =
-    USAGE_WINDOW_TONE_CLASSES[window?.tone] || USAGE_WINDOW_TONE_CLASSES.muted;
-  const progress = Number.isFinite(window?.progress) ? window.progress : 0;
-  const remainingText = window?.remainingText || window?.resetAt || t('待同步');
-
+const renderSiteStatusTag = (status, t) => {
+  const meta = SITE_STATUS_MAP[status] || SITE_STATUS_MAP[0];
   return (
-    <div
-      className={`rounded-xl border px-3 py-2 ${toneClasses.card}`}
-      key={window?.key}
-    >
-      <div className='flex items-center justify-between gap-2'>
-        <span className='text-[11px] font-semibold uppercase tracking-wide text-semi-color-text-2'>
-          {window?.label || '-'}
-        </span>
-        <span className={`text-xs font-semibold tabular-nums ${toneClasses.text}`}>
-          {formatUsageWindowProgress(window?.progress)}
-        </span>
+    <Tag color={meta.color} size='small'>
+      {t(meta.labelKey)}
+    </Tag>
+  );
+};
+
+const SummaryStat = ({ label, value, hint = '', tone = 'default' }) => {
+  const valueType =
+    tone === 'danger'
+      ? 'danger'
+      : tone === 'warning'
+        ? 'warning'
+        : tone === 'primary'
+          ? 'primary'
+          : undefined;
+  return (
+    <Card bordered bodyStyle={{ padding: 12 }}>
+      <Text type='tertiary' size='small'>
+        {label}
+      </Text>
+      <div className='mt-1 text-2xl font-semibold tabular-nums'>
+        <Text type={valueType}>{value}</Text>
       </div>
-      <div className='mt-2 h-1.5 overflow-hidden rounded-full bg-white/70'>
-        <div
-          className={`h-full rounded-full transition-all ${toneClasses.bar}`}
-          style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
+      {hint ? (
+        <Text type='tertiary' size='small' className='mt-1 block'>
+          {hint}
+        </Text>
+      ) : null}
+    </Card>
+  );
+};
+
+const UsageWindowRow = ({ window, t }) => {
+  const tone = window?.tone || 'muted';
+  const progress = Number.isFinite(window?.progress) ? window.progress : 0;
+  const hint = window?.remainingText || window?.resetAt || '';
+  return (
+    <div className='flex items-center gap-2 text-xs' key={window?.key}>
+      <span className='w-12 shrink-0 font-medium uppercase tracking-wide text-semi-color-text-2'>
+        {window?.label || '-'}
+      </span>
+      <div className='min-w-0 flex-1'>
+        <Progress
+          percent={Math.min(100, Math.max(0, progress))}
+          stroke={toneToSemiColor(tone)}
+          showInfo={false}
+          size='small'
         />
       </div>
-      <div className='mt-2 text-xs text-semi-color-text-1'>{remainingText}</div>
-      {window?.resetAt ? (
-        <div className='mt-1 text-[11px] text-semi-color-text-2 break-all'>
-          {window.resetAt}
-        </div>
+      <span className='w-12 shrink-0 text-right font-mono tabular-nums'>
+        <Text type={toneToTextType(tone)} size='small'>
+          {formatUsageWindowProgress(window?.progress)}
+        </Text>
+      </span>
+      {hint ? (
+        <span
+          className='min-w-0 shrink-0 truncate text-semi-color-text-2'
+          style={{ maxWidth: 110 }}
+          title={hint}
+        >
+          {hint}
+        </span>
       ) : null}
     </div>
   );
 };
 
-const renderAccountSignals = (account, t) => {
-  const tags = [];
-  tags.push(
-    <Tag key='platform_badge' color='cyan' size='small'>
-      {getCRSPlatformBadgeLabel(account)}
-    </Tag>,
+const DailyUsageLine = ({ account, t }) => {
+  const requests = Number(account?.usage_daily_requests || 0);
+  const tokens = Number(account?.usage_daily_tokens || 0);
+  const cost = Number(account?.usage_daily_cost || 0);
+  const segments = [];
+  if (requests > 0) {
+    segments.push(`${formatCRSRequestCount(requests)} ${t('次')}`);
+  }
+  const tokensText = formatCRSTokenCount(tokens);
+  if (tokensText) segments.push(`${tokensText} Tok`);
+  const costText = formatCRSDailyCost(cost);
+  if (costText) segments.push(costText);
+  if (segments.length === 0) {
+    return (
+      <Text type='tertiary' size='small'>
+        {t('今日暂无数据')}
+      </Text>
+    );
+  }
+  return (
+    <div className='flex items-center gap-2 text-xs font-mono tabular-nums text-semi-color-text-1'>
+      <Text type='tertiary' size='small'>
+        {t('今日')}
+      </Text>
+      <span>{segments.join(' · ')}</span>
+    </div>
   );
-  if (account?.is_active) {
-    tags.push(
-      <Tag key='active' color='green' size='small'>
-        {t('活跃')}
-      </Tag>,
-    );
-  } else {
-    tags.push(
-      <Tag key='inactive' color='grey' size='small'>
-        {t('未激活')}
-      </Tag>,
-    );
-  }
-  if (account?.schedulable) {
-    tags.push(
-      <Tag key='schedulable' color='blue' size='small'>
-        {t('可调度')}
-      </Tag>,
-    );
-  }
-  if (account?.rate_limited) {
-    tags.push(
-      <Tag key='rate_limited' color='orange' size='small'>
-        {t('限速中')}
-      </Tag>,
-    );
-  }
-  if (account?.status) {
-    tags.push(
-      <Tag key='status' color='white' size='small'>
-        {account.status}
-      </Tag>,
-    );
-  }
-  return <div className='flex flex-wrap gap-1'>{tags}</div>;
 };
+
+const AccountStatusTags = ({ account, t }) => (
+  <div className='flex flex-wrap gap-1'>
+    <Tag color='cyan' size='small'>
+      {getCRSPlatformBadgeLabel(account)}
+    </Tag>
+    {account?.is_active ? (
+      <Tag color='green' size='small'>
+        {t('活跃')}
+      </Tag>
+    ) : (
+      <Tag color='grey' size='small'>
+        {t('未激活')}
+      </Tag>
+    )}
+    {account?.schedulable ? (
+      <Tag color='blue' size='small'>
+        {t('可调度')}
+      </Tag>
+    ) : null}
+    {account?.rate_limited ? (
+      <Tag color='orange' size='small'>
+        {t('限速中')}
+      </Tag>
+    ) : null}
+    {account?.status && account.status !== 'active' ? (
+      <Tag color='white' size='small'>
+        {account.status}
+      </Tag>
+    ) : null}
+  </div>
+);
 
 const CRSSiteDetailSideSheet = ({
   visible,
@@ -244,20 +269,31 @@ const CRSSiteDetailSideSheet = ({
       dataIndex: 'name',
       render: (_, record) => (
         <div className='min-w-0'>
-          <div className='font-medium text-semi-color-text-0'>
+          <div className='truncate font-medium text-semi-color-text-0'>
             {record.name || record.remote_account_id}
           </div>
-          <div className='mt-1 text-xs text-semi-color-text-2 break-all'>
+          <div className='mt-0.5 break-all text-xs text-semi-color-text-2'>
             {record.remote_account_id}
           </div>
           {record.subscription_plan ? (
-            <div className='mt-1 text-xs text-semi-color-text-2'>
-              {t('计划')}: {record.subscription_plan}
+            <div className='mt-0.5 text-xs'>
+              <Text type='tertiary' size='small'>
+                {t('计划')}: {record.subscription_plan}
+              </Text>
+            </div>
+          ) : null}
+          {record.last_synced_at ? (
+            <div className='mt-0.5 text-xs'>
+              <Text type='tertiary' size='small'>
+                {t('同步')} {timestamp2string(record.last_synced_at)}
+              </Text>
             </div>
           ) : null}
           {record.sync_error || record.error_message ? (
-            <div className='mt-1 text-xs text-red-500 break-all'>
-              {record.sync_error || record.error_message}
+            <div className='mt-1 break-all text-xs'>
+              <Text type='danger' size='small'>
+                {record.sync_error || record.error_message}
+              </Text>
             </div>
           ) : null}
         </div>
@@ -266,54 +302,31 @@ const CRSSiteDetailSideSheet = ({
     {
       title: t('状态'),
       dataIndex: 'status',
-      width: 280,
-      render: (_, record) => renderAccountSignals(record, t),
+      width: 180,
+      render: (_, record) => <AccountStatusTags account={record} t={t} />,
     },
     {
-      title: t('额度'),
-      dataIndex: 'quota_remaining',
-      width: 240,
+      title: t('额度使用'),
+      dataIndex: 'usage_windows',
       render: (_, record) => {
         const windows = buildCRSUsageWindows(record);
-        if (windows.length === 0) {
-          return <Text type='tertiary'>-</Text>;
-        }
+        const hasWindows = windows.length > 0;
         return (
-          <div className='space-y-2'>
-            {windows.map((window) => (
-              <UsageWindowCard key={window.key} window={window} t={t} />
-            ))}
+          <div className='flex flex-col gap-1.5'>
+            {hasWindows ? (
+              windows.map((window) => (
+                <UsageWindowRow key={window.key} window={window} t={t} />
+              ))
+            ) : (
+              <Text type='tertiary' size='small'>
+                {t('暂无额度数据')}
+              </Text>
+            )}
+            <Divider margin='4px' />
+            <DailyUsageLine account={record} t={t} />
           </div>
         );
       },
-    },
-    {
-      title: t('限速'),
-      dataIndex: 'rate_limited',
-      width: 160,
-      render: (_, record) =>
-        record.rate_limited ? (
-          <div className='space-y-1 text-xs'>
-            <Tag color='orange' size='small'>
-              {t('限速中')}
-            </Tag>
-            {record.rate_limit_reset_at ? (
-              <div className='text-semi-color-text-2'>
-                {record.rate_limit_reset_at}
-              </div>
-            ) : null}
-          </div>
-        ) : (
-          <Tag color='green' size='small'>
-            {t('正常')}
-          </Tag>
-        ),
-    },
-    {
-      title: t('最近同步'),
-      dataIndex: 'last_synced_at',
-      width: 170,
-      render: (value) => (value ? timestamp2string(value) : '-'),
     },
   ];
 
@@ -322,16 +335,16 @@ const CRSSiteDetailSideSheet = ({
       visible={visible}
       onCancel={onClose}
       title={site?.name || site?.host || t('站点详情')}
-      width={isMobile ? '100%' : 980}
+      width={isMobile ? '100%' : 1040}
       bodyStyle={{ padding: 16 }}
     >
       <Spin spinning={loading}>
         {site ? (
-          <div className='space-y-4'>
-            <div className='rounded-2xl border border-semi-color-border bg-semi-color-bg-1 p-4'>
+          <div className='flex flex-col gap-4'>
+            <Card bordered bodyStyle={{ padding: 16 }}>
               <div className='flex flex-wrap items-start justify-between gap-3'>
                 <div className='min-w-0 flex-1'>
-                  <div className='flex flex-wrap items-center gap-2'>
+                  <Space spacing={8} wrap>
                     <Title heading={6} style={{ margin: 0 }}>
                       {site.name || site.host}
                     </Title>
@@ -341,33 +354,32 @@ const CRSSiteDetailSideSheet = ({
                         {site.group}
                       </Tag>
                     ) : null}
+                  </Space>
+                  <div className='mt-1'>
+                    <Text
+                      type='tertiary'
+                      size='small'
+                      className='break-all'
+                    >
+                      {site.scheme}://{site.host}
+                    </Text>
                   </div>
-                  <Text
-                    type='tertiary'
-                    size='small'
-                    className='mt-1 block break-all'
-                  >
-                    {site.scheme}://{site.host}
-                  </Text>
-                  <div className='mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-semi-color-text-2'>
-                    <span>
-                      {t('用户名')}:{' '}
-                      <span className='font-medium'>
-                        {site.username || '-'}
-                      </span>
-                    </span>
-                    <span>
+                  <div className='mt-2 flex flex-wrap gap-x-4 gap-y-1'>
+                    <Text type='tertiary' size='small'>
+                      {t('用户名')}: {site.username || '-'}
+                    </Text>
+                    <Text type='tertiary' size='small'>
                       {t('最近同步')}:{' '}
-                      <span className='font-medium'>
-                        {site.last_synced_at
-                          ? timestamp2string(site.last_synced_at)
-                          : '-'}
-                      </span>
-                    </span>
+                      {site.last_synced_at
+                        ? timestamp2string(site.last_synced_at)
+                        : '-'}
+                    </Text>
                   </div>
                   {site.last_sync_error ? (
-                    <div className='mt-3 rounded-lg bg-red-500/5 px-3 py-2 text-xs text-red-500 break-all'>
-                      {site.last_sync_error}
+                    <div className='mt-2'>
+                      <Text type='danger' size='small' className='break-all'>
+                        {site.last_sync_error}
+                      </Text>
                     </div>
                   ) : null}
                 </div>
@@ -380,85 +392,91 @@ const CRSSiteDetailSideSheet = ({
                   {t('刷新站点')}
                 </Button>
               </div>
-            </div>
+            </Card>
 
             <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
-              <SummaryItem
+              <SummaryStat
                 label={t('观察账号')}
                 value={observer.total_accounts ?? accounts.length}
               />
-              <SummaryItem
+              <SummaryStat
                 label={t('可调度')}
+                tone='primary'
                 value={observer.schedulable_count ?? 0}
-                tone='text-blue-600 dark:text-blue-400'
-                subText={`${t('活跃')} ${observer.active_accounts ?? 0}`}
+                hint={`${t('活跃')} ${observer.active_accounts ?? 0}`}
               />
-              <SummaryItem
+              <SummaryStat
                 label={t('限速中')}
+                tone='danger'
                 value={observer.rate_limited_count ?? 0}
-                tone='text-orange-500'
               />
-              <SummaryItem
+              <SummaryStat
                 label={t('低额度')}
+                tone='warning'
                 value={observer.low_quota_count ?? 0}
-                tone='text-amber-500'
-                subText={`${t('空额度')} ${observer.empty_quota_count ?? 0}`}
+                hint={`${t('空额度')} ${observer.empty_quota_count ?? 0}`}
               />
             </div>
 
             {dashboard?.overview ? (
-              <div className='rounded-2xl border border-semi-color-border bg-semi-color-bg-1 p-4'>
-                <div className='mb-3'>
-                  <Title heading={6} style={{ margin: 0 }}>
-                    {t('Dashboard 概览')}
-                  </Title>
-                  <Text type='tertiary' size='small' className='mt-1 block'>
+              <Card
+                bordered
+                title={t('Dashboard 概览')}
+                bodyStyle={{ padding: 12 }}
+                headerStyle={{ padding: '10px 16px' }}
+              >
+                <div className='mb-2'>
+                  <Text type='tertiary' size='small'>
                     {t('这是远端 CRS /admin/dashboard 的缓存结果')}
                   </Text>
                 </div>
                 <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
-                  <SummaryItem
+                  <SummaryStat
                     label={t('总账号')}
                     value={dashboard.overview.totalAccounts ?? 0}
                   />
-                  <SummaryItem
+                  <SummaryStat
                     label={t('正常账号')}
+                    tone='primary'
                     value={dashboard.overview.normalAccounts ?? 0}
-                    tone='text-green-600 dark:text-green-400'
                   />
-                  <SummaryItem
+                  <SummaryStat
                     label={t('API Keys')}
                     value={dashboard.overview.totalApiKeys ?? 0}
                   />
-                  <SummaryItem
+                  <SummaryStat
                     label={t('今日请求')}
                     value={dashboard.recentActivity?.requestsToday ?? 0}
                   />
                 </div>
-              </div>
+              </Card>
             ) : null}
 
-            <div className='rounded-2xl border border-semi-color-border bg-semi-color-bg-1 p-4'>
-              <div className='mb-3 flex flex-wrap items-start justify-between gap-3'>
-                <div>
-                  <Title heading={6} style={{ margin: 0 }}>
-                    {t('站点账号明细')}
-                  </Title>
-                  <Text type='tertiary' size='small' className='mt-1 block'>
-                    {t(
-                      '来自远端 CRS 的标准化账号快照，可按平台、额度和关键词快速筛选',
-                    )}
+            <Card
+              bordered
+              bodyStyle={{ padding: 12 }}
+              headerStyle={{ padding: '10px 16px' }}
+              title={
+                <div className='flex items-center justify-between'>
+                  <div>
+                    <Title heading={6} style={{ margin: 0 }}>
+                      {t('站点账号明细')}
+                    </Title>
+                    <Text type='tertiary' size='small' className='mt-1 block'>
+                      {t('来自远端 CRS 的标准化账号快照')}
+                    </Text>
+                  </div>
+                  <Text type='tertiary' size='small'>
+                    {t('显示 {{filtered}} / {{total}}', {
+                      filtered: filteredAccounts.length,
+                      total: accounts.length,
+                    })}
                   </Text>
                 </div>
-                <Text type='tertiary' size='small'>
-                  {t('显示 {{filtered}} / {{total}}', {
-                    filtered: filteredAccounts.length,
-                    total: accounts.length,
-                  })}
-                </Text>
-              </div>
+              }
+            >
               {accounts.length > 0 ? (
-                <div className='mb-3 grid gap-2 lg:grid-cols-[minmax(0,1.2fr),220px,220px]'>
+                <div className='mb-3 grid gap-2 lg:grid-cols-[minmax(0,1.2fr),200px,200px]'>
                   <Input
                     prefix={<Search size={14} />}
                     placeholder={t('搜索账号名、远端 ID、订阅计划')}
@@ -493,7 +511,7 @@ const CRSSiteDetailSideSheet = ({
                   }
                   pagination={false}
                   size='small'
-                  scroll={{ x: 980 }}
+                  scroll={isMobile ? { x: 820 } : undefined}
                   empty={
                     <Empty
                       image={null}
@@ -504,7 +522,7 @@ const CRSSiteDetailSideSheet = ({
               ) : (
                 <Empty image={null} description={t('该站点暂时没有账号快照')} />
               )}
-            </div>
+            </Card>
           </div>
         ) : (
           <Empty image={null} description={t('请选择一个站点')} />

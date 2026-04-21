@@ -91,6 +91,7 @@ type crsAccountVO struct {
 	UsageTotalTokens          int64                  `json:"usage_total_tokens"`
 	UsageRPM                  float64                `json:"usage_rpm"`
 	UsageTPM                  float64                `json:"usage_tpm"`
+	UsageDailyCost            float64                `json:"usage_daily_cost"`
 	SyncError                 string                 `json:"sync_error"`
 	LastSyncedAt              int64                  `json:"last_synced_at"`
 	UpdatedTime               int64                  `json:"updated_time"`
@@ -190,6 +191,7 @@ func accountSnapshotToVO(snapshot *model.CRSAccountSnapshot, siteName string) cr
 		UsageTotalTokens:          snapshot.UsageTotalTokens,
 		UsageRPM:                  snapshot.UsageRPM,
 		UsageTPM:                  snapshot.UsageTPM,
+		UsageDailyCost:            snapshot.UsageDailyCost,
 		SyncError:                 snapshot.SyncError,
 		LastSyncedAt:              snapshot.LastSyncedAt,
 		UpdatedTime:               snapshot.UpdatedTime,

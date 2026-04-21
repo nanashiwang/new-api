@@ -296,6 +296,7 @@ func normalizeCRSRemoteAccountSnapshot(siteID int, platform string, account map[
 	snapshot.UsageTotalTokens = int64(firstNonZeroInt(getIntValue(totalUsage["allTokens"]), getIntValue(totalUsage["tokens"])))
 	snapshot.UsageRPM = getFloatValue(avgUsage["rpm"])
 	snapshot.UsageTPM = getFloatValue(avgUsage["tpm"])
+	snapshot.UsageDailyCost = getFloatValue(dailyUsage["cost"])
 
 	rateLimit := getMapValue(account["rateLimitStatus"])
 	snapshot.RateLimited = getBoolValue(rateLimit["isRateLimited"], false)
@@ -482,9 +483,16 @@ func normalizeCRSUsageWindow(key, label, source string, raw map[string]any) (mod
 		return model.CRSUsageWindow{}, false
 	}
 
-	progress, hasProgress := firstCRSUsageWindowNumber(raw, "progress", "percentage")
+	progress, hasProgress := firstCRSUsageWindowNumber(raw, "utilization", "progress", "percentage")
 	remainingText := firstCRSUsageWindowText(raw, "remainingText", "remainingTime", "remaining")
-	resetAt := firstCRSUsageWindowText(raw, "resetAt", "windowEnd", "windowEndAt")
+	if remainingText == "" {
+		if value, ok := raw["remainingSeconds"]; ok {
+			if seconds := getFloatValue(value); seconds > 0 {
+				remainingText = formatCRSRemainingDuration(seconds)
+			}
+		}
+	}
+	resetAt := firstCRSUsageWindowText(raw, "resetsAt", "resetAt", "windowEnd", "windowEndAt")
 	if !hasProgress && remainingText == "" && resetAt == "" {
 		return model.CRSUsageWindow{}, false
 	}
@@ -523,6 +531,30 @@ func firstCRSUsageWindowText(raw map[string]any, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func formatCRSRemainingDuration(seconds float64) string {
+	total := int64(seconds)
+	if total < 60 {
+		return "不足 1 分钟"
+	}
+	if total < 3600 {
+		return fmt.Sprintf("%d 分钟", total/60)
+	}
+	if total < 86400 {
+		hours := total / 3600
+		minutes := (total % 3600) / 60
+		if minutes == 0 {
+			return fmt.Sprintf("%d 小时", hours)
+		}
+		return fmt.Sprintf("%d 小时 %d 分钟", hours, minutes)
+	}
+	days := total / 86400
+	hours := (total % 86400) / 3600
+	if hours == 0 {
+		return fmt.Sprintf("%d 天", days)
+	}
+	return fmt.Sprintf("%d 天 %d 小时", days, hours)
 }
 
 func resolveCRSUsageWindowTone(progress float64, hasProgress bool, remainingText, resetAt string) string {

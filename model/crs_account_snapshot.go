@@ -48,6 +48,7 @@ type CRSAccountSnapshot struct {
 	UsageTotalTokens          int64   `json:"usage_total_tokens" gorm:"bigint;not null;default:0"`
 	UsageRPM                  float64 `json:"usage_rpm" gorm:"not null;default:0"`
 	UsageTPM                  float64 `json:"usage_tpm" gorm:"not null;default:0"`
+	UsageDailyCost            float64 `json:"usage_daily_cost" gorm:"not null;default:0"`
 	RawAccount                string  `json:"raw_account" gorm:"type:text;not null"`
 	RawBalance                string  `json:"raw_balance" gorm:"type:text;not null"`
 	SyncError                 string  `json:"sync_error" gorm:"type:text;not null"`

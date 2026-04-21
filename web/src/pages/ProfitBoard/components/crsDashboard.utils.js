@@ -200,6 +200,37 @@ export const joinCRSHostPort = (host = '', port = '') => {
   return `${normalizedHost}:${normalizedPort}`;
 };
 
+export const formatCRSDailyCost = (cost, currency = 'USD') => {
+  const numeric = Number(cost);
+  if (!Number.isFinite(numeric) || numeric <= 0) return '';
+  const symbol = currency === 'USD' ? '$' : '';
+  const fixed = numeric >= 1 ? numeric.toFixed(2) : numeric.toFixed(4);
+  const [intPart, decPart] = fixed.split('.');
+  const withCommas = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `${symbol}${withCommas}.${decPart}`;
+};
+
+export const formatCRSTokenCount = (tokens) => {
+  const numeric = Number(tokens);
+  if (!Number.isFinite(numeric) || numeric <= 0) return '';
+  if (numeric >= 1_000_000_000) {
+    return `${(numeric / 1_000_000_000).toFixed(2)}B`;
+  }
+  if (numeric >= 1_000_000) {
+    return `${(numeric / 1_000_000).toFixed(2)}M`;
+  }
+  if (numeric >= 1_000) {
+    return `${(numeric / 1_000).toFixed(1)}K`;
+  }
+  return `${Math.round(numeric)}`;
+};
+
+export const formatCRSRequestCount = (count) => {
+  const numeric = Number(count);
+  if (!Number.isFinite(numeric) || numeric <= 0) return '0';
+  return Math.round(numeric).toLocaleString('en-US');
+};
+
 export const getCRSPlatformBadgeLabel = (account = {}) => {
   const normalizedPlatform = normalizeText(account?.platform).toLowerCase();
   const displayName =
