@@ -171,13 +171,14 @@ func SubscriptionEpayNotify(c *gin.Context) {
 	payAmount, _ := strconv.ParseFloat(verifyInfo.Money, 64)
 	LockOrder(verifyInfo.ServiceTradeNo)
 	defer UnlockOrder(verifyInfo.ServiceTradeNo)
-	checkResult, err := service.ValidateSubscriptionCallback(service.PaymentCallbackValidationInput{
+	validationInput := service.PaymentCallbackValidationInput{
 		TradeNo:         verifyInfo.ServiceTradeNo,
 		PaymentMethod:   verifyInfo.Type,
 		ProviderAmount:  payAmount,
 		Source:          "subscription_epay_notify",
 		ProviderPayload: common.GetJsonString(verifyInfo),
-	})
+	}
+	checkResult, err := service.ValidateSubscriptionCallback(validationInput)
 	if err != nil {
 		_, _ = c.Writer.Write([]byte("fail"))
 		return
@@ -188,6 +189,7 @@ func SubscriptionEpayNotify(c *gin.Context) {
 	}
 
 	if err := model.CompleteSubscriptionOrder(verifyInfo.ServiceTradeNo, common.GetJsonString(verifyInfo)); err != nil {
+		service.RecordSubscriptionProcessingRiskCase(validationInput, err)
 		_, _ = c.Writer.Write([]byte("fail"))
 		return
 	}
@@ -237,13 +239,14 @@ func SubscriptionEpayReturn(c *gin.Context) {
 		payAmount, _ := strconv.ParseFloat(verifyInfo.Money, 64)
 		LockOrder(verifyInfo.ServiceTradeNo)
 		defer UnlockOrder(verifyInfo.ServiceTradeNo)
-		checkResult, err := service.ValidateSubscriptionCallback(service.PaymentCallbackValidationInput{
+		validationInput := service.PaymentCallbackValidationInput{
 			TradeNo:         verifyInfo.ServiceTradeNo,
 			PaymentMethod:   verifyInfo.Type,
 			ProviderAmount:  payAmount,
 			Source:          "subscription_epay_return",
 			ProviderPayload: common.GetJsonString(verifyInfo),
-		})
+		}
+		checkResult, err := service.ValidateSubscriptionCallback(validationInput)
 		if err != nil {
 			c.Redirect(http.StatusFound, system_setting.ServerAddress+"/console/subscription?pay=fail")
 			return
@@ -253,6 +256,7 @@ func SubscriptionEpayReturn(c *gin.Context) {
 			return
 		}
 		if err := model.CompleteSubscriptionOrder(verifyInfo.ServiceTradeNo, common.GetJsonString(verifyInfo)); err != nil {
+			service.RecordSubscriptionProcessingRiskCase(validationInput, err)
 			c.Redirect(http.StatusFound, system_setting.ServerAddress+"/console/subscription?pay=fail")
 			return
 		}

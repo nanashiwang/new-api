@@ -202,14 +202,15 @@ func sessionCompleted(event stripe.Event) {
 		"event_type":   string(event.Type),
 	}
 	if subscriptionOrder := model.GetSubscriptionOrderByTradeNo(referenceId); subscriptionOrder != nil {
-		checkResult, err := service.ValidateSubscriptionCallback(service.PaymentCallbackValidationInput{
+		validationInput := service.PaymentCallbackValidationInput{
 			TradeNo:         referenceId,
 			PaymentMethod:   PaymentMethodStripe,
 			ProviderAmount:  paidAmount,
 			Currency:        strings.ToUpper(event.GetObjectValue("currency")),
 			Source:          "subscription_stripe_webhook",
 			ProviderPayload: common.GetJsonString(payload),
-		})
+		}
+		checkResult, err := service.ValidateSubscriptionCallback(validationInput)
 		if err != nil {
 			log.Println("stripe subscription validation failed:", err.Error(), referenceId)
 			return
@@ -218,6 +219,7 @@ func sessionCompleted(event stripe.Event) {
 			return
 		}
 		if err := model.CompleteSubscriptionOrder(referenceId, common.GetJsonString(payload)); err != nil {
+			service.RecordSubscriptionProcessingRiskCase(validationInput, err)
 			log.Println("complete subscription order failed:", err.Error(), referenceId)
 		}
 		return

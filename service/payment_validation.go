@@ -172,3 +172,37 @@ func recordSubscriptionRiskCase(order *model.SubscriptionOrder, input PaymentCal
 		ProviderPayload:       payload,
 	})
 }
+
+func RecordSubscriptionProcessingRiskCase(input PaymentCallbackValidationInput, processingErr error) {
+	tradeNo := strings.TrimSpace(input.TradeNo)
+	if tradeNo == "" {
+		return
+	}
+	order := model.GetSubscriptionOrderByTradeNo(tradeNo)
+	if order == nil {
+		return
+	}
+	payload := strings.TrimSpace(input.ProviderPayload)
+	if payload == "" {
+		payload = strings.TrimSpace(order.ProviderPayload)
+	}
+	handlerNote := ""
+	if processingErr != nil {
+		handlerNote = strings.TrimSpace(processingErr.Error())
+	}
+	_, _ = model.UpsertPaymentRiskCase(model.PaymentRiskCaseUpsertInput{
+		RecordType:            model.PaymentRiskRecordTypeSubscription,
+		TradeNo:               order.TradeNo,
+		UserId:                order.UserId,
+		PaymentMethod:         order.PaymentMethod,
+		ProviderPaymentMethod: strings.TrimSpace(input.PaymentMethod),
+		ExpectedMoney:         order.Money,
+		ReceivedMoney:         input.ProviderAmount,
+		Currency:              strings.TrimSpace(input.Currency),
+		Source:                strings.TrimSpace(input.Source),
+		Reason:                model.PaymentRiskReasonManualReview,
+		OrderStatus:           order.Status,
+		ProviderPayload:       payload,
+		HandlerNote:           handlerNote,
+	})
+}

@@ -304,14 +304,15 @@ func handleCheckoutCompleted(c *gin.Context, event *CreemWebhookEvent) {
 	defer UnlockOrder(referenceId)
 	payAmount := float64(event.Object.Order.AmountPaid) / 100.0
 	if subscriptionOrder := model.GetSubscriptionOrderByTradeNo(referenceId); subscriptionOrder != nil {
-		checkResult, err := service.ValidateSubscriptionCallback(service.PaymentCallbackValidationInput{
+		validationInput := service.PaymentCallbackValidationInput{
 			TradeNo:         referenceId,
 			PaymentMethod:   PaymentMethodCreem,
 			ProviderAmount:  payAmount,
 			Currency:        event.Object.Order.Currency,
 			Source:          "subscription_creem_webhook",
 			ProviderPayload: common.GetJsonString(event),
-		})
+		}
+		checkResult, err := service.ValidateSubscriptionCallback(validationInput)
 		if err != nil {
 			log.Printf("Creem订阅订单校验失败: %s, 订单号: %s", err.Error(), referenceId)
 			c.AbortWithStatus(http.StatusBadRequest)
@@ -322,6 +323,7 @@ func handleCheckoutCompleted(c *gin.Context, event *CreemWebhookEvent) {
 			return
 		}
 		if err := model.CompleteSubscriptionOrder(referenceId, common.GetJsonString(event)); err != nil {
+			service.RecordSubscriptionProcessingRiskCase(validationInput, err)
 			log.Printf("Creem订阅订单处理失败: %s, 订单号: %s", err.Error(), referenceId)
 			c.AbortWithStatus(http.StatusInternalServerError)
 			return

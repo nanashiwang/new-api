@@ -56,7 +56,7 @@ func setupTopupCallbackTestDB(t *testing.T) {
 		operation_setting.EpayKey = originEpayKey
 	})
 
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.TopUp{}, &model.PaymentRiskCase{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.TopUp{}, &model.PaymentRiskCase{}, &model.SubscriptionOrder{}))
 }
 
 func createTopupCallbackTestUser(t *testing.T, username string) *model.User {
@@ -134,6 +134,52 @@ func TestEpayNotify_RejectsAmountMismatch(t *testing.T) {
 	require.Equal(t, topup.UserId, riskCase.UserId)
 	require.Equal(t, topup.PaymentMethod, riskCase.PaymentMethod)
 	require.Equal(t, 0.01, riskCase.ReceivedMoney)
+}
+
+func TestSubscriptionEpayNotify_ProcessingFailureCreatesRiskCase(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupTopupCallbackTestDB(t)
+
+	user := createTopupCallbackTestUser(t, "sub-risk")
+	order := &model.SubscriptionOrder{
+		UserId:        user.Id,
+		PlanId:        999999,
+		Money:         88,
+		TradeNo:       "SUBUSR1NOPROCESSFAIL",
+		PaymentMethod: "alipay",
+		CreateTime:    1_760_000_100,
+		Status:        common.TopUpStatusPending,
+	}
+	require.NoError(t, order.Insert())
+
+	callbackURL := buildSignedEpayCallbackURL(t, "/api/subscription/epay/notify", map[string]string{
+		"trade_no":     "EPAY-SUB-001",
+		"out_trade_no": order.TradeNo,
+		"type":         "alipay",
+		"name":         "subscription",
+		"money":        "88.00",
+		"trade_status": epay.StatusTradeSuccess,
+	})
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, callbackURL, nil)
+
+	SubscriptionEpayNotify(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, "fail", recorder.Body.String())
+
+	savedOrder := model.GetSubscriptionOrderByTradeNo(order.TradeNo)
+	require.NotNil(t, savedOrder)
+	require.Equal(t, common.TopUpStatusPending, savedOrder.Status)
+
+	riskCase, err := model.GetPaymentRiskCaseByRecord(model.PaymentRiskRecordTypeSubscription, order.TradeNo)
+	require.NoError(t, err)
+	require.Equal(t, model.PaymentRiskReasonManualReview, riskCase.Reason)
+	require.Equal(t, order.UserId, riskCase.UserId)
+	require.Equal(t, order.PaymentMethod, riskCase.PaymentMethod)
+	require.Equal(t, 88.0, riskCase.ReceivedMoney)
 }
 
 func TestStripeWebhook_ForbiddenWhenDisabled(t *testing.T) {

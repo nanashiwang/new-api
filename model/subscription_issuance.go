@@ -158,7 +158,7 @@ func ConfirmSubscriptionIssuanceTx(tx *gorm.DB, issuanceId int, userId int, purc
 	}
 	plan := issuance.Plan
 	if plan == nil {
-		loadedPlan, err := getSubscriptionPlanByIdTx(tx, issuance.PlanId)
+		loadedPlan, err := getSubscriptionPlanByIdTx(tx.Session(&gorm.Session{NewDB: true}), issuance.PlanId)
 		if err != nil {
 			return nil, "", err
 		}
@@ -223,10 +223,32 @@ func ConfirmSubscriptionIssuanceTx(tx *gorm.DB, issuanceId int, userId int, purc
 	issuance.IssueSummary = summary
 	issuance.Status = SubscriptionIssuanceStatusIssued
 	issuance.IssuedTime = common.GetTimestamp()
-	if err := tx.Save(&issuance).Error; err != nil {
+	if err := persistIssuedSubscriptionIssuanceTx(tx, &issuance); err != nil {
 		return nil, "", err
 	}
 	return &issuance, summary, nil
+}
+
+func persistIssuedSubscriptionIssuanceTx(tx *gorm.DB, issuance *SubscriptionIssuance) error {
+	if tx == nil {
+		return errors.New("tx is nil")
+	}
+	if issuance == nil || issuance.Id <= 0 || issuance.UserId <= 0 {
+		return errors.New("invalid issuance")
+	}
+	now := common.GetTimestamp()
+	issuance.UpdatedTime = now
+	session := tx.Session(&gorm.Session{NewDB: true})
+	return session.Model(&SubscriptionIssuance{}).
+		Where("id = ? AND user_id = ?", issuance.Id, issuance.UserId).
+		Updates(map[string]any{
+			"purchase_mode":                issuance.PurchaseMode,
+			"renew_target_subscription_id": issuance.RenewTargetSubscriptionId,
+			"issue_summary":                issuance.IssueSummary,
+			"status":                       issuance.Status,
+			"updated_time":                 issuance.UpdatedTime,
+			"issued_time":                  issuance.IssuedTime,
+		}).Error
 }
 
 func IsRecoverableSubscriptionIssuanceError(err error) bool {

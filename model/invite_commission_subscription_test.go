@@ -1,7 +1,10 @@
 package model
 
 import (
+	"bytes"
 	"fmt"
+	"log"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -11,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 var (
@@ -148,11 +152,30 @@ func TestConfirmSubscriptionIssuanceTx_StackDoesNotPolluteIssuanceSaveStatement(
 	}
 	require.NoError(t, DB.Create(issuance).Error)
 
+	var sqlLogs bytes.Buffer
+	originDB := DB
+	originLogDB := LOG_DB
+	testLogger := gormlogger.New(log.New(&sqlLogs, "", 0), gormlogger.Config{
+		LogLevel: gormlogger.Info,
+		Colorful: false,
+	})
+	DB = DB.Session(&gorm.Session{Logger: testLogger})
+	LOG_DB = LOG_DB.Session(&gorm.Session{Logger: testLogger})
+	t.Cleanup(func() {
+		DB = originDB
+		LOG_DB = originLogDB
+	})
+
 	err := DB.Transaction(func(tx *gorm.DB) error {
+		sqlLogs.Reset()
 		_, _, err := ConfirmSubscriptionIssuanceTx(tx, issuance.Id, user.Id, SubscriptionPurchaseModeStack, 0)
 		return err
 	})
 	require.NoError(t, err)
+
+	logText := sqlLogs.String()
+	assert.False(t, strings.Contains(logText, "INSERT INTO `subscription_plans`"), logText)
+	assert.False(t, strings.Contains(logText, "UPDATE `subscription_plans`"), logText)
 
 	var refreshedIssuance SubscriptionIssuance
 	require.NoError(t, DB.First(&refreshedIssuance, issuance.Id).Error)
