@@ -275,7 +275,13 @@ func (channel *Channel) SaveWithoutKey() error {
 	if channel.Id == 0 {
 		return errors.New("channel ID is 0")
 	}
-	return DB.Omit("key").Save(channel).Error
+	// Save() will fall back to Create() when an UPDATE affects 0 rows, which
+	// breaks MySQL here because `key` is intentionally omitted.
+	return DB.Model(&Channel{}).
+		Where("id = ?", channel.Id).
+		Select("*").
+		Omit("id", "key").
+		Updates(channel).Error
 }
 
 func (channel *Channel) getMultiKeyStatus(index int) int {
