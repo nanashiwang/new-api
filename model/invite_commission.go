@@ -94,8 +94,12 @@ func EnqueueInviteCommissionFromSubscriptionOrderTx(tx *gorm.DB, order *Subscrip
 	if order == nil || order.Id <= 0 {
 		return nil
 	}
+	if !common.InviterCommissionEnabled || common.InviterRechargeCommissionRate <= 0 {
+		return nil
+	}
 	if operation_setting.Price <= 0 {
-		return errors.New("invalid payment price setting")
+		common.SysError(fmt.Sprintf("skip invite commission for subscription order %d: invalid payment price setting", order.Id))
+		return nil
 	}
 
 	// 仅信任 order.id；其余字段从 DB 读取，避免调用方传入被篡改数据。

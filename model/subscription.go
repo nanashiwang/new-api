@@ -867,8 +867,8 @@ func renewUserSubscriptionByPlanTx(tx *gorm.DB, userId int, plan *SubscriptionPl
 }
 
 // CompleteSubscriptionOrder 完成在线支付订阅订单（幂等）：
-// - 正常情况下创建 issuance 后立即自动发放
-// - 若自动发放遇到可人工修复的续费冲突，则保留 pending issuance 供用户继续处理
+// - 先稳定落库订单成功态、支付记录镜像和待发放记录
+// - 后续返佣入池、自动发放都走“尽力而为”，失败不再回滚已确认收款的核心结果
 // - stack: 新建订阅
 // - renew: 仅续费同 plan 生效订阅；无可续费目标时不回退到叠加
 // - renew_extend: 续费式购买；无生效订阅时先创建 1 条，再按同条顺延
@@ -876,129 +876,188 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string) error {
 	if tradeNo == "" {
 		return errors.New("tradeNo is empty")
 	}
-	refCol := "`trade_no`"
-	if common.UsingPostgreSQL {
-		refCol = `"trade_no"`
-	}
-	var logUserId int
-	var logPlanTitle string
-	var logMoney float64
-	var logPaymentMethod string
-	var logPurchaseQuantity int
-	var logIssuanceId int
-	var logIssueSummary string
-	var logAutoIssued bool
-	var logPendingManualIssue bool
+
+	result := subscriptionOrderCompletionResult{}
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		var order SubscriptionOrder
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", tradeNo).First(&order).Error; err != nil {
-			return ErrSubscriptionOrderNotFound
-		}
-		if order.Status == common.TopUpStatusSuccess {
-			return nil
-		}
-		if order.Status != common.TopUpStatusPending {
-			return ErrSubscriptionOrderStatusInvalid
-		}
-		plan, err := getSubscriptionPlanByIdTx(tx, order.PlanId)
+		coreResult, err := completeSubscriptionOrderCoreTx(tx, tradeNo, providerPayload)
 		if err != nil {
 			return err
 		}
-		if order.PurchaseQuantity <= 0 {
-			order.PurchaseQuantity = 1
-		}
-		issuance := &SubscriptionIssuance{
-			UserId:                    order.UserId,
-			PlanId:                    plan.Id,
-			PlanTitle:                 plan.Title,
-			SourceType:                SubscriptionIssuanceSourceOrder,
-			SourceRef:                 order.TradeNo,
-			PurchaseMode:              normalizeSubscriptionIssuancePurchaseMode(order.PurchaseMode),
-			PurchaseQuantity:          order.PurchaseQuantity,
-			RenewTargetSubscriptionId: order.RenewTargetSubscriptionId,
-		}
-		if err := CreateSubscriptionIssuanceTx(tx, issuance); err != nil {
-			return err
-		}
-		if err := upsertSubscriptionTopUpTx(tx, &order); err != nil {
-			return err
-		}
-		order.Status = common.TopUpStatusSuccess
-		order.CompleteTime = common.GetTimestamp()
-		if providerPayload != "" {
-			order.ProviderPayload = providerPayload
-		}
-		if err := tx.Save(&order).Error; err != nil {
-			return err
-		}
-		if err := EnqueueInviteCommissionFromSubscriptionOrderTx(tx, &order); err != nil {
-			return err
-		}
-		autoIssued, issueSummary, err := autoIssuePaidSubscriptionOrderTx(tx, issuance)
-		if err != nil {
-			return err
-		}
-		logUserId = order.UserId
-		logPlanTitle = plan.Title
-		logMoney = order.Money
-		logPaymentMethod = order.PaymentMethod
-		logPurchaseQuantity = order.PurchaseQuantity
-		logIssuanceId = issuance.Id
-		logIssueSummary = issueSummary
-		logAutoIssued = autoIssued
-		logPendingManualIssue = !autoIssued
+		result = coreResult
 		return nil
 	})
 	if err != nil {
 		return err
 	}
-	if logUserId > 0 {
-		if logPurchaseQuantity <= 0 {
-			logPurchaseQuantity = 1
+	if result.AlreadyCompleted {
+		return nil
+	}
+
+	result.AutoIssued, result.IssueSummary = autoIssuePaidSubscriptionOrder(result.TradeNo, result.IssuanceId, result.UserId)
+	enqueueInviteCommissionForSubscriptionOrder(result.TradeNo, result.OrderId)
+
+	if result.UserId > 0 {
+		if result.PurchaseQuantity <= 0 {
+			result.PurchaseQuantity = 1
 		}
-		msg := fmt.Sprintf("订阅支付成功，套餐: %s，份数: %d，支付金额: %.2f，支付方式: %s，发放记录: %d", logPlanTitle, logPurchaseQuantity, logMoney, logPaymentMethod, logIssuanceId)
-		if logAutoIssued {
-			if logIssueSummary != "" {
-				msg = fmt.Sprintf("%s，已自动发放：%s", msg, logIssueSummary)
+		msg := fmt.Sprintf("订阅支付成功，套餐: %s，份数: %d，支付金额: %.2f，支付方式: %s，发放记录: %d", result.PlanTitle, result.PurchaseQuantity, result.Money, result.PaymentMethod, result.IssuanceId)
+		if result.AutoIssued {
+			if result.IssueSummary != "" {
+				msg = fmt.Sprintf("%s，已自动发放：%s", msg, result.IssueSummary)
 			} else {
 				msg = fmt.Sprintf("%s，已自动发放", msg)
 			}
-		} else if logPendingManualIssue {
-			if logIssueSummary != "" {
-				msg = fmt.Sprintf("%s，待用户确认发放：%s", msg, logIssueSummary)
+		} else {
+			if result.IssueSummary != "" {
+				msg = fmt.Sprintf("%s，待用户确认发放：%s", msg, result.IssueSummary)
 			} else {
 				msg = fmt.Sprintf("%s，待用户确认发放", msg)
 			}
 		}
-		RecordLog(logUserId, LogTypeTopup, msg)
+		RecordLog(result.UserId, LogTypeTopup, msg)
 	}
 	return nil
 }
 
-func autoIssuePaidSubscriptionOrderTx(tx *gorm.DB, issuance *SubscriptionIssuance) (bool, string, error) {
+type subscriptionOrderCompletionResult struct {
+	OrderId          int
+	TradeNo          string
+	UserId           int
+	PlanTitle        string
+	Money            float64
+	PaymentMethod    string
+	PurchaseQuantity int
+	IssuanceId       int
+	AlreadyCompleted bool
+	AutoIssued       bool
+	IssueSummary     string
+}
+
+func completeSubscriptionOrderCoreTx(tx *gorm.DB, tradeNo string, providerPayload string) (subscriptionOrderCompletionResult, error) {
 	if tx == nil {
-		return false, "", errors.New("tx is nil")
+		return subscriptionOrderCompletionResult{}, errors.New("tx is nil")
 	}
-	if issuance == nil {
-		return false, "", errors.New("issuance is nil")
+	refCol := "`trade_no`"
+	if common.UsingPostgreSQL {
+		refCol = `"trade_no"`
 	}
-	confirmedIssuance, summary, err := ConfirmSubscriptionIssuanceTx(
-		tx,
-		issuance.Id,
-		issuance.UserId,
-		issuance.PurchaseMode,
-		issuance.RenewTargetSubscriptionId,
-	)
+	var order SubscriptionOrder
+	if err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", tradeNo).First(&order).Error; err != nil {
+		return subscriptionOrderCompletionResult{}, ErrSubscriptionOrderNotFound
+	}
+	result := subscriptionOrderCompletionResult{
+		OrderId:          order.Id,
+		TradeNo:          order.TradeNo,
+		UserId:           order.UserId,
+		Money:            order.Money,
+		PaymentMethod:    order.PaymentMethod,
+		PurchaseQuantity: order.PurchaseQuantity,
+	}
+	if order.Status == common.TopUpStatusSuccess {
+		result.AlreadyCompleted = true
+		return result, nil
+	}
+	if order.Status != common.TopUpStatusPending {
+		return subscriptionOrderCompletionResult{}, ErrSubscriptionOrderStatusInvalid
+	}
+
+	plan, err := getSubscriptionPlanByIdTx(tx, order.PlanId)
 	if err != nil {
-		if IsRecoverableSubscriptionIssuanceError(err) {
-			return false, err.Error(), nil
+		return subscriptionOrderCompletionResult{}, err
+	}
+	result.PlanTitle = plan.Title
+
+	if order.PurchaseQuantity <= 0 {
+		order.PurchaseQuantity = 1
+		result.PurchaseQuantity = 1
+	}
+	issuance := &SubscriptionIssuance{
+		UserId:                    order.UserId,
+		PlanId:                    plan.Id,
+		PlanTitle:                 plan.Title,
+		SourceType:                SubscriptionIssuanceSourceOrder,
+		SourceRef:                 order.TradeNo,
+		PurchaseMode:              normalizeSubscriptionIssuancePurchaseMode(order.PurchaseMode),
+		PurchaseQuantity:          order.PurchaseQuantity,
+		RenewTargetSubscriptionId: order.RenewTargetSubscriptionId,
+	}
+	if err := CreateSubscriptionIssuanceTx(tx, issuance); err != nil {
+		return subscriptionOrderCompletionResult{}, err
+	}
+	if err := upsertSubscriptionTopUpTx(tx, &order); err != nil {
+		return subscriptionOrderCompletionResult{}, err
+	}
+	order.Status = common.TopUpStatusSuccess
+	order.CompleteTime = common.GetTimestamp()
+	if providerPayload != "" {
+		order.ProviderPayload = providerPayload
+	}
+	if err := tx.Save(&order).Error; err != nil {
+		return subscriptionOrderCompletionResult{}, err
+	}
+	result.IssuanceId = issuance.Id
+	return result, nil
+}
+
+func autoIssuePaidSubscriptionOrder(tradeNo string, issuanceId int, userId int) (bool, string) {
+	if issuanceId <= 0 || userId <= 0 {
+		return false, ""
+	}
+	var summary string
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		_, confirmSummary, err := ConfirmSubscriptionIssuanceTx(tx, issuanceId, userId, "", 0)
+		if err != nil {
+			summary = err.Error()
+			return err
 		}
-		return false, "", err
+		summary = confirmSummary
+		return nil
+	})
+	if err == nil {
+		return true, summary
 	}
-	if confirmedIssuance != nil {
-		*issuance = *confirmedIssuance
+
+	if summary == "" {
+		summary = err.Error()
 	}
-	return true, summary, nil
+	if updateErr := updatePendingSubscriptionIssuanceIssueSummary(issuanceId, summary); updateErr != nil {
+		common.SysError(fmt.Sprintf("update pending subscription issuance summary failed: trade_no=%s, issuance_id=%d, err=%s", tradeNo, issuanceId, updateErr.Error()))
+	}
+	common.SysError(fmt.Sprintf("auto issue paid subscription order failed: trade_no=%s, issuance_id=%d, err=%s", tradeNo, issuanceId, err.Error()))
+	return false, summary
+}
+
+func updatePendingSubscriptionIssuanceIssueSummary(issuanceId int, summary string) error {
+	if issuanceId <= 0 {
+		return nil
+	}
+	summary = normalizeSubscriptionIssuanceIssueSummary(summary)
+	return DB.Model(&SubscriptionIssuance{}).
+		Where("id = ? AND status = ?", issuanceId, SubscriptionIssuanceStatusPending).
+		Update("issue_summary", summary).Error
+}
+
+func normalizeSubscriptionIssuanceIssueSummary(summary string) string {
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return ""
+	}
+	runes := []rune(summary)
+	if len(runes) > 255 {
+		return string(runes[:255])
+	}
+	return summary
+}
+
+func enqueueInviteCommissionForSubscriptionOrder(tradeNo string, orderId int) {
+	if orderId <= 0 {
+		return
+	}
+	if err := DB.Transaction(func(tx *gorm.DB) error {
+		return EnqueueInviteCommissionFromSubscriptionOrderTx(tx, &SubscriptionOrder{Id: orderId})
+	}); err != nil {
+		common.SysError(fmt.Sprintf("enqueue invite commission for subscription order failed: trade_no=%s, order_id=%d, err=%s", tradeNo, orderId, err.Error()))
+	}
 }
 
 func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {

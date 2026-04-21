@@ -2,7 +2,6 @@ package model
 
 import (
 	"fmt"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -269,7 +268,7 @@ func TestCompleteSubscriptionOrder_EnqueueInviteCommission_Renew(t *testing.T) {
 	assert.Greater(t, refreshedSub.EndTime, existingSub.EndTime)
 }
 
-func TestCompleteSubscriptionOrder_InvalidPrice_RollbackWithoutLedger(t *testing.T) {
+func TestCompleteSubscriptionOrder_InvalidPrice_DoesNotRollbackCorePaymentState(t *testing.T) {
 	setupInviteCommissionSubscriptionTest(t)
 
 	originEnabled := common.InviterCommissionEnabled
@@ -295,23 +294,76 @@ func TestCompleteSubscriptionOrder_InvalidPrice_RollbackWithoutLedger(t *testing
 	createSubscriptionOrderForInviteCommissionTest(t, invitee.Id, plan.Id, tradeNo, 88, SubscriptionPurchaseModeStack, 0)
 
 	err := CompleteSubscriptionOrder(tradeNo, `{"status":"success"}`)
-	require.Error(t, err)
-	assert.True(t, strings.Contains(err.Error(), "invalid payment price setting"))
+	require.NoError(t, err)
 
 	order := GetSubscriptionOrderByTradeNo(tradeNo)
 	require.NotNil(t, order)
-	assert.Equal(t, common.TopUpStatusPending, order.Status)
+	assert.Equal(t, common.TopUpStatusSuccess, order.Status)
+	assert.NotZero(t, order.CompleteTime)
 
 	var ledgerCount int64
 	require.NoError(t, DB.Model(&InviteCommissionLedger{}).Where("topup_trade_no = ?", tradeNo).Count(&ledgerCount).Error)
 	assert.EqualValues(t, 0, ledgerCount)
 
-	var topupCount int64
-	require.NoError(t, DB.Model(&TopUp{}).Where("trade_no = ?", tradeNo).Count(&topupCount).Error)
-	assert.EqualValues(t, 0, topupCount)
+	var topup TopUp
+	require.NoError(t, DB.Where("trade_no = ?", tradeNo).First(&topup).Error)
+	assert.Equal(t, common.TopUpStatusSuccess, topup.Status)
+	assert.Equal(t, order.Money, topup.Money)
+
+	issuance := requireIssuedSubscriptionIssuanceBySourceRef(t, SubscriptionIssuanceSourceOrder, tradeNo)
+	assert.Equal(t, SubscriptionPurchaseModeStack, issuance.PurchaseMode)
+	assert.Equal(t, 1, issuance.PurchaseQuantity)
 
 	var subCount int64
 	require.NoError(t, DB.Model(&UserSubscription{}).Where("user_id = ? AND plan_id = ?", invitee.Id, plan.Id).Count(&subCount).Error)
+	assert.EqualValues(t, 1, subCount)
+}
+
+func TestCompleteSubscriptionOrder_AutoIssueFailure_PreservesCorePaymentState(t *testing.T) {
+	setupInviteCommissionSubscriptionTest(t)
+
+	originEnabled := common.InviterCommissionEnabled
+	originRate := common.InviterRechargeCommissionRate
+	originQuotaPerUnit := common.QuotaPerUnit
+	originPrice := operation_setting.Price
+	t.Cleanup(func() {
+		common.InviterCommissionEnabled = originEnabled
+		common.InviterRechargeCommissionRate = originRate
+		common.QuotaPerUnit = originQuotaPerUnit
+		operation_setting.Price = originPrice
+	})
+	common.InviterCommissionEnabled = false
+	common.InviterRechargeCommissionRate = 0
+	common.QuotaPerUnit = 1000
+	operation_setting.Price = 8
+
+	user := createInviteCommissionTestUser(t, "invitee_sub_auto_issue_fail", 0)
+	plan := createSubscriptionPlanForInviteCommissionTest(t, "异常时长套餐", 88, 1000)
+	require.NoError(t, DB.Model(&SubscriptionPlan{}).Where("id = ?", plan.Id).Update("duration_value", 0).Error)
+	_ = getSubscriptionPlanCache().Purge()
+	_ = getSubscriptionPlanInfoCache().Purge()
+
+	tradeNo := "sub_auto_issue_fail_001"
+	createSubscriptionOrderForInviteCommissionTest(t, user.Id, plan.Id, tradeNo, 88, SubscriptionPurchaseModeStack, 0)
+
+	err := CompleteSubscriptionOrder(tradeNo, `{"status":"success"}`)
+	require.NoError(t, err)
+
+	order := GetSubscriptionOrderByTradeNo(tradeNo)
+	require.NotNil(t, order)
+	assert.Equal(t, common.TopUpStatusSuccess, order.Status)
+	assert.NotZero(t, order.CompleteTime)
+
+	var topup TopUp
+	require.NoError(t, DB.Where("trade_no = ?", tradeNo).First(&topup).Error)
+	assert.Equal(t, common.TopUpStatusSuccess, topup.Status)
+
+	issuance := requirePendingSubscriptionIssuanceBySourceRef(t, SubscriptionIssuanceSourceOrder, tradeNo)
+	assert.Contains(t, issuance.IssueSummary, "duration_value must be > 0")
+	assert.EqualValues(t, 0, issuance.IssuedTime)
+
+	var subCount int64
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("user_id = ? AND plan_id = ?", user.Id, plan.Id).Count(&subCount).Error)
 	assert.EqualValues(t, 0, subCount)
 }
 
