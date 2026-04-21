@@ -30,7 +30,7 @@ type CRSAccountSnapshot struct {
 	SessionWindowProgress     float64 `json:"session_window_progress" gorm:"not null;default:0"`
 	SessionWindowRemaining    string  `json:"session_window_remaining" gorm:"type:varchar(128);not null;default:''"`
 	SessionWindowEndAt        string  `json:"session_window_end_at" gorm:"type:varchar(64);not null;default:''"`
-	UsageWindowsJSON          string  `json:"usage_windows_json" gorm:"type:text;not null;default:'[]'"`
+	UsageWindowsJSON          string  `json:"usage_windows_json" gorm:"type:text"`
 	SubscriptionPlan          string  `json:"subscription_plan" gorm:"type:varchar(64);not null;default:''"`
 	SubscriptionInfo          string  `json:"subscription_info" gorm:"type:text;not null"`
 	QuotaJSON                 string  `json:"quota_json" gorm:"type:text;not null"`
@@ -88,10 +88,16 @@ func (s *CRSAccountSnapshot) BeforeCreate(tx *gorm.DB) error {
 	if s.UpdatedTime <= 0 {
 		s.UpdatedTime = now
 	}
+	if strings.TrimSpace(s.UsageWindowsJSON) == "" {
+		s.UsageWindowsJSON = "[]"
+	}
 	return nil
 }
 
 func (s *CRSAccountSnapshot) BeforeUpdate(tx *gorm.DB) error {
+	if strings.TrimSpace(s.UsageWindowsJSON) == "" {
+		s.UsageWindowsJSON = "[]"
+	}
 	s.UpdatedTime = common.GetTimestamp()
 	return nil
 }

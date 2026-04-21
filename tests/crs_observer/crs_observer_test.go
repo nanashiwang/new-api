@@ -1,6 +1,7 @@
 package crsobserver
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/QuantumNous/new-api/model"
@@ -123,4 +124,43 @@ func TestQueryCRSAccountSnapshotsFiltersLowQuota(t *testing.T) {
 	require.EqualValues(t, 1, total)
 	require.Len(t, rows, 1)
 	require.Equal(t, "acct-low", rows[0].RemoteAccountID)
+}
+
+func TestCRSAccountSnapshotTextFieldsDoNotDeclareDefaultValues(t *testing.T) {
+	t.Parallel()
+
+	field, ok := reflect.TypeOf(model.CRSAccountSnapshot{}).FieldByName("UsageWindowsJSON")
+	require.True(t, ok)
+
+	gormTag := field.Tag.Get("gorm")
+	require.Contains(t, gormTag, "type:text")
+	require.NotContains(t, gormTag, "default:")
+}
+
+func TestReplaceCRSAccountSnapshotsBackfillsUsageWindowsJSON(t *testing.T) {
+	db := setupCRSObserverTestDB(t)
+
+	site := &model.CRSSite{
+		Name:              "demo",
+		Host:              "usage-window.example.com",
+		Scheme:            "https",
+		Username:          "admin",
+		PasswordEncrypted: "enc-password",
+	}
+	require.NoError(t, db.Create(site).Error)
+
+	require.NoError(t, model.ReplaceCRSAccountSnapshots(site.Id, []*model.CRSAccountSnapshot{
+		{
+			SiteID:          site.Id,
+			RemoteAccountID: "acct-usage-window",
+			Platform:        "claude",
+			Name:            "Usage Window",
+			LastSyncedAt:    100,
+		},
+	}))
+
+	rows, err := model.ListCRSAccountSnapshotsBySite(site.Id)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "[]", rows[0].UsageWindowsJSON)
 }
