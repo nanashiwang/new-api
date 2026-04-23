@@ -43,6 +43,26 @@ var defNext = func(c *gin.Context) {
 	c.Next()
 }
 
+// abortWithRateLimit writes standard rate-limit headers (Retry-After,
+// X-RateLimit-*) and a JSON error body before aborting with HTTP 429. This
+// allows well-behaved clients (OpenAI SDK, LangChain, etc.) to back off
+// instead of immediately retrying and amplifying load.
+func abortWithRateLimit(c *gin.Context, maxRequestNum int, duration int64, mark string) {
+	retryAfter := strconv.FormatInt(duration, 10)
+	c.Header("Retry-After", retryAfter)
+	c.Header("X-RateLimit-Limit", strconv.Itoa(maxRequestNum))
+	c.Header("X-RateLimit-Window", retryAfter)
+	c.Header("X-RateLimit-Scope", mark)
+	c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+		"error": gin.H{
+			"code":        "rate_limited",
+			"message":     fmt.Sprintf("Rate limit exceeded (%s). Retry after %ss.", mark, retryAfter),
+			"scope":       mark,
+			"retry_after": duration,
+		},
+	})
+}
+
 func redisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark string) {
 	ctx := context.Background()
 	expiration := getRateLimitExpiration(duration)
@@ -54,16 +74,14 @@ func redisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark st
 		return
 	}
 	if !allowed {
-		c.Status(http.StatusTooManyRequests)
-		c.Abort()
+		abortWithRateLimit(c, maxRequestNum, duration, mark)
 	}
 }
 
 func memoryRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark string) {
 	key := mark + c.ClientIP()
 	if !inMemoryRateLimiter.Request(key, maxRequestNum, duration) {
-		c.Status(http.StatusTooManyRequests)
-		c.Abort()
+		abortWithRateLimit(c, maxRequestNum, duration, mark)
 		return
 	}
 }
@@ -139,7 +157,7 @@ func userRateLimitFactory(maxRequestNum int, duration int64, mark string) func(c
 				return
 			}
 			key := buildRateLimitRedisKey(mark, fmt.Sprintf("user:%d", userId))
-			userRedisRateLimiter(c, maxRequestNum, duration, key)
+			userRedisRateLimiter(c, maxRequestNum, duration, mark, key)
 		}
 	}
 	// It's safe to call multi times.
@@ -153,8 +171,7 @@ func userRateLimitFactory(maxRequestNum int, duration int64, mark string) func(c
 		}
 		key := fmt.Sprintf("%s:user:%d", mark, userId)
 		if !inMemoryRateLimiter.Request(key, maxRequestNum, duration) {
-			c.Status(http.StatusTooManyRequests)
-			c.Abort()
+			abortWithRateLimit(c, maxRequestNum, duration, mark)
 			return
 		}
 	}
@@ -162,7 +179,7 @@ func userRateLimitFactory(maxRequestNum int, duration int64, mark string) func(c
 
 // userRedisRateLimiter is like redisRateLimiter but accepts a pre-built key
 // (to support user-ID-based keys).
-func userRedisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, key string) {
+func userRedisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark string, key string) {
 	ctx := context.Background()
 	expiration := getRateLimitExpiration(duration)
 	allowed, err := evalRedisRateLimit(ctx, key, time.Now(), maxRequestNum, duration, expiration)
@@ -173,8 +190,7 @@ func userRedisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, key
 		return
 	}
 	if !allowed {
-		c.Status(http.StatusTooManyRequests)
-		c.Abort()
+		abortWithRateLimit(c, maxRequestNum, duration, mark)
 	}
 }
 
