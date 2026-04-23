@@ -195,6 +195,43 @@ func RecordLogWithAdminInfo(userId int, logType int, content string, adminInfo m
 	}
 }
 
+// RecordTopupLog records a top-up log (Type=LogTypeTopup) with administrator-only
+// audit fields (server IP, caller IP, payment method, callback payment method,
+// system version) stored under Other.admin_info. Non-admin views strip this
+// field via formatUserLogs. Extras merge into admin_info and override the
+// defaults when the same key is provided (e.g. admin_id/admin_username for
+// manual top-ups).
+func RecordTopupLog(userId int, content string, callerIp string,
+	paymentMethod string, callbackPaymentMethod string,
+	extras map[string]interface{}) {
+	username, _ := GetUsernameById(userId, false)
+	adminInfo := map[string]interface{}{
+		"server_ip":               common.GetIp(),
+		"caller_ip":               callerIp,
+		"payment_method":          paymentMethod,
+		"callback_payment_method": callbackPaymentMethod,
+		"version":                 common.Version,
+	}
+	for k, v := range extras {
+		adminInfo[k] = v
+	}
+	log := &Log{
+		UserId:    userId,
+		Username:  username,
+		CreatedAt: common.GetTimestamp(),
+		Type:      LogTypeTopup,
+		Content:   content,
+		Ip:        callerIp,
+		Other: common.MapToJsonStr(map[string]interface{}{
+			"admin_info": adminInfo,
+		}),
+	}
+	err := LOG_DB.Create(log).Error
+	if err != nil {
+		common.SysLog("failed to record topup log: " + err.Error())
+	}
+}
+
 func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string, tokenName string, content string, tokenId int, useTimeSeconds int,
 	isStream bool, group string, other map[string]interface{}) {
 	logger.LogInfo(c, fmt.Sprintf("record error log: userId=%d, channelId=%d, modelName=%s, tokenName=%s, content=%s", userId, channelId, modelName, tokenName, content))

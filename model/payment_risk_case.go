@@ -472,7 +472,8 @@ func confirmPaymentRiskCase(riskCase *PaymentRiskCase) error {
 		return ErrPaymentRiskCaseNotFound
 	}
 	if topUp.Status == common.TopUpStatusPending {
-		return CompleteTopUpByTradeNo(riskCase.TradeNo, "risk_confirm")
+		return CompleteTopUpByTradeNo(riskCase.TradeNo, "risk_confirm", "",
+			map[string]interface{}{"risk_case_id": riskCase.Id})
 	}
 	return nil
 }
@@ -495,7 +496,10 @@ func reversePaymentRiskCase(riskCase *PaymentRiskCase) (int, error) {
 		return 0, err
 	}
 	if strings.TrimSpace(summary) != "" && riskCase.UserId > 0 {
-		RecordLog(riskCase.UserId, LogTypeTopup, "payment risk reversal succeeded: "+summary)
+		RecordTopupLog(riskCase.UserId,
+			"payment risk reversal succeeded: "+summary,
+			"", "", "risk_reversal",
+			map[string]interface{}{"risk_case_id": riskCase.Id, "trade_no": riskCase.TradeNo})
 	}
 	return quotaDelta, nil
 }

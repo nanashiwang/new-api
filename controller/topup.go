@@ -279,7 +279,7 @@ func EpayNotify(c *gin.Context) {
 		_, _ = c.Writer.Write([]byte("success"))
 		return
 	}
-	if err := model.CompleteTopUpByTradeNo(verifyInfo.ServiceTradeNo, "epay"); err != nil {
+	if err := model.CompleteTopUpByTradeNo(verifyInfo.ServiceTradeNo, "epay", c.ClientIP(), nil); err != nil {
 		log.Printf("epay notify complete order failed: trade_no=%s err=%s", verifyInfo.ServiceTradeNo, err.Error())
 		_, _ = c.Writer.Write([]byte("fail"))
 		return
@@ -329,7 +329,7 @@ func EpayReturn(c *gin.Context) {
 			c.Redirect(http.StatusFound, successURL)
 			return
 		}
-		if err := model.CompleteTopUpByTradeNo(verifyInfo.ServiceTradeNo, "epay_return"); err != nil {
+		if err := model.CompleteTopUpByTradeNo(verifyInfo.ServiceTradeNo, "epay_return", c.ClientIP(), nil); err != nil {
 			log.Printf("epay return complete order failed: trade_no=%s err=%s", verifyInfo.ServiceTradeNo, err.Error())
 			c.Redirect(http.StatusFound, failURL)
 			return
@@ -423,7 +423,11 @@ func AdminCompleteTopUp(c *gin.Context) {
 	LockOrder(req.TradeNo)
 	defer UnlockOrder(req.TradeNo)
 
-	if err := model.ManualCompleteTopUp(req.TradeNo); err != nil {
+	adminExtras := map[string]interface{}{
+		"admin_id":       c.GetInt("id"),
+		"admin_username": c.GetString("username"),
+	}
+	if err := model.ManualCompleteTopUp(req.TradeNo, c.ClientIP(), adminExtras); err != nil {
 		common.ApiError(c, err)
 		return
 	}

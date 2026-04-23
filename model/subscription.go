@@ -926,7 +926,8 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string) error {
 				msg = fmt.Sprintf("%s，待用户确认发放", msg)
 			}
 		}
-		RecordLog(result.UserId, LogTypeTopup, msg)
+		RecordTopupLog(result.UserId, msg, "", result.PaymentMethod, "subscription_grant",
+			map[string]interface{}{"issuance_id": result.IssuanceId, "trade_no": result.TradeNo})
 	}
 	return nil
 }

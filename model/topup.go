@@ -66,7 +66,7 @@ func GetTopUpByTradeNo(tradeNo string) *TopUp {
 	return topUp
 }
 
-func Recharge(referenceId string, customerId string) (err error) {
+func Recharge(referenceId string, customerId string, callerIp string) (err error) {
 	if referenceId == "" {
 		return errors.New("未提供支付单号")
 	}
@@ -113,7 +113,9 @@ func Recharge(referenceId string, customerId string) (err error) {
 		return errors.New("充值失败，请稍后重试")
 	}
 
-	RecordLog(topUp.UserId, LogTypeTopup, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%d", logger.FormatQuota(int(quota)), topUp.Amount))
+	RecordTopupLog(topUp.UserId,
+		fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%d", logger.FormatQuota(int(quota)), topUp.Amount),
+		callerIp, topUp.PaymentMethod, "stripe", nil)
 	// 返佣采用 T+1 日批结算：
 	// 1) 此处只入返佣台账（pending），不直接发放；
 	// 2) 真正发放由定时任务统一处理，避免支付回调路径里出现复杂并发问题。
@@ -321,7 +323,7 @@ func recordQuotaBenefitGrantTx(tx *gorm.DB, topUp *TopUp, quotaDelta int, contex
 	})
 }
 
-func CompleteTopUpByTradeNo(tradeNo string, source string) error {
+func CompleteTopUpByTradeNo(tradeNo string, source string, callerIp string, adminExtras map[string]interface{}) error {
 	if tradeNo == "" {
 		return errors.New("trade number is required")
 	}
@@ -334,6 +336,7 @@ func CompleteTopUpByTradeNo(tradeNo string, source string) error {
 	var userId int
 	var quotaToAdd int
 	var payMoney float64
+	var paymentMethod string
 	var alreadyCompleted bool
 
 	err := DB.Transaction(func(tx *gorm.DB) error {
@@ -372,6 +375,7 @@ func CompleteTopUpByTradeNo(tradeNo string, source string) error {
 
 		userId = topUp.UserId
 		payMoney = topUp.Money
+		paymentMethod = topUp.PaymentMethod
 		return nil
 	})
 
@@ -386,7 +390,7 @@ func CompleteTopUpByTradeNo(tradeNo string, source string) error {
 	if source == "manual" {
 		logMessage = fmt.Sprintf("manual top-up completion succeeded, quota: %v, paid amount: %f", logger.FormatQuota(quotaToAdd), payMoney)
 	}
-	RecordLog(userId, LogTypeTopup, logMessage)
+	RecordTopupLog(userId, logMessage, callerIp, paymentMethod, source, adminExtras)
 
 	if topUp := GetTopUpByTradeNo(tradeNo); topUp != nil {
 		if enqueueErr := EnqueueInviteCommissionFromTopUp(topUp, quotaToAdd); enqueueErr != nil {
@@ -401,10 +405,10 @@ func CompleteTopUpByTradeNo(tradeNo string, source string) error {
 }
 
 // ManualCompleteTopUp completes a pending top-up order manually.
-func ManualCompleteTopUp(tradeNo string) error {
-	return CompleteTopUpByTradeNo(tradeNo, "manual")
+func ManualCompleteTopUp(tradeNo string, callerIp string, adminExtras map[string]interface{}) error {
+	return CompleteTopUpByTradeNo(tradeNo, "manual", callerIp, adminExtras)
 }
-func RechargeCreem(referenceId string, customerEmail string, customerName string) (err error) {
+func RechargeCreem(referenceId string, customerEmail string, customerName string, callerIp string) (err error) {
 
 	if referenceId == "" {
 		return errors.New("未提供支付单号")
@@ -474,7 +478,9 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 		return errors.New("充值失败，请稍后重试")
 	}
 
-	RecordLog(topUp.UserId, LogTypeTopup, fmt.Sprintf("使用Creem充值成功，充值额度: %v，支付金额：%.2f", quota, topUp.Money))
+	RecordTopupLog(topUp.UserId,
+		fmt.Sprintf("使用Creem充值成功，充值额度: %v，支付金额：%.2f", quota, topUp.Money),
+		callerIp, topUp.PaymentMethod, "creem", nil)
 	// Creem 的 Amount 字段就是充值额度，直接作为返佣基数入池。
 	if enqueueErr := EnqueueInviteCommissionFromTopUp(topUp, int(quota)); enqueueErr != nil {
 		common.SysError("enqueue invite commission (creem) failed: " + enqueueErr.Error())

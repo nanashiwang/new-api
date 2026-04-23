@@ -172,7 +172,7 @@ func StripeWebhook(c *gin.Context) {
 
 	switch event.Type {
 	case stripe.EventTypeCheckoutSessionCompleted:
-		sessionCompleted(event)
+		sessionCompleted(event, c.ClientIP())
 	case stripe.EventTypeCheckoutSessionExpired:
 		sessionExpired(event)
 	default:
@@ -182,7 +182,7 @@ func StripeWebhook(c *gin.Context) {
 	c.Status(http.StatusOK)
 }
 
-func sessionCompleted(event stripe.Event) {
+func sessionCompleted(event stripe.Event, callerIp string) {
 	customerId := event.GetObjectValue("customer")
 	referenceId := event.GetObjectValue("client_reference_id")
 	status := event.GetObjectValue("status")
@@ -240,7 +240,7 @@ func sessionCompleted(event stripe.Event) {
 	if checkResult.AlreadyCompleted {
 		return
 	}
-	err = model.Recharge(referenceId, customerId)
+	err = model.Recharge(referenceId, customerId, callerIp)
 	if err != nil {
 		log.Println(err.Error(), referenceId)
 		return

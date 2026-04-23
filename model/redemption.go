@@ -322,13 +322,22 @@ func RedeemWithOptions(key string, userId int, renewTargetSubscriptionId int, pu
 
 	switch result.BenefitType {
 	case RedemptionBenefitTypeSubscription:
-		RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码领取套餐 %s，兑换码ID %d，待发放记录 %d", result.PlanTitle, redemption.Id, result.IssuanceId))
+		RecordTopupLog(userId,
+			fmt.Sprintf("通过兑换码领取套餐 %s，兑换码ID %d，待发放记录 %d", result.PlanTitle, redemption.Id, result.IssuanceId),
+			"", "redemption", "redemption_plan",
+			map[string]interface{}{"redemption_id": redemption.Id, "issuance_id": result.IssuanceId})
 		return result, nil
 	case RedemptionBenefitTypeSellableToken:
-		RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码领取可售令牌 %s，兑换码ID %d，待发放记录 %d", result.ProductName, redemption.Id, result.IssuanceId))
+		RecordTopupLog(userId,
+			fmt.Sprintf("通过兑换码领取可售令牌 %s，兑换码ID %d，待发放记录 %d", result.ProductName, redemption.Id, result.IssuanceId),
+			"", "redemption", "redemption_token",
+			map[string]interface{}{"redemption_id": redemption.Id, "issuance_id": result.IssuanceId})
 		return result, nil
 	}
-	RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码充值 %s，兑换码ID %d", logger.LogQuota(redemption.Quota), redemption.Id))
+	RecordTopupLog(userId,
+		fmt.Sprintf("通过兑换码充值 %s，兑换码ID %d", logger.LogQuota(redemption.Quota), redemption.Id),
+		"", "redemption", "redemption_quota",
+		map[string]interface{}{"redemption_id": redemption.Id})
 	return result, nil
 }
 
