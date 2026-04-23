@@ -1066,6 +1066,8 @@ func buildUsageFromGeminiMetadata(metadata dto.GeminiUsageMetadata, fallbackProm
 			usage.CompletionTokenDetails.ImageTokens += detail.TokenCount
 		case "AUDIO":
 			usage.CompletionTokenDetails.AudioTokens += detail.TokenCount
+		case "TEXT":
+			usage.CompletionTokenDetails.TextTokens += detail.TokenCount
 		}
 	}
 
