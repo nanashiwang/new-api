@@ -161,4 +161,13 @@ func TestPostConsumeQuota_LogsChargedQuotaWhenPackageSettleFails(t *testing.T) {
 	require.Equal(t, float64(8), other["charged_quota"])
 	require.Equal(t, true, other["settle_failed"])
 	require.NotEmpty(t, other["settle_error"])
+
+	var user model.User
+	require.NoError(t, model.DB.First(&user, userID).Error)
+	require.EqualValues(t, 8, user.UsedQuota)
+	require.EqualValues(t, 1, user.RequestCount)
+
+	var channel model.Channel
+	require.NoError(t, model.DB.First(&channel, channelID).Error)
+	require.EqualValues(t, 8, channel.UsedQuota)
 }

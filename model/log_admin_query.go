@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
 )
 
@@ -97,6 +98,13 @@ func normalizeRankingOrder(order string) string {
 	}
 }
 
+func qualifiedLogGroupCol() string {
+	if common.LogSqlType == common.DatabaseTypePostgreSQL || (common.LogSqlType == "" && common.UsingPostgreSQL) {
+		return `logs."group"`
+	}
+	return "logs." + logGroupCol
+}
+
 func GetTopUsers(filters AdminLogQueryFilters, limit int, quotaOrder string, requestOrder string) ([]TopUserStat, []TopUserStat, error) {
 	if limit <= 0 {
 		limit = 10
@@ -111,12 +119,13 @@ func GetTopUsers(filters AdminLogQueryFilters, limit int, quotaOrder string, req
 	baseQuery := LOG_DB.Table("logs")
 	baseQuery = applyAdminLogFilters(baseQuery, filters, true)
 
-	selectClause := "logs.user_id, logs.username, " + logGroupCol + " as user_group, " +
+	groupCol := qualifiedLogGroupCol()
+	selectClause := "logs.user_id, logs.username, " + groupCol + " as user_group, " +
 		"COUNT(*) as request_count, " +
 		"COALESCE(SUM(quota), 0) as quota, " +
 		"COALESCE(SUM(prompt_tokens), 0) as prompt_tokens, " +
 		"COALESCE(SUM(completion_tokens), 0) as completion_tokens"
-	groupClause := "logs.user_id, logs.username, " + logGroupCol
+	groupClause := "logs.user_id, logs.username, " + groupCol
 
 	byQuota := make([]TopUserStat, 0, limit)
 	quotaQuery := baseQuery.Session(&gorm.Session{}).

@@ -56,13 +56,13 @@ type User struct {
 	// 生效套餐元数据（仅用于用户管理列表响应，不落库）：
 	// - HasActiveSubscription：当前是否存在生效套餐
 	// - ActiveSubscriptionCount：当前生效套餐条数
-	HasActiveSubscription            bool  `json:"has_active_subscription" gorm:"-"`
-	ActiveSubscriptionCount          int   `json:"active_subscription_count" gorm:"-"`
-	PendingSubscriptionIssuanceCount int   `json:"pending_subscription_issuance_count" gorm:"-"`
-	SubscriptionQuotaRemaining       int64                    `json:"subscription_quota_remaining" gorm:"-"`
-	SubscriptionQuotaTotal           int64                    `json:"subscription_quota_total" gorm:"-"`
-	SubscriptionQuotaHasUnlimited    bool                     `json:"subscription_quota_has_unlimited" gorm:"-"`
-	SubscriptionQuotaItems           []SubscriptionQuotaItem  `json:"subscription_quota_items,omitempty" gorm:"-"`
+	HasActiveSubscription            bool                    `json:"has_active_subscription" gorm:"-"`
+	ActiveSubscriptionCount          int                     `json:"active_subscription_count" gorm:"-"`
+	PendingSubscriptionIssuanceCount int                     `json:"pending_subscription_issuance_count" gorm:"-"`
+	SubscriptionQuotaRemaining       int64                   `json:"subscription_quota_remaining" gorm:"-"`
+	SubscriptionQuotaTotal           int64                   `json:"subscription_quota_total" gorm:"-"`
+	SubscriptionQuotaHasUnlimited    bool                    `json:"subscription_quota_has_unlimited" gorm:"-"`
+	SubscriptionQuotaItems           []SubscriptionQuotaItem `json:"subscription_quota_items,omitempty" gorm:"-"`
 	// 可售令牌元数据（仅用于用户管理列表响应，不落库）
 	HasSellableToken             bool `json:"has_sellable_token" gorm:"-"`
 	ActiveSellableTokenCount     int  `json:"active_sellable_token_count" gorm:"-"`
@@ -1720,6 +1720,17 @@ func updateUserUsedQuotaAndRequestCount(id int, quota int, count int) {
 	//if err := invalidateUserCache(id); err != nil {
 	//	common.SysError("failed to invalidate user cache: " + err.Error())
 	//}
+}
+
+func UpdateUserUsedQuota(id int, quota int) {
+	if quota == 0 {
+		return
+	}
+	if common.BatchUpdateEnabled {
+		addNewRecord(BatchUpdateTypeUsedQuota, id, quota)
+		return
+	}
+	updateUserUsedQuota(id, quota)
 }
 
 func updateUserUsedQuota(id int, quota int) {

@@ -1501,22 +1501,24 @@ func TopUp(c *gin.Context) {
 // Redeem 提供统一兑换入口，兼容余额码与套餐码两种权益。
 func Redeem(c *gin.Context) {
 	id := c.GetInt("id")
+
+	req := topUpRequest{}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		middleware.RecordRedemptionAttempt(c, false)
+		common.ApiError(c, err)
+		return
+	}
+
+	if !middleware.CheckRedemptionRateLimit(c) {
+		return
+	}
+
 	lock := getTopUpLock(id)
 	if !lock.TryLock() {
 		common.ApiErrorI18n(c, i18n.MsgUserTopUpProcessing)
 		return
 	}
 	defer lock.Unlock()
-
-	if !middleware.CheckRedemptionRateLimit(c) {
-		return
-	}
-
-	req := topUpRequest{}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		common.ApiError(c, err)
-		return
-	}
 
 	result, err := model.RedeemWithOptions(req.Key, id, req.RenewTargetSubscriptionId, req.PurchaseMode)
 	if err != nil {

@@ -410,11 +410,10 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 		if !ratio.IsZero() && quota == 0 {
 			quota = 1
 		}
-		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, quota)
-		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
 	}
 
-	settleErr := service.SettleBilling(ctx, relayInfo, quota)
+	actualQuota := quota
+	settleErr := service.SettleBilling(ctx, relayInfo, actualQuota)
 	if settleErr != nil {
 		logger.LogError(ctx, "error settling billing: "+settleErr.Error())
 	}
@@ -470,7 +469,10 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 	if tieredResult != nil {
 		service.InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	}
-	quota, logContent, other = service.FinalizeConsumeLogAfterSettle(logContent, other, quota, relayInfo, settleErr)
+	quota, logContent, other = service.FinalizeConsumeLogAfterSettle(logContent, other, actualQuota, relayInfo, settleErr)
+	if totalTokens != 0 {
+		service.UpdateUsageStats(relayInfo.UserId, relayInfo.ChannelId, quota, true)
+	}
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
 		ChannelId:        relayInfo.ChannelId,
 		PromptTokens:     promptTokens,

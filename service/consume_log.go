@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 )
 
@@ -43,4 +44,15 @@ func FinalizeConsumeLogAfterSettle(logContent string, other map[string]interface
 		logContent += "，" + note
 	}
 	return loggedQuota, logContent, other
+}
+
+func UpdateUsageStats(userId int, channelId int, quota int, countRequest bool) {
+	if countRequest {
+		model.UpdateUserUsedQuotaAndRequestCount(userId, quota)
+	} else if quota != 0 {
+		model.UpdateUserUsedQuota(userId, quota)
+	}
+	if quota != 0 {
+		model.UpdateChannelUsedQuota(channelId, quota)
+	}
 }

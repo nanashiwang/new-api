@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Modal } from '@douyinfe/semi-ui';
 import {
@@ -72,6 +72,7 @@ export const useLogsData = () => {
   const [logCount, setLogCount] = useState(0);
   const [pageSize, setPageSize] = useState(ITEMS_PER_PAGE);
   const [logType, setLogType] = useState(0);
+  const topUsersRequestCounter = useRef(0);
 
   // User and admin
   const isAdminUser = isAdmin();
@@ -183,6 +184,18 @@ export const useLogsData = () => {
   const [channelAffinityUsageCacheTarget, setChannelAffinityUsageCacheTarget] =
     useState(null);
 
+  // Top users drawer state (admin only)
+  const [showTopUsersDrawer, setShowTopUsersDrawer] = useState(false);
+  const [topUsersLoading, setTopUsersLoading] = useState(false);
+  const [topUsersData, setTopUsersData] = useState({
+    by_quota: [],
+    by_requests: [],
+  });
+  const [topUsersViewMode, setTopUsersViewMode] = useState('both');
+  const [topUsersQuotaOrder, setTopUsersQuotaOrder] = useState('desc');
+  const [topUsersRequestOrder, setTopUsersRequestOrder] = useState('desc');
+  const [topUsersLimit, setTopUsersLimit] = useState(10);
+
   // Initialize default column visibility
   const initDefaultColumns = () => {
     const defaults = getDefaultColumnVisibility();
@@ -255,6 +268,78 @@ export const useLogsData = () => {
       request_id: formValues.request_id || '',
       logType: formValues.logType ? parseInt(formValues.logType) : 0,
     };
+  };
+
+  const loadTopUsers = async () => {
+    if (!isAdminUser) {
+      return;
+    }
+    const reqId = ++topUsersRequestCounter.current;
+    const {
+      username,
+      token_name,
+      model_name,
+      start_timestamp,
+      end_timestamp,
+      channel,
+      group,
+      request_id,
+    } = getFormValues();
+
+    setTopUsersLoading(true);
+    try {
+      const localStartTimestamp = Date.parse(start_timestamp) / 1000;
+      const localEndTimestamp = Date.parse(end_timestamp) / 1000;
+      const params = new URLSearchParams({
+        username,
+        token_name,
+        model_name,
+        start_timestamp: String(localStartTimestamp),
+        end_timestamp: String(localEndTimestamp),
+        channel: String(channel),
+        group,
+        request_id,
+        view_mode: topUsersViewMode,
+        quota_order: topUsersQuotaOrder,
+        request_order: topUsersRequestOrder,
+        limit: String(topUsersLimit),
+      });
+      const res = await API.get(`/api/log/top-users?${params.toString()}`);
+      if (reqId !== topUsersRequestCounter.current) {
+        return;
+      }
+      const { success, message, data } = res.data || {};
+      if (success) {
+        setTopUsersData({
+          by_quota: data?.by_quota || [],
+          by_requests: data?.by_requests || [],
+        });
+      } else {
+        showError(message || 'Failed to load top users');
+      }
+    } catch (error) {
+      if (reqId !== topUsersRequestCounter.current) {
+        return;
+      }
+      showError(error?.message || 'Failed to load top users');
+    } finally {
+      if (reqId === topUsersRequestCounter.current) {
+        setTopUsersLoading(false);
+      }
+    }
+  };
+
+  const openTopUsersDrawer = () => {
+    setShowTopUsersDrawer(true);
+  };
+
+  const selectTopUser = async (username) => {
+    if (!formApi || !username) {
+      return;
+    }
+    formApi.setValue('username', username);
+    setShowTopUsersDrawer(false);
+    await refresh();
   };
 
   // Statistics functions
@@ -655,6 +740,9 @@ export const useLogsData = () => {
     setActivePage(1);
     handleEyeClick();
     await loadLogs(1, pageSize);
+    if (showTopUsersDrawer) {
+      await loadTopUsers();
+    }
   };
 
   // Copy text function
@@ -685,6 +773,20 @@ export const useLogsData = () => {
       handleEyeClick();
     }
   }, [formApi]);
+
+  useEffect(() => {
+    if (showTopUsersDrawer) {
+      loadTopUsers().catch((reason) => {
+        showError(reason?.message || reason || 'Failed to load top users');
+      });
+    }
+  }, [
+    showTopUsersDrawer,
+    topUsersViewMode,
+    topUsersQuotaOrder,
+    topUsersRequestOrder,
+    topUsersLimit,
+  ]);
 
   // Check if any record has expandable content
   const hasExpandableRows = () => {
@@ -739,6 +841,24 @@ export const useLogsData = () => {
     setShowChannelAffinityUsageCacheModal,
     channelAffinityUsageCacheTarget,
     openChannelAffinityUsageCacheModal,
+
+    // Top users drawer
+    showTopUsersDrawer,
+    setShowTopUsersDrawer,
+    topUsersLoading,
+    topUsersData,
+    topUsersViewMode,
+    setTopUsersViewMode,
+    topUsersQuotaOrder,
+    setTopUsersQuotaOrder,
+    topUsersRequestOrder,
+    setTopUsersRequestOrder,
+    topUsersLimit,
+    setTopUsersLimit,
+    openTopUsersDrawer,
+    selectTopUser,
+    refreshTopUsers: loadTopUsers,
+    currentTopUsersLogType: getFormValues().logType,
 
     // Functions
     loadLogs,

@@ -103,7 +103,9 @@ func recordRedemptionHit(mark string, userId int, duration int64, maxCount int) 
 		ctx := context.Background()
 		key := buildRateLimitRedisKey(mark, fmt.Sprintf("user:%d", userId))
 		// Lua 脚本内部会先 ZREMRANGEBYSCORE 清过期；用 max+buffer 确保必写入。
-		_, _ = evalRedisRateLimit(ctx, key, time.Now(), maxCount+redemptionRateLimitBufferSize, duration, getRateLimitExpiration(duration))
+		if _, err := evalRedisRateLimit(ctx, key, time.Now(), maxCount+redemptionRateLimitBufferSize, duration, getRateLimitExpiration(duration)); err != nil {
+			common.SysError(fmt.Sprintf("failed to record redemption rate limit hit: %v", err))
+		}
 		return
 	}
 	inMemoryRateLimiter.Init(getRateLimitExpiration(duration))

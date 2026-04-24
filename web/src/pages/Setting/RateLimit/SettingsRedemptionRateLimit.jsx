@@ -78,10 +78,14 @@ export default function RedemptionRateLimit(props) {
   }
 
   function onUnitChange(newUnit) {
+    const displayValue = Math.max(1, Number(durationDisplay) || 1);
     setUnit(newUnit);
-    setDurationDisplay(
-      secondsToDisplay(inputs.RedemptionRateLimitDurationSeconds, newUnit),
-    );
+    setInputs((prev) => ({
+      ...prev,
+      RedemptionRateLimitDurationSeconds: String(
+        displayValue * (UNIT_SECONDS[newUnit] || 1),
+      ),
+    }));
   }
 
   function onSubmit() {
@@ -158,8 +162,9 @@ export default function RedemptionRateLimit(props) {
                   field={'RedemptionRateLimitEnabled'}
                   label={t('启用兑换码兑换速率限制')}
                   size='default'
-                  checkedText={'\u542f\u7528'}
-                  uncheckedText={'\u5173\u95ed'}
+                  style={{ minWidth: 56 }}
+                  checkedText={t('启用')}
+                  uncheckedText={t('关闭')}
                   onChange={(value) => {
                     setInputs({
                       ...inputs,
