@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useEffect, useState } from 'react';
-import { Card, Spin } from '@douyinfe/semi-ui';
+import { Card, Spin, Tabs } from '@douyinfe/semi-ui';
 import SettingsGeneralPayment from '../../pages/Setting/Payment/SettingsGeneralPayment';
 import SettingsPaymentGateway from '../../pages/Setting/Payment/SettingsPaymentGateway';
 import SettingsPaymentGatewayStripe from '../../pages/Setting/Payment/SettingsPaymentGatewayStripe';
@@ -110,7 +110,7 @@ const PaymentSetting = () => {
         }
       });
 
-      setInputs(newInputs);
+      setInputs((prev) => ({ ...prev, ...newInputs }));
     } else {
       showError(t(message));
     }
@@ -135,16 +135,36 @@ const PaymentSetting = () => {
     <>
       <Spin spinning={loading} size='large'>
         <Card style={{ marginTop: '10px' }}>
-          <SettingsGeneralPayment options={inputs} refresh={onRefresh} />
-        </Card>
-        <Card style={{ marginTop: '10px' }}>
-          <SettingsPaymentGateway options={inputs} refresh={onRefresh} />
-        </Card>
-        <Card style={{ marginTop: '10px' }}>
-          <SettingsPaymentGatewayStripe options={inputs} refresh={onRefresh} />
-        </Card>
-        <Card style={{ marginTop: '10px' }}>
-          <SettingsPaymentGatewayCreem options={inputs} refresh={onRefresh} />
+          <Tabs
+            type='card'
+            defaultActiveKey='general'
+            contentStyle={{ paddingTop: 24 }}
+          >
+            <Tabs.TabPane tab={t('通用设置')} itemKey='general'>
+              <SettingsGeneralPayment
+                options={inputs}
+                refresh={onRefresh}
+              />
+            </Tabs.TabPane>
+            <Tabs.TabPane tab={t('易支付设置')} itemKey='epay'>
+              <SettingsPaymentGateway
+                options={inputs}
+                refresh={onRefresh}
+              />
+            </Tabs.TabPane>
+            <Tabs.TabPane tab={t('Stripe 设置')} itemKey='stripe'>
+              <SettingsPaymentGatewayStripe
+                options={inputs}
+                refresh={onRefresh}
+              />
+            </Tabs.TabPane>
+            <Tabs.TabPane tab={t('Creem 设置')} itemKey='creem'>
+              <SettingsPaymentGatewayCreem
+                options={inputs}
+                refresh={onRefresh}
+              />
+            </Tabs.TabPane>
+          </Tabs>
         </Card>
       </Spin>
     </>
