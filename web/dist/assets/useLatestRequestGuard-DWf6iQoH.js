@@ -1,1 +1,0 @@
-import{r as t}from"./react-core-CZZu3mg-.js";const a=()=>{const s=t.useRef(0),r=t.useCallback(()=>{const e=s.current+1;return s.current=e,e},[]),u=t.useCallback(e=>e===s.current,[]);return t.useMemo(()=>({createRequestId:r,isLatestRequest:u}),[r,u])};export{a as u};
