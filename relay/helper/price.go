@@ -79,7 +79,7 @@ func estimateConservativeBuiltInToolQuota(info *relaycommon.RelayInfo, priceData
 				searchContextSize = "medium"
 			}
 			toolQuota = toolQuota.Add(
-				decimal.NewFromFloat(operation_setting.GetWebSearchPricePerThousand(info.OriginModelName, searchContextSize)).
+				decimal.NewFromFloat(operation_setting.GetToolPriceForModel(dto.BuildInToolWebSearchPreview, info.OriginModelName)).
 					Div(decimal.NewFromInt(1000)).
 					Mul(groupRatio).
 					Mul(quotaPerUnit),
@@ -87,7 +87,7 @@ func estimateConservativeBuiltInToolQuota(info *relaycommon.RelayInfo, priceData
 		}
 		if fileSearchTool, exists := info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolFileSearch]; exists && fileSearchTool != nil {
 			toolQuota = toolQuota.Add(
-				decimal.NewFromFloat(operation_setting.GetFileSearchPricePerThousand()).
+				decimal.NewFromFloat(operation_setting.GetToolPriceForModel(dto.BuildInToolFileSearch, info.OriginModelName)).
 					Div(decimal.NewFromInt(1000)).
 					Mul(groupRatio).
 					Mul(quotaPerUnit),
@@ -96,12 +96,8 @@ func estimateConservativeBuiltInToolQuota(info *relaycommon.RelayInfo, priceData
 	}
 
 	if strings.HasSuffix(info.OriginModelName, "search-preview") {
-		searchContextSize := "medium"
-		if request, ok := info.Request.(*dto.GeneralOpenAIRequest); ok && request.WebSearchOptions != nil && request.WebSearchOptions.SearchContextSize != "" {
-			searchContextSize = request.WebSearchOptions.SearchContextSize
-		}
 		toolQuota = toolQuota.Add(
-			decimal.NewFromFloat(operation_setting.GetWebSearchPricePerThousand(info.OriginModelName, searchContextSize)).
+			decimal.NewFromFloat(operation_setting.GetToolPriceForModel(dto.BuildInToolWebSearchPreview, info.OriginModelName)).
 				Div(decimal.NewFromInt(1000)).
 				Mul(groupRatio).
 				Mul(quotaPerUnit),
@@ -110,7 +106,7 @@ func estimateConservativeBuiltInToolQuota(info *relaycommon.RelayInfo, priceData
 
 	if request, ok := info.Request.(*dto.GeneralOpenAIRequest); ok && request.WebSearchOptions != nil && info.RelayFormat == types.RelayFormatClaude {
 		toolQuota = toolQuota.Add(
-			decimal.NewFromFloat(operation_setting.GetClaudeWebSearchPricePerThousand()).
+			decimal.NewFromFloat(operation_setting.GetToolPriceForModel(dto.BuildInToolWebSearch, info.OriginModelName)).
 				Div(decimal.NewFromInt(1000)).
 				Mul(groupRatio).
 				Mul(quotaPerUnit),

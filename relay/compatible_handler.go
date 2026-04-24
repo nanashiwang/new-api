@@ -22,12 +22,18 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
-	"github.com/samber/lo"
 
 	"github.com/shopspring/decimal"
 
 	"github.com/gin-gonic/gin"
 )
+
+func newAPIErrorFromParamOverride(err error) *types.NewAPIError {
+	if fixedErr, ok := relaycommon.AsParamOverrideReturnError(err); ok {
+		return relaycommon.NewAPIErrorFromParamOverride(fixedErr)
+	}
+	return types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid, types.ErrOptionWithSkipRetry())
+}
 
 func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
@@ -58,7 +64,7 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 	}
 
 	// 如果不支持StreamOptions，将StreamOptions设置为nil
-	if !info.SupportStreamOptions || !lo.FromPtrOr(request.Stream, false) {
+	if !info.SupportsChatStreamOptions || !request.Stream {
 		request.StreamOptions = nil
 	} else {
 		// 如果支持StreamOptions，且请求中没有设置StreamOptions，根据配置文件设置StreamOptions
@@ -408,8 +414,9 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
 	}
 
-	if err := service.SettleBilling(ctx, relayInfo, quota); err != nil {
-		logger.LogError(ctx, "error settling billing: "+err.Error())
+	settleErr := service.SettleBilling(ctx, relayInfo, quota)
+	if settleErr != nil {
+		logger.LogError(ctx, "error settling billing: "+settleErr.Error())
 	}
 
 	logModel := modelName
@@ -463,6 +470,7 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 	if tieredResult != nil {
 		service.InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	}
+	quota, logContent, other = service.FinalizeConsumeLogAfterSettle(logContent, other, quota, relayInfo, settleErr)
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
 		ChannelId:        relayInfo.ChannelId,
 		PromptTokens:     promptTokens,

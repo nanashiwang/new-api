@@ -1228,6 +1228,14 @@ function shouldUseRatioBillingProcess(modelPrice = -1) {
   return modelPrice === -1 && getQuotaDisplayType() === 'TOKENS';
 }
 
+export function formatPaymentAmount(amount, digits = 2) {
+  const numericAmount = Number(amount || 0);
+  if (!Number.isFinite(numericAmount)) {
+    return '0.00';
+  }
+  return numericAmount.toFixed(digits);
+}
+
 function formatCompactDisplayPrice(usdAmount, digits = 6) {
   const { symbol, rate } = getCurrencyConfig();
   const amount = Number((usdAmount * rate).toFixed(digits));
@@ -3294,4 +3302,50 @@ export function rehypeSplitWordsIntoSpans(options = {}) {
       }
     });
   };
+}
+
+export function getPaymentCurrencySymbol() {
+  return getCurrencyConfig().symbol;
+}
+
+export function formatConcurrencyLabel(maxConcurrency, t = (value) => value) {
+  const value = Number(maxConcurrency || 0);
+  if (!Number.isFinite(value) || value <= 0) {
+    return t('??');
+  }
+  return t('?? {{count}}', { count: value });
+}
+
+export function formatWindowLimitShort(windowSeconds, windowRequestLimit, t = (value) => value) {
+  const seconds = Number(windowSeconds || 0);
+  const limit = Number(windowRequestLimit || 0);
+  if (!Number.isFinite(seconds) || !Number.isFinite(limit) || seconds <= 0 || limit <= 0) {
+    return t('??');
+  }
+  if (seconds % 86400 === 0) {
+    return `${limit}/${seconds / 86400}${t('?')}`;
+  }
+  if (seconds % 3600 === 0) {
+    return `${limit}/${seconds / 3600}${t('??')}`;
+  }
+  if (seconds % 60 === 0) {
+    return `${limit}/${seconds / 60}${t('??')}`;
+  }
+  return `${limit}/${seconds}${t('?')}`;
+}
+
+export function formatConcurrencyLong(maxConcurrency, t = (value) => value) {
+  const value = Number(maxConcurrency || 0);
+  if (!Number.isFinite(value) || value <= 0) {
+    return t('??????');
+  }
+  return t('???? {{count}} ???', { count: value });
+}
+
+export function formatWindowLimitLong(windowSeconds, windowRequestLimit, t = (value) => value) {
+  const short = formatWindowLimitShort(windowSeconds, windowRequestLimit, t);
+  if (short === t('??')) {
+    return t('???????');
+  }
+  return t('?????{{limit}}', { limit: short });
 }

@@ -239,6 +239,9 @@ func normalizeTokenModelSupportedEndpointTypes(modelName string, supportedEndpoi
 			return []constant.EndpointType{constant.EndpointTypeOpenAI}
 		}
 	}
+	if common.IsOpenAITextModel(modelName) && containsEndpointType(supportedEndpointTypes, constant.EndpointTypeOpenAI) && !containsEndpointType(supportedEndpointTypes, constant.EndpointTypeOpenAIResponse) {
+		supportedEndpointTypes = append(supportedEndpointTypes, constant.EndpointTypeOpenAIResponse)
+	}
 	return supportedEndpointTypes
 }
 

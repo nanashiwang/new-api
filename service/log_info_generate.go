@@ -72,6 +72,25 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 
 	AppendChannelAffinityAdminInfo(ctx, adminInfo)
 
+	if len(relayInfo.ParamOverrideAudit) > 0 {
+		other["po"] = append([]string(nil), relayInfo.ParamOverrideAudit...)
+	}
+	if relayInfo.StreamStatus != nil {
+		status := "ok"
+		if relayInfo.StreamStatus.HasErrors() || !relayInfo.StreamStatus.IsNormalEnd() {
+			status = "error"
+		}
+		streamStatus := map[string]interface{}{
+			"status":      status,
+			"end_reason":  string(relayInfo.StreamStatus.EndReason),
+			"error_count": relayInfo.StreamStatus.TotalErrorCount(),
+		}
+		if relayInfo.StreamStatus.EndError != nil {
+			streamStatus["end_error"] = relayInfo.StreamStatus.EndError.Error()
+		}
+		other["stream_status"] = streamStatus
+	}
+
 	other["admin_info"] = adminInfo
 	appendRequestPath(ctx, relayInfo, other)
 	appendRequestConversionChain(relayInfo, other)

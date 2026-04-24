@@ -52,7 +52,7 @@ func TestResolveLoggedQuotaAfterSettle_TokenOnlyPackageOverrun(t *testing.T) {
 	err := session.Settle(12)
 	require.Error(t, err)
 
-	loggedQuota := resolveLoggedQuotaAfterSettle(12, relayInfo, err)
+	loggedQuota, _, _ := FinalizeConsumeLogAfterSettle("", nil, 12, relayInfo, err)
 	require.Equal(t, 8, loggedQuota)
 
 	token, getErr := model.GetTokenById(2001)

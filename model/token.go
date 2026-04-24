@@ -78,6 +78,27 @@ func (token *Token) Clean() {
 	token.Key = ""
 }
 
+func MaskTokenKey(key string) string {
+	if key == "" {
+		return ""
+	}
+	if len(key) <= 4 {
+		return strings.Repeat("*", len(key))
+	}
+	if len(key) <= 8 {
+		return key[:2] + "****" + key[len(key)-2:]
+	}
+	return key[:4] + "**********" + key[len(key)-4:]
+}
+
+func (token *Token) GetFullKey() string {
+	return token.Key
+}
+
+func (token *Token) GetMaskedKey() string {
+	return MaskTokenKey(token.Key)
+}
+
 func (token *Token) GetIpLimits() []string {
 	// delete empty spaces
 	//split with \n

@@ -113,9 +113,9 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		return newAPIError
 	}
 
-	imageN := uint(1)
-	if request.N != nil {
-		imageN = *request.N
+	imageN := request.N
+	if imageN == 0 {
+		imageN = 1
 	}
 
 	// n is handled via OtherRatio so it is applied exactly once in quota
@@ -152,6 +152,6 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		logContent = append(logContent, fmt.Sprintf("生成数量 %d", imageN))
 	}
 
-	service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), logContent)
+	postConsumeQuota(c, info, usage.(*dto.Usage), logContent...)
 	return nil
 }

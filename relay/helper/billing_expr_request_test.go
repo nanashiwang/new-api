@@ -11,7 +11,6 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/gin-gonic/gin"
-	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -40,14 +39,14 @@ func TestResolveIncomingBillingExprRequestInput(t *testing.T) {
 func TestBuildBillingExprRequestInputFromRequest(t *testing.T) {
 	request := &dto.GeneralOpenAIRequest{
 		Model:  "gemini-3.1-pro-preview",
-		Stream: lo.ToPtr(true),
+		Stream: true,
 		Messages: []dto.Message{
 			{
 				Role:    "user",
 				Content: "hi",
 			},
 		},
-		MaxTokens: lo.ToPtr(uint(3000)),
+		MaxTokens: uint(3000),
 	}
 
 	input, err := BuildBillingExprRequestInputFromRequest(request, map[string]string{
