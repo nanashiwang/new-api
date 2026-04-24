@@ -3511,6 +3511,18 @@
     "全部刷新完成": "All sites refreshed",
     "站点已创建": "Site created",
     "站点已更新": "Site updated",
-    "站点已删除": "Site deleted"
+    "站点已删除": "Site deleted",
+    "单位": "Unit",
+    "兑换码速率限制": "Redemption code rate limit",
+    "启用兑换码兑换速率限制": "Enable redemption rate limit",
+    "每周期最多成功兑换次数": "Max successful redemptions per period",
+    "每周期最多失败次数": "Max failures per period",
+    "0 代表不限制": "0 means unlimited",
+    "0 代表不限制；到达后锁定整个周期": "0 means unlimited; once reached, the whole period is locked",
+    "保存兑换码速率限制": "Save redemption rate limit settings",
+    "搭配下方“单位”使用，后端会换算为秒后保存": "Combined with the unit below; the backend stores the value as seconds",
+    "搭配右侧“单位”使用，后端会换算为秒后保存": "Combined with the unit on the right; the backend stores the value as seconds",
+    "兑换次数过于频繁，{{sec}} 秒后再试": "Redeeming too often, try again after {{sec}}s",
+    "兑换失败次数过多，{{sec}} 秒后再试": "Too many failed redemptions, try again after {{sec}}s"
   }
 }

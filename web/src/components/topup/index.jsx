@@ -199,7 +199,9 @@ const TopUp = () => {
       if (purchaseMode) {
         payload.purchase_mode = purchaseMode;
       }
-      const res = await API.post('/api/user/redeem', payload);
+      const res = await API.post('/api/user/redeem', payload, {
+        skipErrorHandler: true,
+      });
       const { success, message, data } = res.data;
       if (success) {
         showSuccess(t('兑换成功！'));
@@ -267,7 +269,23 @@ const TopUp = () => {
         showError(message);
       }
     } catch (err) {
-      showError(t('请求失败'));
+      const status = err?.response?.status;
+      const body = err?.response?.data;
+      if (status === 429 || body?.error?.code === 'rate_limited') {
+        const retry = Number(body?.error?.retry_after) || 60;
+        const scope = body?.error?.scope;
+        if (scope === 'RDF') {
+          showError(
+            t('兑换失败次数过多，{{sec}} 秒后再试', { sec: retry }),
+          );
+        } else {
+          showError(
+            t('兑换次数过于频繁，{{sec}} 秒后再试', { sec: retry }),
+          );
+        }
+      } else {
+        showError(t('请求失败'));
+      }
     } finally {
       setIsSubmitting(false);
     }

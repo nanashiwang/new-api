@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
@@ -26,6 +27,11 @@ import (
 type LoginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+}
+
+type accountBindRequest struct {
+	Email string `json:"email"`
+	Code  string `json:"code"`
 }
 
 var invalidateManagedUserCaches = model.InvalidateUserAndTokenCaches
@@ -1366,6 +1372,15 @@ func ManageUserBatch(c *gin.Context) {
 func EmailBind(c *gin.Context) {
 	email := c.Query("email")
 	code := c.Query("code")
+	if c.Request.Method == http.MethodPost {
+		var req accountBindRequest
+		if err := common.DecodeJson(c.Request.Body, &req); err != nil {
+			common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+			return
+		}
+		email = req.Email
+		code = req.Code
+	}
 	if !common.VerifyCodeWithKey(email, code, common.EmailVerificationPurpose) {
 		common.ApiErrorI18n(c, i18n.MsgUserVerificationCodeError)
 		return
@@ -1493,6 +1508,10 @@ func Redeem(c *gin.Context) {
 	}
 	defer lock.Unlock()
 
+	if !middleware.CheckRedemptionRateLimit(c) {
+		return
+	}
+
 	req := topUpRequest{}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.ApiError(c, err)
@@ -1501,6 +1520,9 @@ func Redeem(c *gin.Context) {
 
 	result, err := model.RedeemWithOptions(req.Key, id, req.RenewTargetSubscriptionId, req.PurchaseMode)
 	if err != nil {
+		if shouldCountAsRedeemFailure(err) {
+			middleware.RecordRedemptionAttempt(c, false)
+		}
 		if needTargetErr, ok := err.(*model.RedeemNeedRenewTargetError); ok {
 			// 多条可续费订阅时，由前端弹出选择器让用户自己决定续到哪一条。
 			c.JSON(http.StatusOK, gin.H{
@@ -1550,7 +1572,23 @@ func Redeem(c *gin.Context) {
 	}
 
 	// 统一兑换接口直接返回结构化结果，让前端根据权益类型自行处理展示和刷新。
+	middleware.RecordRedemptionAttempt(c, true)
 	common.ApiSuccess(c, result)
+}
+
+// shouldCountAsRedeemFailure 用于区分"真正失败"和"尚未裁决"的兑换错误。
+// "尚未裁决"（需要前端进一步选择）的错误不应计入失败次数。
+func shouldCountAsRedeemFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	if _, ok := err.(*model.RedeemNeedRenewTargetError); ok {
+		return false
+	}
+	if _, ok := err.(*model.RedeemNeedSelectPurchaseModeError); ok {
+		return false
+	}
+	return true
 }
 
 type UpdateUserSettingRequest struct {

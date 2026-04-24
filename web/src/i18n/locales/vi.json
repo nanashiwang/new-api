@@ -3962,6 +3962,18 @@
     "全部刷新完成": "全部刷新完成",
     "站点已创建": "站点已创建",
     "站点已更新": "站点已更新",
-    "站点已删除": "站点已删除"
+    "站点已删除": "站点已删除",
+    "单位": "Đơn vị",
+    "兑换码速率限制": "Giới hạn tần suất mã đổi",
+    "启用兑换码兑换速率限制": "Bật giới hạn tần suất đổi mã",
+    "每周期最多成功兑换次数": "Số lần đổi thành công tối đa mỗi chu kỳ",
+    "每周期最多失败次数": "Số lần thất bại tối đa mỗi chu kỳ",
+    "0 代表不限制": "0 nghĩa là không giới hạn",
+    "0 代表不限制；到达后锁定整个周期": "0 nghĩa là không giới hạn; khi đạt sẽ khóa toàn bộ chu kỳ",
+    "保存兑换码速率限制": "Lưu cài đặt giới hạn mã đổi",
+    "搭配下方“单位”使用，后端会换算为秒后保存": "Kết hợp với \"đơn vị\" bên dưới; máy chủ lưu theo giây",
+    "搭配右侧“单位”使用，后端会换算为秒后保存": "Kết hợp với \"đơn vị\" bên phải; máy chủ lưu theo giây",
+    "兑换次数过于频繁，{{sec}} 秒后再试": "Đổi mã quá thường xuyên, thử lại sau {{sec}} giây",
+    "兑换失败次数过多，{{sec}} 秒后再试": "Quá nhiều lần đổi thất bại, thử lại sau {{sec}} giây"
   }
 }

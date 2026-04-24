@@ -3581,6 +3581,18 @@
     "全部刷新完成": "全部刷新完成",
     "站点已创建": "站点已创建",
     "站点已更新": "站点已更新",
-    "站点已删除": "站点已删除"
+    "站点已删除": "站点已删除",
+    "单位": "Unité",
+    "兑换码速率限制": "Limite de taux pour les codes de rechargement",
+    "启用兑换码兑换速率限制": "Activer la limite de taux pour les codes",
+    "每周期最多成功兑换次数": "Nombre max. de rechargements réussis par période",
+    "每周期最多失败次数": "Nombre max. d’échecs par période",
+    "0 代表不限制": "0 signifie aucune limite",
+    "0 代表不限制；到达后锁定整个周期": "0 signifie aucune limite ; une fois atteint, la période entière est bloquée",
+    "保存兑换码速率限制": "Enregistrer la limite de taux des codes",
+    "搭配下方“单位”使用，后端会换算为秒后保存": "À utiliser avec l’unité ci-dessous ; le backend enregistre la valeur en secondes",
+    "搭配右侧“单位”使用，后端会换算为秒后保存": "À utiliser avec l’unité à droite ; le backend enregistre la valeur en secondes",
+    "兑换次数过于频繁，{{sec}} 秒后再试": "Trop de tentatives, réessayez dans {{sec}} s",
+    "兑换失败次数过多，{{sec}} 秒后再试": "Trop d’échecs, réessayez dans {{sec}} s"
   }
 }

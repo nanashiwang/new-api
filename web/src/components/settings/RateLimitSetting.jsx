@@ -23,6 +23,7 @@ import { Card, Spin } from '@douyinfe/semi-ui';
 import { API, showError, toBoolean } from '../../helpers';
 import { useTranslation } from 'react-i18next';
 import RequestRateLimit from '../../pages/Setting/RateLimit/SettingsRequestRateLimit';
+import RedemptionRateLimit from '../../pages/Setting/RateLimit/SettingsRedemptionRateLimit';
 
 const RateLimitSetting = () => {
   const { t } = useTranslation();
@@ -32,6 +33,10 @@ const RateLimitSetting = () => {
     ModelRequestRateLimitSuccessCount: 1000,
     ModelRequestRateLimitDurationMinutes: 1,
     ModelRequestRateLimitGroup: '',
+    RedemptionRateLimitEnabled: false,
+    RedemptionRateLimitDurationSeconds: 600,
+    RedemptionRateLimitSuccessCount: 0,
+    RedemptionRateLimitFailureCount: 0,
   });
 
   let [loading, setLoading] = useState(false);
@@ -80,6 +85,10 @@ const RateLimitSetting = () => {
         {/* AI请求速率限制 */}
         <Card style={{ marginTop: '10px' }}>
           <RequestRateLimit options={inputs} refresh={onRefresh} />
+        </Card>
+        {/* 兑换码速率限制 */}
+        <Card style={{ marginTop: '10px' }}>
+          <RedemptionRateLimit options={inputs} refresh={onRefresh} />
         </Card>
       </Spin>
     </>

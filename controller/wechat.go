@@ -129,6 +129,14 @@ func WeChatBind(c *gin.Context) {
 		return
 	}
 	code := c.Query("code")
+	if c.Request.Method == http.MethodPost {
+		var req accountBindRequest
+		if err := common.DecodeJson(c.Request.Body, &req); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		code = req.Code
+	}
 	wechatId, err := getWeChatIdByCode(code)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{

@@ -515,7 +515,7 @@ func executeChannelStyleTest(
 		result.newAPIError = types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 		return
 	}
-	if bodyErr := detectErrorFromTestResponseBody(respBody); bodyErr != nil {
+	if bodyErr := validateTestResponseBody(respBody, isStream); bodyErr != nil {
 		result.context = c
 		result.info = relayInfo
 		result.usage = usage
@@ -747,6 +747,42 @@ func detectErrorFromTestResponseBody(respBody []byte) error {
 	}
 
 	return nil
+}
+
+func validateStreamTestResponseBody(respBody []byte) error {
+	b := bytes.TrimSpace(respBody)
+	if len(b) == 0 {
+		return errors.New("stream response body is empty")
+	}
+
+	for _, line := range bytes.Split(b, []byte{'\n'}) {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 || !bytes.HasPrefix(line, []byte("data:")) {
+			continue
+		}
+		payload := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
+		if len(payload) == 0 || bytes.Equal(payload, []byte("[DONE]")) {
+			continue
+		}
+
+		return nil
+	}
+
+	return errors.New("stream response body does not contain a valid stream event")
+}
+
+func validateTestResponseBody(respBody []byte, isStream bool) error {
+	if bodyErr := detectErrorFromTestResponseBody(respBody); bodyErr != nil {
+		return bodyErr
+	}
+	if isStream {
+		return validateStreamTestResponseBody(respBody)
+	}
+	return nil
+}
+
+func shouldUseStreamForAutomaticChannelTest(channel *model.Channel) bool {
+	return channel != nil && channel.Type == constant.ChannelTypeCodex
 }
 
 func detectErrorMessageFromJSONBytes(jsonBytes []byte) string {
@@ -1035,7 +1071,11 @@ func testAllChannels(notify bool) error {
 				time.Sleep(common.RequestInterval)
 				continue
 			}
-			result := testChannel(channel, "", "", nil, nil)
+			var streamOverride *bool
+			if shouldUseStreamForAutomaticChannelTest(channel) {
+				streamOverride = common.GetPointer(true)
+			}
+			result := testChannel(channel, "", "", streamOverride, nil)
 			tok := time.Now()
 			milliseconds := tok.Sub(tik).Milliseconds()
 

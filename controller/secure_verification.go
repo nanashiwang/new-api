@@ -16,7 +16,12 @@ import (
 
 const (
 	// SecureVerificationSessionKey 安全验证的 session key
-	SecureVerificationSessionKey = "secure_verified_at"
+	SecureVerificationSessionKey       = "secure_verified_at"
+	secureVerificationMethodSessionKey = "secure_verified_method"
+	secureVerificationMethod2FA        = "2fa"
+	secureVerificationMethodPasskey    = "passkey"
+	// PasskeyReadySessionKey Passkey 验证完成后的中转标记，供 /api/verify 晋升为正式安全验证会话
+	PasskeyReadySessionKey = "secure_passkey_ready_at"
 	// SecureVerificationTimeout 验证有效期（秒）
 	SecureVerificationTimeout = 300 // 5分钟
 )
@@ -115,6 +120,8 @@ func UniversalVerify(c *gin.Context) {
 	session := sessions.Default(c)
 	now := time.Now().Unix()
 	session.Set(SecureVerificationSessionKey, now)
+	session.Set(secureVerificationMethodSessionKey, req.Method)
+	session.Delete(PasskeyReadySessionKey)
 	if err := session.Save(); err != nil {
 		common.ApiError(c, fmt.Errorf("保存验证状态失败: %v", err))
 		return
@@ -139,6 +146,8 @@ func PasskeyVerifyAndSetSession(c *gin.Context) {
 	session := sessions.Default(c)
 	now := time.Now().Unix()
 	session.Set(SecureVerificationSessionKey, now)
+	session.Set(secureVerificationMethodSessionKey, secureVerificationMethodPasskey)
+	session.Delete(PasskeyReadySessionKey)
 	_ = session.Save()
 }
 
