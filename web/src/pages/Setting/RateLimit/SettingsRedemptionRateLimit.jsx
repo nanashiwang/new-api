@@ -162,9 +162,8 @@ export default function RedemptionRateLimit(props) {
                   field={'RedemptionRateLimitEnabled'}
                   label={t('启用兑换码兑换速率限制')}
                   size='default'
-                  style={{ minWidth: 56 }}
-                  checkedText={t('启用')}
-                  uncheckedText={t('关闭')}
+                  checkedText='｜'
+                  uncheckedText='〇'
                   onChange={(value) => {
                     setInputs({
                       ...inputs,
