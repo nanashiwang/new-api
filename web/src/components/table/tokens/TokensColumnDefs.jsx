@@ -108,10 +108,17 @@ const renderGroupColumn = (text, record, t) => {
 };
 
 // 渲染 Token key 列（支持显示/隐藏与复制）
-const renderTokenKey = (text, record, showKeys, setShowKeys, copyText) => {
-  const fullKey = 'sk-' + record.key;
-  const maskedKey =
-    'sk-' + record.key.slice(0, 4) + '**********' + record.key.slice(-4);
+const renderTokenKey = (
+  text,
+  record,
+  showKeys,
+  tokenFullKeys,
+  toggleTokenKeyVisibility,
+  copyTokenKey,
+) => {
+  const formatKey = (key) => (key?.startsWith('sk-') ? key : `sk-${key || ''}`);
+  const fullKey = formatKey(tokenFullKeys[record.id] || record.key);
+  const maskedKey = formatKey(record.key);
   const revealed = !!showKeys[record.id];
 
   return (
@@ -128,9 +135,9 @@ const renderTokenKey = (text, record, showKeys, setShowKeys, copyText) => {
               type='tertiary'
               icon={revealed ? <IconEyeClosed /> : <IconEyeOpened />}
               aria-label='toggle token visibility'
-              onClick={(e) => {
+              onClick={async (e) => {
                 e.stopPropagation();
-                setShowKeys((prev) => ({ ...prev, [record.id]: !revealed }));
+                await toggleTokenKeyVisibility(record);
               }}
             />
             <Button
@@ -141,7 +148,7 @@ const renderTokenKey = (text, record, showKeys, setShowKeys, copyText) => {
               aria-label='copy token key'
               onClick={async (e) => {
                 e.stopPropagation();
-                await copyText(fullKey);
+                await copyTokenKey(record);
               }}
             />
           </div>
@@ -657,8 +664,9 @@ const renderOperations = (
 export const getTokensColumns = ({
   t,
   showKeys,
-  setShowKeys,
-  copyText,
+  tokenFullKeys,
+  toggleTokenKeyVisibility,
+  copyTokenKey,
   manageToken,
   openTestModal,
   setEditingToken,
@@ -703,7 +711,14 @@ export const getTokensColumns = ({
       title: t('密钥'),
       key: 'token_key',
       render: (text, record) =>
-        renderTokenKey(text, record, showKeys, setShowKeys, copyText),
+        renderTokenKey(
+          text,
+          record,
+          showKeys,
+          tokenFullKeys,
+          toggleTokenKeyVisibility,
+          copyTokenKey,
+        ),
     },
     {
       title: t('可用模型'),

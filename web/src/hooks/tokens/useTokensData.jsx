@@ -69,6 +69,7 @@ export const useTokensData = (openFluentNotification) => {
   // UI 状态
   const [compactMode, setCompactMode] = useTableCompactMode('tokens');
   const [showKeys, setShowKeys] = useState({});
+  const [tokenFullKeys, setTokenFullKeys] = useState({});
 
   // 表单状态
   const [formApi, setFormApi] = useState(null);
@@ -232,6 +233,44 @@ export const useTokensData = (openFluentNotification) => {
         size: 'large',
       });
     }
+  };
+
+  const normalizeTokenKeyForDisplay = (key) => {
+    if (!key) return '';
+    return key.startsWith('sk-') ? key : `sk-${key}`;
+  };
+
+  const getTokenFullKey = async (record) => {
+    if (!record?.id) return '';
+    const cachedKey = tokenFullKeys[record.id];
+    if (cachedKey) return cachedKey;
+
+    // 列表接口会返回脱敏 key，复制/显示完整 key 时再按需获取真实值。
+    const res = await API.get(`/api/token/${record.id}/key`);
+    const { success, message, data } = res.data || {};
+    if (!success || !data?.key) {
+      showError(message || t('获取令牌失败'));
+      return '';
+    }
+    setTokenFullKeys((prev) => ({ ...prev, [record.id]: data.key }));
+    return data.key;
+  };
+
+  const copyTokenKey = async (record) => {
+    const key = await getTokenFullKey(record);
+    if (!key) return;
+    await copyText(normalizeTokenKeyForDisplay(key));
+  };
+
+  const toggleTokenKeyVisibility = async (record) => {
+    const revealed = !!showKeys[record.id];
+    if (revealed) {
+      setShowKeys((prev) => ({ ...prev, [record.id]: false }));
+      return;
+    }
+    const key = await getTokenFullKey(record);
+    if (!key) return;
+    setShowKeys((prev) => ({ ...prev, [record.id]: true }));
   };
 
   // 打开聊天集成链接函数
@@ -495,8 +534,13 @@ export const useTokensData = (openFluentNotification) => {
             onClick={async () => {
               let content = '';
               for (let i = 0; i < selectedKeys.length; i++) {
+                const key = await getTokenFullKey(selectedKeys[i]);
+                if (!key) return;
                 content +=
-                  selectedKeys[i].name + '    sk-' + selectedKeys[i].key + '\n';
+                  selectedKeys[i].name +
+                  '    ' +
+                  normalizeTokenKeyForDisplay(key) +
+                  '\n';
               }
               await copyText(content);
               Modal.destroyAll();
@@ -509,7 +553,9 @@ export const useTokensData = (openFluentNotification) => {
             onClick={async () => {
               let content = '';
               for (let i = 0; i < selectedKeys.length; i++) {
-                content += 'sk-' + selectedKeys[i].key + '\n';
+                const key = await getTokenFullKey(selectedKeys[i]);
+                if (!key) return;
+                content += normalizeTokenKeyForDisplay(key) + '\n';
               }
               await copyText(content);
               Modal.destroyAll();
@@ -583,6 +629,9 @@ export const useTokensData = (openFluentNotification) => {
     setCompactMode,
     showKeys,
     setShowKeys,
+    tokenFullKeys,
+    copyTokenKey,
+    toggleTokenKeyVisibility,
 
     // 表单状态
     formApi,

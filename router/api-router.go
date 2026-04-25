@@ -330,6 +330,7 @@ func SetApiRouter(router *gin.Engine) {
 			tokenRoute.GET("/models", controller.GetTokenModels)
 			tokenRoute.GET("/channels", middleware.AdminAuth(), controller.GetTokenChannels)
 			tokenRoute.POST("/test/:id", controller.TestToken)
+			tokenRoute.GET("/:id/key", controller.GetTokenKey)
 			tokenRoute.GET("/:id", controller.GetToken)
 			tokenRoute.POST("/", controller.AddToken)
 			tokenRoute.PUT("/", controller.UpdateToken)
