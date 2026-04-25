@@ -24,26 +24,41 @@ func TestCalcPeriodWindowDay(t *testing.T) {
 	}
 }
 
-func TestCalcPeriodWindowWeekStartsMonday(t *testing.T) {
+func TestCalcAnchoredPeriodWindowWeek(t *testing.T) {
 	loc := time.UTC
 	withLocal(t, loc)
-	start, end := CalcPeriodWindow("week", time.Date(2024, 3, 10, 12, 0, 0, 0, loc))
-	if time.Unix(start, 0).In(loc) != time.Date(2024, 3, 4, 0, 0, 0, 0, loc) {
+	anchor := time.Date(2024, 3, 5, 17, 0, 0, 0, loc).Unix()
+	start, end := CalcAnchoredPeriodWindow("week", time.Date(2024, 3, 10, 13, 0, 0, 0, loc), anchor)
+	if time.Unix(start, 0).In(loc) != time.Date(2024, 3, 5, 0, 0, 0, 0, loc) {
 		t.Fatalf("bad week start")
 	}
-	if time.Unix(end, 0).In(loc) != time.Date(2024, 3, 11, 0, 0, 0, 0, loc) {
+	if time.Unix(end, 0).In(loc) != time.Date(2024, 3, 12, 0, 0, 0, 0, loc) {
 		t.Fatalf("bad week end")
 	}
 }
 
-func TestCalcPeriodWindowMonthLeap(t *testing.T) {
+func TestCalcAnchoredPeriodWindowWeekNextPeriod(t *testing.T) {
 	loc := time.UTC
 	withLocal(t, loc)
-	start, end := CalcPeriodWindow("month", time.Date(2024, 2, 29, 23, 0, 0, 0, loc))
-	if time.Unix(start, 0).In(loc) != time.Date(2024, 2, 1, 0, 0, 0, 0, loc) {
+	anchor := time.Date(2024, 3, 5, 17, 0, 0, 0, loc).Unix()
+	start, end := CalcAnchoredPeriodWindow("week", time.Date(2024, 3, 12, 0, 1, 0, 0, loc), anchor)
+	if time.Unix(start, 0).In(loc) != time.Date(2024, 3, 12, 0, 0, 0, 0, loc) {
+		t.Fatalf("bad next week start")
+	}
+	if time.Unix(end, 0).In(loc) != time.Date(2024, 3, 19, 0, 0, 0, 0, loc) {
+		t.Fatalf("bad next week end")
+	}
+}
+
+func TestCalcAnchoredPeriodWindowMonth(t *testing.T) {
+	loc := time.UTC
+	withLocal(t, loc)
+	anchor := time.Date(2024, 2, 29, 17, 0, 0, 0, loc).Unix()
+	start, end := CalcAnchoredPeriodWindow("month", time.Date(2024, 3, 10, 23, 0, 0, 0, loc), anchor)
+	if time.Unix(start, 0).In(loc) != time.Date(2024, 2, 29, 0, 0, 0, 0, loc) {
 		t.Fatalf("bad month start")
 	}
-	if time.Unix(end, 0).In(loc) != time.Date(2024, 3, 1, 0, 0, 0, 0, loc) {
+	if time.Unix(end, 0).In(loc) != time.Date(2024, 3, 29, 0, 0, 0, 0, loc) {
 		t.Fatalf("bad month end")
 	}
 }

@@ -24,6 +24,7 @@ import {
   showInfo,
   showSuccess,
   showWarning,
+  renderQuota,
   verifyJSON,
   selectFilter,
 } from '../../../../helpers';
@@ -713,8 +714,8 @@ const EditTagModal = (props) => {
                         <div className='flex justify-between text-xs mb-1'>
                           <span>{t('周期内已用额度')}</span>
                           <span>
-                            {Number(tagQuotaUsage.used_quota || 0)} /{' '}
-                            {Number(tagQuotaUsage.quota_limit)}
+                            {renderQuota(Number(tagQuotaUsage.used_quota || 0))} /{' '}
+                            {renderQuota(Number(tagQuotaUsage.quota_limit))}
                           </span>
                         </div>
                         <Progress

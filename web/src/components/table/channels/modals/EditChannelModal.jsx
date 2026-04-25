@@ -24,6 +24,7 @@ import {
   showError,
   showInfo,
   showSuccess,
+  renderQuota,
   verifyJSON,
 } from '../../../../helpers';
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
@@ -4153,8 +4154,8 @@ const EditChannelModal = (props) => {
                             <div className='flex justify-between text-xs mb-1'>
                               <span>{t('周期内已用额度')}</span>
                               <span>
-                                {Number(quotaUsage.used_quota || 0)} /{' '}
-                                {Number(quotaUsage.quota_limit)}
+                                {renderQuota(Number(quotaUsage.used_quota || 0))} /{' '}
+                                {renderQuota(Number(quotaUsage.quota_limit))}
                               </span>
                             </div>
                             <Progress

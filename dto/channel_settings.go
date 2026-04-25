@@ -84,6 +84,7 @@ type QuotaPolicy struct {
 	Period     string `json:"period,omitempty"`
 	QuotaLimit int64  `json:"quota_limit,omitempty"`
 	CountLimit int64  `json:"count_limit,omitempty"`
+	AnchorTime int64  `json:"anchor_time,omitempty"`
 }
 
 func (p QuotaPolicy) IsActive() bool {

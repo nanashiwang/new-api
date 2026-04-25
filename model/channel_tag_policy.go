@@ -66,6 +66,28 @@ func GetTagPolicy(tag string) (dto.QuotaPolicy, bool, error) {
 	return policy, true, nil
 }
 
+func normalizeTagQuotaPolicyAnchor(tag string, policy dto.QuotaPolicy) dto.QuotaPolicy {
+	if !policy.Enabled {
+		policy.AnchorTime = 0
+		return policy
+	}
+	oldPolicy, found, err := GetTagPolicy(tag)
+	if err == nil && found && quotaPolicyAnchorReusable(oldPolicy, policy) {
+		policy.AnchorTime = oldPolicy.AnchorTime
+		return policy
+	}
+	policy.AnchorTime = common.GetTimestamp()
+	return policy
+}
+
+func quotaPolicyAnchorReusable(oldPolicy, newPolicy dto.QuotaPolicy) bool {
+	return oldPolicy.Enabled &&
+		oldPolicy.AnchorTime > 0 &&
+		oldPolicy.Period == newPolicy.Period &&
+		oldPolicy.QuotaLimit == newPolicy.QuotaLimit &&
+		oldPolicy.CountLimit == newPolicy.CountLimit
+}
+
 func UpsertTagPolicy(tag string, policy dto.QuotaPolicy) error {
 	tag = strings.TrimSpace(tag)
 	if tag == "" {
@@ -74,6 +96,7 @@ func UpsertTagPolicy(tag string, policy dto.QuotaPolicy) error {
 	if err := policy.Validate(); err != nil {
 		return err
 	}
+	policy = normalizeTagQuotaPolicyAnchor(tag, policy)
 	data, err := common.Marshal(policy)
 	if err != nil {
 		return err

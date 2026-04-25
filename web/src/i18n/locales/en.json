@@ -3547,5 +3547,7 @@
     "搭配右侧“单位”使用，后端会换算为秒后保存": "Combined with the unit on the right; the backend stores the value as seconds",
     "兑换次数过于频繁，{{sec}} 秒后再试": "Redeeming too often, try again after {{sec}}s",
     "兑换失败次数过多，{{sec}} 秒后再试": "Too many failed redemptions, try again after {{sec}}s"
-  }
+  },
+  "?????? 0 ??? 7 ????": "Week (resets every 7 days from enabled date at 00:00)",
+  "?????? 0 ???????": "Month (resets monthly from enabled date at 00:00)"
 }

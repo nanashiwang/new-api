@@ -710,6 +710,7 @@ func AddChannel(c *gin.Context) {
 	}
 
 	addChannelRequest.Channel.CreatedTime = common.GetTimestamp()
+	applyChannelQuotaPolicyAnchor(addChannelRequest.Channel, nil)
 	keys := make([]string, 0)
 	switch addChannelRequest.Mode {
 	case "multi_to_single":
@@ -1008,6 +1009,32 @@ type PatchChannel struct {
 	KeyMode      *string `json:"key_mode"` // 多key模式下密钥覆盖或者追加
 }
 
+func applyChannelQuotaPolicyAnchor(channel *model.Channel, origin *model.Channel) {
+	if channel == nil {
+		return
+	}
+	setting := channel.GetSetting()
+	policy := setting.QuotaPolicy
+	if !policy.Enabled {
+		policy.AnchorTime = 0
+		setting.QuotaPolicy = policy
+		channel.SetSetting(setting)
+		return
+	}
+	if origin != nil {
+		oldPolicy := origin.GetSetting().QuotaPolicy
+		if oldPolicy.Enabled && oldPolicy.AnchorTime > 0 && oldPolicy.Period == policy.Period && oldPolicy.QuotaLimit == policy.QuotaLimit && oldPolicy.CountLimit == policy.CountLimit {
+			policy.AnchorTime = oldPolicy.AnchorTime
+		} else {
+			policy.AnchorTime = common.GetTimestamp()
+		}
+	} else {
+		policy.AnchorTime = common.GetTimestamp()
+	}
+	setting.QuotaPolicy = policy
+	channel.SetSetting(setting)
+}
+
 func UpdateChannel(c *gin.Context) {
 	channel := PatchChannel{}
 	err := c.ShouldBindJSON(&channel)
@@ -1036,6 +1063,7 @@ func UpdateChannel(c *gin.Context) {
 
 	// Always copy the original ChannelInfo so that fields like IsMultiKey and MultiKeySize are retained.
 	channel.ChannelInfo = originChannel.ChannelInfo
+	applyChannelQuotaPolicyAnchor(&channel.Channel, originChannel)
 
 	// If the request explicitly specifies a new MultiKeyMode, apply it on top of the original info.
 	if channel.MultiKeyMode != nil && *channel.MultiKeyMode != "" {

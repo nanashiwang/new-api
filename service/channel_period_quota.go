@@ -49,7 +49,7 @@ func recordChannelPeriodQuota(channelId int, dq, dc int64) error {
 	if err != nil || !ok || !policy.IsActive() {
 		return err
 	}
-	start, end := common.CalcPeriodWindow(policy.Period, nowChannelPeriodQuota())
+	start, end := common.CalcAnchoredPeriodWindow(policy.Period, nowChannelPeriodQuota(), policy.AnchorTime)
 	used, count, err := model.IncrChannelQuotaUsage(scope, scopeKey, policy.Period, start, end, dq, dc)
 	if err != nil {
 		return err
@@ -114,7 +114,7 @@ func GetCurrentChannelPeriodQuotaUsage(channelId int) (*model.ChannelQuotaUsage,
 	if err != nil || !ok {
 		return nil, policy, ok, err
 	}
-	start, _ := common.CalcPeriodWindow(policy.Period, nowChannelPeriodQuota())
+	start, _ := common.CalcAnchoredPeriodWindow(policy.Period, nowChannelPeriodQuota(), policy.AnchorTime)
 	usage, err := model.GetChannelQuotaUsage(scope, scopeKey, policy.Period, start)
 	if err == gorm.ErrRecordNotFound {
 		return nil, policy, true, nil
@@ -127,7 +127,7 @@ func GetCurrentTagPeriodQuotaUsage(tag string) (*model.ChannelQuotaUsage, dto.Qu
 	if err != nil || !found || !policy.IsActive() {
 		return nil, policy, found, err
 	}
-	start, _ := common.CalcPeriodWindow(policy.Period, nowChannelPeriodQuota())
+	start, _ := common.CalcAnchoredPeriodWindow(policy.Period, nowChannelPeriodQuota(), policy.AnchorTime)
 	usage, err := model.GetChannelQuotaUsage(periodQuotaScopeTag, tag, policy.Period, start)
 	if err == gorm.ErrRecordNotFound {
 		return nil, policy, true, nil
