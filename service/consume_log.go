@@ -49,6 +49,7 @@ func FinalizeConsumeLogAfterSettle(logContent string, other map[string]interface
 func UpdateUsageStats(userId int, channelId int, quota int, countRequest bool) {
 	if countRequest {
 		model.UpdateUserUsedQuotaAndRequestCount(userId, quota)
+		RecordChannelPeriodCount(channelId)
 	} else if quota != 0 {
 		model.UpdateUserUsedQuota(userId, quota)
 	}

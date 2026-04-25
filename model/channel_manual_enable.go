@@ -35,6 +35,7 @@ func RecoverChannelForManualEnable(channelId int) error {
 
 	channel.Status = common.ChannelStatusEnabled
 	clearChannelStatusMetadata(channel)
+	ClearPeriodQuotaMeta(channel)
 	channel.ClearPendingDisable()
 
 	if channel.ChannelInfo.IsMultiKey {
@@ -72,6 +73,7 @@ func RecoverChannelKeyForManualEnable(channelId int, keyIndex int) error {
 
 	channel.Status = common.ChannelStatusEnabled
 	clearChannelStatusMetadata(channel)
+	ClearPeriodQuotaMeta(channel)
 	channel.ClearPendingDisable()
 
 	if channel.ChannelInfo.MultiKeyStatusList != nil {

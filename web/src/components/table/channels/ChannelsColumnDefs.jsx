@@ -770,6 +770,101 @@ export const getChannelsColumns = ({
       },
     },
     {
+      key: COLUMN_KEYS.QUOTA_USAGE,
+      title: t('周期用量'),
+      dataIndex: 'quota_usage',
+      render: (text, record, index) => {
+        if (record.children !== undefined) {
+          return null;
+        }
+        const usage = record.quota_usage;
+        if (!usage || (!usage.quota_limit && !usage.count_limit)) {
+          return (
+            <Typography.Text type='tertiary' size='small'>
+              -
+            </Typography.Text>
+          );
+        }
+        const periodLabel =
+          usage.period === 'day'
+            ? t('日')
+            : usage.period === 'week'
+              ? t('周')
+              : usage.period === 'month'
+                ? t('月')
+                : usage.period;
+        const scopeLabel =
+          usage.scope === 'tag' ? t('标签') : t('渠道');
+        const quotaPct =
+          Number(usage.quota_limit) > 0
+            ? Math.min(
+                100,
+                Math.floor(
+                  (Number(usage.used_quota || 0) /
+                    Math.max(1, Number(usage.quota_limit))) *
+                    100,
+                ),
+              )
+            : 0;
+        const countPct =
+          Number(usage.count_limit) > 0
+            ? Math.min(
+                100,
+                Math.floor(
+                  (Number(usage.used_count || 0) /
+                    Math.max(1, Number(usage.count_limit))) *
+                    100,
+                ),
+              )
+            : 0;
+        const tooltipContent = (
+          <div className='text-xs'>
+            <div>
+              {scopeLabel} · {periodLabel}
+            </div>
+            {Number(usage.quota_limit) > 0 && (
+              <div>
+                {t('额度')}: {Number(usage.used_quota || 0)} /{' '}
+                {Number(usage.quota_limit)}
+              </div>
+            )}
+            {Number(usage.count_limit) > 0 && (
+              <div>
+                {t('次数')}: {Number(usage.used_count || 0)} /{' '}
+                {Number(usage.count_limit)}
+              </div>
+            )}
+            {usage.period_end ? (
+              <div>
+                {t('重置于')}:{' '}
+                {new Date(Number(usage.period_end) * 1000).toLocaleString()}
+              </div>
+            ) : null}
+          </div>
+        );
+        return (
+          <Tooltip content={tooltipContent}>
+            <div style={{ minWidth: 110 }}>
+              <div className='text-xs mb-1 text-tertiary'>
+                {scopeLabel} · {periodLabel}
+              </div>
+              {Number(usage.quota_limit) > 0 && (
+                <Progress percent={quotaPct} size='small' showInfo={false} />
+              )}
+              {Number(usage.count_limit) > 0 && (
+                <Progress
+                  percent={countPct}
+                  size='small'
+                  showInfo={false}
+                  className='mt-1'
+                />
+              )}
+            </div>
+          </Tooltip>
+        );
+      },
+    },
+    {
       key: COLUMN_KEYS.OPERATE,
       title: '',
       dataIndex: 'operate',

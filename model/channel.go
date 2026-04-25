@@ -18,6 +18,8 @@ import (
 	"gorm.io/gorm"
 )
 
+var PostUpdateChannelUsedQuotaHook func(channelId, quotaDelta int)
+
 type Channel struct {
 	Id                 int     `json:"id"`
 	Type               int     `json:"type" gorm:"default:0"`
@@ -751,6 +753,28 @@ func DisableChannelByTag(tag string) error {
 	return err
 }
 
+func AutoDisableChannelsByTagWithReason(tag, reason string, periodEnd int64) error {
+	channels, err := GetChannelsByTag(tag, false, true)
+	if err != nil {
+		return err
+	}
+	for _, channel := range channels {
+		if channel == nil {
+			continue
+		}
+		info := channel.GetOtherInfo()
+		info["status_reason"] = reason
+		info["status_time"] = common.GetTimestamp()
+		channel.SetOtherInfo(info)
+		SetPeriodQuotaMeta(channel, "tag", tag, periodEnd)
+		channel.Status = common.ChannelStatusAutoDisabled
+		if err := channel.SaveWithoutKey(); err != nil {
+			return err
+		}
+	}
+	return UpdateAbilityStatusByTag(tag, false)
+}
+
 func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *string, group *string, priority *int64, weight *uint, autoBan *int, paramOverride *string, headerOverride *string) error {
 	updateData := Channel{}
 	shouldReCreateAbilities := false
@@ -872,6 +896,9 @@ func mergeChannelClientRestrictionSetting(channel *Channel, mode *string, client
 func UpdateChannelUsedQuota(id int, quota int) {
 	if common.BatchUpdateEnabled {
 		addNewRecord(BatchUpdateTypeChannelUsedQuota, id, quota)
+		if PostUpdateChannelUsedQuotaHook != nil {
+			PostUpdateChannelUsedQuotaHook(id, quota)
+		}
 		return
 	}
 	updateChannelUsedQuota(id, quota)
@@ -881,6 +908,9 @@ func updateChannelUsedQuota(id int, quota int) {
 	err := DB.Model(&Channel{}).Where("id = ?", id).Update("used_quota", gorm.Expr("used_quota + ?", quota)).Error
 	if err != nil {
 		common.SysLog(fmt.Sprintf("failed to update channel used quota: channel_id=%d, delta_quota=%d, error=%v", id, quota, err))
+	}
+	if PostUpdateChannelUsedQuotaHook != nil {
+		PostUpdateChannelUsedQuotaHook(id, quota)
 	}
 }
 

@@ -115,6 +115,7 @@ func main() {
 
 	// Subscription quota reset task (daily/weekly/monthly/custom)
 	service.StartSubscriptionQuotaResetTask()
+	service.StartChannelPeriodQuotaResetTask()
 	// 邀请充值返佣结算任务（T+1 日批）。
 	service.StartInviteCommissionSettlementTask()
 	// 渠道上游模型更新巡检任务。

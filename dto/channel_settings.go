@@ -79,6 +79,35 @@ const (
 	ClientRestrictionModeBlocklist ClientRestrictionMode = "blocklist"
 )
 
+type QuotaPolicy struct {
+	Enabled    bool   `json:"enabled,omitempty"`
+	Period     string `json:"period,omitempty"`
+	QuotaLimit int64  `json:"quota_limit,omitempty"`
+	CountLimit int64  `json:"count_limit,omitempty"`
+}
+
+func (p QuotaPolicy) IsActive() bool {
+	return p.Enabled && (p.QuotaLimit > 0 || p.CountLimit > 0)
+}
+
+func (p QuotaPolicy) Validate() error {
+	if p.QuotaLimit < 0 {
+		return fmt.Errorf("quota_limit cannot be negative")
+	}
+	if p.CountLimit < 0 {
+		return fmt.Errorf("count_limit cannot be negative")
+	}
+	if p.Period == "" && !p.IsActive() {
+		return nil
+	}
+	switch p.Period {
+	case "day", "week", "month":
+		return nil
+	default:
+		return fmt.Errorf("invalid quota_policy period: %s", p.Period)
+	}
+}
+
 type ChannelSettings struct {
 	ForceFormat                    bool                           `json:"force_format,omitempty"`
 	ThinkingToContent              bool                           `json:"thinking_to_content,omitempty"`
@@ -90,6 +119,7 @@ type ChannelSettings struct {
 	ClaudeImageTransportMode       ClaudeImageTransportMode       `json:"claude_image_transport_mode,omitempty"`
 	ClientRestrictionMode          ClientRestrictionMode          `json:"client_restriction_mode,omitempty"`
 	ClientRestrictionClients       []string                       `json:"client_restriction_clients,omitempty"`
+	QuotaPolicy                    QuotaPolicy                    `json:"quota_policy,omitempty"`
 }
 
 func (s ChannelSettings) Validate() error {
@@ -100,6 +130,9 @@ func (s ChannelSettings) Validate() error {
 		return err
 	}
 	if err := s.ValidateClientRestriction(); err != nil {
+		return err
+	}
+	if err := s.QuotaPolicy.Validate(); err != nil {
 		return err
 	}
 	return nil

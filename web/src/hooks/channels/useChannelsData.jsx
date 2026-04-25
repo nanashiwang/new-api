@@ -158,6 +158,7 @@ export const useChannelsData = () => {
     BALANCE: 'balance',
     PRIORITY: 'priority',
     WEIGHT: 'weight',
+    QUOTA_USAGE: 'quota_usage',
     OPERATE: 'operate',
   };
 
@@ -198,6 +199,7 @@ export const useChannelsData = () => {
       [COLUMN_KEYS.BALANCE]: true,
       [COLUMN_KEYS.PRIORITY]: true,
       [COLUMN_KEYS.WEIGHT]: true,
+      [COLUMN_KEYS.QUOTA_USAGE]: false,
       [COLUMN_KEYS.OPERATE]: true,
     };
   };

@@ -38,6 +38,9 @@ import {
   Tag,
   Avatar,
   Form,
+  Progress,
+  Row,
+  Col,
 } from '@douyinfe/semi-ui';
 import {
   IconSave,
@@ -46,6 +49,7 @@ import {
   IconUser,
   IconCode,
   IconSetting,
+  IconCalendar,
 } from '@douyinfe/semi-icons';
 import { getChannelModels } from '../../../../helpers';
 import { useTranslation } from 'react-i18next';
@@ -76,8 +80,14 @@ const EditTagModal = (props) => {
     header_override: null,
     client_restriction_mode: null,
     client_restriction_clients: [],
+    quota_policy_enabled: false,
+    quota_policy_period: 'day',
+    quota_policy_quota_limit: 0,
+    quota_policy_count_limit: 0,
   };
   const [inputs, setInputs] = useState(originInputs);
+  const [quotaPolicyOriginal, setQuotaPolicyOriginal] = useState(null);
+  const [tagQuotaUsage, setTagQuotaUsage] = useState(null);
   const modelSearchMatchedCount = useMemo(() => {
     const keyword = modelSearchValue.trim();
     if (!keyword) {
@@ -287,20 +297,71 @@ const EditTagModal = (props) => {
       data.auto_ban === undefined &&
       data.param_override === undefined &&
       data.header_override === undefined &&
-      data.client_restriction_mode === undefined
+      data.client_restriction_mode === undefined &&
+      !quotaPolicyChanged(formVals)
     ) {
       showWarning('没有任何修改！');
       setLoading(false);
       return;
     }
-    await submit(data);
+    await submit(data, formVals);
     setLoading(false);
   };
 
-  const submit = async (data) => {
+  const quotaPolicyChanged = (formVals) => {
+    const original = quotaPolicyOriginal || {
+      enabled: false,
+      period: 'day',
+      quota_limit: 0,
+      count_limit: 0,
+    };
+    return (
+      !!formVals.quota_policy_enabled !== !!original.enabled ||
+      (formVals.quota_policy_period || 'day') !== (original.period || 'day') ||
+      (Number(formVals.quota_policy_quota_limit) || 0) !==
+        (Number(original.quota_limit) || 0) ||
+      (Number(formVals.quota_policy_count_limit) || 0) !==
+        (Number(original.count_limit) || 0)
+    );
+  };
+
+  const submit = async (data, formVals) => {
     try {
-      const res = await API.put('/api/channel/tag', data);
-      if (res?.data?.success) {
+      const hasTagFields =
+        data.model_mapping !== undefined ||
+        data.groups !== undefined ||
+        data.models !== undefined ||
+        data.new_tag !== undefined ||
+        data.auto_ban !== undefined ||
+        data.param_override !== undefined ||
+        data.header_override !== undefined ||
+        data.client_restriction_mode !== undefined;
+      let tagOk = true;
+      if (hasTagFields) {
+        const res = await API.put('/api/channel/tag', data);
+        tagOk = !!res?.data?.success;
+        if (!tagOk) return;
+      }
+      let policyOk = true;
+      if (formVals && quotaPolicyChanged(formVals)) {
+        const policyRes = await API.put('/api/channel/tag/quota_policy', {
+          tag,
+          quota_policy: {
+            enabled: !!formVals.quota_policy_enabled,
+            period: formVals.quota_policy_period || 'day',
+            quota_limit: Math.max(
+              0,
+              Number(formVals.quota_policy_quota_limit) || 0,
+            ),
+            count_limit: Math.max(
+              0,
+              Number(formVals.quota_policy_count_limit) || 0,
+            ),
+          },
+        });
+        policyOk = !!policyRes?.data?.success;
+      }
+      if (tagOk && policyOk) {
         showSuccess('标签更新成功！');
         refresh();
         handleClose();
@@ -342,9 +403,74 @@ const EditTagModal = (props) => {
       }
     };
 
+    const fetchQuotaPolicy = async () => {
+      if (!tag) {
+        setQuotaPolicyOriginal(null);
+        return;
+      }
+      try {
+        const res = await API.get(
+          `/api/channel/tag/quota_policy?tag=${encodeURIComponent(tag)}`,
+        );
+        if (res?.data?.success) {
+          const payload = res.data.data || {};
+          const policy = payload.found ? payload.quota_policy : null;
+          setQuotaPolicyOriginal(policy);
+          if (policy) {
+            handleInputChange('quota_policy_enabled', !!policy.enabled);
+            handleInputChange('quota_policy_period', policy.period || 'day');
+            handleInputChange(
+              'quota_policy_quota_limit',
+              Number(policy.quota_limit) || 0,
+            );
+            handleInputChange(
+              'quota_policy_count_limit',
+              Number(policy.count_limit) || 0,
+            );
+          }
+        }
+      } catch (error) {
+        // ignore
+      }
+    };
+
+    const fetchQuotaUsage = async () => {
+      if (!tag) {
+        setTagQuotaUsage(null);
+        return;
+      }
+      try {
+        const res = await API.get(
+          `/api/channel/tag/quota_usage?tag=${encodeURIComponent(tag)}`,
+        );
+        if (res?.data?.success) {
+          const payload = res.data.data || {};
+          if (!payload.found) {
+            setTagQuotaUsage(null);
+            return;
+          }
+          const usage = payload.usage || {};
+          const policy = payload.policy || {};
+          setTagQuotaUsage({
+            period: usage.period || policy.period || '',
+            period_start: usage.period_start || 0,
+            period_end: usage.period_end || 0,
+            used_quota: Number(usage.used_quota) || 0,
+            used_count: Number(usage.used_count) || 0,
+            quota_limit: Number(policy.quota_limit) || 0,
+            count_limit: Number(policy.count_limit) || 0,
+          });
+        }
+      } catch (error) {
+        // ignore
+      }
+    };
+
     fetchModels().then();
     fetchGroups().then();
     fetchTagModels().then();
+    fetchQuotaPolicy().then();
+    fetchQuotaUsage().then();
     setModelSearchValue('');
     if (formApiRef.current) {
       formApiRef.current.setValues({
@@ -495,6 +621,161 @@ const EditTagModal = (props) => {
                     )}
                   />
                 </div>
+              </Card>
+
+              <Card className='!rounded-2xl shadow-sm border-0 mb-6'>
+                <div className='flex items-center mb-2'>
+                  <Avatar size='small' color='cyan' className='mr-2 shadow-md'>
+                    <IconCalendar size={16} />
+                  </Avatar>
+                  <div>
+                    <Text className='text-lg font-medium'>
+                      {t('周期配额（标签共享池）')}
+                    </Text>
+                    <div className='text-xs text-gray-600'>
+                      {t(
+                        '该标签下所有渠道用量之和达到上限后整组自动禁用，下个周期开始整组自动恢复。仅对未单独配置周期限额的渠道生效。',
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <Form.Switch
+                  field='quota_policy_enabled'
+                  label={t('启用周期限额')}
+                  checkedText={t('开')}
+                  uncheckedText={t('关')}
+                  onChange={(value) =>
+                    handleInputChange('quota_policy_enabled', value)
+                  }
+                />
+
+                {inputs.quota_policy_enabled && (
+                  <>
+                    <Form.Select
+                      field='quota_policy_period'
+                      label={t('统计周期')}
+                      optionList={[
+                        { label: t('日（每日 0 点重置）'), value: 'day' },
+                        { label: t('周（周一 0 点重置）'), value: 'week' },
+                        { label: t('月（每月 1 号 0 点重置）'), value: 'month' },
+                      ]}
+                      onChange={(value) =>
+                        handleInputChange('quota_policy_period', value)
+                      }
+                      style={{ width: '100%' }}
+                    />
+
+                    <Row gutter={12}>
+                      <Col span={12}>
+                        <Form.InputNumber
+                          field='quota_policy_quota_limit'
+                          label={t('周期内额度上限（0=无限）')}
+                          placeholder={t('对应使用日志中的"花费"列')}
+                          min={0}
+                          precision={0}
+                          onNumberChange={(value) =>
+                            handleInputChange(
+                              'quota_policy_quota_limit',
+                              value,
+                            )
+                          }
+                          style={{ width: '100%' }}
+                        />
+                      </Col>
+                      <Col span={12}>
+                        <Form.InputNumber
+                          field='quota_policy_count_limit'
+                          label={t('周期内调用次数上限（0=无限）')}
+                          placeholder={t('每次成功请求计 1 次')}
+                          min={0}
+                          precision={0}
+                          onNumberChange={(value) =>
+                            handleInputChange(
+                              'quota_policy_count_limit',
+                              value,
+                            )
+                          }
+                          style={{ width: '100%' }}
+                        />
+                      </Col>
+                    </Row>
+                  </>
+                )}
+
+                {tagQuotaUsage && (
+                  <div className='mt-4 p-3 rounded-xl bg-semi-color-fill-0'>
+                    <Text className='text-sm font-medium block mb-2'>
+                      {t('当前周期共享池用量')}
+                    </Text>
+                    {Number(tagQuotaUsage.quota_limit) > 0 && (
+                      <div className='mb-2'>
+                        <div className='flex justify-between text-xs mb-1'>
+                          <span>{t('周期内已用额度')}</span>
+                          <span>
+                            {Number(tagQuotaUsage.used_quota || 0)} /{' '}
+                            {Number(tagQuotaUsage.quota_limit)}
+                          </span>
+                        </div>
+                        <Progress
+                          percent={Math.min(
+                            100,
+                            Math.floor(
+                              (Number(tagQuotaUsage.used_quota || 0) /
+                                Math.max(
+                                  1,
+                                  Number(tagQuotaUsage.quota_limit),
+                                )) *
+                                100,
+                            ),
+                          )}
+                          showInfo={false}
+                          size='small'
+                        />
+                      </div>
+                    )}
+                    {Number(tagQuotaUsage.count_limit) > 0 && (
+                      <div className='mb-2'>
+                        <div className='flex justify-between text-xs mb-1'>
+                          <span>{t('周期内已调用次数')}</span>
+                          <span>
+                            {Number(tagQuotaUsage.used_count || 0)} /{' '}
+                            {Number(tagQuotaUsage.count_limit)}
+                          </span>
+                        </div>
+                        <Progress
+                          percent={Math.min(
+                            100,
+                            Math.floor(
+                              (Number(tagQuotaUsage.used_count || 0) /
+                                Math.max(
+                                  1,
+                                  Number(tagQuotaUsage.count_limit),
+                                )) *
+                                100,
+                            ),
+                          )}
+                          showInfo={false}
+                          size='small'
+                        />
+                      </div>
+                    )}
+                    <div className='text-xs text-gray-500 mt-2'>
+                      {t('周期窗口')}:{' '}
+                      {tagQuotaUsage.period_start
+                        ? new Date(
+                            Number(tagQuotaUsage.period_start) * 1000,
+                          ).toLocaleString()
+                        : '-'}{' '}
+                      {t('至')}{' '}
+                      {tagQuotaUsage.period_end
+                        ? new Date(
+                            Number(tagQuotaUsage.period_end) * 1000,
+                          ).toLocaleString()
+                        : '-'}
+                    </div>
+                  </div>
+                )}
               </Card>
 
               <Card className='!rounded-2xl shadow-sm border-0 mb-6'>

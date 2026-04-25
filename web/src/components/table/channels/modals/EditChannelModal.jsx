@@ -50,6 +50,7 @@ import {
   Highlight,
   Input,
   Tooltip,
+  Progress,
 } from '@douyinfe/semi-ui';
 import {
   getChannelModels,
@@ -85,6 +86,7 @@ import {
   IconSearch,
   IconChevronUp,
   IconChevronDown,
+  IconCalendar,
 } from '@douyinfe/semi-icons';
 
 const { Text, Title } = Typography;
@@ -197,6 +199,11 @@ const EditChannelModal = (props) => {
     upstream_model_update_last_check_time: 0,
     upstream_model_update_last_detected_models: [],
     upstream_model_update_ignored_models: '',
+    // 周期配额限制
+    quota_policy_enabled: false,
+    quota_policy_period: 'day',
+    quota_policy_quota_limit: 0,
+    quota_policy_count_limit: 0,
   };
   const [batch, setBatch] = useState(false);
   const [multiToSingle, setMultiToSingle] = useState(false);
@@ -280,6 +287,11 @@ const EditChannelModal = (props) => {
   const [clipboardConfig, setClipboardConfig] = useState(null);
   const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
 
+  // 周期配额相关状态
+  const [quotaUsage, setQuotaUsage] = useState(null);
+  const [inheritedTagPolicy, setInheritedTagPolicy] = useState(null);
+  const [quotaUsageRefreshTick, setQuotaUsageRefreshTick] = useState(0);
+
   // 密钥显示状态
   const [keyDisplayState, setKeyDisplayState] = useState({
     showModal: false,
@@ -318,6 +330,7 @@ const EditChannelModal = (props) => {
     apiConfig: null,
     modelConfig: null,
     advancedSettings: null,
+    quotaSettings: null,
     channelExtraSettings: null,
   });
   const [currentSectionIndex, setCurrentSectionIndex] = useState(0);
@@ -326,6 +339,7 @@ const EditChannelModal = (props) => {
     'apiConfig',
     'modelConfig',
     'advancedSettings',
+    'quotaSettings',
     'channelExtraSettings',
   ];
   const formContainerRef = useRef(null);
@@ -708,6 +722,11 @@ const EditChannelModal = (props) => {
             parsedSettings.client_restriction_mode || '';
           data.client_restriction_clients =
             parsedSettings.client_restriction_clients || [];
+          const qp = parsedSettings.quota_policy || {};
+          data.quota_policy_enabled = !!qp.enabled;
+          data.quota_policy_period = qp.period || 'day';
+          data.quota_policy_quota_limit = Number(qp.quota_limit) || 0;
+          data.quota_policy_count_limit = Number(qp.count_limit) || 0;
         } catch (error) {
           console.error('解析渠道设置失败:', error);
           data.force_format = false;
@@ -718,6 +737,10 @@ const EditChannelModal = (props) => {
           data.system_prompt_override = false;
           data.client_restriction_mode = '';
           data.client_restriction_clients = [];
+          data.quota_policy_enabled = false;
+          data.quota_policy_period = 'day';
+          data.quota_policy_quota_limit = 0;
+          data.quota_policy_count_limit = 0;
         }
       } else {
         data.force_format = false;
@@ -728,6 +751,10 @@ const EditChannelModal = (props) => {
         data.system_prompt_override = false;
         data.client_restriction_mode = '';
         data.client_restriction_clients = [];
+        data.quota_policy_enabled = false;
+        data.quota_policy_period = 'day';
+        data.quota_policy_quota_limit = 0;
+        data.quota_policy_count_limit = 0;
       }
 
       if (data.settings) {
@@ -1199,6 +1226,74 @@ const EditChannelModal = (props) => {
     }
   }, [isEdit, props.visible]);
 
+  // 获取当前渠道的周期配额用量
+  useEffect(() => {
+    if (!props.visible || !isEdit || !channelId) {
+      setQuotaUsage(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await API.get(`/api/channel/${channelId}/quota_usage`);
+        if (!cancelled && res?.data?.success) {
+          const payload = res.data.data || {};
+          if (!payload.found) {
+            setQuotaUsage(null);
+            return;
+          }
+          const usage = payload.usage || {};
+          const policy = payload.policy || {};
+          setQuotaUsage({
+            scope: usage.scope || 'channel',
+            period: usage.period || policy.period || '',
+            period_start: usage.period_start || 0,
+            period_end: usage.period_end || 0,
+            used_quota: Number(usage.used_quota) || 0,
+            used_count: Number(usage.used_count) || 0,
+            quota_limit: Number(policy.quota_limit) || 0,
+            count_limit: Number(policy.count_limit) || 0,
+          });
+        }
+      } catch (e) {
+        // 静默失败，旧版本后端不存在该接口时不影响表单
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [props.visible, isEdit, channelId, quotaUsageRefreshTick]);
+
+  // 自身未启用时，拉取标签策略用于"将继承"提示
+  useEffect(() => {
+    if (!props.visible || inputs.quota_policy_enabled) {
+      setInheritedTagPolicy(null);
+      return;
+    }
+    const tagName = (inputs.tag || '').trim();
+    if (!tagName) {
+      setInheritedTagPolicy(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await API.get(
+          `/api/channel/tag/quota_policy?tag=${encodeURIComponent(tagName)}`,
+        );
+        if (!cancelled && res?.data?.success) {
+          const payload = res.data.data || {};
+          setInheritedTagPolicy(payload.found ? payload.quota_policy : null);
+        }
+      } catch (e) {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [props.visible, inputs.tag, inputs.quota_policy_enabled]);
+
   useEffect(() => {
     return () => {
       if (statusCodeRiskConfirmResolverRef.current) {
@@ -1604,6 +1699,12 @@ const EditChannelModal = (props) => {
       system_prompt_override: localInputs.system_prompt_override || false,
       client_restriction_mode: localInputs.client_restriction_mode || '',
       client_restriction_clients: normalizedClientRestrictionClients,
+      quota_policy: {
+        enabled: !!localInputs.quota_policy_enabled,
+        period: localInputs.quota_policy_period || 'day',
+        quota_limit: Math.max(0, Number(localInputs.quota_policy_quota_limit) || 0),
+        count_limit: Math.max(0, Number(localInputs.quota_policy_count_limit) || 0),
+      },
     };
     localInputs.setting = JSON.stringify(channelExtraSettings);
 
@@ -1707,6 +1808,10 @@ const EditChannelModal = (props) => {
     delete localInputs.system_prompt;
     delete localInputs.system_prompt_override;
     delete localInputs.is_enterprise_account;
+    delete localInputs.quota_policy_enabled;
+    delete localInputs.quota_policy_period;
+    delete localInputs.quota_policy_quota_limit;
+    delete localInputs.quota_policy_count_limit;
     // 顶层的 vertex_key_type 不应发送给后端
     delete localInputs.vertex_key_type;
     // 顶层的 aws_key_type 不应发送给后端
@@ -3895,6 +4000,212 @@ const EditChannelModal = (props) => {
                       </>
                     )}
                       </>
+                    )}
+                  </Card>
+                </div>
+
+                {/* Quota Policy Card */}
+                <div
+                  ref={(el) => (formSectionRefs.current.quotaSettings = el)}
+                >
+                  <Card className='!rounded-2xl shadow-sm border-0 mb-6'>
+                    <div className='flex items-center mb-2'>
+                      <Avatar
+                        size='small'
+                        color='cyan'
+                        className='mr-2 shadow-md'
+                      >
+                        <IconCalendar size={16} />
+                      </Avatar>
+                      <div>
+                        <Text className='text-lg font-medium'>
+                          {t('周期配额限制')}
+                        </Text>
+                        <div className='text-xs text-gray-600'>
+                          {t('按周期限制本渠道的最大消耗或调用次数，达到上限自动禁用，下个周期开始自动恢复')}
+                        </div>
+                      </div>
+                    </div>
+
+                    <Form.Switch
+                      field='quota_policy_enabled'
+                      label={t('启用周期限额')}
+                      checkedText={t('开')}
+                      uncheckedText={t('关')}
+                      onChange={(value) =>
+                        handleInputChange('quota_policy_enabled', value)
+                      }
+                      extraText={t(
+                        '开启后将忽略所属标签的共享池配额；关闭则继承所属标签的策略（若有）',
+                      )}
+                    />
+
+                    {inputs.quota_policy_enabled && (
+                      <>
+                        <Form.Select
+                          field='quota_policy_period'
+                          label={t('统计周期')}
+                          optionList={[
+                            { label: t('日（每日 0 点重置）'), value: 'day' },
+                            { label: t('周（周一 0 点重置）'), value: 'week' },
+                            { label: t('月（每月 1 号 0 点重置）'), value: 'month' },
+                          ]}
+                          onChange={(value) =>
+                            handleInputChange('quota_policy_period', value)
+                          }
+                          style={{ width: '100%' }}
+                        />
+
+                        <Row gutter={12}>
+                          <Col span={12}>
+                            <Form.InputNumber
+                              field='quota_policy_quota_limit'
+                              label={t('周期内额度上限（0=无限）')}
+                              placeholder={t('对应使用日志中的"花费"列')}
+                              min={0}
+                              precision={0}
+                              onNumberChange={(value) =>
+                                handleInputChange(
+                                  'quota_policy_quota_limit',
+                                  value,
+                                )
+                              }
+                              style={{ width: '100%' }}
+                            />
+                          </Col>
+                          <Col span={12}>
+                            <Form.InputNumber
+                              field='quota_policy_count_limit'
+                              label={t('周期内调用次数上限（0=无限）')}
+                              placeholder={t('每次成功请求计 1 次')}
+                              min={0}
+                              precision={0}
+                              onNumberChange={(value) =>
+                                handleInputChange(
+                                  'quota_policy_count_limit',
+                                  value,
+                                )
+                              }
+                              style={{ width: '100%' }}
+                            />
+                          </Col>
+                        </Row>
+                      </>
+                    )}
+
+                    {!inputs.quota_policy_enabled &&
+                      inheritedTagPolicy?.enabled && (
+                        <Banner
+                          type='info'
+                          closeIcon={null}
+                          className='!rounded-lg mt-4'
+                          description={t(
+                            '将继承标签 「{{tag}}」 的共享池配额：周期 {{period}}，额度上限 {{quota}}，次数上限 {{count}}',
+                            {
+                              tag: (inputs.tag || '').trim(),
+                              period:
+                                inheritedTagPolicy.period === 'day'
+                                  ? t('日')
+                                  : inheritedTagPolicy.period === 'week'
+                                    ? t('周')
+                                    : t('月'),
+                              quota:
+                                Number(inheritedTagPolicy.quota_limit) > 0
+                                  ? inheritedTagPolicy.quota_limit
+                                  : t('无限'),
+                              count:
+                                Number(inheritedTagPolicy.count_limit) > 0
+                                  ? inheritedTagPolicy.count_limit
+                                  : t('无限'),
+                            },
+                          )}
+                        />
+                      )}
+
+                    {isEdit && quotaUsage && (
+                      <div className='mt-4 p-3 rounded-xl bg-semi-color-fill-0'>
+                        <div className='flex items-center justify-between mb-2'>
+                          <Text className='text-sm font-medium'>
+                            {t('当前周期用量')}
+                            {quotaUsage.scope === 'tag' && (
+                              <Tag
+                                size='small'
+                                color='blue'
+                                shape='circle'
+                                className='ml-2'
+                              >
+                                {t('标签共享池')}
+                              </Tag>
+                            )}
+                          </Text>
+                          <Button
+                            size='small'
+                            theme='borderless'
+                            onClick={() =>
+                              setQuotaUsageRefreshTick((tick) => tick + 1)
+                            }
+                          >
+                            {t('刷新')}
+                          </Button>
+                        </div>
+                        {Number(quotaUsage.quota_limit) > 0 && (
+                          <div className='mb-2'>
+                            <div className='flex justify-between text-xs mb-1'>
+                              <span>{t('周期内已用额度')}</span>
+                              <span>
+                                {Number(quotaUsage.used_quota || 0)} /{' '}
+                                {Number(quotaUsage.quota_limit)}
+                              </span>
+                            </div>
+                            <Progress
+                              percent={Math.min(
+                                100,
+                                Math.floor(
+                                  (Number(quotaUsage.used_quota || 0) /
+                                    Math.max(
+                                      1,
+                                      Number(quotaUsage.quota_limit),
+                                    )) *
+                                    100,
+                                ),
+                              )}
+                              showInfo={false}
+                              size='small'
+                            />
+                          </div>
+                        )}
+                        {Number(quotaUsage.count_limit) > 0 && (
+                          <div className='mb-2'>
+                            <div className='flex justify-between text-xs mb-1'>
+                              <span>{t('周期内已调用次数')}</span>
+                              <span>
+                                {Number(quotaUsage.used_count || 0)} /{' '}
+                                {Number(quotaUsage.count_limit)}
+                              </span>
+                            </div>
+                            <Progress
+                              percent={Math.min(
+                                100,
+                                Math.floor(
+                                  (Number(quotaUsage.used_count || 0) /
+                                    Math.max(
+                                      1,
+                                      Number(quotaUsage.count_limit),
+                                    )) *
+                                    100,
+                                ),
+                              )}
+                              showInfo={false}
+                              size='small'
+                            />
+                          </div>
+                        )}
+                        <div className='text-xs text-gray-500 mt-2'>
+                          {t('周期窗口')}:{' '}
+                          {formatUnixTime(quotaUsage.period_start)}{' '}
+                          {t('至')} {formatUnixTime(quotaUsage.period_end)}
+                        </div>
+                      </div>
                     )}
                   </Card>
                 </div>
