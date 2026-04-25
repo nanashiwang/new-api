@@ -37,3 +37,24 @@ export const quotaToUSDAmount = (quota) => {
   if (!Number.isFinite(q) || q <= 0) return 0;
   return q / getQuotaPerUnit();
 };
+
+export const quotaToCurrencyAmount = (quota) => {
+  const q = Number(quota || 0);
+  if (!Number.isFinite(q) || q <= 0) return 0;
+  const { type, rate } = getCurrencyConfig();
+  const usd = q / getQuotaPerUnit();
+  return type === 'CNY' || type === 'CUSTOM' ? usd * (rate || 1) : usd;
+};
+
+export const currencyAmountToQuota = (amount) => {
+  const val = Number(amount || 0);
+  if (!Number.isFinite(val) || val <= 0) return 0;
+  const { type, rate } = getCurrencyConfig();
+  const usd = type === 'CNY' || type === 'CUSTOM' ? val / (rate || 1) : val;
+  return Math.round(usd * getQuotaPerUnit());
+};
+
+export const renderCurrencyQuota = (quota, digits = 2) => {
+  const { symbol } = getCurrencyConfig();
+  return `${symbol}${quotaToCurrencyAmount(quota).toFixed(digits)}`;
+};

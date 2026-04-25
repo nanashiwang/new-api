@@ -24,10 +24,14 @@ import {
   showInfo,
   showSuccess,
   showWarning,
-  renderQuota,
   verifyJSON,
   selectFilter,
 } from '../../../../helpers';
+import {
+  currencyAmountToQuota,
+  quotaToCurrencyAmount,
+  renderCurrencyQuota,
+} from '../../../../helpers/quota';
 import {
   SideSheet,
   Space,
@@ -350,9 +354,8 @@ const EditTagModal = (props) => {
           quota_policy: {
             enabled: !!formVals.quota_policy_enabled,
             period: formVals.quota_policy_period || 'day',
-            quota_limit: Math.max(
-              0,
-              Number(formVals.quota_policy_quota_limit) || 0,
+            quota_limit: currencyAmountToQuota(
+              formVals.quota_policy_quota_limit,
             ),
             count_limit: Math.max(
               0,
@@ -416,13 +419,19 @@ const EditTagModal = (props) => {
         if (res?.data?.success) {
           const payload = res.data.data || {};
           const policy = payload.found ? payload.quota_policy : null;
-          setQuotaPolicyOriginal(policy);
+          const displayPolicy = policy
+            ? {
+                ...policy,
+                quota_limit: quotaToCurrencyAmount(policy.quota_limit),
+              }
+            : null;
+          setQuotaPolicyOriginal(displayPolicy);
           if (policy) {
             handleInputChange('quota_policy_enabled', !!policy.enabled);
             handleInputChange('quota_policy_period', policy.period || 'day');
             handleInputChange(
               'quota_policy_quota_limit',
-              Number(policy.quota_limit) || 0,
+              quotaToCurrencyAmount(policy.quota_limit),
             );
             handleInputChange(
               'quota_policy_count_limit',
@@ -658,8 +667,8 @@ const EditTagModal = (props) => {
                       label={t('统计周期')}
                       optionList={[
                         { label: t('日（每日 0 点重置）'), value: 'day' },
-                        { label: t('周（周一 0 点重置）'), value: 'week' },
-                        { label: t('月（每月 1 号 0 点重置）'), value: 'month' },
+                        { label: t('周（每 7 天重置）'), value: 'week' },
+                        { label: t('月（每月重置）'), value: 'month' },
                       ]}
                       onChange={(value) =>
                         handleInputChange('quota_policy_period', value)
@@ -671,10 +680,10 @@ const EditTagModal = (props) => {
                       <Col span={12}>
                         <Form.InputNumber
                           field='quota_policy_quota_limit'
-                          label={t('周期内额度上限（0=无限）')}
-                          placeholder={t('对应使用日志中的"花费"列')}
+                          label={t('周期内金额上限（0=无限）')}
+                          placeholder={t('按系统货币填写')}
                           min={0}
-                          precision={0}
+                          precision={2}
                           onNumberChange={(value) =>
                             handleInputChange(
                               'quota_policy_quota_limit',
@@ -712,10 +721,15 @@ const EditTagModal = (props) => {
                     {Number(tagQuotaUsage.quota_limit) > 0 && (
                       <div className='mb-2'>
                         <div className='flex justify-between text-xs mb-1'>
-                          <span>{t('周期内已用额度')}</span>
+                          <span>{t('周期内已用金额')}</span>
                           <span>
-                            {renderQuota(Number(tagQuotaUsage.used_quota || 0))} /{' '}
-                            {renderQuota(Number(tagQuotaUsage.quota_limit))}
+                            {renderCurrencyQuota(
+                              Number(tagQuotaUsage.used_quota || 0),
+                            )}{' '}
+                            /{' '}
+                            {renderCurrencyQuota(
+                              Number(tagQuotaUsage.quota_limit),
+                            )}
                           </span>
                         </div>
                         <Progress

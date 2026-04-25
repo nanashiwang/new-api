@@ -24,9 +24,13 @@ import {
   showError,
   showInfo,
   showSuccess,
-  renderQuota,
   verifyJSON,
 } from '../../../../helpers';
+import {
+  currencyAmountToQuota,
+  renderCurrencyQuota,
+  quotaToCurrencyAmount,
+} from '../../../../helpers/quota';
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
 import {
   CHANNEL_OPTIONS,
@@ -726,7 +730,9 @@ const EditChannelModal = (props) => {
           const qp = parsedSettings.quota_policy || {};
           data.quota_policy_enabled = !!qp.enabled;
           data.quota_policy_period = qp.period || 'day';
-          data.quota_policy_quota_limit = Number(qp.quota_limit) || 0;
+          data.quota_policy_quota_limit = quotaToCurrencyAmount(
+            qp.quota_limit,
+          );
           data.quota_policy_count_limit = Number(qp.count_limit) || 0;
         } catch (error) {
           console.error('解析渠道设置失败:', error);
@@ -1703,7 +1709,9 @@ const EditChannelModal = (props) => {
       quota_policy: {
         enabled: !!localInputs.quota_policy_enabled,
         period: localInputs.quota_policy_period || 'day',
-        quota_limit: Math.max(0, Number(localInputs.quota_policy_quota_limit) || 0),
+        quota_limit: currencyAmountToQuota(
+          localInputs.quota_policy_quota_limit,
+        ),
         count_limit: Math.max(0, Number(localInputs.quota_policy_count_limit) || 0),
       },
     };
@@ -4048,8 +4056,8 @@ const EditChannelModal = (props) => {
                           label={t('统计周期')}
                           optionList={[
                             { label: t('日（每日 0 点重置）'), value: 'day' },
-                            { label: t('周（周一 0 点重置）'), value: 'week' },
-                            { label: t('月（每月 1 号 0 点重置）'), value: 'month' },
+                            { label: t('周（每 7 天重置）'), value: 'week' },
+                            { label: t('月（每月重置）'), value: 'month' },
                           ]}
                           onChange={(value) =>
                             handleInputChange('quota_policy_period', value)
@@ -4061,10 +4069,10 @@ const EditChannelModal = (props) => {
                           <Col span={12}>
                             <Form.InputNumber
                               field='quota_policy_quota_limit'
-                              label={t('周期内额度上限（0=无限）')}
-                              placeholder={t('对应使用日志中的"花费"列')}
+                              label={t('周期内金额上限（0=无限）')}
+                              placeholder={t('按系统货币填写')}
                               min={0}
-                              precision={0}
+                              precision={2}
                               onNumberChange={(value) =>
                                 handleInputChange(
                                   'quota_policy_quota_limit',
@@ -4101,7 +4109,7 @@ const EditChannelModal = (props) => {
                           closeIcon={null}
                           className='!rounded-lg mt-4'
                           description={t(
-                            '将继承标签 「{{tag}}」 的共享池配额：周期 {{period}}，额度上限 {{quota}}，次数上限 {{count}}',
+                            '将继承标签 「{{tag}}」 的共享池配额：周期 {{period}}，金额上限 {{quota}}，次数上限 {{count}}',
                             {
                               tag: (inputs.tag || '').trim(),
                               period:
@@ -4112,7 +4120,9 @@ const EditChannelModal = (props) => {
                                     : t('月'),
                               quota:
                                 Number(inheritedTagPolicy.quota_limit) > 0
-                                  ? inheritedTagPolicy.quota_limit
+                                  ? renderCurrencyQuota(
+                                      Number(inheritedTagPolicy.quota_limit),
+                                    )
                                   : t('无限'),
                               count:
                                 Number(inheritedTagPolicy.count_limit) > 0
@@ -4152,10 +4162,15 @@ const EditChannelModal = (props) => {
                         {Number(quotaUsage.quota_limit) > 0 && (
                           <div className='mb-2'>
                             <div className='flex justify-between text-xs mb-1'>
-                              <span>{t('周期内已用额度')}</span>
+                              <span>{t('周期内已用金额')}</span>
                               <span>
-                                {renderQuota(Number(quotaUsage.used_quota || 0))} /{' '}
-                                {renderQuota(Number(quotaUsage.quota_limit))}
+                                {renderCurrencyQuota(
+                                  Number(quotaUsage.used_quota || 0),
+                                )}{' '}
+                                /{' '}
+                                {renderCurrencyQuota(
+                                  Number(quotaUsage.quota_limit),
+                                )}
                               </span>
                             </div>
                             <Progress
