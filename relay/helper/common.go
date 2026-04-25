@@ -106,6 +106,25 @@ func PingData(c *gin.Context) error {
 	return FlushWriter(c)
 }
 
+// ClaudePingData 按 Claude Messages SSE 协议下发 ping 事件。
+// 相比 PingData 的注释行（": PING\n\n"），标准 ping 事件能被
+// 部分对注释行不友好的中间代理/CDN 当作真正的数据帧，对长 reasoning
+// 阶段保活更可靠。
+func ClaudePingData(c *gin.Context) error {
+	if c == nil || c.Writer == nil {
+		return errors.New("context or writer is nil")
+	}
+
+	if c.Request != nil && c.Request.Context().Err() != nil {
+		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
+	}
+
+	if _, err := c.Writer.Write([]byte("event: ping\ndata: {\"type\":\"ping\"}\n\n")); err != nil {
+		return fmt.Errorf("write claude ping data failed: %w", err)
+	}
+	return FlushWriter(c)
+}
+
 func ObjectData(c *gin.Context, object interface{}) error {
 	if object == nil {
 		return errors.New("object is nil")

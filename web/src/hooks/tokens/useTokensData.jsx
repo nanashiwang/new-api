@@ -245,15 +245,20 @@ export const useTokensData = (openFluentNotification) => {
     const cachedKey = tokenFullKeys[record.id];
     if (cachedKey) return cachedKey;
 
-    // 列表接口会返回脱敏 key，复制/显示完整 key 时再按需获取真实值。
-    const res = await API.get(`/api/token/${record.id}/key`);
-    const { success, message, data } = res.data || {};
-    if (!success || !data?.key) {
-      showError(message || t('获取令牌失败'));
+    try {
+      // List API returns masked keys; fetch the full key only when needed.
+      const res = await API.get(`/api/token/${record.id}/key`);
+      const { success, message, data } = res.data || {};
+      if (!success || !data?.key) {
+        showError(message || t('获取令牌失败'));
+        return '';
+      }
+      setTokenFullKeys((prev) => ({ ...prev, [record.id]: data.key }));
+      return data.key;
+    } catch (error) {
+      showError(error?.message || t('获取令牌失败'));
       return '';
     }
-    setTokenFullKeys((prev) => ({ ...prev, [record.id]: data.key }));
-    return data.key;
   };
 
   const copyTokenKey = async (record) => {
@@ -275,15 +280,33 @@ export const useTokensData = (openFluentNotification) => {
 
   // 打开聊天集成链接函数
   const onOpenLink = async (type, url, record) => {
-    if (url && url.startsWith('fluent')) {
-      openFluentNotification(record.key);
+    if (!url) return;
+
+    const needsKey =
+      url.startsWith('fluent') ||
+      url.includes('{key}') ||
+      url.includes('{cherryConfig}');
+    let apiKey = '';
+    let rawKey = '';
+    if (needsKey) {
+      rawKey = await getTokenFullKey(record);
+      if (!rawKey) return;
+      apiKey = normalizeTokenKeyForDisplay(rawKey);
+    }
+
+    if (url.startsWith('fluent')) {
+      openFluentNotification(rawKey);
       return;
     }
     let status = localStorage.getItem('status');
     let serverAddress = '';
     if (status) {
-      status = JSON.parse(status);
-      serverAddress = status.server_address;
+      try {
+        status = JSON.parse(status);
+        serverAddress = status.server_address || '';
+      } catch (_) {
+        serverAddress = '';
+      }
     }
     if (serverAddress === '') {
       serverAddress = window.location.origin;
@@ -292,7 +315,7 @@ export const useTokensData = (openFluentNotification) => {
       let cherryConfig = {
         id: 'new-api',
         baseUrl: serverAddress,
-        apiKey: 'sk-' + record.key,
+        apiKey,
       };
       let encodedConfig = encodeURIComponent(
         encodeToBase64(JSON.stringify(cherryConfig)),
@@ -301,7 +324,7 @@ export const useTokensData = (openFluentNotification) => {
     } else {
       let encodedServerAddress = encodeURIComponent(serverAddress);
       url = url.replaceAll('{address}', encodedServerAddress);
-      url = url.replaceAll('{key}', 'sk-' + record.key);
+      url = url.replaceAll('{key}', apiKey);
     }
 
     window.open(url, '_blank');
@@ -630,6 +653,7 @@ export const useTokensData = (openFluentNotification) => {
     showKeys,
     setShowKeys,
     tokenFullKeys,
+    getTokenFullKey,
     copyTokenKey,
     toggleTokenKeyVisibility,
 

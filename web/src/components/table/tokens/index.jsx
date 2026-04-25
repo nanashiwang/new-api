@@ -44,6 +44,7 @@ function TokensPage() {
   const { openFluentNotification } = useFluentIntegration({
     tokens: tokensData.tokens,
     selectedKeys: tokensData.selectedKeys,
+    getTokenFullKey: tokensData.getTokenFullKey,
     t: tokensData.t,
   });
   // 每次渲染后同步最新版本

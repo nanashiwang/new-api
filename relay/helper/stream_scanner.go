@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/types"
 
 	"github.com/bytedance/gopkg/util/gopool"
 
@@ -147,7 +148,14 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 					gopool.Go(func() {
 						writeMutex.Lock()
 						defer writeMutex.Unlock()
-						done <- PingData(c)
+						// Claude Messages 协议有自己的 ping 事件格式，注释行
+						// 在部分中间代理上不被视为活跃数据；对 Claude 输出路径
+						// 单独走标准 ping 事件以提升保活兼容性。
+						if info != nil && info.RelayFormat == types.RelayFormatClaude {
+							done <- ClaudePingData(c)
+						} else {
+							done <- PingData(c)
+						}
 					})
 
 					select {

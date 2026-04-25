@@ -34,10 +34,11 @@ import { API, showError, getModelCategories, selectFilter } from '../../helpers'
  * @param {object} params
  * @param {Array}  params.tokens       - 当前 token 列表（来自 useTokensData）
  * @param {Array}  params.selectedKeys - 已选中 token 列表
+ * @param {Function} params.getTokenFullKey - 按需获取完整 token key
  * @param {Function} params.t          - 翻译函数
  * @returns {{ openFluentNotification: Function, modelOptions: Array }}
  */
-export function useFluentIntegration({ tokens, selectedKeys, t }) {
+export function useFluentIntegration({ tokens, selectedKeys, getTokenFullKey, t }) {
   const [modelOptions, setModelOptions] = useState([]);
   const [selectedModel, setSelectedModel] = useState('');
   const [fluentNoticeOpen, setFluentNoticeOpen] = useState(false);
@@ -50,6 +51,7 @@ export function useFluentIntegration({ tokens, selectedKeys, t }) {
     t: (k) => k,
     selectedModel: '',
     prefillKey: '',
+    getTokenFullKey: async () => '',
   });
 
   // 保存最新版本的 openFluentNotification，供事件监听器调用
@@ -62,8 +64,9 @@ export function useFluentIntegration({ tokens, selectedKeys, t }) {
       t,
       selectedModel,
       prefillKey,
+      getTokenFullKey,
     };
-  }, [tokens, selectedKeys, t, selectedModel, prefillKey]);
+  }, [tokens, selectedKeys, t, selectedModel, prefillKey, getTokenFullKey]);
 
   // 加载可用模型列表
   const loadModels = async () => {
@@ -102,13 +105,14 @@ export function useFluentIntegration({ tokens, selectedKeys, t }) {
 
   // Notification 中"一键填充"按钮的处理函数
   // 通过 latestRef 读取最新值，避免 Notification 渲染后 closure 过期
-  const handlePrefillToFluent = () => {
+  const handlePrefillToFluent = async () => {
     const {
       tokens: latestTokens,
       selectedKeys: latestSelectedKeys,
       t: latestT,
       selectedModel: chosenModel,
       prefillKey: overrideKey,
+      getTokenFullKey: fetchTokenFullKey,
     } = latestRef.current;
 
     const container = document.getElementById('fluent-new-api-container');
@@ -132,9 +136,12 @@ export function useFluentIntegration({ tokens, selectedKeys, t }) {
     }
     if (!serverAddress) serverAddress = window.location.origin;
 
+    const normalizeApiKey = (key) =>
+      key?.startsWith('sk-') ? key : `sk-${key || ''}`;
+
     let apiKeyToUse = '';
     if (overrideKey) {
-      apiKeyToUse = 'sk-' + overrideKey;
+      apiKeyToUse = normalizeApiKey(overrideKey);
     } else {
       const token =
         latestSelectedKeys && latestSelectedKeys.length === 1
@@ -146,7 +153,15 @@ export function useFluentIntegration({ tokens, selectedKeys, t }) {
         Toast.warning(latestT('没有可用令牌用于填充'));
         return;
       }
-      apiKeyToUse = 'sk-' + token.key;
+      let fullKey = '';
+      try {
+        fullKey = await fetchTokenFullKey(token);
+      } catch (error) {
+        Toast.error(error?.message || latestT('获取令牌失败'));
+        return;
+      }
+      if (!fullKey) return;
+      apiKeyToUse = normalizeApiKey(fullKey);
     }
 
     const payload = {
