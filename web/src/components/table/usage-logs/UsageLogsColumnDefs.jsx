@@ -637,12 +637,7 @@ export const getLogsColumns = ({
             return <>{renderGroup(record.group)}</>;
           }
 
-          let other = null;
-          try {
-            other = JSON.parse(record.other);
-          } catch (e) {
-            console.error(`Failed to parse record.other: "${record.other}".`, e);
-          }
+          const other = getLogOther(record.other);
           if (other?.group !== undefined) {
             return <>{renderGroup(other.group)}</>;
           }
@@ -779,6 +774,7 @@ export const getLogsColumns = ({
       key: COLUMN_KEYS.COST,
       title: t('花费'),
       dataIndex: 'quota',
+      width: 120,
       render: (text, record) => {
         if (
           !(
@@ -798,7 +794,9 @@ export const getLogsColumns = ({
             </Tooltip>
           );
         }
-        return <>{renderQuota(text, 6)}</>;
+        return (
+          <span style={{ whiteSpace: 'nowrap' }}>{renderQuota(text, 6)}</span>
+        );
       },
     },
     {
@@ -845,11 +843,9 @@ export const getLogsColumns = ({
           return <></>;
         }
         let content = t('渠道') + `：${record.channel}`;
-        if (record.other !== '') {
-          const other = JSON.parse(record.other);
-          if (other?.admin_info?.use_channel) {
-            content = t('渠道') + `：${other.admin_info.use_channel.join('->')}`;
-          }
+        const other = getLogOther(record.other);
+        if (other?.admin_info?.use_channel) {
+          content = t('渠道') + `：${other.admin_info.use_channel.join('->')}`;
         }
         return isAdminUser ? <div>{content}</div> : <></>;
       },

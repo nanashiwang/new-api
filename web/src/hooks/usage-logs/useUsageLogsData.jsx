@@ -72,6 +72,9 @@ export const useLogsData = () => {
   const [logCount, setLogCount] = useState(0);
   const [pageSize, setPageSize] = useState(ITEMS_PER_PAGE);
   const [logType, setLogType] = useState(0);
+  const [groupOptions, setGroupOptions] = useState([]);
+  const logsRequestCounter = useRef(0);
+  const statRequestCounter = useRef(0);
   const topUsersRequestCounter = useRef(0);
 
   // User and admin
@@ -270,6 +273,73 @@ export const useLogsData = () => {
     };
   };
 
+  const toUnixTimestamp = (value) => {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : 0;
+  };
+
+  const buildQueryString = (params) => {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      query.set(
+        key,
+        value === undefined || value === null ? '' : String(value),
+      );
+    });
+    return query.toString();
+  };
+
+  const normalizeLogQueryValues = (customLogType = null) => {
+    const values = getFormValues();
+    const currentLogType =
+      customLogType !== null
+        ? customLogType
+        : values.logType !== undefined
+          ? values.logType
+          : logType;
+
+    return {
+      ...values,
+      logType: currentLogType,
+      startTimestamp: toUnixTimestamp(values.start_timestamp),
+      endTimestamp: toUnixTimestamp(values.end_timestamp),
+    };
+  };
+
+  const normalizeGroupOptions = (data) => {
+    if (Array.isArray(data)) {
+      return data.map((group) => ({
+        label: group,
+        value: group,
+      }));
+    }
+
+    if (data && typeof data === 'object') {
+      return Object.entries(data).map(([group, info]) => ({
+        label: info?.desc || group,
+        value: group,
+        ratio: info?.ratio,
+      }));
+    }
+
+    return [];
+  };
+
+  const loadGroups = async () => {
+    const url = isAdminUser ? '/api/group/' : '/api/user/self/groups';
+    try {
+      const res = await API.get(url);
+      const { success, message, data } = res.data || {};
+      if (success) {
+        setGroupOptions(normalizeGroupOptions(data));
+      } else {
+        showError(t(message || '加载分组失败'));
+      }
+    } catch (error) {
+      showError(error?.message || t('加载分组失败'));
+    }
+  };
+
   const loadTopUsers = async () => {
     if (!isAdminUser) {
       return;
@@ -279,23 +349,21 @@ export const useLogsData = () => {
       username,
       token_name,
       model_name,
-      start_timestamp,
-      end_timestamp,
+      startTimestamp,
+      endTimestamp,
       channel,
       group,
       request_id,
-    } = getFormValues();
+    } = normalizeLogQueryValues();
 
     setTopUsersLoading(true);
     try {
-      const localStartTimestamp = Date.parse(start_timestamp) / 1000;
-      const localEndTimestamp = Date.parse(end_timestamp) / 1000;
       const params = new URLSearchParams({
         username,
         token_name,
         model_name,
-        start_timestamp: String(localStartTimestamp),
-        end_timestamp: String(localEndTimestamp),
+        start_timestamp: String(startTimestamp),
+        end_timestamp: String(endTimestamp),
         channel: String(channel),
         group,
         request_id,
@@ -343,21 +411,30 @@ export const useLogsData = () => {
   };
 
   // Statistics functions
-  const getLogSelfStat = async () => {
+  const getLogSelfStat = async (reqId) => {
     const {
       token_name,
       model_name,
-      start_timestamp,
-      end_timestamp,
+      startTimestamp,
+      endTimestamp,
       group,
-      logType: formLogType,
-    } = getFormValues();
-    const currentLogType = formLogType !== undefined ? formLogType : logType;
-    let localStartTimestamp = Date.parse(start_timestamp) / 1000;
-    let localEndTimestamp = Date.parse(end_timestamp) / 1000;
-    let url = `/api/log/self/stat?type=${currentLogType}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&group=${group}`;
-    url = encodeURI(url);
+      request_id,
+      logType: currentLogType,
+    } = normalizeLogQueryValues();
+    const query = buildQueryString({
+      type: currentLogType,
+      token_name,
+      model_name,
+      start_timestamp: startTimestamp,
+      end_timestamp: endTimestamp,
+      group,
+      request_id,
+    });
+    let url = `/api/log/self/stat?${query}`;
     let res = await API.get(url);
+    if (reqId !== statRequestCounter.current) {
+      return;
+    }
     const { success, message, data } = res.data;
     if (success) {
       setStat(data);
@@ -366,23 +443,34 @@ export const useLogsData = () => {
     }
   };
 
-  const getLogStat = async () => {
+  const getLogStat = async (reqId) => {
     const {
       username,
       token_name,
       model_name,
-      start_timestamp,
-      end_timestamp,
+      startTimestamp,
+      endTimestamp,
       channel,
       group,
-      logType: formLogType,
-    } = getFormValues();
-    const currentLogType = formLogType !== undefined ? formLogType : logType;
-    let localStartTimestamp = Date.parse(start_timestamp) / 1000;
-    let localEndTimestamp = Date.parse(end_timestamp) / 1000;
-    let url = `/api/log/stat?type=${currentLogType}&username=${username}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&channel=${channel}&group=${group}`;
-    url = encodeURI(url);
+      request_id,
+      logType: currentLogType,
+    } = normalizeLogQueryValues();
+    const query = buildQueryString({
+      type: currentLogType,
+      username,
+      token_name,
+      model_name,
+      start_timestamp: startTimestamp,
+      end_timestamp: endTimestamp,
+      channel,
+      group,
+      request_id,
+    });
+    let url = `/api/log/stat?${query}`;
     let res = await API.get(url);
+    if (reqId !== statRequestCounter.current) {
+      return;
+    }
     const { success, message, data } = res.data;
     if (success) {
       setStat(data);
@@ -392,17 +480,26 @@ export const useLogsData = () => {
   };
 
   const handleEyeClick = async () => {
-    if (loadingStat) {
-      return;
-    }
+    const reqId = ++statRequestCounter.current;
     setLoadingStat(true);
-    if (isAdminUser) {
-      await getLogStat();
-    } else {
-      await getLogSelfStat();
+    try {
+      if (isAdminUser) {
+        await getLogStat(reqId);
+      } else {
+        await getLogSelfStat(reqId);
+      }
+      if (reqId === statRequestCounter.current) {
+        setShowStat(true);
+      }
+    } catch (error) {
+      if (reqId === statRequestCounter.current) {
+        showError(error?.message || t('加载统计失败'));
+      }
+    } finally {
+      if (reqId === statRequestCounter.current) {
+        setLoadingStat(false);
+      }
     }
-    setShowStat(true);
-    setLoadingStat(false);
   };
 
   // User info function
@@ -673,49 +770,66 @@ export const useLogsData = () => {
 
   // Load logs function
   const loadLogs = async (startIdx, pageSize, customLogType = null) => {
+    const reqId = ++logsRequestCounter.current;
     setLoading(true);
 
-    let url = '';
     const {
       username,
       token_name,
       model_name,
-      start_timestamp,
-      end_timestamp,
+      startTimestamp,
+      endTimestamp,
       channel,
       group,
       request_id,
-      logType: formLogType,
-    } = getFormValues();
+      logType: currentLogType,
+    } = normalizeLogQueryValues(customLogType);
 
-    const currentLogType =
-      customLogType !== null
-        ? customLogType
-        : formLogType !== undefined
-          ? formLogType
-          : logType;
-
-    let localStartTimestamp = Date.parse(start_timestamp) / 1000;
-    let localEndTimestamp = Date.parse(end_timestamp) / 1000;
+    const queryParams = {
+      p: startIdx,
+      page_size: pageSize,
+      type: currentLogType,
+      token_name,
+      model_name,
+      start_timestamp: startTimestamp,
+      end_timestamp: endTimestamp,
+      group,
+      request_id,
+    };
     if (isAdminUser) {
-      url = `/api/log/?p=${startIdx}&page_size=${pageSize}&type=${currentLogType}&username=${username}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&channel=${channel}&group=${group}&request_id=${request_id}`;
-    } else {
-      url = `/api/log/self/?p=${startIdx}&page_size=${pageSize}&type=${currentLogType}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&group=${group}&request_id=${request_id}`;
+      queryParams.username = username;
+      queryParams.channel = channel;
     }
-    url = encodeURI(url);
-    const res = await API.get(url);
-    const { success, message, data } = res.data;
-    if (success) {
-      const newPageData = data.items;
-      setActivePage(data.page);
-      setPageSize(data.page_size);
-      setLogCount(data.total);
 
-      setLogsFormat(newPageData);
-    } else {
-      showError(message);
+    const url = `${
+      isAdminUser ? '/api/log/' : '/api/log/self/'
+    }?${buildQueryString(queryParams)}`;
+
+    try {
+      const res = await API.get(url);
+      if (reqId !== logsRequestCounter.current) {
+        return;
+      }
+      const { success, message, data } = res.data;
+      if (success) {
+        const newPageData = data.items;
+        setActivePage(data.page);
+        setPageSize(data.page_size);
+        setLogCount(data.total);
+
+        setLogsFormat(newPageData);
+      } else {
+        showError(message);
+      }
+    } catch (error) {
+      if (reqId === logsRequestCounter.current) {
+        showError(error?.message || t('加载日志失败'));
+      }
+    } finally {
+      if (reqId === logsRequestCounter.current) {
+        setLoading(false);
+      }
     }
-    setLoading(false);
   };
 
   // Page handlers
@@ -728,7 +842,7 @@ export const useLogsData = () => {
     localStorage.setItem('page-size', size + '');
     setPageSize(size);
     setActivePage(1);
-    loadLogs(activePage, size)
+    loadLogs(1, size)
       .then()
       .catch((reason) => {
         showError(reason);
@@ -765,6 +879,7 @@ export const useLogsData = () => {
       .catch((reason) => {
         showError(reason);
       });
+    loadGroups().then();
   }, []);
 
   // Initialize statistics when formApi is available
@@ -808,6 +923,7 @@ export const useLogsData = () => {
     logType,
     stat,
     isAdminUser,
+    groupOptions,
 
     // Form state
     formApi,
