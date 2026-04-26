@@ -50,6 +50,9 @@ func recordChannelPeriodQuota(channelId int, dq, dc int64) error {
 		return err
 	}
 	start, end := common.CalcAnchoredPeriodWindow(policy.Period, nowChannelPeriodQuota(), policy.AnchorTime)
+	if err := model.DeleteStaleChannelQuotaUsage(scope, scopeKey, policy.Period, start, policy.AnchorTime); err != nil {
+		return err
+	}
 	used, count, err := model.IncrChannelQuotaUsage(scope, scopeKey, policy.Period, start, end, dq, dc)
 	if err != nil {
 		return err
@@ -114,12 +117,18 @@ func GetCurrentChannelPeriodQuotaUsage(channelId int) (*model.ChannelQuotaUsage,
 	if err != nil || !ok {
 		return nil, policy, ok, err
 	}
-	start, _ := common.CalcAnchoredPeriodWindow(policy.Period, nowChannelPeriodQuota(), policy.AnchorTime)
+	start, end := common.CalcAnchoredPeriodWindow(policy.Period, nowChannelPeriodQuota(), policy.AnchorTime)
 	usage, err := model.GetChannelQuotaUsage(scope, scopeKey, policy.Period, start)
 	if err == gorm.ErrRecordNotFound {
-		return nil, policy, true, nil
+		return newZeroPeriodQuotaUsage(scope, scopeKey, policy, start, end), policy, true, nil
 	}
-	return usage, policy, true, err
+	if err != nil {
+		return nil, policy, true, err
+	}
+	if isStalePeriodQuotaUsage(usage, policy) {
+		return newZeroPeriodQuotaUsage(scope, scopeKey, policy, start, end), policy, true, nil
+	}
+	return usage, policy, true, nil
 }
 
 func GetCurrentTagPeriodQuotaUsage(tag string) (*model.ChannelQuotaUsage, dto.QuotaPolicy, bool, error) {
@@ -127,10 +136,30 @@ func GetCurrentTagPeriodQuotaUsage(tag string) (*model.ChannelQuotaUsage, dto.Qu
 	if err != nil || !found || !policy.IsActive() {
 		return nil, policy, found, err
 	}
-	start, _ := common.CalcAnchoredPeriodWindow(policy.Period, nowChannelPeriodQuota(), policy.AnchorTime)
+	start, end := common.CalcAnchoredPeriodWindow(policy.Period, nowChannelPeriodQuota(), policy.AnchorTime)
 	usage, err := model.GetChannelQuotaUsage(periodQuotaScopeTag, tag, policy.Period, start)
 	if err == gorm.ErrRecordNotFound {
-		return nil, policy, true, nil
+		return newZeroPeriodQuotaUsage(periodQuotaScopeTag, tag, policy, start, end), policy, true, nil
 	}
-	return usage, policy, true, err
+	if err != nil {
+		return nil, policy, true, err
+	}
+	if isStalePeriodQuotaUsage(usage, policy) {
+		return newZeroPeriodQuotaUsage(periodQuotaScopeTag, tag, policy, start, end), policy, true, nil
+	}
+	return usage, policy, true, nil
+}
+
+func isStalePeriodQuotaUsage(usage *model.ChannelQuotaUsage, policy dto.QuotaPolicy) bool {
+	return usage != nil && policy.AnchorTime > 0 && usage.CreatedAt < policy.AnchorTime
+}
+
+func newZeroPeriodQuotaUsage(scope, scopeKey string, policy dto.QuotaPolicy, start, end int64) *model.ChannelQuotaUsage {
+	return &model.ChannelQuotaUsage{
+		Scope:       scope,
+		ScopeKey:    scopeKey,
+		Period:      policy.Period,
+		PeriodStart: start,
+		PeriodEnd:   end,
+	}
 }

@@ -80,3 +80,17 @@ func GetChannelQuotaUsage(scope, scopeKey, period string, start int64) (*Channel
 	}
 	return &usage, nil
 }
+
+func DeleteStaleChannelQuotaUsage(scope, scopeKey, period string, start, anchor int64) error {
+	if anchor <= 0 {
+		return nil
+	}
+	return DB.Where(
+		"scope = ? AND scope_key = ? AND period = ? AND period_start = ? AND created_at < ?",
+		scope,
+		scopeKey,
+		period,
+		start,
+		anchor,
+	).Delete(&ChannelQuotaUsage{}).Error
+}

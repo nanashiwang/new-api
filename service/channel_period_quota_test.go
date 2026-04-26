@@ -70,6 +70,69 @@ func TestChannelPeriodQuotaChannelLevelTrigger(t *testing.T) {
 	}
 }
 
+func TestCurrentChannelPeriodQuotaUsageIgnoresStaleRows(t *testing.T) {
+	setupChannelPeriodQuotaTestDB(t)
+	anchor := nowChannelPeriodQuota().Unix()
+	createQuotaTestChannel(t, 1, "pool", dto.QuotaPolicy{Enabled: true, Period: "day", QuotaLimit: 1000, AnchorTime: anchor})
+	start, end := common.CalcAnchoredPeriodWindow("day", nowChannelPeriodQuota(), anchor)
+	err := model.DB.Create(&model.ChannelQuotaUsage{
+		Scope:       periodQuotaScopeChannel,
+		ScopeKey:    "1",
+		Period:      "day",
+		PeriodStart: start,
+		PeriodEnd:   end,
+		UsedQuota:   500,
+		CreatedAt:   anchor - 60,
+		UpdatedAt:   anchor - 60,
+	}).Error
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage, _, found, err := GetCurrentChannelPeriodQuotaUsage(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatal("expected active policy to be found")
+	}
+	if usage == nil {
+		t.Fatal("expected zero usage for current period")
+	}
+	if usage.UsedQuota != 0 || usage.PeriodStart != start || usage.PeriodEnd != end {
+		t.Fatalf("expected stale usage to be replaced by zero current usage, got=%+v", usage)
+	}
+}
+
+func TestChannelPeriodQuotaRecordingStartsFromPolicyAnchor(t *testing.T) {
+	setupChannelPeriodQuotaTestDB(t)
+	anchor := nowChannelPeriodQuota().Unix()
+	createQuotaTestChannel(t, 1, "pool", dto.QuotaPolicy{Enabled: true, Period: "day", QuotaLimit: 1000, AnchorTime: anchor})
+	start, end := common.CalcAnchoredPeriodWindow("day", nowChannelPeriodQuota(), anchor)
+	err := model.DB.Create(&model.ChannelQuotaUsage{
+		Scope:       periodQuotaScopeChannel,
+		ScopeKey:    "1",
+		Period:      "day",
+		PeriodStart: start,
+		PeriodEnd:   end,
+		UsedQuota:   500,
+		CreatedAt:   anchor - 60,
+		UpdatedAt:   anchor - 60,
+	}).Error
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := recordChannelPeriodQuota(1, 10, 0); err != nil {
+		t.Fatal(err)
+	}
+	usage, err := model.GetChannelQuotaUsage(periodQuotaScopeChannel, "1", "day", start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.UsedQuota != 10 {
+		t.Fatalf("expected stale usage to reset before recording, got=%d", usage.UsedQuota)
+	}
+}
+
 func TestChannelPeriodQuotaChannelOverridesTag(t *testing.T) {
 	setupChannelPeriodQuotaTestDB(t)
 	createQuotaTestChannel(t, 1, "pool", dto.QuotaPolicy{Enabled: true, Period: "day", CountLimit: 2})
