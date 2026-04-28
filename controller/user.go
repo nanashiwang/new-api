@@ -554,11 +554,6 @@ func GetUser(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	myRole := c.GetInt("role")
-	if myRole <= user.Role && myRole != common.RoleRootUser {
-		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionSameLevel)
-		return
-	}
 
 	// 补充套餐和令牌元数据，确保管理页面刷新单行或详情时显示一致。
 	_ = model.AttachUserSubscriptionMetadata(model.DB, []*model.User{user})
