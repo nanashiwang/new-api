@@ -31,6 +31,7 @@ const (
 	ProfitBoardUpstreamModeManual          = "manual_rules"
 	ProfitBoardUpstreamModeWallet          = "wallet_observer"
 	ProfitBoardUpstreamAccountTypeNewAPI   = "newapi"
+	ProfitBoardUpstreamAccountTypeSub2API  = "sub2api"
 	ProfitBoardResourceDisplayBoth         = "both"
 	ProfitBoardResourceDisplayWallet       = "wallet"
 	ProfitBoardResourceDisplaySubscription = "subscription"
@@ -120,11 +121,16 @@ type ProfitBoardComboPricingConfig struct {
 
 type ProfitBoardRemoteObserverConfig struct {
 	Enabled              bool   `json:"enabled,omitempty"`
+	AccountType          string `json:"account_type,omitempty"`
 	BaseURL              string `json:"base_url,omitempty"`
 	UserID               int    `json:"user_id,omitempty"`
 	AccessToken          string `json:"access_token,omitempty"`
 	AccessTokenMasked    string `json:"access_token_masked,omitempty"`
 	AccessTokenEncrypted string `json:"access_token_encrypted,omitempty"`
+	Email                string `json:"email,omitempty"`
+	Password             string `json:"password,omitempty"`
+	PasswordMasked       string `json:"password_masked,omitempty"`
+	PasswordEncrypted    string `json:"password_encrypted,omitempty"`
 }
 
 type ProfitBoardRemoteSubscriptionSnapshot struct {

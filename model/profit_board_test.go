@@ -4,11 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
@@ -50,6 +53,28 @@ func requireProfitBoardWarningContains(t *testing.T, warnings []string, needle s
 	}
 
 	t.Fatalf("expected warnings to contain %q, got %+v", needle, warnings)
+}
+
+func writeProfitBoardTestJSON(t *testing.T, w http.ResponseWriter, value any) {
+	t.Helper()
+	raw, err := common.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if _, err = w.Write(raw); err != nil {
+		t.Fatalf("write response: %v", err)
+	}
+}
+
+func allowProfitBoardTestPrivateFetch(t *testing.T) {
+	t.Helper()
+	fetchSetting := system_setting.GetFetchSetting()
+	origin := *fetchSetting
+	fetchSetting.EnableSSRFProtection = false
+	t.Cleanup(func() {
+		*fetchSetting = origin
+	})
 }
 
 func findProfitBoardWarningItem(items []ProfitBoardWarningItem, code string) *ProfitBoardWarningItem {
@@ -1495,6 +1520,244 @@ func TestGetProfitBoardUpstreamAccountTrendUsesPeriodUsedUSD(t *testing.T) {
 	}
 	if !trend.Account.LowBalanceAlert {
 		t.Fatalf("expected low balance alert: %+v", trend.Account)
+	}
+}
+
+func TestSyncProfitBoardSub2APIAccountFetchesBalance(t *testing.T) {
+	setupProfitBoardTestDB(t)
+	allowProfitBoardTestPrivateFetch(t)
+
+	originQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 1000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originQuotaPerUnit
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/login":
+			if r.Method != http.MethodPost {
+				t.Fatalf("unexpected login method: %s", r.Method)
+			}
+			var payload map[string]string
+			if err := common.DecodeJson(r.Body, &payload); err != nil {
+				t.Fatalf("decode login payload: %v", err)
+			}
+			if payload["email"] != "ops@example.com" || payload["password"] != "sub2api-password" {
+				t.Fatalf("unexpected login payload: %+v", payload)
+			}
+			writeProfitBoardTestJSON(t, w, map[string]any{
+				"data": map[string]any{
+					"access_token": "profile-token",
+				},
+			})
+		case "/api/v1/user/profile":
+			if r.Header.Get("Authorization") != "Bearer profile-token" {
+				t.Fatalf("unexpected profile authorization: %q", r.Header.Get("Authorization"))
+			}
+			writeProfitBoardTestJSON(t, w, map[string]any{
+				"data": map[string]any{
+					"balance": 12.5,
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	saved, err := SaveProfitBoardUpstreamAccount(ProfitBoardUpstreamAccount{
+		Name:        "sub2api account",
+		AccountType: ProfitBoardUpstreamAccountTypeSub2API,
+		BaseURL:     server.URL + "/api/v1",
+		Email:       "ops@example.com",
+		Password:    "sub2api-password",
+		Enabled:     true,
+	})
+	if err != nil {
+		t.Fatalf("SaveProfitBoardUpstreamAccount: %v", err)
+	}
+	if saved.AccountType != ProfitBoardUpstreamAccountTypeSub2API || saved.UserID != 0 {
+		t.Fatalf("unexpected saved account: %+v", saved)
+	}
+	if saved.PasswordMasked != "sub2****word" || saved.AccessTokenMasked != "" {
+		t.Fatalf("unexpected masked secrets: %+v", saved)
+	}
+
+	synced, err := SyncProfitBoardUpstreamAccount(saved.Id, true)
+	if err != nil {
+		t.Fatalf("SyncProfitBoardUpstreamAccount: %v", err)
+	}
+	if synced.Status != profitBoardRemoteObserverStatusNeedsBaseline {
+		t.Fatalf("unexpected synced status: %+v", synced)
+	}
+	if synced.WalletBalanceUSD != 12.5 || synced.WalletQuotaUSD != 12.5 {
+		t.Fatalf("unexpected wallet balance: %+v", synced)
+	}
+	if synced.HasSubscriptionData || synced.SubscriptionCount != 0 {
+		t.Fatalf("sub2api should not expose subscription data: %+v", synced)
+	}
+	if synced.ResourceDisplayMode != ProfitBoardResourceDisplayWallet {
+		t.Fatalf("unexpected display mode: %+v", synced)
+	}
+}
+
+func TestCollectProfitBoardSub2APIObservedAggregateUsesBalanceDelta(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	originQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 1000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originQuotaPerUnit
+	})
+
+	encryptedPassword, err := encryptProfitBoardRemoteSecret("sub2api-password")
+	if err != nil {
+		t.Fatalf("encrypt password: %v", err)
+	}
+	account := ProfitBoardUpstreamAccount{
+		Name:              "sub2api delta",
+		AccountType:       ProfitBoardUpstreamAccountTypeSub2API,
+		BaseURL:           "https://sub2api.example.com",
+		Email:             "ops@example.com",
+		PasswordEncrypted: encryptedPassword,
+		Enabled:           true,
+		CreatedAt:         1,
+		UpdatedAt:         1,
+	}
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+
+	config := account.remoteObserverConfig()
+	signature := profitBoardUpstreamAccountSnapshotSignature(account.Id)
+	now := time.Now().Unix()
+	seedProfitBoardRemoteSnapshot(t, signature, profitBoardUpstreamAccountSnapshotComboID, config, now-180, 10000, 0, nil)
+	seedProfitBoardRemoteSnapshot(t, signature, profitBoardUpstreamAccountSnapshotComboID, config, now-120, 8500, 0, nil)
+	seedProfitBoardRemoteSnapshot(t, signature, profitBoardUpstreamAccountSnapshotComboID, config, now-60, 9500, 0, nil)
+
+	aggregate, err := collectProfitBoardUpstreamAccountObservedAggregate(account.Id, now-240, now, "day", 0, false)
+	if err != nil {
+		t.Fatalf("collectProfitBoardUpstreamAccountObservedAggregate: %v", err)
+	}
+	if aggregate.TotalCostUSD != 1.5 {
+		t.Fatalf("unexpected total cost: %+v", aggregate)
+	}
+	requireProfitBoardWarningContains(t, aggregate.Warnings, "钱包余额上升")
+	if aggregate.State.WalletBalanceUSD != 9.5 {
+		t.Fatalf("unexpected state balance: %+v", aggregate.State)
+	}
+}
+
+func TestFetchProfitBoardSub2APIErrors(t *testing.T) {
+	allowProfitBoardTestPrivateFetch(t)
+
+	originQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 1000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originQuotaPerUnit
+	})
+
+	_, err := fetchProfitBoardRemoteObserver(ProfitBoardRemoteObserverConfig{
+		Enabled:     true,
+		AccountType: ProfitBoardUpstreamAccountTypeSub2API,
+		BaseURL:     "https://sub2api.example.com",
+		Password:    "sub2api-password",
+	})
+	if !errors.Is(err, ErrProfitBoardRemoteMissingEmail) {
+		t.Fatalf("unexpected missing email error: got %v want %v", err, ErrProfitBoardRemoteMissingEmail)
+	}
+
+	_, err = fetchProfitBoardRemoteObserver(ProfitBoardRemoteObserverConfig{
+		Enabled:     true,
+		AccountType: ProfitBoardUpstreamAccountTypeSub2API,
+		BaseURL:     "https://sub2api.example.com",
+		Email:       "ops@example.com",
+	})
+	if !errors.Is(err, ErrProfitBoardRemoteMissingPassword) {
+		t.Fatalf("unexpected missing password error: got %v want %v", err, ErrProfitBoardRemoteMissingPassword)
+	}
+
+	tests := []struct {
+		name      string
+		handler   http.HandlerFunc
+		wantError error
+	}{
+		{
+			name: "login without token",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				writeProfitBoardTestJSON(t, w, map[string]any{
+					"success": true,
+					"data":    map[string]any{},
+				})
+			},
+			wantError: ErrProfitBoardRemoteLoginNoToken,
+		},
+		{
+			name: "profile without balance",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/auth/login" {
+					writeProfitBoardTestJSON(t, w, map[string]any{
+						"success": true,
+						"data": map[string]any{
+							"access_token": "profile-token",
+						},
+					})
+					return
+				}
+				writeProfitBoardTestJSON(t, w, map[string]any{
+					"success": true,
+					"data":    map[string]any{},
+				})
+			},
+			wantError: ErrProfitBoardRemoteBalanceInvalid,
+		},
+		{
+			name: "profile with non numeric balance",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/auth/login" {
+					writeProfitBoardTestJSON(t, w, map[string]any{
+						"success": true,
+						"data": map[string]any{
+							"access_token": "profile-token",
+						},
+					})
+					return
+				}
+				writeProfitBoardTestJSON(t, w, map[string]any{
+					"success": true,
+					"data": map[string]any{
+						"balance": "not-a-number",
+					},
+				})
+			},
+			wantError: ErrProfitBoardRemoteBalanceInvalid,
+		},
+		{
+			name: "non 2xx",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, "bad upstream", http.StatusBadGateway)
+			},
+			wantError: ErrProfitBoardRemoteRequestFail,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(tt.handler)
+			defer server.Close()
+
+			_, err := fetchProfitBoardRemoteObserver(ProfitBoardRemoteObserverConfig{
+				Enabled:     true,
+				AccountType: ProfitBoardUpstreamAccountTypeSub2API,
+				BaseURL:     server.URL,
+				Email:       "ops@example.com",
+				Password:    "sub2api-password",
+			})
+			if !errors.Is(err, tt.wantError) {
+				t.Fatalf("unexpected error: got %v want %v", err, tt.wantError)
+			}
+		})
 	}
 }
 

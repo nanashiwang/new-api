@@ -17,6 +17,8 @@ var (
 	ErrProfitBoardAccountNameEmpty       = errors.New("profit_board:account_name_empty")
 	ErrProfitBoardAccountInvalid         = errors.New("profit_board:account_invalid")
 	ErrProfitBoardAccountTokenEmpty      = errors.New("profit_board:account_token_empty")
+	ErrProfitBoardAccountEmailEmpty      = errors.New("profit_board:account_email_empty")
+	ErrProfitBoardAccountPasswordEmpty   = errors.New("profit_board:account_password_empty")
 )
 
 const profitBoardUpstreamAccountSnapshotComboID = "wallet"
@@ -28,9 +30,13 @@ type ProfitBoardUpstreamAccount struct {
 	AccountType            string  `json:"account_type" gorm:"type:varchar(24);index;not null"`
 	BaseURL                string  `json:"base_url" gorm:"type:varchar(255);not null"`
 	UserID                 int     `json:"user_id" gorm:"index;not null"`
+	Email                  string  `json:"email,omitempty" gorm:"type:varchar(255);index"`
 	AccessToken            string  `json:"access_token,omitempty" gorm:"-"`
 	AccessTokenMasked      string  `json:"access_token_masked,omitempty" gorm:"-"`
 	AccessTokenEncrypted   string  `json:"-" gorm:"type:text;not null"`
+	Password               string  `json:"password,omitempty" gorm:"-"`
+	PasswordMasked         string  `json:"password_masked,omitempty" gorm:"-"`
+	PasswordEncrypted      string  `json:"-" gorm:"type:text"`
 	Enabled                bool    `json:"enabled" gorm:"default:true"`
 	ResourceDisplayMode    string  `json:"resource_display_mode" gorm:"type:varchar(24);default:both"`
 	LowBalanceThresholdUSD float64 `json:"low_balance_threshold_usd" gorm:"type:decimal(18,6);default:0"`
@@ -45,9 +51,11 @@ type ProfitBoardUpstreamAccountOption struct {
 	AccountType                  string  `json:"account_type"`
 	BaseURL                      string  `json:"base_url"`
 	UserID                       int     `json:"user_id"`
+	Email                        string  `json:"email,omitempty"`
 	Enabled                      bool    `json:"enabled"`
 	ResourceDisplayMode          string  `json:"resource_display_mode"`
 	AccessTokenMasked            string  `json:"access_token_masked,omitempty"`
+	PasswordMasked               string  `json:"password_masked,omitempty"`
 	Status                       string  `json:"status,omitempty"`
 	ErrorMessage                 string  `json:"error_message,omitempty"`
 	LastSyncedAt                 int64   `json:"last_synced_at"`
@@ -197,7 +205,9 @@ func normalizeProfitBoardUpstreamAccount(account ProfitBoardUpstreamAccount) Pro
 		account.AccountType = ProfitBoardUpstreamAccountTypeNewAPI
 	}
 	account.BaseURL = strings.TrimRight(strings.TrimSpace(account.BaseURL), "/")
+	account.Email = strings.TrimSpace(account.Email)
 	account.AccessToken = strings.TrimSpace(account.AccessToken)
+	account.Password = strings.TrimSpace(account.Password)
 	if account.UserID < 0 {
 		account.UserID = 0
 	}
@@ -205,41 +215,76 @@ func normalizeProfitBoardUpstreamAccount(account ProfitBoardUpstreamAccount) Pro
 		account.LowBalanceThresholdUSD = 0
 	}
 	account.ResourceDisplayMode = normalizeProfitBoardUpstreamAccountResourceDisplayMode(account.ResourceDisplayMode)
+	if account.AccountType == ProfitBoardUpstreamAccountTypeSub2API {
+		account.UserID = 0
+		account.ResourceDisplayMode = ProfitBoardResourceDisplayWallet
+	}
 	return account
 }
 
 func validateProfitBoardUpstreamAccount(account ProfitBoardUpstreamAccount, requireSecret bool) error {
 	account = normalizeProfitBoardUpstreamAccount(account)
-	if account.AccountType != ProfitBoardUpstreamAccountTypeNewAPI {
-		return ErrProfitBoardAccountTypeUnsupported
-	}
 	if account.Name == "" {
 		return ErrProfitBoardAccountNameEmpty
 	}
-	config := ProfitBoardRemoteObserverConfig{
-		Enabled:              true,
-		BaseURL:              account.BaseURL,
-		UserID:               account.UserID,
-		AccessToken:          account.AccessToken,
-		AccessTokenEncrypted: account.AccessTokenEncrypted,
-	}
-	if !requireSecret {
-		config.AccessToken = ""
-	}
-	if err := validateProfitBoardRemoteObserverConfig(config); err != nil {
-		return err
+	switch account.AccountType {
+	case ProfitBoardUpstreamAccountTypeNewAPI:
+		config := ProfitBoardRemoteObserverConfig{
+			Enabled:              true,
+			BaseURL:              account.BaseURL,
+			UserID:               account.UserID,
+			AccessToken:          account.AccessToken,
+			AccessTokenEncrypted: account.AccessTokenEncrypted,
+		}
+		if !requireSecret {
+			config.AccessToken = ""
+		}
+		if err := validateProfitBoardRemoteObserverConfig(config); err != nil {
+			return err
+		}
+	case ProfitBoardUpstreamAccountTypeSub2API:
+		if account.Email == "" {
+			return ErrProfitBoardAccountEmailEmpty
+		}
+		config := ProfitBoardRemoteObserverConfig{
+			Enabled:           true,
+			AccountType:       ProfitBoardUpstreamAccountTypeSub2API,
+			BaseURL:           account.BaseURL,
+			Email:             account.Email,
+			Password:          account.Password,
+			PasswordEncrypted: account.PasswordEncrypted,
+		}
+		if !requireSecret {
+			config.Password = ""
+		}
+		if err := validateProfitBoardRemoteObserverConfig(config); err != nil {
+			if errors.Is(err, ErrProfitBoardRemoteMissingPassword) {
+				return ErrProfitBoardAccountPasswordEmpty
+			}
+			return err
+		}
+	default:
+		return ErrProfitBoardAccountTypeUnsupported
 	}
 	return nil
 }
 
 func (a ProfitBoardUpstreamAccount) remoteObserverConfig() ProfitBoardRemoteObserverConfig {
-	return normalizeProfitBoardRemoteObserverConfig(ProfitBoardRemoteObserverConfig{
-		Enabled:              a.Enabled,
-		BaseURL:              a.BaseURL,
-		UserID:               a.UserID,
-		AccessToken:          a.AccessToken,
-		AccessTokenEncrypted: a.AccessTokenEncrypted,
-	})
+	a = normalizeProfitBoardUpstreamAccount(a)
+	config := ProfitBoardRemoteObserverConfig{
+		Enabled:           a.Enabled,
+		AccountType:       a.AccountType,
+		BaseURL:           a.BaseURL,
+		UserID:            a.UserID,
+		Email:             a.Email,
+		Password:          a.Password,
+		PasswordEncrypted: a.PasswordEncrypted,
+	}
+	if a.AccountType == ProfitBoardUpstreamAccountTypeNewAPI {
+		config.AccessToken = a.AccessToken
+		config.AccessTokenEncrypted = a.AccessTokenEncrypted
+	}
+	return normalizeProfitBoardRemoteObserverConfig(config)
 }
 
 func profitBoardUpstreamAccountSnapshotSignature(accountID int) string {
@@ -267,9 +312,11 @@ func buildProfitBoardUpstreamAccountOption(
 		AccountType:                  account.AccountType,
 		BaseURL:                      account.BaseURL,
 		UserID:                       account.UserID,
+		Email:                        account.Email,
 		Enabled:                      account.Enabled,
 		ResourceDisplayMode:          account.ResourceDisplayMode,
 		AccessTokenMasked:            maskProfitBoardRemoteSecret(statefulProfitBoardUpstreamToken(account)),
+		PasswordMasked:               maskProfitBoardRemoteSecret(statefulProfitBoardUpstreamPassword(account)),
 		Status:                       state.Status,
 		ErrorMessage:                 state.ErrorMessage,
 		LastSyncedAt:                 state.LastSyncedAt,
@@ -303,6 +350,20 @@ func statefulProfitBoardUpstreamToken(account ProfitBoardUpstreamAccount) string
 		return ""
 	}
 	decrypted, err := decryptProfitBoardRemoteSecret(account.AccessTokenEncrypted)
+	if err != nil {
+		return ""
+	}
+	return decrypted
+}
+
+func statefulProfitBoardUpstreamPassword(account ProfitBoardUpstreamAccount) string {
+	if account.Password != "" {
+		return account.Password
+	}
+	if account.PasswordEncrypted == "" {
+		return ""
+	}
+	decrypted, err := decryptProfitBoardRemoteSecret(account.PasswordEncrypted)
 	if err != nil {
 		return ""
 	}
@@ -367,27 +428,25 @@ func SaveProfitBoardUpstreamAccount(account ProfitBoardUpstreamAccount) (*Profit
 		if err := DB.First(&existing, "id = ?", account.Id).Error; err != nil {
 			return nil, err
 		}
+		existing = normalizeProfitBoardUpstreamAccount(existing)
 		if account.AccessTokenEncrypted == "" {
 			account.AccessTokenEncrypted = existing.AccessTokenEncrypted
 		}
+		if account.PasswordEncrypted == "" {
+			account.PasswordEncrypted = existing.PasswordEncrypted
+		}
 	}
-	requireSecret := account.Id == 0 || account.AccessToken != "" || account.AccessTokenEncrypted == ""
+	requireSecret := account.Id == 0 ||
+		(account.AccountType == ProfitBoardUpstreamAccountTypeNewAPI && (account.AccessToken != "" || account.AccessTokenEncrypted == "")) ||
+		(account.AccountType == ProfitBoardUpstreamAccountTypeSub2API && (account.Password != "" || account.PasswordEncrypted == ""))
 	if err := validateProfitBoardUpstreamAccount(account, requireSecret); err != nil {
 		return nil, err
 	}
-	switch {
-	case account.AccessToken != "":
-		encrypted, err := encryptProfitBoardRemoteSecret(account.AccessToken)
-		if err != nil {
-			return nil, err
-		}
-		account.AccessTokenEncrypted = encrypted
-	case existing.AccessTokenEncrypted != "":
-		account.AccessTokenEncrypted = existing.AccessTokenEncrypted
-	default:
-		return nil, ErrProfitBoardAccountTokenEmpty
+	if err := prepareProfitBoardUpstreamAccountSecrets(&account, existing); err != nil {
+		return nil, err
 	}
 	account.AccessToken = ""
+	account.Password = ""
 	if account.Id == 0 {
 		if err := DB.Create(&account).Error; err != nil {
 			return nil, err
@@ -398,7 +457,9 @@ func SaveProfitBoardUpstreamAccount(account ProfitBoardUpstreamAccount) (*Profit
 		existing.AccountType = account.AccountType
 		existing.BaseURL = account.BaseURL
 		existing.UserID = account.UserID
+		existing.Email = account.Email
 		existing.AccessTokenEncrypted = account.AccessTokenEncrypted
+		existing.PasswordEncrypted = account.PasswordEncrypted
 		existing.Enabled = account.Enabled
 		existing.ResourceDisplayMode = account.ResourceDisplayMode
 		existing.LowBalanceThresholdUSD = account.LowBalanceThresholdUSD
@@ -413,6 +474,45 @@ func SaveProfitBoardUpstreamAccount(account ProfitBoardUpstreamAccount) (*Profit
 	}
 	option := buildProfitBoardUpstreamAccountOption(account, state)
 	return &option, nil
+}
+
+func prepareProfitBoardUpstreamAccountSecrets(account *ProfitBoardUpstreamAccount, existing ProfitBoardUpstreamAccount) error {
+	switch account.AccountType {
+	case ProfitBoardUpstreamAccountTypeNewAPI:
+		account.PasswordEncrypted = ""
+		account.Email = ""
+		switch {
+		case account.AccessToken != "":
+			encrypted, err := encryptProfitBoardRemoteSecret(account.AccessToken)
+			if err != nil {
+				return err
+			}
+			account.AccessTokenEncrypted = encrypted
+		case existing.AccountType == ProfitBoardUpstreamAccountTypeNewAPI && existing.AccessTokenEncrypted != "":
+			account.AccessTokenEncrypted = existing.AccessTokenEncrypted
+		default:
+			return ErrProfitBoardAccountTokenEmpty
+		}
+	case ProfitBoardUpstreamAccountTypeSub2API:
+		account.AccessTokenEncrypted = ""
+		account.UserID = 0
+		account.ResourceDisplayMode = ProfitBoardResourceDisplayWallet
+		switch {
+		case account.Password != "":
+			encrypted, err := encryptProfitBoardRemoteSecret(account.Password)
+			if err != nil {
+				return err
+			}
+			account.PasswordEncrypted = encrypted
+		case existing.AccountType == ProfitBoardUpstreamAccountTypeSub2API && existing.PasswordEncrypted != "":
+			account.PasswordEncrypted = existing.PasswordEncrypted
+		default:
+			return ErrProfitBoardAccountPasswordEmpty
+		}
+	default:
+		return ErrProfitBoardAccountTypeUnsupported
+	}
+	return nil
 }
 
 func DeleteProfitBoardUpstreamAccount(id int) error {
@@ -567,7 +667,7 @@ func collectProfitBoardUpstreamAccountObservedAggregate(accountID int, startTime
 	}
 	if len(snapshots) >= 2 {
 		for index := 1; index < len(snapshots); index++ {
-			deltaQuota, warnings := profitBoardRemoteSnapshotDelta(snapshots[index-1], snapshots[index])
+			deltaQuota, warnings := profitBoardRemoteSnapshotDeltaForConfig(config, snapshots[index-1], snapshots[index])
 			for _, warning := range warnings {
 				aggregate.Warnings = append(aggregate.Warnings, fmt.Sprintf("%s：%s", account.Name, warning))
 			}
@@ -587,6 +687,13 @@ func collectProfitBoardUpstreamAccountObservedAggregate(accountID int, startTime
 		if totalCostQuota == 0 {
 			allRolledBack := true
 			for index := 1; index < len(snapshots); index++ {
+				if config.AccountType == ProfitBoardUpstreamAccountTypeSub2API {
+					if snapshots[index].WalletQuota <= snapshots[index-1].WalletQuota {
+						allRolledBack = false
+						break
+					}
+					continue
+				}
 				if snapshots[index].WalletUsedQuota >= snapshots[index-1].WalletUsedQuota {
 					allRolledBack = false
 					break
@@ -661,7 +768,7 @@ func GetProfitBoardUpstreamAccountTrend(id int, startTimestamp int64, endTimesta
 	totalCostUSD := 0.0
 	if len(snapshots) >= 2 {
 		for index := 1; index < len(snapshots); index++ {
-			deltaQuota, deltaWarnings := profitBoardRemoteSnapshotDelta(snapshots[index-1], snapshots[index])
+			deltaQuota, deltaWarnings := profitBoardRemoteSnapshotDeltaForConfig(config, snapshots[index-1], snapshots[index])
 			for _, warning := range deltaWarnings {
 				warnings = append(warnings, fmt.Sprintf("%s：%s", account.Name, warning))
 			}

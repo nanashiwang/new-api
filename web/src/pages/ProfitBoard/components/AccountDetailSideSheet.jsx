@@ -104,6 +104,7 @@ const AccountDetailSideSheet = ({
   const domainLabel = getUpstreamAccountSuggestedName(account?.base_url);
   const resourceDisplayMode = normalizeUpstreamAccountResourceDisplayMode(
     account?.resource_display_mode,
+    account?.account_type,
   );
   const showWallet =
     resourceDisplayMode === 'both' || resourceDisplayMode === 'wallet';
@@ -151,7 +152,11 @@ const AccountDetailSideSheet = ({
                 {showSubscription ? (
                   <SummaryItem
                     label={t('订阅剩余')}
-                    value={formatUpstreamSubscriptionRemaining(account, status, t)}
+                    value={formatUpstreamSubscriptionRemaining(
+                      account,
+                      status,
+                      t,
+                    )}
                     tone={summaryTones.subscription}
                   />
                 ) : null}

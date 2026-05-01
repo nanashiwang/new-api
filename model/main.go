@@ -690,6 +690,8 @@ func ensureProfitBoardUpstreamAccountColumnsSQLite() error {
 	}
 	required := []sqliteColumnDef{
 		{Name: "resource_display_mode", DDL: "`resource_display_mode` varchar(24) DEFAULT 'both'"},
+		{Name: "email", DDL: "`email` varchar(255)"},
+		{Name: "password_encrypted", DDL: "`password_encrypted` text"},
 	}
 	for _, col := range required {
 		if _, ok := existing[col.Name]; ok {

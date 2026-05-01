@@ -1,16 +1,20 @@
 package model
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,13 +26,17 @@ import (
 
 // Sentinel errors for i18n translation (remote observer)
 var (
-	ErrProfitBoardRemoteMissingURL   = errors.New("profit_board:remote_missing_url")
-	ErrProfitBoardRemoteMissingUID   = errors.New("profit_board:remote_missing_uid")
-	ErrProfitBoardRemoteMissingToken = errors.New("profit_board:remote_missing_token")
-	ErrProfitBoardRemoteTokenEmpty   = errors.New("profit_board:remote_token_empty")
-	ErrProfitBoardRemoteNotNewAPI    = errors.New("profit_board:remote_not_newapi")
-	ErrProfitBoardRemoteURLInvalid   = errors.New("profit_board:remote_url_invalid")
-	ErrProfitBoardRemoteRequestFail  = errors.New("profit_board:remote_request_fail")
+	ErrProfitBoardRemoteMissingURL      = errors.New("profit_board:remote_missing_url")
+	ErrProfitBoardRemoteMissingUID      = errors.New("profit_board:remote_missing_uid")
+	ErrProfitBoardRemoteMissingToken    = errors.New("profit_board:remote_missing_token")
+	ErrProfitBoardRemoteMissingEmail    = errors.New("profit_board:remote_missing_email")
+	ErrProfitBoardRemoteMissingPassword = errors.New("profit_board:remote_missing_password")
+	ErrProfitBoardRemoteTokenEmpty      = errors.New("profit_board:remote_token_empty")
+	ErrProfitBoardRemoteNotNewAPI       = errors.New("profit_board:remote_not_newapi")
+	ErrProfitBoardRemoteURLInvalid      = errors.New("profit_board:remote_url_invalid")
+	ErrProfitBoardRemoteRequestFail     = errors.New("profit_board:remote_request_fail")
+	ErrProfitBoardRemoteLoginNoToken    = errors.New("profit_board:remote_login_no_token")
+	ErrProfitBoardRemoteBalanceInvalid  = errors.New("profit_board:remote_balance_invalid")
 )
 
 const (
@@ -96,6 +104,20 @@ type profitBoardRemoteEnvelope[T any] struct {
 	Data    T      `json:"data"`
 }
 
+type profitBoardSub2APIEnvelope[T any] struct {
+	Success *bool  `json:"success,omitempty"`
+	Message string `json:"message"`
+	Data    T      `json:"data"`
+}
+
+type profitBoardSub2APILoginData struct {
+	AccessToken string `json:"access_token"`
+}
+
+type profitBoardSub2APIProfileData struct {
+	Balance json.RawMessage `json:"balance"`
+}
+
 type profitBoardRemoteFetchResult struct {
 	RemoteQuotaPerUnit float64
 	WalletQuota        int64
@@ -124,12 +146,26 @@ func normalizeProfitBoardRemoteSubscriptionSnapshot(
 }
 
 func normalizeProfitBoardRemoteObserverConfig(config ProfitBoardRemoteObserverConfig) ProfitBoardRemoteObserverConfig {
+	config.AccountType = strings.ToLower(strings.TrimSpace(config.AccountType))
+	if config.AccountType == "" {
+		config.AccountType = ProfitBoardUpstreamAccountTypeNewAPI
+	}
 	config.BaseURL = strings.TrimRight(strings.TrimSpace(config.BaseURL), "/")
 	config.AccessToken = strings.TrimSpace(config.AccessToken)
 	config.AccessTokenMasked = strings.TrimSpace(config.AccessTokenMasked)
 	config.AccessTokenEncrypted = strings.TrimSpace(config.AccessTokenEncrypted)
+	config.Email = strings.TrimSpace(config.Email)
+	config.Password = strings.TrimSpace(config.Password)
+	config.PasswordMasked = strings.TrimSpace(config.PasswordMasked)
+	config.PasswordEncrypted = strings.TrimSpace(config.PasswordEncrypted)
 	if config.UserID < 0 {
 		config.UserID = 0
+	}
+	if config.AccountType == ProfitBoardUpstreamAccountTypeSub2API {
+		config.UserID = 0
+		config.AccessToken = ""
+		config.AccessTokenMasked = ""
+		config.AccessTokenEncrypted = ""
 	}
 	return config
 }
@@ -144,8 +180,15 @@ func profitBoardHasEnabledRemoteObserver(comboConfigs []ProfitBoardComboPricingC
 }
 
 func profitBoardRemoteObserverConfigured(config ProfitBoardRemoteObserverConfig) bool {
-	return strings.TrimSpace(config.BaseURL) != "" && config.UserID > 0 &&
-		(strings.TrimSpace(config.AccessToken) != "" || strings.TrimSpace(config.AccessTokenEncrypted) != "")
+	config = normalizeProfitBoardRemoteObserverConfig(config)
+	switch config.AccountType {
+	case ProfitBoardUpstreamAccountTypeSub2API:
+		return config.BaseURL != "" && config.Email != "" &&
+			(config.Password != "" || config.PasswordEncrypted != "")
+	default:
+		return config.BaseURL != "" && config.UserID > 0 &&
+			(config.AccessToken != "" || config.AccessTokenEncrypted != "")
+	}
 }
 
 func validateProfitBoardRemoteObserverConfig(config ProfitBoardRemoteObserverConfig) error {
@@ -156,15 +199,34 @@ func validateProfitBoardRemoteObserverConfig(config ProfitBoardRemoteObserverCon
 	if config.BaseURL == "" {
 		return ErrProfitBoardRemoteMissingURL
 	}
-	if config.UserID <= 0 {
-		return ErrProfitBoardRemoteMissingUID
+	switch config.AccountType {
+	case ProfitBoardUpstreamAccountTypeSub2API:
+		if config.Email == "" {
+			return ErrProfitBoardRemoteMissingEmail
+		}
+		if config.Password == "" && config.PasswordEncrypted == "" {
+			return ErrProfitBoardRemoteMissingPassword
+		}
+	case ProfitBoardUpstreamAccountTypeNewAPI:
+		if config.UserID <= 0 {
+			return ErrProfitBoardRemoteMissingUID
+		}
+		if config.AccessToken == "" && config.AccessTokenEncrypted == "" {
+			return ErrProfitBoardRemoteMissingToken
+		}
+	default:
+		return ErrProfitBoardAccountTypeUnsupported
 	}
-	if strings.TrimSpace(config.AccessToken) == "" && strings.TrimSpace(config.AccessTokenEncrypted) == "" {
-		return ErrProfitBoardRemoteMissingToken
+	if err := validateProfitBoardRemoteURL(config.BaseURL); err != nil {
+		return fmt.Errorf("%w: %v", ErrProfitBoardRemoteURLInvalid, err)
 	}
+	return nil
+}
+
+func validateProfitBoardRemoteURL(url string) error {
 	fetchSetting := system_setting.GetFetchSetting()
-	if err := common.ValidateURLWithFetchSetting(
-		config.BaseURL,
+	return common.ValidateURLWithFetchSetting(
+		url,
 		fetchSetting.EnableSSRFProtection,
 		fetchSetting.AllowPrivateIp,
 		fetchSetting.DomainFilterMode,
@@ -173,10 +235,7 @@ func validateProfitBoardRemoteObserverConfig(config ProfitBoardRemoteObserverCon
 		fetchSetting.IpList,
 		fetchSetting.AllowedPorts,
 		fetchSetting.ApplyIPFilterForDomain,
-	); err != nil {
-		return fmt.Errorf("%w: %v", ErrProfitBoardRemoteURLInvalid, err)
-	}
-	return nil
+	)
 }
 
 func profitBoardRemoteSecretKey() []byte {
@@ -252,8 +311,15 @@ func stripProfitBoardRemoteObserverSecret(config ProfitBoardRemoteObserverConfig
 			config.AccessTokenMasked = maskProfitBoardRemoteSecret(decrypted)
 		}
 	}
+	if config.PasswordMasked == "" && config.PasswordEncrypted != "" {
+		if decrypted, err := decryptProfitBoardRemoteSecret(config.PasswordEncrypted); err == nil {
+			config.PasswordMasked = maskProfitBoardRemoteSecret(decrypted)
+		}
+	}
 	config.AccessToken = ""
 	config.AccessTokenEncrypted = ""
+	config.Password = ""
+	config.PasswordEncrypted = ""
 	return config
 }
 
@@ -362,10 +428,24 @@ func prepareProfitBoardRemoteObserverConfigsForStorage(signature string, comboCo
 		case persisted.AccessTokenEncrypted != "":
 			current.RemoteObserver.AccessTokenEncrypted = persisted.AccessTokenEncrypted
 		}
+		switch {
+		case current.RemoteObserver.Password != "":
+			encrypted, encErr := encryptProfitBoardRemoteSecret(current.RemoteObserver.Password)
+			if encErr != nil {
+				return nil, encErr
+			}
+			current.RemoteObserver.PasswordEncrypted = encrypted
+		case current.RemoteObserver.PasswordEncrypted != "":
+		case persisted.PasswordEncrypted != "":
+			current.RemoteObserver.PasswordEncrypted = persisted.PasswordEncrypted
+		}
 		current.RemoteObserver.AccessTokenMasked = ""
 		current.RemoteObserver.AccessToken = ""
+		current.RemoteObserver.PasswordMasked = ""
+		current.RemoteObserver.Password = ""
 		if !current.RemoteObserver.Enabled && current.RemoteObserver.BaseURL == "" && current.RemoteObserver.UserID == 0 {
 			current.RemoteObserver.AccessTokenEncrypted = ""
+			current.RemoteObserver.PasswordEncrypted = ""
 		}
 		prepared = append(prepared, current)
 	}
@@ -384,6 +464,9 @@ func hydrateProfitBoardRemoteObserverSecrets(signature string, comboConfigs []Pr
 		if current.RemoteObserver.AccessToken == "" && current.RemoteObserver.AccessTokenEncrypted == "" {
 			current.RemoteObserver.AccessTokenEncrypted = normalizeProfitBoardRemoteObserverConfig(persistedMap[current.ComboId].RemoteObserver).AccessTokenEncrypted
 		}
+		if current.RemoteObserver.Password == "" && current.RemoteObserver.PasswordEncrypted == "" {
+			current.RemoteObserver.PasswordEncrypted = normalizeProfitBoardRemoteObserverConfig(persistedMap[current.ComboId].RemoteObserver).PasswordEncrypted
+		}
 		hydrated = append(hydrated, current)
 	}
 	return hydrated
@@ -391,6 +474,18 @@ func hydrateProfitBoardRemoteObserverSecrets(signature string, comboConfigs []Pr
 
 func profitBoardRemoteObserverConfigHash(config ProfitBoardRemoteObserverConfig) string {
 	config = normalizeProfitBoardRemoteObserverConfig(config)
+	if config.AccountType == ProfitBoardUpstreamAccountTypeSub2API {
+		password := strings.TrimSpace(config.Password)
+		if password == "" && config.PasswordEncrypted != "" {
+			if decrypted, err := decryptProfitBoardRemoteSecret(config.PasswordEncrypted); err == nil {
+				password = strings.TrimSpace(decrypted)
+			}
+		}
+		if password == "" {
+			return ""
+		}
+		return common.GenerateHMAC(strings.ToLower(config.BaseURL) + "|" + ProfitBoardUpstreamAccountTypeSub2API + "|" + strings.ToLower(config.Email) + "|" + password)
+	}
 	token := strings.TrimSpace(config.AccessToken)
 	if token == "" && config.AccessTokenEncrypted != "" {
 		if decrypted, err := decryptProfitBoardRemoteSecret(config.AccessTokenEncrypted); err == nil {
@@ -408,6 +503,13 @@ func profitBoardQuotaToUSD(quota int64) float64 {
 		return 0
 	}
 	return roundProfitBoardAmount(float64(quota) / common.QuotaPerUnit)
+}
+
+func profitBoardUSDToQuota(usd float64) int64 {
+	if usd <= 0 || common.QuotaPerUnit <= 0 {
+		return 0
+	}
+	return int64(math.Round(usd * common.QuotaPerUnit))
 }
 
 func newProfitBoardRemoteHTTPClient() *http.Client {
@@ -459,18 +561,7 @@ func profitBoardRemoteRequest[T any](client *http.Client, remoteConfig ProfitBoa
 		return ErrProfitBoardRemoteTokenEmpty
 	}
 	url := strings.TrimRight(remoteConfig.BaseURL, "/") + path
-	fetchSetting := system_setting.GetFetchSetting()
-	if err := common.ValidateURLWithFetchSetting(
-		url,
-		fetchSetting.EnableSSRFProtection,
-		fetchSetting.AllowPrivateIp,
-		fetchSetting.DomainFilterMode,
-		fetchSetting.IpFilterMode,
-		fetchSetting.DomainList,
-		fetchSetting.IpList,
-		fetchSetting.AllowedPorts,
-		fetchSetting.ApplyIPFilterForDomain,
-	); err != nil {
+	if err := validateProfitBoardRemoteURL(url); err != nil {
 		return err
 	}
 	req, err := http.NewRequest(http.MethodGet, url, nil)
@@ -511,11 +602,173 @@ func profitBoardRemoteRequest[T any](client *http.Client, remoteConfig ProfitBoa
 	return nil
 }
 
+func buildProfitBoardSub2APIURL(baseURL string, path string) string {
+	baseURL = strings.TrimRight(baseURL, "/")
+	if strings.HasSuffix(strings.ToLower(baseURL), "/api/v1") && strings.HasPrefix(path, "/api/v1/") {
+		return baseURL + strings.TrimPrefix(path, "/api/v1")
+	}
+	return baseURL + path
+}
+
+func profitBoardSub2APIRequest[T any](client *http.Client, remoteConfig ProfitBoardRemoteObserverConfig, method string, path string, body any, token string, target *T) error {
+	url := buildProfitBoardSub2APIURL(remoteConfig.BaseURL, path)
+	if err := validateProfitBoardRemoteURL(url); err != nil {
+		return err
+	}
+	var reader io.Reader
+	if body != nil {
+		payload, err := common.Marshal(body)
+		if err != nil {
+			return err
+		}
+		reader = bytes.NewReader(payload)
+	}
+	req, err := http.NewRequest(method, url, reader)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if strings.TrimSpace(token) != "" {
+		token = strings.TrimSpace(token)
+		if !strings.HasPrefix(strings.ToLower(token), "bearer ") {
+			token = "Bearer " + token
+		}
+		req.Header.Set("Authorization", token)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("%w (%d): %s", ErrProfitBoardRemoteRequestFail, resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+	envelope := profitBoardSub2APIEnvelope[T]{}
+	if err := common.Unmarshal(respBody, &envelope); err != nil {
+		return err
+	}
+	if envelope.Success != nil && !*envelope.Success {
+		if envelope.Message == "" {
+			envelope.Message = "远端返回失败"
+		}
+		return errors.New(envelope.Message)
+	}
+	*target = envelope.Data
+	return nil
+}
+
+func decryptProfitBoardRemotePassword(config ProfitBoardRemoteObserverConfig) (string, error) {
+	password := strings.TrimSpace(config.Password)
+	if password != "" {
+		return password, nil
+	}
+	if config.PasswordEncrypted == "" {
+		return "", ErrProfitBoardRemoteMissingPassword
+	}
+	decrypted, err := decryptProfitBoardRemoteSecret(config.PasswordEncrypted)
+	if err != nil {
+		return "", err
+	}
+	password = strings.TrimSpace(decrypted)
+	if password == "" {
+		return "", ErrProfitBoardRemoteMissingPassword
+	}
+	return password, nil
+}
+
+func parseProfitBoardSub2APIBalance(raw json.RawMessage) (float64, error) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || string(raw) == "null" {
+		return 0, ErrProfitBoardRemoteBalanceInvalid
+	}
+	var numeric float64
+	if err := common.Unmarshal(raw, &numeric); err == nil {
+		if numeric < 0 || math.IsNaN(numeric) || math.IsInf(numeric, 0) {
+			return 0, ErrProfitBoardRemoteBalanceInvalid
+		}
+		return numeric, nil
+	}
+	var text string
+	if err := common.Unmarshal(raw, &text); err != nil {
+		return 0, ErrProfitBoardRemoteBalanceInvalid
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return 0, ErrProfitBoardRemoteBalanceInvalid
+	}
+	value, err := strconv.ParseFloat(text, 64)
+	if err != nil || value < 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0, ErrProfitBoardRemoteBalanceInvalid
+	}
+	return value, nil
+}
+
+func fetchProfitBoardSub2APIObserver(client *http.Client, remoteConfig ProfitBoardRemoteObserverConfig) (*profitBoardRemoteFetchResult, error) {
+	password, err := decryptProfitBoardRemotePassword(remoteConfig)
+	if err != nil {
+		return nil, err
+	}
+	loginData := profitBoardSub2APILoginData{}
+	if err := profitBoardSub2APIRequest(
+		client,
+		remoteConfig,
+		http.MethodPost,
+		"/api/v1/auth/login",
+		map[string]string{
+			"email":    remoteConfig.Email,
+			"password": password,
+		},
+		"",
+		&loginData,
+	); err != nil {
+		return nil, err
+	}
+	token := strings.TrimSpace(loginData.AccessToken)
+	if token == "" {
+		return nil, ErrProfitBoardRemoteLoginNoToken
+	}
+	profileData := profitBoardSub2APIProfileData{}
+	if err := profitBoardSub2APIRequest(
+		client,
+		remoteConfig,
+		http.MethodGet,
+		"/api/v1/user/profile",
+		nil,
+		token,
+		&profileData,
+	); err != nil {
+		return nil, err
+	}
+	balanceUSD, err := parseProfitBoardSub2APIBalance(profileData.Balance)
+	if err != nil {
+		return nil, err
+	}
+	return &profitBoardRemoteFetchResult{
+		RemoteQuotaPerUnit: common.QuotaPerUnit,
+		WalletQuota:        profitBoardUSDToQuota(balanceUSD),
+		WalletUsedQuota:    0,
+		Subscriptions:      []ProfitBoardRemoteSubscriptionSnapshot{},
+	}, nil
+}
+
 func fetchProfitBoardRemoteObserver(remoteConfig ProfitBoardRemoteObserverConfig) (*profitBoardRemoteFetchResult, error) {
 	if err := validateProfitBoardRemoteObserverConfig(remoteConfig); err != nil {
 		return nil, err
 	}
 	client := newProfitBoardRemoteHTTPClient()
+	remoteConfig = normalizeProfitBoardRemoteObserverConfig(remoteConfig)
+	if remoteConfig.AccountType == ProfitBoardUpstreamAccountTypeSub2API {
+		return fetchProfitBoardSub2APIObserver(client, remoteConfig)
+	}
 
 	statusData := profitBoardRemoteStatusData{}
 	if err := profitBoardRemoteRequest(client, remoteConfig, "/api/status", &statusData); err != nil {
@@ -817,6 +1070,17 @@ func profitBoardRemoteSnapshotDelta(prev ProfitBoardRemoteSnapshot, curr ProfitB
 	return totalDelta, warnings
 }
 
+func profitBoardRemoteSnapshotDeltaForConfig(config ProfitBoardRemoteObserverConfig, prev ProfitBoardRemoteSnapshot, curr ProfitBoardRemoteSnapshot) (int64, []string) {
+	config = normalizeProfitBoardRemoteObserverConfig(config)
+	if config.AccountType != ProfitBoardUpstreamAccountTypeSub2API {
+		return profitBoardRemoteSnapshotDelta(prev, curr)
+	}
+	if prev.WalletQuota >= curr.WalletQuota {
+		return prev.WalletQuota - curr.WalletQuota, nil
+	}
+	return 0, []string{"远端钱包余额上升，可能因为充值或额度重置，当前时间段的钱包观测成本已按 0 处理"}
+}
+
 func uniqueProfitBoardWarnings(items []string) []string {
 	if len(items) == 0 {
 		return items
@@ -884,7 +1148,7 @@ func collectProfitBoardRemoteObserverAggregate(signature string, batches []Profi
 		batchCostQuota := int64(0)
 		if len(snapshots) >= 2 {
 			for index := 1; index < len(snapshots); index++ {
-				deltaQuota, warnings := profitBoardRemoteSnapshotDelta(snapshots[index-1], snapshots[index])
+				deltaQuota, warnings := profitBoardRemoteSnapshotDeltaForConfig(remoteConfig, snapshots[index-1], snapshots[index])
 				for _, warning := range warnings {
 					aggregate.Warnings = append(aggregate.Warnings, fmt.Sprintf("%s：%s", batch.Name, warning))
 				}

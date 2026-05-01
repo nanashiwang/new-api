@@ -531,14 +531,30 @@ export const createDefaultUpstreamAccountDraft = () => ({
   account_type: 'newapi',
   base_url: '',
   user_id: 0,
+  email: '',
   access_token: '',
   access_token_masked: '',
+  password: '',
+  password_masked: '',
   resource_display_mode: 'both',
   low_balance_threshold_usd: 0,
   enabled: true,
 });
 
-export const normalizeUpstreamAccountResourceDisplayMode = (value) => {
+export const normalizeUpstreamAccountType = (value) =>
+  String(value || '')
+    .trim()
+    .toLowerCase() === 'sub2api'
+    ? 'sub2api'
+    : 'newapi';
+
+export const normalizeUpstreamAccountResourceDisplayMode = (
+  value,
+  accountType = 'newapi',
+) => {
+  if (normalizeUpstreamAccountType(accountType) === 'sub2api') {
+    return 'wallet';
+  }
   switch (String(value || '').trim()) {
     case 'wallet':
       return 'wallet';
@@ -577,17 +593,22 @@ export const prepareUpstreamAccountDraftForSave = (
 ) => {
   const baseUrl = normalizeUpstreamAccountBaseUrl(draft?.base_url);
   const suggestedName = getUpstreamAccountSuggestedName(baseUrl);
+  const accountType = normalizeUpstreamAccountType(draft?.account_type);
   return {
     ...draft,
+    account_type: accountType,
     name:
       String(draft?.name || '').trim() ||
       (allowSuggestedName ? suggestedName : ''),
     remark: String(draft?.remark || '').trim(),
     base_url: baseUrl,
+    email: String(draft?.email || '').trim(),
     access_token: String(draft?.access_token || '').trim(),
-    user_id: Number(draft?.user_id || 0),
+    password: String(draft?.password || '').trim(),
+    user_id: accountType === 'sub2api' ? 0 : Number(draft?.user_id || 0),
     resource_display_mode: normalizeUpstreamAccountResourceDisplayMode(
       draft?.resource_display_mode,
+      accountType,
     ),
   };
 };
@@ -610,14 +631,23 @@ export const getUpstreamAccountDraftValidation = (draft, options) => {
       errors.base_url = '请输入有效的 URL';
     }
   }
-  if (!Number.isInteger(prepared.user_id) || prepared.user_id <= 0) {
-    errors.user_id = '请输入有效的用户 ID';
-  }
-  if (
-    !prepared.access_token &&
-    !String(prepared?.access_token_masked || '').trim()
-  ) {
-    errors.access_token = '请输入 access token';
+  if (prepared.account_type === 'sub2api') {
+    if (!prepared.email) {
+      errors.email = '请输入邮箱';
+    }
+    if (!prepared.password && !String(prepared?.password_masked || '').trim()) {
+      errors.password = '请输入密码';
+    }
+  } else {
+    if (!Number.isInteger(prepared.user_id) || prepared.user_id <= 0) {
+      errors.user_id = '请输入有效的用户 ID';
+    }
+    if (
+      !prepared.access_token &&
+      !String(prepared?.access_token_masked || '').trim()
+    ) {
+      errors.access_token = '请输入 access token';
+    }
   }
   const firstError = Object.values(errors)[0] || '';
   return {
@@ -778,6 +808,7 @@ export const buildAccountResourceMetrics = (account, status, t) => {
     accountStatus === 'disabled' || accountStatus === 'not_configured';
   const resourceDisplayMode = normalizeUpstreamAccountResourceDisplayMode(
     account?.resource_display_mode,
+    account?.account_type,
   );
   const showWallet =
     resourceDisplayMode === 'both' || resourceDisplayMode === 'wallet';

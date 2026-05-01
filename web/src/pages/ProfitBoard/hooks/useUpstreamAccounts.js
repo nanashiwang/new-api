@@ -22,6 +22,7 @@ import {
   createDefaultUpstreamAccountDraft,
   getUpstreamAccountDraftValidation,
   getUpstreamAccountSuggestedName,
+  normalizeUpstreamAccountType,
   normalizeUpstreamAccountBaseUrl,
   prepareUpstreamAccountDraftForSave,
 } from '../utils';
@@ -165,10 +166,22 @@ export const useUpstreamAccounts = ({
         setAccountNameManuallyEdited(true);
       }
       setAccountDraft((prev) => {
+        const normalizedValue =
+          field === 'account_type'
+            ? normalizeUpstreamAccountType(value)
+            : value;
         const next = {
           ...prev,
-          [field]: field === 'user_id' ? Number(value || 0) : value,
+          [field]: field === 'user_id' ? Number(value || 0) : normalizedValue,
         };
+        if (field === 'account_type') {
+          if (normalizedValue === 'sub2api') {
+            next.user_id = 0;
+            next.resource_display_mode = 'wallet';
+          } else if (prev.account_type === 'sub2api') {
+            next.resource_display_mode = 'both';
+          }
+        }
         if (field === 'base_url' && !accountNameManuallyEdited && !prev.id) {
           const suggestedName = getUpstreamAccountSuggestedName(value);
           if (suggestedName) {
@@ -190,7 +203,8 @@ export const useUpstreamAccounts = ({
         base_url: normalizedBaseUrl,
       };
       if (!accountNameManuallyEdited && !prev.id) {
-        const suggestedName = getUpstreamAccountSuggestedName(normalizedBaseUrl);
+        const suggestedName =
+          getUpstreamAccountSuggestedName(normalizedBaseUrl);
         if (suggestedName) {
           next.name = suggestedName;
         }
@@ -209,11 +223,13 @@ export const useUpstreamAccounts = ({
 
   const accountDraftErrors = useMemo(() => {
     const visibleErrors = {};
-    Object.entries(accountDraftValidation.errors).forEach(([field, message]) => {
-      if (accountDraftSubmitted || accountDraftTouched[field]) {
-        visibleErrors[field] = message;
-      }
-    });
+    Object.entries(accountDraftValidation.errors).forEach(
+      ([field, message]) => {
+        if (accountDraftSubmitted || accountDraftTouched[field]) {
+          visibleErrors[field] = message;
+        }
+      },
+    );
     return visibleErrors;
   }, [
     accountDraftSubmitted,
@@ -245,8 +261,11 @@ export const useUpstreamAccounts = ({
         account_type: account.account_type || 'newapi',
         base_url: account.base_url || '',
         user_id: account.user_id || 0,
+        email: account.email || '',
         access_token: '',
         access_token_masked: account.access_token_masked || '',
+        password: '',
+        password_masked: account.password_masked || '',
         resource_display_mode: account.resource_display_mode || 'both',
         low_balance_threshold_usd: account.low_balance_threshold_usd || 0,
         enabled: account.enabled !== false,
@@ -263,14 +282,11 @@ export const useUpstreamAccounts = ({
     setSideSheetVisible(false);
   }, []);
 
-  const openDetailSideSheet = useCallback(
-    (accountId) => {
-      if (!accountId) return;
-      setEditingAccountId(Number(accountId));
-      setDetailSideSheetVisible(true);
-    },
-    [],
-  );
+  const openDetailSideSheet = useCallback((accountId) => {
+    if (!accountId) return;
+    setEditingAccountId(Number(accountId));
+    setDetailSideSheetVisible(true);
+  }, []);
 
   const closeDetailSideSheet = useCallback(() => {
     setDetailSideSheetVisible(false);

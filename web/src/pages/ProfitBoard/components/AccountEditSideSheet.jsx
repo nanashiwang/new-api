@@ -83,6 +83,8 @@ const AccountEditSideSheet = ({
   const isEditing = !!accountDraft.id;
   const isMobile = useIsMobile();
   const preparedDraft = accountDraftValidation?.prepared || accountDraft;
+  const accountType = preparedDraft.account_type || 'newapi';
+  const isSub2API = accountType === 'sub2api';
   const displayMode = preparedDraft.resource_display_mode || 'both';
   const suggestedName = getUpstreamAccountSuggestedName(accountDraft.base_url);
   const showAutoNameHint =
@@ -97,7 +99,9 @@ const AccountEditSideSheet = ({
   const footerHint = accountDraftCanSave
     ? isEditing
       ? t('保存后可继续手动同步余额')
-      : t('创建后会自动同步一次余额状态')
+      : isSub2API
+        ? t('创建后会登录 sub2api 并自动同步一次余额')
+        : t('创建后会自动同步一次余额状态')
     : t(accountDraftValidation?.firstError || '请先补全必填信息');
 
   return (
@@ -125,9 +129,12 @@ const AccountEditSideSheet = ({
                 onClick={() => {
                   Modal.confirm({
                     title: t('确认删除'),
-                    content: t('确定要删除账户「{{name}}」吗？删除后无法恢复。', {
-                      name: accountDraft.name || t('未命名'),
-                    }),
+                    content: t(
+                      '确定要删除账户「{{name}}」吗？删除后无法恢复。',
+                      {
+                        name: accountDraft.name || t('未命名'),
+                      },
+                    ),
                     okText: t('确认删除'),
                     cancelText: t('取消'),
                     okButtonProps: { type: 'danger' },
@@ -155,8 +162,32 @@ const AccountEditSideSheet = ({
       <div className='space-y-4'>
         <SectionBlock
           title={t('连接信息')}
-          subtitle={t('先填 URL、用户 ID 和 access token，系统会自动帮你规范输入')}
+          subtitle={t('选择上游类型后填写对应凭证，系统会自动帮你规范输入')}
         >
+          <div>
+            <Text type='tertiary' size='small' className='mb-1 block'>
+              {t('账户类型')}
+            </Text>
+            <Select
+              value={accountType}
+              onChange={(value) =>
+                updateAccountDraftField('account_type', value)
+              }
+              optionList={[
+                { label: 'new-api', value: 'newapi' },
+                { label: 'sub2api', value: 'sub2api' },
+              ]}
+              style={{ width: '100%' }}
+            />
+            <FieldMessage
+              message={
+                isSub2API
+                  ? t('sub2api 使用邮箱密码登录后读取钱包余额')
+                  : t('new-api 使用用户 ID 和 access token 读取钱包余额')
+              }
+            />
+          </div>
+
           <div>
             <Text type='tertiary' size='small' className='mb-1 block'>
               {t('URL')}
@@ -178,56 +209,113 @@ const AccountEditSideSheet = ({
             />
           </div>
 
-          <div>
-            <Text type='tertiary' size='small' className='mb-1 block'>
-              {t('用户 ID')}
-            </Text>
-            <InputNumber
-              min={1}
-              value={accountDraft.user_id || 0}
-              onChange={(value) => updateAccountDraftField('user_id', value)}
-              onBlur={() => touchAccountDraftField('user_id')}
-              style={{ width: '100%' }}
-            />
-            <FieldMessage
-              message={
-                accountDraftErrors.user_id ||
-                t('填写远端 new-api 的用户 ID，用于读取钱包余额')
-              }
-              tone={accountDraftErrors.user_id ? 'error' : 'muted'}
-            />
-          </div>
+          {isSub2API ? (
+            <>
+              <div>
+                <Text type='tertiary' size='small' className='mb-1 block'>
+                  {t('邮箱')}
+                </Text>
+                <Input
+                  value={accountDraft.email}
+                  onChange={(value) => updateAccountDraftField('email', value)}
+                  onBlur={() => touchAccountDraftField('email')}
+                  placeholder={t('邮箱地址')}
+                />
+                <FieldMessage
+                  message={
+                    accountDraftErrors.email ||
+                    t('填写 sub2api 登录邮箱，用于获取临时访问令牌')
+                  }
+                  tone={accountDraftErrors.email ? 'error' : 'muted'}
+                />
+              </div>
 
-          <div>
-            <Text type='tertiary' size='small' className='mb-1 block'>
-              {t('密钥')}
-            </Text>
-            <Input
-              value={accountDraft.access_token}
-              onChange={(value) =>
-                updateAccountDraftField('access_token', value)
-              }
-              onBlur={() => touchAccountDraftField('access_token')}
-              mode='password'
-              placeholder={
-                accountDraft.access_token_masked
-                  ? t('留空则保留当前密钥')
-                  : t('输入上游 access token')
-              }
-            />
-            <FieldMessage
-              message={
-                accountDraftErrors.access_token ||
-                (accountDraft.access_token_masked
-                  ? t(
-                      '当前密钥: {{token}}。如需更换，直接输入新的 access token',
-                      { token: accountDraft.access_token_masked },
-                    )
-                  : t('创建后会立即尝试同步余额，建议直接填写可用密钥'))
-              }
-              tone={accountDraftErrors.access_token ? 'error' : 'muted'}
-            />
-          </div>
+              <div>
+                <Text type='tertiary' size='small' className='mb-1 block'>
+                  {t('密码')}
+                </Text>
+                <Input
+                  value={accountDraft.password}
+                  onChange={(value) =>
+                    updateAccountDraftField('password', value)
+                  }
+                  onBlur={() => touchAccountDraftField('password')}
+                  mode='password'
+                  placeholder={
+                    accountDraft.password_masked
+                      ? t('留空则保留当前密码')
+                      : t('输入 sub2api 登录密码')
+                  }
+                />
+                <FieldMessage
+                  message={
+                    accountDraftErrors.password ||
+                    (accountDraft.password_masked
+                      ? t('当前密码: {{password}}。如需更换，直接输入新密码', {
+                          password: accountDraft.password_masked,
+                        })
+                      : t('密码会加密保存，仅用于后台同步余额'))
+                  }
+                  tone={accountDraftErrors.password ? 'error' : 'muted'}
+                />
+              </div>
+            </>
+          ) : (
+            <>
+              <div>
+                <Text type='tertiary' size='small' className='mb-1 block'>
+                  {t('用户 ID')}
+                </Text>
+                <InputNumber
+                  min={1}
+                  value={accountDraft.user_id || 0}
+                  onChange={(value) =>
+                    updateAccountDraftField('user_id', value)
+                  }
+                  onBlur={() => touchAccountDraftField('user_id')}
+                  style={{ width: '100%' }}
+                />
+                <FieldMessage
+                  message={
+                    accountDraftErrors.user_id ||
+                    t('填写远端 new-api 的用户 ID，用于读取钱包余额')
+                  }
+                  tone={accountDraftErrors.user_id ? 'error' : 'muted'}
+                />
+              </div>
+
+              <div>
+                <Text type='tertiary' size='small' className='mb-1 block'>
+                  {t('密钥')}
+                </Text>
+                <Input
+                  value={accountDraft.access_token}
+                  onChange={(value) =>
+                    updateAccountDraftField('access_token', value)
+                  }
+                  onBlur={() => touchAccountDraftField('access_token')}
+                  mode='password'
+                  placeholder={
+                    accountDraft.access_token_masked
+                      ? t('留空则保留当前密钥')
+                      : t('输入上游 access token')
+                  }
+                />
+                <FieldMessage
+                  message={
+                    accountDraftErrors.access_token ||
+                    (accountDraft.access_token_masked
+                      ? t(
+                          '当前密钥: {{token}}。如需更换，直接输入新的 access token',
+                          { token: accountDraft.access_token_masked },
+                        )
+                      : t('创建后会立即尝试同步余额，建议直接填写可用密钥'))
+                  }
+                  tone={accountDraftErrors.access_token ? 'error' : 'muted'}
+                />
+              </div>
+            </>
+          )}
         </SectionBlock>
 
         <SectionBlock
@@ -259,7 +347,9 @@ const AccountEditSideSheet = ({
 
           <div className='flex items-center justify-between rounded-xl border border-semi-color-border bg-semi-color-fill-0 px-3 py-2.5'>
             <div>
-              <Text strong size='small'>{t('启用账户')}</Text>
+              <Text strong size='small'>
+                {t('启用账户')}
+              </Text>
               <Text type='tertiary' size='small' className='ml-2'>
                 {t('关闭后会保留配置，但不再参与余额判断')}
               </Text>
@@ -273,26 +363,37 @@ const AccountEditSideSheet = ({
             />
           </div>
 
-          <div>
-            <Text type='tertiary' size='small' className='mb-1 block'>
-              {t('卡片展示')}
-            </Text>
-            <Select
-              value={displayMode}
-              onChange={(value) =>
-                updateAccountDraftField('resource_display_mode', value)
-              }
-              optionList={[
-                { label: t('同时显示钱包和订阅'), value: 'both' },
-                { label: t('只显示钱包'), value: 'wallet' },
-                { label: t('只显示订阅'), value: 'subscription' },
-              ]}
-              style={{ width: '100%' }}
-            />
-            <FieldMessage
-              message={t('用来控制卡片和详情里展示的钱包/订阅信息')}
-            />
-          </div>
+          {!isSub2API ? (
+            <div>
+              <Text type='tertiary' size='small' className='mb-1 block'>
+                {t('卡片展示')}
+              </Text>
+              <Select
+                value={displayMode}
+                onChange={(value) =>
+                  updateAccountDraftField('resource_display_mode', value)
+                }
+                optionList={[
+                  { label: t('同时显示钱包和订阅'), value: 'both' },
+                  { label: t('只显示钱包'), value: 'wallet' },
+                  { label: t('只显示订阅'), value: 'subscription' },
+                ]}
+                style={{ width: '100%' }}
+              />
+              <FieldMessage
+                message={t('用来控制卡片和详情里展示的钱包/订阅信息')}
+              />
+            </div>
+          ) : (
+            <div className='rounded-xl border border-semi-color-border bg-semi-color-fill-0 px-3 py-2.5'>
+              <Text strong size='small'>
+                {t('卡片展示')}
+              </Text>
+              <Text type='tertiary' size='small' className='ml-2'>
+                {t('sub2api 暂只显示钱包余额')}
+              </Text>
+            </div>
+          )}
 
           <div>
             <Text type='tertiary' size='small' className='mb-1 block'>
@@ -303,9 +404,7 @@ const AccountEditSideSheet = ({
               onChange={(value) => updateAccountDraftField('remark', value)}
               placeholder={t('例如：主站、备用、包月账户')}
             />
-            <FieldMessage
-              message={t('可选，用来补充用途、来源或成本特征')}
-            />
+            <FieldMessage message={t('可选，用来补充用途、来源或成本特征')} />
           </div>
         </SectionBlock>
       </div>

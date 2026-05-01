@@ -56,7 +56,9 @@ const ResourceMetric = ({ metric }) => (
           {metric.title}
         </Text>
         <div className='mt-2 flex flex-wrap items-baseline gap-2'>
-          <span className={`text-2xl font-bold tabular-nums ${metric.valueTone}`}>
+          <span
+            className={`text-2xl font-bold tabular-nums ${metric.valueTone}`}
+          >
             {metric.value}
           </span>
           <span
@@ -131,6 +133,12 @@ const AccountCard = ({
             <Tag color={statusMeta.color} size='small'>
               {statusMeta.label}
             </Tag>
+            <Tag
+              color={item.account_type === 'sub2api' ? 'purple' : 'blue'}
+              size='small'
+            >
+              {item.account_type === 'sub2api' ? 'sub2api' : 'new-api'}
+            </Tag>
           </div>
           {domainLabel ? (
             <Text
@@ -193,12 +201,11 @@ const AccountCard = ({
             <div>
               <span>{item.error_message}</span>
               <div className='mt-1 text-red-500/60'>
-                {t('同步')}{' '}
-                <span className='font-medium'>{syncTime}</span>
+                {t('同步')} <span className='font-medium'>{syncTime}</span>
               </div>
             </div>
           </div>
-        ) : (item.status === 'needs_baseline' || item.status === 'failed') ? (
+        ) : item.status === 'needs_baseline' || item.status === 'failed' ? (
           <div className='mt-3 flex items-start gap-1.5 rounded-lg bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'>
             <AlertCircle size={12} className='mt-0.5 shrink-0' />
             <div>
@@ -213,8 +220,7 @@ const AccountCard = ({
                 </span>
               )}
               <div className='mt-1 text-amber-600/60 dark:text-amber-400/60'>
-                {t('同步')}{' '}
-                <span className='font-medium'>{syncTime}</span>
+                {t('同步')} <span className='font-medium'>{syncTime}</span>
               </div>
             </div>
           </div>
@@ -233,7 +239,9 @@ const AccountCard = ({
         ) : (
           <div className='mt-3 text-xs text-semi-color-text-2'>
             {t('同步')}{' '}
-            <span className='font-medium text-semi-color-text-0'>{syncTime}</span>
+            <span className='font-medium text-semi-color-text-0'>
+              {syncTime}
+            </span>
           </div>
         )}
       </div>
@@ -285,109 +293,112 @@ const UpstreamWalletCard = ({
   }, [accounts, searchQuery]);
 
   return (
-  <Card
-    bordered={false}
-    className='rounded-xl'
-    title={
-      <div className='flex items-center gap-2'>
-        <Wallet size={16} />
-        <span>{t('上游账户')}</span>
-      </div>
-    }
-    headerExtraContent={
-      <Space wrap>
-        <Button
-          type='tertiary'
-          icon={<RefreshCw size={14} />}
-          loading={syncingAllAccounts}
-          onClick={syncAllAccounts}
-          size='small'
-        >
-          {t('全部同步')}
-        </Button>
-        <Button
-          theme='solid'
-          type='primary'
-          icon={<Plus size={14} />}
-          onClick={openCreateSideSheet}
-          size='small'
-        >
-          {t('新建')}
-        </Button>
-      </Space>
-    }
-  >
-    {filteredAccounts.length > 0 ? (
-      <div className='space-y-3'>
-        {accounts.length > 3 && (
-          <Input
-            prefix={<Search size={14} />}
-            placeholder={t('搜索账户名称或域名')}
-            value={searchQuery}
-            onChange={setSearchQuery}
-            showClear
-            size='small'
-          />
-        )}
-        <div className='grid gap-3 md:grid-cols-2 2xl:grid-cols-3'>
-          {filteredAccounts.map((item) => {
-          const statusMeta = getWalletStatusMeta(item.status, t);
-          const resourceMeta = buildAccountResourceMetrics(item, status, t);
-
-          return (
-            <AccountCard
-              key={item.id}
-              item={item}
-              statusMeta={statusMeta}
-              resourceMeta={resourceMeta}
-              syncingAccountId={syncingAccountId}
-              syncAccount={syncAccount}
-              openEditSideSheet={openEditSideSheet}
-              openDetailSideSheet={openDetailSideSheet}
-              deleteAccount={deleteAccount}
-              deletingAccountId={deletingAccountId}
-              t={t}
-            />
-          );
-        })}
+    <Card
+      bordered={false}
+      className='rounded-xl'
+      title={
+        <div className='flex items-center gap-2'>
+          <Wallet size={16} />
+          <span>{t('上游账户')}</span>
         </div>
-      </div>
-    ) : (
-      <Empty image={null} description={
-        searchQuery.trim()
-          ? t('没有匹配"{{query}}"的账户', { query: searchQuery.trim() })
-          : t('点击右上角新建账户')
-      } />
-    )}
+      }
+      headerExtraContent={
+        <Space wrap>
+          <Button
+            type='tertiary'
+            icon={<RefreshCw size={14} />}
+            loading={syncingAllAccounts}
+            onClick={syncAllAccounts}
+            size='small'
+          >
+            {t('全部同步')}
+          </Button>
+          <Button
+            theme='solid'
+            type='primary'
+            icon={<Plus size={14} />}
+            onClick={openCreateSideSheet}
+            size='small'
+          >
+            {t('新建')}
+          </Button>
+        </Space>
+      }
+    >
+      {filteredAccounts.length > 0 ? (
+        <div className='space-y-3'>
+          {accounts.length > 3 && (
+            <Input
+              prefix={<Search size={14} />}
+              placeholder={t('搜索账户名称或域名')}
+              value={searchQuery}
+              onChange={setSearchQuery}
+              showClear
+              size='small'
+            />
+          )}
+          <div className='grid gap-3 md:grid-cols-2 2xl:grid-cols-3'>
+            {filteredAccounts.map((item) => {
+              const statusMeta = getWalletStatusMeta(item.status, t);
+              const resourceMeta = buildAccountResourceMetrics(item, status, t);
 
-    <AccountEditSideSheet
-      visible={sideSheetVisible}
-      onClose={closeSideSheet}
-      accountDraft={accountDraft}
-      updateAccountDraftField={updateAccountDraftField}
-      normalizeAccountDraftBaseUrl={normalizeAccountDraftBaseUrl}
-      touchAccountDraftField={touchAccountDraftField}
-      accountDraftErrors={accountDraftErrors}
-      accountDraftCanSave={accountDraftCanSave}
-      accountDraftValidation={accountDraftValidation}
-      saveAccount={saveAccount}
-      deleteAccount={deleteAccount}
-      savingAccount={savingAccount}
-      deletingAccountId={deletingAccountId}
-      t={t}
-    />
+              return (
+                <AccountCard
+                  key={item.id}
+                  item={item}
+                  statusMeta={statusMeta}
+                  resourceMeta={resourceMeta}
+                  syncingAccountId={syncingAccountId}
+                  syncAccount={syncAccount}
+                  openEditSideSheet={openEditSideSheet}
+                  openDetailSideSheet={openDetailSideSheet}
+                  deleteAccount={deleteAccount}
+                  deletingAccountId={deletingAccountId}
+                  t={t}
+                />
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <Empty
+          image={null}
+          description={
+            searchQuery.trim()
+              ? t('没有匹配"{{query}}"的账户', { query: searchQuery.trim() })
+              : t('点击右上角新建账户')
+          }
+        />
+      )}
 
-    <AccountDetailSideSheet
-      visible={detailSideSheetVisible}
-      onClose={closeDetailSideSheet}
-      account={editingAccount}
-      accountTrend={accountTrend}
-      accountTrendLoading={accountTrendLoading}
-      formatMoney={formatMoney}
-      status={status}
-      t={t}
-    />
-  </Card>
+      <AccountEditSideSheet
+        visible={sideSheetVisible}
+        onClose={closeSideSheet}
+        accountDraft={accountDraft}
+        updateAccountDraftField={updateAccountDraftField}
+        normalizeAccountDraftBaseUrl={normalizeAccountDraftBaseUrl}
+        touchAccountDraftField={touchAccountDraftField}
+        accountDraftErrors={accountDraftErrors}
+        accountDraftCanSave={accountDraftCanSave}
+        accountDraftValidation={accountDraftValidation}
+        saveAccount={saveAccount}
+        deleteAccount={deleteAccount}
+        savingAccount={savingAccount}
+        deletingAccountId={deletingAccountId}
+        t={t}
+      />
+
+      <AccountDetailSideSheet
+        visible={detailSideSheetVisible}
+        onClose={closeDetailSideSheet}
+        account={editingAccount}
+        accountTrend={accountTrend}
+        accountTrendLoading={accountTrendLoading}
+        formatMoney={formatMoney}
+        status={status}
+        t={t}
+      />
+    </Card>
   );
 };
 
