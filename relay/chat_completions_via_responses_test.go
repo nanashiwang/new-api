@@ -159,6 +159,200 @@ func newResponsesRetryStreamHTTPResponse(body string) *http.Response {
 	}
 }
 
+func newResponsesRetryNonStreamSuccessHTTPResponse(t *testing.T, text string) *http.Response {
+	t.Helper()
+
+	body, err := common.Marshal(map[string]any{
+		"id":         "resp_success",
+		"model":      "gpt-5",
+		"created_at": 1700000000,
+		"status":     "completed",
+		"output": []map[string]any{
+			{
+				"type": "message",
+				"role": "assistant",
+				"content": []map[string]any{
+					{
+						"type": "output_text",
+						"text": text,
+					},
+				},
+			},
+		},
+		"usage": map[string]any{
+			"input_tokens":  10,
+			"output_tokens": 2,
+			"total_tokens":  12,
+		},
+	})
+	require.NoError(t, err)
+	return newResponsesRetryHTTPResponse(http.StatusOK, string(body))
+}
+
+func TestChatCompletionsViaResponses_RemovesStreamOptionsForNonStreamRequest(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	info := &relaycommon.RelayInfo{
+		TokenId:         302,
+		UserId:          301,
+		RelayMode:       relayconstant.RelayModeChatCompletions,
+		OriginModelName: "gpt-5",
+		RelayFormat:     types.RelayFormatOpenAI,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:                      303,
+			UpstreamModelName:              "gpt-5",
+			SupportsResponsesStreamOptions: true,
+		},
+	}
+	request := &dto.GeneralOpenAIRequest{
+		Model: "gpt-5",
+		StreamOptions: &dto.StreamOptions{
+			IncludeUsage: true,
+		},
+		Messages: []dto.Message{
+			{Role: "user", Content: "hello"},
+		},
+	}
+	adaptor := &responsesRetryTestAdaptor{
+		responses: []*http.Response{
+			newResponsesRetryNonStreamSuccessHTTPResponse(t, "ok"),
+		},
+	}
+
+	usage, newAPIError := chatCompletionsViaResponses(ctx, info, adaptor, request)
+	require.Nil(t, newAPIError)
+	require.NotNil(t, usage)
+	require.Len(t, adaptor.requests, 1)
+	require.NotContains(t, adaptor.requests[0], `"stream_options"`)
+	require.NotContains(t, adaptor.requests[0], `"stream":true`)
+}
+
+func TestChatCompletionsViaResponses_PreservesStreamOptionsForStreamRequest(t *testing.T) {
+	setResponsesRetryStreamTestTimeout(t)
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	info := &relaycommon.RelayInfo{
+		TokenId:         312,
+		UserId:          311,
+		RelayMode:       relayconstant.RelayModeChatCompletions,
+		OriginModelName: "gpt-5",
+		RelayFormat:     types.RelayFormatOpenAI,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:                      313,
+			UpstreamModelName:              "gpt-5",
+			SupportsResponsesStreamOptions: true,
+		},
+	}
+	request := &dto.GeneralOpenAIRequest{
+		Model:  "gpt-5",
+		Stream: true,
+		StreamOptions: &dto.StreamOptions{
+			IncludeUsage: true,
+		},
+		Messages: []dto.Message{
+			{Role: "user", Content: "hello"},
+		},
+	}
+	successBody := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_stream","model":"gpt-5","created_at":1700000000}}`,
+		`data: {"type":"response.output_text.delta","delta":"ok"}`,
+		`data: {"type":"response.completed","response":{"id":"resp_stream","model":"gpt-5","created_at":1700000000,"usage":{"input_tokens":10,"output_tokens":2,"total_tokens":12},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}}`,
+		`data: [DONE]`,
+	}, "\n")
+	adaptor := &responsesRetryTestAdaptor{
+		responses: []*http.Response{
+			newResponsesRetryStreamHTTPResponse(successBody),
+		},
+	}
+
+	usage, newAPIError := chatCompletionsViaResponses(ctx, info, adaptor, request)
+	require.Nil(t, newAPIError)
+	require.NotNil(t, usage)
+	require.Len(t, adaptor.requests, 1)
+	require.Contains(t, adaptor.requests[0], `"stream":true`)
+	require.Contains(t, adaptor.requests[0], `"stream_options"`)
+}
+
+func TestChatCompletionsViaResponses_RemovesStreamOptionsFromNonStreamFallbackRequest(t *testing.T) {
+	setResponsesRetryTestOptions(t, map[string]string{
+		testResponsesSessionBridgeEnabledOption:  "true",
+		testResponsesSessionBridgeUseRedisOption: "false",
+	})
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	info := &relaycommon.RelayInfo{
+		TokenId:         322,
+		UserId:          321,
+		RelayMode:       relayconstant.RelayModeChatCompletions,
+		OriginModelName: "gpt-5",
+		RelayFormat:     types.RelayFormatOpenAI,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:                      323,
+			ApiType:                        constant.APITypeOpenAI,
+			ChannelBaseUrl:                 "https://example.com",
+			UpstreamModelName:              "gpt-5",
+			SupportsResponsesStreamOptions: true,
+		},
+	}
+
+	initialReq := &dto.GeneralOpenAIRequest{
+		Model: "gpt-5",
+		Messages: []dto.Message{
+			{Role: "system", Content: "sys"},
+			{Role: "user", Content: "hello"},
+		},
+	}
+	err := service.StoreResponsesSessionBridge(
+		info,
+		initialReq,
+		dto.Message{Role: "assistant", Content: "hi"},
+		"resp_1",
+	)
+	require.NoError(t, err)
+
+	request := &dto.GeneralOpenAIRequest{
+		Model: "gpt-5",
+		StreamOptions: &dto.StreamOptions{
+			IncludeUsage: true,
+		},
+		Messages: []dto.Message{
+			{Role: "system", Content: "sys"},
+			{Role: "user", Content: "hello"},
+			{Role: "assistant", Content: "hi"},
+			{Role: "user", Content: "what's next?"},
+		},
+	}
+	adaptor := &responsesRetryTestAdaptor{
+		responses: []*http.Response{
+			newResponsesRetryHTTPResponse(http.StatusBadRequest, `{"error":{"message":"Unsupported parameter: previous_response_id"}}`),
+			newResponsesRetryNonStreamSuccessHTTPResponse(t, "fallback ok"),
+		},
+	}
+
+	usage, newAPIError := chatCompletionsViaResponses(ctx, info, adaptor, request)
+	require.Nil(t, newAPIError)
+	require.NotNil(t, usage)
+	require.Len(t, adaptor.requests, 2)
+	require.Contains(t, adaptor.requests[0], `"previous_response_id":"resp_1"`)
+	require.NotContains(t, adaptor.requests[0], `"stream_options"`)
+	require.NotContains(t, adaptor.requests[1], `"previous_response_id"`)
+	require.NotContains(t, adaptor.requests[1], `"stream_options"`)
+	require.Contains(t, adaptor.requests[1], `"hello"`)
+	require.Contains(t, adaptor.requests[1], `"hi"`)
+	require.Contains(t, adaptor.requests[1], `what's next?`)
+}
+
 func TestChatCompletionsViaResponses_RetriesWithoutPreviousResponseID(t *testing.T) {
 	setResponsesRetryTestOptions(t, map[string]string{
 		testResponsesSessionBridgeEnabledOption:  "true",

@@ -186,6 +186,16 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 		if err != nil {
 			return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 		}
+		jsonData, err = relaycommon.NormalizeJSONStreamOptions(jsonData)
+		if err != nil {
+			return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+		if strippedStreamOptions {
+			jsonData, err = relaycommon.RemoveJSONStreamOptions(jsonData)
+			if err != nil {
+				return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			}
+		}
 
 		resp, err := adaptor.DoRequest(c, info, bytes.NewBuffer(jsonData))
 		if err != nil {
