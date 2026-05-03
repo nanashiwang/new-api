@@ -101,3 +101,70 @@ func TestResolveResponsesBridgeModeDisabledWins(t *testing.T) {
 		t.Fatal("expected claude bridge to stay disabled when channel setting disables it")
 	}
 }
+
+func TestResolveResponsesBridgeModeGlobalPassThroughDisablesBridge(t *testing.T) {
+	original := *model_setting.GetGlobalSettings()
+	model_setting.GetGlobalSettings().PassThroughRequestEnabled = true
+	model_setting.GetGlobalSettings().ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled:       true,
+		AllChannels:   true,
+		ModelPatterns: []string{"^gpt-5$"},
+	}
+	defer func() {
+		*model_setting.GetGlobalSettings() = original
+	}()
+
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeChatCompletions,
+		OriginModelName: "gpt-5",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:            1,
+			ChannelType:          1,
+			SupportsResponsesAPI: true,
+			ChannelSetting: dto.ChannelSettings{
+				ChatCompletionsToResponsesMode: dto.ChatCompletionsToResponsesModeEnabled,
+			},
+		},
+	}
+
+	if got := resolveResponsesBridgeMode(info); got != responsesBridgeModeDisabled {
+		t.Fatalf("expected disabled bridge mode when global pass-through is enabled, got %q", got)
+	}
+	if shouldUseResponsesBridge(info) {
+		t.Fatal("expected chat/completions bridge to stay disabled when global pass-through is enabled")
+	}
+}
+
+func TestResolveResponsesBridgeModeChannelPassThroughDisablesBridge(t *testing.T) {
+	original := *model_setting.GetGlobalSettings()
+	model_setting.GetGlobalSettings().PassThroughRequestEnabled = false
+	model_setting.GetGlobalSettings().ChatCompletionsToResponsesPolicy = model_setting.ChatCompletionsToResponsesPolicy{
+		Enabled:       true,
+		AllChannels:   true,
+		ModelPatterns: []string{"^gpt-5$"},
+	}
+	defer func() {
+		*model_setting.GetGlobalSettings() = original
+	}()
+
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeChatCompletions,
+		OriginModelName: "gpt-5",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:            1,
+			ChannelType:          1,
+			SupportsResponsesAPI: true,
+			ChannelSetting: dto.ChannelSettings{
+				PassThroughBodyEnabled:         true,
+				ChatCompletionsToResponsesMode: dto.ChatCompletionsToResponsesModeEnabled,
+			},
+		},
+	}
+
+	if got := resolveResponsesBridgeMode(info); got != responsesBridgeModeDisabled {
+		t.Fatalf("expected disabled bridge mode when channel pass-through is enabled, got %q", got)
+	}
+	if shouldUseResponsesBridge(info) {
+		t.Fatal("expected chat/completions bridge to stay disabled when channel pass-through is enabled")
+	}
+}
