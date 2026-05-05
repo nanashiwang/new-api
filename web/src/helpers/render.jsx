@@ -1657,6 +1657,7 @@ export function renderModelPrice(opts) {
     audio_input_token_count: audioInputTokens = 0,
     audio_input_price: audioInputPrice = 0,
     image_generation_call: imageGenerationCall = false,
+    image_generation_call_count: imageGenerationCallCount = 0,
     image_generation_call_price: imageGenerationCallPrice = 0,
     displayMode = 'price',
   } = opts;
@@ -1666,6 +1667,8 @@ export function renderModelPrice(opts) {
   );
   let groupRatio = effectiveGroupRatio;
   const completionRatio = _completionRatio ?? 0;
+  const normalizedImageGenerationCallCount =
+    imageGenerationCallCount || (imageGenerationCall ? 1 : 0);
 
   const { symbol, rate } = getCurrencyConfig();
 
@@ -1799,8 +1802,9 @@ export function renderModelPrice(opts) {
         : '',
       imageGenerationCall && imageGenerationCallPrice > 0
         ? buildBillingPriceText(
-            ' + 图片生成调用 {{symbol}}{{price}} / 1次 * {{ratioType}} {{ratio}}',
+            ' + 图片生成调用 {{count}} 次 {{symbol}}{{price}} * {{ratioType}} {{ratio}}',
             {
+              count: normalizedImageGenerationCallCount,
               symbol,
               usdAmount: imageGenerationCallPrice,
               rate,
@@ -1866,11 +1870,15 @@ export function renderModelPrice(opts) {
           })
         : null,
       imageGenerationCall && imageGenerationCallPrice > 0
-        ? buildBillingPriceText('图片生成调用：{{symbol}}{{price}} / 1次', {
-            symbol,
-            usdAmount: imageGenerationCallPrice,
-            rate,
-          })
+        ? buildBillingPriceText(
+            '图片生成调用 {{count}} 次：{{symbol}}{{price}}',
+            {
+              count: normalizedImageGenerationCallCount,
+              symbol,
+              usdAmount: imageGenerationCallPrice,
+              rate,
+            },
+          )
         : null,
       buildBillingText(
         '{{inputDesc}} + {{outputDesc}}{{extraServices}} = {{symbol}}{{total}}',
@@ -2071,8 +2079,9 @@ export function renderModelPrice(opts) {
       : null,
     imageGenerationCall && imageGenerationCallPrice > 0
       ? buildBillingText(
-          '图片生成：1 次 * 单价 {{price}} * {{ratioType}} {{ratio}} = {{amount}}',
+          '图片生成：{{count}} 次 * 总价 {{price}} * {{ratioType}} {{ratio}} = {{amount}}',
           {
+            count: normalizedImageGenerationCallCount,
             price: renderDisplayAmountFromUsd(imageGenerationCallPrice),
             ratioType: ratioLabel,
             ratio: groupRatio,
@@ -2100,6 +2109,9 @@ export function renderLogContent(opts) {
     web_search_call_count: webSearchCallCount = 0,
     file_search: fileSearch = false,
     file_search_call_count: fileSearchCallCount = 0,
+    image_generation_call: imageGenerationCall = false,
+    image_generation_call_count: imageGenerationCallCount = 0,
+    image_generation_call_price: imageGenerationCallPrice = 0,
     displayMode = 'price',
   } = opts;
   const {
@@ -2166,6 +2178,24 @@ export function renderLogContent(opts) {
         fileSearchCallCount,
       },
     );
+    appendPricePart(
+      parts,
+      imageGenerationCall,
+      '图片生成工具调用 {{imageGenerationCallCount}} 次',
+      {
+        imageGenerationCallCount:
+          imageGenerationCallCount || (imageGenerationCall ? 1 : 0),
+      },
+    );
+    appendPricePart(
+      parts,
+      imageGenerationCall && imageGenerationCallPrice > 0,
+      '图片生成工具费用 {{symbol}}{{price}}',
+      {
+        symbol,
+        price: (imageGenerationCallPrice * rate).toFixed(6),
+      },
+    );
     parts.push(getGroupRatioText(groupRatio, user_group_ratio));
     return joinBillingSummary(parts);
   }
@@ -2178,6 +2208,12 @@ export function renderLogContent(opts) {
       ratio,
     });
   } else {
+    const imageGenerationText = imageGenerationCall
+      ? i18next.t('，图片生成工具调用 {{imageGenerationCallCount}} 次', {
+          imageGenerationCallCount:
+            imageGenerationCallCount || (imageGenerationCall ? 1 : 0),
+        })
+      : '';
     if (image) {
       return i18next.t(
         '模型倍率 {{modelRatio}}，缓存倍率 {{cacheRatio}}，输出倍率 {{completionRatio}}，图片输入倍率 {{imageRatio}}，{{ratioType}} {{ratio}}',
@@ -2189,7 +2225,7 @@ export function renderLogContent(opts) {
           ratioType: ratioLabel,
           ratio,
         },
-      );
+      ) + imageGenerationText;
     } else if (webSearch) {
       return i18next.t(
         '模型倍率 {{modelRatio}}，缓存倍率 {{cacheRatio}}，输出倍率 {{completionRatio}}，{{ratioType}} {{ratio}}，Web 搜索调用 {{webSearchCallCount}} 次',
@@ -2201,7 +2237,7 @@ export function renderLogContent(opts) {
           ratio,
           webSearchCallCount,
         },
-      );
+      ) + imageGenerationText;
     } else {
       return i18next.t(
         '模型倍率 {{modelRatio}}，缓存倍率 {{cacheRatio}}，输出倍率 {{completionRatio}}，{{ratioType}} {{ratio}}',
@@ -2212,7 +2248,7 @@ export function renderLogContent(opts) {
           ratioType: ratioLabel,
           ratio,
         },
-      );
+      ) + imageGenerationText;
     }
   }
 }

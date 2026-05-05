@@ -36,6 +36,7 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 
 	if responsesResponse.HasImageGenerationCall() {
 		c.Set("image_generation_call", true)
+		c.Set("image_generation_call_count", responsesResponse.CountImageGenerationCalls())
 		c.Set("image_generation_call_quality", responsesResponse.GetQuality())
 		c.Set("image_generation_call_size", responsesResponse.GetSize())
 	}
@@ -119,6 +120,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 					}
 					if streamResponse.Response.HasImageGenerationCall() {
 						c.Set("image_generation_call", true)
+						c.Set("image_generation_call_count", streamResponse.Response.CountImageGenerationCalls())
 						c.Set("image_generation_call_quality", streamResponse.Response.GetQuality())
 						c.Set("image_generation_call_size", streamResponse.Response.GetSize())
 					}

@@ -14,6 +14,7 @@ type ToolCallUsage struct {
 	WebSearchToolName      string // "web_search_preview", "web_search", etc.
 	FileSearchCalls        int
 	ImageGenerationCall    bool
+	ImageGenerationCalls   int
 	ImageGenerationQuality string
 	ImageGenerationSize    string
 }
@@ -68,14 +69,19 @@ func ComputeToolCallQuota(usage ToolCallUsage, groupRatio float64) ToolCallResul
 		addItem("file_search", usage.FileSearchCalls)
 	}
 
-	if usage.ImageGenerationCall {
+	imageGenerationCalls := usage.ImageGenerationCalls
+	if imageGenerationCalls <= 0 && usage.ImageGenerationCall {
+		imageGenerationCalls = 1
+	}
+	if imageGenerationCalls > 0 {
 		price := operation_setting.GetGPTImage1PriceOnceCall(usage.ImageGenerationQuality, usage.ImageGenerationSize)
-		quota := int(math.Round(price * common.QuotaPerUnit * groupRatio))
+		totalPrice := price * float64(imageGenerationCalls)
+		quota := int(math.Round(totalPrice * common.QuotaPerUnit * groupRatio))
 		items = append(items, ToolCallItem{
 			Name:       "image_generation",
-			CallCount:  1,
+			CallCount:  imageGenerationCalls,
 			PricePer1K: price,
-			TotalPrice: price,
+			TotalPrice: totalPrice,
 			Quota:      quota,
 		})
 		totalQuota += quota

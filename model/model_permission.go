@@ -276,6 +276,10 @@ func permissionScopeAllowsCall(scope int, role int) bool {
 	}
 }
 
+func IsModelPermissionScopeCallableByRole(scope int, role int) bool {
+	return permissionScopeAllowsCall(scope, role)
+}
+
 func IsModelVisibleToRole(modelName string, role int) bool {
 	access := GetModelAccess(modelName)
 	return permissionScopeAllowsVisibility(access.VisibilityScope, role)

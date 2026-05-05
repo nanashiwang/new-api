@@ -299,15 +299,17 @@ func (o *OpenAIResponsesResponse) GetOpenAIError() *types.OpenAIError {
 }
 
 func (o *OpenAIResponsesResponse) HasImageGenerationCall() bool {
-	if len(o.Output) == 0 {
-		return false
-	}
+	return o.CountImageGenerationCalls() > 0
+}
+
+func (o *OpenAIResponsesResponse) CountImageGenerationCalls() int {
+	count := 0
 	for _, output := range o.Output {
 		if output.Type == ResponsesOutputTypeImageGenerationCall {
-			return true
+			count++
 		}
 	}
-	return false
+	return count
 }
 
 func (o *OpenAIResponsesResponse) GetQuality() string {
@@ -408,6 +410,7 @@ const (
 	BuildInToolWebSearch        = "web_search"
 	BuildInToolWebSearchPreview = "web_search_preview"
 	BuildInToolFileSearch       = "file_search"
+	BuildInToolImageGeneration  = "image_generation"
 )
 
 const (

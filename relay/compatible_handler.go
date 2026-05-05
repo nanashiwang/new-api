@@ -294,6 +294,7 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 	toolUsage := service.ToolCallUsage{
 		ModelName:              modelName,
 		ImageGenerationCall:    ctx.GetBool("image_generation_call"),
+		ImageGenerationCalls:   ctx.GetInt("image_generation_call_count"),
 		ImageGenerationQuality: ctx.GetString("image_generation_call_quality"),
 		ImageGenerationSize:    ctx.GetString("image_generation_call_size"),
 	}
@@ -396,12 +397,19 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 
 	// record all the consume log even if quota is 0
 	if totalTokens == 0 {
-		// in this case, must be some error happened
-		// we cannot just return, because we may have to return the pre-consumed quota
-		quota = 0
-		extraContent = append(extraContent, "上游没有返回计费信息，无法扣费（可能是上游超时）")
-		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, "+
-			"tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, modelName, relayInfo.FinalPreConsumedQuota))
+		if toolResult.TotalQuota > 0 {
+			if quota < toolResult.TotalQuota {
+				quota = toolResult.TotalQuota
+			}
+			extraContent = append(extraContent, "上游未返回 token 用量，仅按工具调用扣费")
+		} else {
+			// in this case, must be some error happened
+			// we cannot just return, because we may have to return the pre-consumed quota
+			quota = 0
+			extraContent = append(extraContent, "上游没有返回计费信息，无法扣费（可能是上游超时）")
+			logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, "+
+				"tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, modelName, relayInfo.FinalPreConsumedQuota))
+		}
 	} else {
 		if !ratio.IsZero() && quota == 0 {
 			quota = 1
@@ -454,7 +462,10 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 			other["file_search_price"] = item.PricePer1K
 		case "image_generation":
 			other["image_generation_call"] = true
+			other["image_generation_call_count"] = item.CallCount
 			other["image_generation_call_price"] = item.TotalPrice
+			other["image_generation_call_quality"] = toolUsage.ImageGenerationQuality
+			other["image_generation_call_size"] = toolUsage.ImageGenerationSize
 		}
 	}
 	if !audioInputQuota.IsZero() {
@@ -466,7 +477,7 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 		service.InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	}
 	quota, logContent, other = service.FinalizeConsumeLogAfterSettle(logContent, other, actualQuota, relayInfo, settleErr)
-	if totalTokens != 0 {
+	if totalTokens != 0 || toolResult.TotalQuota > 0 {
 		service.UpdateUsageStats(relayInfo.UserId, relayInfo.ChannelId, quota, true)
 	}
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{

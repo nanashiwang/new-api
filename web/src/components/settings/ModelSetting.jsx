@@ -41,6 +41,7 @@ const defaultModelSettingInputs = {
   'global.pass_through_request_enabled': false,
   'global.thinking_model_blacklist': '[]',
   'global.chat_completions_to_responses_policy': '{}',
+  'global.image_generation_tool_call_permission': 0,
   'general_setting.ping_interval_enabled': false,
   'general_setting.ping_interval_seconds': 60,
   'gemini.thinking_adapter_enabled': false,
@@ -83,6 +84,8 @@ const ModelSetting = () => {
         // Keep boolean config keys ending with enabled/Enabled so UI parses correctly.
         if (item.key.endsWith('Enabled') || item.key.endsWith('enabled')) {
           newInputs[item.key] = toBoolean(item.value);
+        } else if (item.key === 'global.image_generation_tool_call_permission') {
+          newInputs[item.key] = Number(item.value || 0);
         } else {
           newInputs[item.key] = item.value;
         }

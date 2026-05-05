@@ -449,15 +449,27 @@ function getUsageLogDetailSummary(record, text, billingDisplayMode, t) {
   }
 
   const summaryOpts = { ...other, displayMode: billingDisplayMode, outputMode: 'segments' };
+  const imageGenerationSegment =
+    other?.image_generation_call === true
+      ? { text: t('图片生成工具'), tone: 'primary' }
+      : null;
 
   if (other?.billing_mode === 'tiered_expr') {
-    return { segments: renderTieredModelPriceSimple(summaryOpts) };
+    return {
+      segments: [
+        ...renderTieredModelPriceSimple(summaryOpts),
+        imageGenerationSegment,
+      ].filter(Boolean),
+    };
   }
 
   return {
-    segments: other?.claude
-      ? renderModelPriceSimple({ ...summaryOpts, provider: 'claude' })
-      : renderModelPriceSimple({ ...summaryOpts, provider: 'openai' }),
+    segments: [
+      ...(other?.claude
+        ? renderModelPriceSimple({ ...summaryOpts, provider: 'claude' })
+        : renderModelPriceSimple({ ...summaryOpts, provider: 'openai' })),
+      imageGenerationSegment,
+    ].filter(Boolean),
   };
 }
 

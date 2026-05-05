@@ -66,10 +66,18 @@ const chatCompletionsToResponsesPolicyAllChannelsExample = JSON.stringify(
   2,
 );
 
+const CALL_SCOPE_OPTIONS = [
+  { label: '全部可调用', value: 0 },
+  { label: '仅管理员可调用', value: 1 },
+  { label: '仅普通用户可调用', value: 2 },
+  { label: '都不可调用', value: 3 },
+];
+
 const defaultGlobalSettingInputs = {
   'global.pass_through_request_enabled': false,
   'global.thinking_model_blacklist': '[]',
   'global.chat_completions_to_responses_policy': '{}',
+  'global.image_generation_tool_call_permission': 0,
   'general_setting.ping_interval_enabled': false,
   'general_setting.ping_interval_seconds': 60,
 };
@@ -166,6 +174,9 @@ export default function SettingGlobalModel(props) {
             value = defaultGlobalSettingInputs[key];
           }
         }
+        if (key === 'global.image_generation_tool_call_permission') {
+          value = Number(value || 0);
+        }
         currentInputs[key] = value;
       } else {
         currentInputs[key] = defaultGlobalSettingInputs[key];
@@ -201,6 +212,26 @@ export default function SettingGlobalModel(props) {
                   }
                   extraText={t(
                     '开启后，所有请求将直接透传给上游，不会进行任何处理（重定向和渠道适配也将失效）,请谨慎开启',
+                  )}
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Select
+                  label={t('图片生成工具调用权限')}
+                  field={'global.image_generation_tool_call_permission'}
+                  optionList={CALL_SCOPE_OPTIONS.map((item) => ({
+                    ...item,
+                    label: t(item.label),
+                  }))}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      'global.image_generation_tool_call_permission':
+                        Number(value),
+                    })
+                  }
+                  extraText={t(
+                    '仅限制 /v1/responses 中的 image_generation 工具调用，不影响普通模型请求。',
                   )}
                 />
               </Col>

@@ -33,9 +33,10 @@ func (p ChatCompletionsToResponsesPolicy) IsChannelEnabled(channelID int, channe
 }
 
 type GlobalSettings struct {
-	PassThroughRequestEnabled        bool                             `json:"pass_through_request_enabled"`
-	ThinkingModelBlacklist           []string                         `json:"thinking_model_blacklist"`
-	ChatCompletionsToResponsesPolicy ChatCompletionsToResponsesPolicy `json:"chat_completions_to_responses_policy"`
+	PassThroughRequestEnabled         bool                             `json:"pass_through_request_enabled"`
+	ThinkingModelBlacklist            []string                         `json:"thinking_model_blacklist"`
+	ChatCompletionsToResponsesPolicy  ChatCompletionsToResponsesPolicy `json:"chat_completions_to_responses_policy"`
+	ImageGenerationToolCallPermission int                              `json:"image_generation_tool_call_permission"`
 }
 
 // 默认配置
@@ -49,6 +50,7 @@ var defaultOpenaiSettings = GlobalSettings{
 		Enabled:     false,
 		AllChannels: true,
 	},
+	ImageGenerationToolCallPermission: 0,
 }
 
 // 全局实例

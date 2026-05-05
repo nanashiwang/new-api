@@ -598,6 +598,33 @@ export const useLogsData = () => {
               : renderLogContent({ ...other, displayMode: billingDisplayMode }),
           });
         }
+        if (other?.image_generation_call === true) {
+          const imageGenerationParts = [t('已调用 image_generation')];
+          if (other?.image_generation_call_count > 0) {
+            imageGenerationParts.push(
+              `${t('调用次数')}：${other.image_generation_call_count}`,
+            );
+          }
+          if (other?.image_generation_call_size) {
+            imageGenerationParts.push(
+              `${t('尺寸')}：${other.image_generation_call_size}`,
+            );
+          }
+          if (other?.image_generation_call_quality) {
+            imageGenerationParts.push(
+              `${t('质量')}：${other.image_generation_call_quality}`,
+            );
+          }
+          if (other?.image_generation_call_price > 0) {
+            imageGenerationParts.push(
+              `${t('工具费用')}：$${Number(other.image_generation_call_price).toFixed(6)}`,
+            );
+          }
+          expandDataLocal.push({
+            key: t('图片生成工具调用'),
+            value: imageGenerationParts.join('，'),
+          });
+        }
         if (logs[i]?.content) {
           expandDataLocal.push({
             key: t('其他详情'),

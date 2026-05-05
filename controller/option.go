@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -242,6 +243,15 @@ func UpdateOption(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": err.Error(),
+			})
+			return
+		}
+	case "global.image_generation_tool_call_permission":
+		scope, parseErr := strconv.Atoi(option.Value.(string))
+		if parseErr != nil || model.NormalizeModelPermissionScope(scope) != scope {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "图片生成工具调用权限设置无效",
 			})
 			return
 		}

@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 
@@ -23,8 +25,21 @@ import (
 )
 
 type ModelRequest struct {
-	Model string `json:"model"`
-	Group string `json:"group,omitempty"`
+	Model      string          `json:"model"`
+	Group      string          `json:"group,omitempty"`
+	Tools      json.RawMessage `json:"tools,omitempty"`
+	ToolChoice json.RawMessage `json:"tool_choice,omitempty"`
+}
+
+func (r *ModelRequest) HasImageGenerationTool() bool {
+	if r == nil {
+		return false
+	}
+	request := dto.OpenAIResponsesRequest{
+		Tools:      r.Tools,
+		ToolChoice: r.ToolChoice,
+	}
+	return request.HasImageGenerationTool()
 }
 
 func Distribute() func(c *gin.Context) {
@@ -46,6 +61,12 @@ func Distribute() func(c *gin.Context) {
 			if !model.IsModelCallableByRole(modelRequest.Model, role) {
 				abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("无权调用模型 %s", modelRequest.Model), types.ErrorCodeAccessDenied)
 				return
+			}
+			if isResponsesCreateRequest(c) && modelRequest.HasImageGenerationTool() {
+				if !isImageGenerationToolCallableByRole(role) {
+					abortWithOpenAiMessage(c, http.StatusForbidden, "无权调用图片生成工具 image_generation", types.ErrorCodeAccessDenied)
+					return
+				}
 			}
 		}
 		if ok {
@@ -127,6 +148,19 @@ func Distribute() func(c *gin.Context) {
 			service.RecordChannelAffinity(c, selectedChannel.Id)
 		}
 	}
+}
+
+func isResponsesCreateRequest(c *gin.Context) bool {
+	if c == nil || c.Request == nil {
+		return false
+	}
+	path := c.Request.URL.Path
+	return strings.HasPrefix(path, "/v1/responses") && !strings.HasPrefix(path, "/v1/responses/compact")
+}
+
+func isImageGenerationToolCallableByRole(role int) bool {
+	scope := model_setting.GetGlobalSettings().ImageGenerationToolCallPermission
+	return model.IsModelPermissionScopeCallableByRole(scope, role)
 }
 
 func getModelPermissionRole(c *gin.Context) int {
@@ -377,7 +411,7 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		if err != nil {
 			return nil, false, err
 		}
-		modelRequest.Model = req.Model
+		modelRequest = *req
 	}
 	if strings.HasPrefix(c.Request.URL.Path, "/v1/realtime") {
 		//wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01

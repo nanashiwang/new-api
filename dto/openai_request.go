@@ -1034,6 +1034,55 @@ func (r *OpenAIResponsesRequest) GetToolsMap() []map[string]any {
 	return toolsMap
 }
 
+func (r *OpenAIResponsesRequest) HasImageGenerationTool() bool {
+	if r == nil {
+		return false
+	}
+	if rawToolsHasBuiltInToolType(r.Tools, BuildInToolImageGeneration) {
+		return true
+	}
+	return rawToolChoiceType(r.ToolChoice) == BuildInToolImageGeneration
+}
+
+func rawToolsHasBuiltInToolType(raw json.RawMessage, target string) bool {
+	if len(raw) == 0 {
+		return false
+	}
+
+	var tools []map[string]any
+	if err := common.Unmarshal(raw, &tools); err == nil {
+		for _, tool := range tools {
+			if NormalizeBuiltInToolType(common.Interface2String(tool["type"])) == target {
+				return true
+			}
+		}
+		return false
+	}
+
+	var tool map[string]any
+	if err := common.Unmarshal(raw, &tool); err != nil {
+		return false
+	}
+	return NormalizeBuiltInToolType(common.Interface2String(tool["type"])) == target
+}
+
+func rawToolChoiceType(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+
+	var choice map[string]any
+	if err := common.Unmarshal(raw, &choice); err == nil {
+		return NormalizeBuiltInToolType(common.Interface2String(choice["type"]))
+	}
+
+	var choiceString string
+	if err := common.Unmarshal(raw, &choiceString); err == nil {
+		return NormalizeBuiltInToolType(choiceString)
+	}
+	return ""
+}
+
 type Reasoning struct {
 	Effort  string `json:"effort,omitempty"`
 	Summary string `json:"summary,omitempty"`

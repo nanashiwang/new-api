@@ -171,3 +171,76 @@ func TestPostConsumeQuota_LogsChargedQuotaWhenPackageSettleFails(t *testing.T) {
 	require.NoError(t, model.DB.First(&channel, channelID).Error)
 	require.EqualValues(t, 8, channel.UsedQuota)
 }
+
+func TestPostConsumeQuota_LogsImageGenerationToolWithZeroTokens(t *testing.T) {
+	truncateRelayTables(t)
+
+	const userID = 5102
+	const tokenID = 6102
+	const channelID = 7102
+	const tokenKey = "relay_image_generation_token_key"
+
+	seedRelayUser(t, userID, 100000)
+	seedRelayPackageToken(t, tokenID, userID, tokenKey, 100000, 0)
+	seedRelayChannel(t, channelID)
+
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	ctx.Set("image_generation_call", true)
+	ctx.Set("image_generation_call_count", 1)
+	ctx.Set("image_generation_call_quality", "high")
+	ctx.Set("image_generation_call_size", "1536x1024")
+
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:            userID,
+		UserQuota:         100000,
+		TokenId:           tokenID,
+		TokenKey:          tokenKey,
+		OriginModelName:   "gpt-5.5",
+		UsingGroup:        "default",
+		StartTime:         time.Now(),
+		FirstResponseTime: time.Now(),
+		RequestURLPath:    "/v1/responses",
+		RequestConversionChain: []types.RelayFormat{
+			types.RelayFormatOpenAIResponses,
+		},
+		PriceData: types.PriceData{
+			ModelRatio:      0,
+			CompletionRatio: 1,
+			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId: channelID,
+		},
+	}
+
+	expectedToolQuota := service.ComputeToolCallQuota(service.ToolCallUsage{
+		ModelName:              relayInfo.OriginModelName,
+		ImageGenerationCall:    true,
+		ImageGenerationCalls:   1,
+		ImageGenerationQuality: "high",
+		ImageGenerationSize:    "1536x1024",
+	}, 1).TotalQuota
+	require.Greater(t, expectedToolQuota, 0)
+
+	postConsumeQuota(ctx, relayInfo, &dto.Usage{})
+
+	logEntry := getLastRelayLog(t)
+	require.Equal(t, model.LogTypeConsume, logEntry.Type)
+	require.Equal(t, expectedToolQuota, logEntry.Quota)
+	require.Contains(t, logEntry.Content, "image_generation 调用 1 次")
+	require.Contains(t, logEntry.Content, "仅按工具调用扣费")
+
+	other := make(map[string]interface{})
+	require.NoError(t, common.UnmarshalJsonStr(logEntry.Other, &other))
+	require.Equal(t, true, other["image_generation_call"])
+	require.Equal(t, float64(1), other["image_generation_call_count"])
+	require.Equal(t, "high", other["image_generation_call_quality"])
+	require.Equal(t, "1536x1024", other["image_generation_call_size"])
+	require.Greater(t, other["image_generation_call_price"].(float64), 0.0)
+
+	var channel model.Channel
+	require.NoError(t, model.DB.First(&channel, channelID).Error)
+	require.EqualValues(t, expectedToolQuota, channel.UsedQuota)
+}
