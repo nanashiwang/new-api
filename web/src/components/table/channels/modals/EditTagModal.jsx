@@ -93,6 +93,8 @@ const EditTagModal = (props) => {
   const [inputs, setInputs] = useState(originInputs);
   const [quotaPolicyOriginal, setQuotaPolicyOriginal] = useState(null);
   const [tagQuotaUsage, setTagQuotaUsage] = useState(null);
+  const [modelMappingClearRequested, setModelMappingClearRequested] =
+    useState(false);
   const modelSearchMatchedCount = useMemo(() => {
     const keyword = modelSearchValue.trim();
     if (!keyword) {
@@ -116,6 +118,9 @@ const EditTagModal = (props) => {
   const getInitValues = () => ({ ...originInputs });
 
   const handleInputChange = (name, value) => {
+    if (name === 'model_mapping') {
+      setModelMappingClearRequested(false);
+    }
     setInputs((inputs) => ({ ...inputs, [name]: value }));
     if (formApiRef.current) {
       formApiRef.current.setValue(name, value);
@@ -183,6 +188,14 @@ const EditTagModal = (props) => {
     }
   };
 
+  const clearModelMapping = () => {
+    setModelMappingClearRequested(true);
+    setInputs((inputs) => ({ ...inputs, model_mapping: '' }));
+    if (formApiRef.current) {
+      formApiRef.current.setValue('model_mapping', '');
+    }
+  };
+
   const fetchModels = async () => {
     try {
       let res = await API.get(`/api/channel/models`);
@@ -217,7 +230,9 @@ const EditTagModal = (props) => {
     setLoading(true);
     const formVals = values || formApiRef.current?.getValues() || {};
     let data = { tag };
-    if (formVals.model_mapping) {
+    if (modelMappingClearRequested) {
+      data.model_mapping = '';
+    } else if (formVals.model_mapping) {
       if (!verifyJSON(formVals.model_mapping)) {
         showInfo('模型映射必须是合法的 JSON 格式！');
         setLoading(false);
@@ -367,6 +382,7 @@ const EditTagModal = (props) => {
       }
       if (tagOk && policyOk) {
         showSuccess('标签更新成功！');
+        setModelMappingClearRequested(false);
         refresh();
         handleClose();
       }
@@ -482,6 +498,7 @@ const EditTagModal = (props) => {
     fetchQuotaPolicy().then();
     fetchQuotaUsage().then();
     setModelSearchValue('');
+    setModelMappingClearRequested(false);
     if (formApiRef.current) {
       formApiRef.current.setValues({
         ...getInitValues(),
@@ -882,12 +899,7 @@ const EditTagModal = (props) => {
                         </Text>
                         <Text
                           className='!text-semi-color-primary cursor-pointer'
-                          onClick={() =>
-                            handleInputChange(
-                              'model_mapping',
-                              JSON.stringify({}, null, 2),
-                            )
-                          }
+                          onClick={clearModelMapping}
                         >
                           {t('清空重定向')}
                         </Text>

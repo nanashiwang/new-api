@@ -784,7 +784,7 @@ func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *
 		updateData.Tag = newTag
 		updatedTag = *newTag
 	}
-	if modelMapping != nil && *modelMapping != "" {
+	if modelMapping != nil {
 		updateData.ModelMapping = modelMapping
 	}
 	if models != nil && *models != "" {

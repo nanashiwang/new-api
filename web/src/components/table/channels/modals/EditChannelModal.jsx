@@ -672,6 +672,13 @@ const EditChannelModal = (props) => {
     }
   };
 
+  const clearModelMapping = () => {
+    handleInputChange('model_mapping', '');
+    if (formApiRef.current) {
+      formApiRef.current.setValue('model_mapping', '');
+    }
+  };
+
   const loadChannel = async () => {
     setLoading(true);
     let res = await API.get(`/api/channel/${channelId}`);
@@ -3410,6 +3417,18 @@ const EditChannelModal = (props) => {
                       extraText={t(
                         '键为请求中的模型名称，值为要替换的模型名称',
                       )}
+                      extraFooter={
+                        <Space>
+                          <Button
+                            size='small'
+                            type='danger'
+                            theme='borderless'
+                            onClick={clearModelMapping}
+                          >
+                            {t('清空重定向')}
+                          </Button>
+                        </Space>
+                      }
                     />
                   </Card>
                 </div>
