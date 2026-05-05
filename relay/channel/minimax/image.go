@@ -52,8 +52,8 @@ func oaiImage2MiniMaxImageRequest(request dto.ImageRequest) MiniMaxImageRequest 
 	if minimaxRequest.Model == "" {
 		minimaxRequest.Model = "image-01"
 	}
-	if request.N > 0 {
-		minimaxRequest.N = int(request.N)
+	if request.N != nil && *request.N > 0 {
+		minimaxRequest.N = int(*request.N)
 	}
 	if aspectRatio := aspectRatioFromImageRequest(request); aspectRatio != "" {
 		minimaxRequest.AspectRatio = aspectRatio

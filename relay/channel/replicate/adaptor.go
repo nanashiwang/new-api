@@ -115,8 +115,8 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		}
 	}
 
-	if request.N > 0 {
-		inputPayload["num_outputs"] = int(request.N)
+	if request.N != nil && *request.N > 0 {
+		inputPayload["num_outputs"] = int(*request.N)
 	}
 
 	if strings.EqualFold(request.Quality, "hd") || strings.EqualFold(request.Quality, "high") {

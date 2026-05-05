@@ -52,8 +52,8 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 	if sfRequest.ImageSize == "" {
 		sfRequest.ImageSize = request.Size
 	}
-	if sfRequest.BatchSize == 0 {
-		sfRequest.BatchSize = request.N
+	if sfRequest.BatchSize == 0 && request.N != nil {
+		sfRequest.BatchSize = *request.N
 	}
 
 	return sfRequest, nil

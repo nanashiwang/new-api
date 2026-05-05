@@ -905,7 +905,7 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 			return &dto.ImageRequest{
 				Model:  model,
 				Prompt: "a cute cat",
-				N:      1,
+				N:      common.GetPointer(uint(1)),
 				Size:   "1024x1024",
 			}
 		case constant.EndpointTypeJinaRerank:

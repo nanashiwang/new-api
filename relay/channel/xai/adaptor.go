@@ -37,10 +37,14 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 }
 
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
+	imageN := uint(1)
+	if request.N != nil {
+		imageN = *request.N
+	}
 	xaiRequest := ImageRequest{
 		Model:          request.Model,
 		Prompt:         request.Prompt,
-		N:              int(request.N),
+		N:              int(imageN),
 		ResponseFormat: request.ResponseFormat,
 	}
 	return xaiRequest, nil

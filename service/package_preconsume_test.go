@@ -101,7 +101,7 @@ func TestPreConsumeBilling_PackageTokenUsesConservativeImageQuota(t *testing.T) 
 	seedBillingPackageToken(t, tokenID, userID, tokenKey, 200, 15, 0)
 
 	ctx := newPackageBillingContext(true)
-	request := &dto.ImageRequest{Model: "test-image-model", N: 1}
+	request := &dto.ImageRequest{Model: "test-image-model", N: common.GetPointer(uint(1))}
 	relayInfo := &relaycommon.RelayInfo{
 		UserId:          userID,
 		TokenId:         tokenID,

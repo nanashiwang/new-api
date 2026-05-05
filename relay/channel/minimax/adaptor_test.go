@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -49,7 +50,7 @@ func TestConvertImageRequest(t *testing.T) {
 		Prompt:         "a red fox in snowfall",
 		Size:           "1536x1024",
 		ResponseFormat: "url",
-		N:              2,
+		N:              common.GetPointer(uint(2)),
 	}
 
 	got, err := adaptor.ConvertImageRequest(gin.CreateTestContextOnly(httptest.NewRecorder(), gin.New()), info, request)

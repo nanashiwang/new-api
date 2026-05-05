@@ -113,9 +113,9 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		return newAPIError
 	}
 
-	imageN := request.N
-	if imageN == 0 {
-		imageN = 1
+	imageN := uint(1)
+	if request.N != nil {
+		imageN = *request.N
 	}
 
 	// n is handled via OtherRatio so it is applied exactly once in quota
