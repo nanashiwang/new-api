@@ -450,6 +450,10 @@ func SyncUpstreamModels(c *gin.Context) {
 		}
 	}
 
+	if createdModels > 0 || updatedModels > 0 {
+		model.RefreshPricing()
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{

@@ -24,15 +24,18 @@ type UserBase struct {
 	Email    string `json:"email"`
 	Quota    int    `json:"quota"`
 	Status   int    `json:"status"`
+	Role     int    `json:"role"`
 	Username string `json:"username"`
 	Setting  string `json:"setting"`
 }
 
 func (user *UserBase) WriteContext(c *gin.Context) {
+	c.Set("role", user.Role)
 	common.SetContextKey(c, constant.ContextKeyUserGroup, user.Group)
 	common.SetContextKey(c, constant.ContextKeyUserQuota, user.Quota)
 	common.SetContextKey(c, constant.ContextKeyUserStatus, user.Status)
 	common.SetContextKey(c, constant.ContextKeyUserEmail, user.Email)
+	common.SetContextKey(c, constant.ContextKeyUserRole, user.Role)
 	common.SetContextKey(c, constant.ContextKeyUserName, user.Username)
 	common.SetContextKey(c, constant.ContextKeyUserSetting, user.GetSetting())
 }
@@ -129,6 +132,14 @@ func GetUserCache(userId int) (userCache *UserBase, err error) {
 	// Try getting from Redis first
 	userCache, err = cacheGetUserBase(userId)
 	if err == nil {
+		if userCache.Id > 0 && userCache.Role == common.RoleGuestUser {
+			fromDB = true
+			user, err = GetUserById(userId, false)
+			if err != nil {
+				return nil, err
+			}
+			return user.ToBaseUser(), nil
+		}
 		return userCache, nil
 	}
 
@@ -140,15 +151,7 @@ func GetUserCache(userId int) (userCache *UserBase, err error) {
 	}
 
 	// Create cache object from user data
-	userCache = &UserBase{
-		Id:       user.Id,
-		Group:    user.Group,
-		Quota:    user.Quota,
-		Status:   user.Status,
-		Username: user.Username,
-		Setting:  user.Setting,
-		Email:    user.Email,
-	}
+	userCache = user.ToBaseUser()
 
 	return userCache, nil
 }

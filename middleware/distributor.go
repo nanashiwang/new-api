@@ -41,6 +41,13 @@ func Distribute() func(c *gin.Context) {
 			abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
 			return
 		}
+		if shouldSelectChannel && strings.TrimSpace(modelRequest.Model) != "" {
+			role := getModelPermissionRole(c)
+			if !model.IsModelCallableByRole(modelRequest.Model, role) {
+				abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("无权调用模型 %s", modelRequest.Model), types.ErrorCodeAccessDenied)
+				return
+			}
+		}
 		if ok {
 			id, err := strconv.Atoi(channelId.(string))
 			if err != nil {
@@ -120,6 +127,21 @@ func Distribute() func(c *gin.Context) {
 			service.RecordChannelAffinity(c, selectedChannel.Id)
 		}
 	}
+}
+
+func getModelPermissionRole(c *gin.Context) int {
+	if role := common.GetContextKeyInt(c, constant.ContextKeyUserRole); role != common.RoleGuestUser {
+		return role
+	}
+	if role := c.GetInt("role"); role != common.RoleGuestUser {
+		return role
+	}
+	if userId := c.GetInt("id"); userId > 0 {
+		if userCache, err := model.GetUserCache(userId); err == nil {
+			return userCache.Role
+		}
+	}
+	return common.RoleGuestUser
 }
 
 func appendUniqueChannelID(ids []int, channelID int) []int {

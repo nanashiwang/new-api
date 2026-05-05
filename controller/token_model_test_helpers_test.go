@@ -30,14 +30,16 @@ func setupTokenModelHelperDB(t *testing.T) {
 	}
 	model.DB = db
 	model.LOG_DB = db
+	model.InvalidateModelPermissionCache()
 	common.RedisEnabled = false
 	originSelfUseModeEnabled := operation_setting.SelfUseModeEnabled
 	operation_setting.SelfUseModeEnabled = true
 	t.Cleanup(func() {
 		operation_setting.SelfUseModeEnabled = originSelfUseModeEnabled
+		model.InvalidateModelPermissionCache()
 	})
 
-	if err := db.AutoMigrate(&model.User{}, &model.Token{}, &model.Ability{}, &model.Channel{}, &model.Model{}, &model.Vendor{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Token{}, &model.Ability{}, &model.Channel{}, &model.Model{}, &model.ModelPermission{}, &model.Vendor{}); err != nil {
 		t.Fatalf("migrate db: %v", err)
 	}
 
@@ -140,6 +142,37 @@ func TestResolveTokenAllowedModels_IntersectsModelLimits(t *testing.T) {
 	}
 	if len(models) != 1 || models[0] != "gpt-5.2" {
 		t.Fatalf("unexpected token allowed models: %#v", models)
+	}
+}
+
+func TestResolveRequestedTokenModels_FiltersVisibilityOnlyForLists(t *testing.T) {
+	setupTokenModelHelperDB(t)
+	seedTokenModelHelperData(t)
+
+	permission := model.ModelPermission{
+		ModelName:       "gpt-5.2-codex",
+		NameRule:        model.NameRuleExact,
+		VisibilityScope: model.ModelPermissionScopeNone,
+		CallScope:       model.ModelPermissionScopeAll,
+	}
+	if err := permission.Insert(); err != nil {
+		t.Fatalf("insert model permission: %v", err)
+	}
+
+	models, err := resolveRequestedTokenModels(1, "")
+	if err != nil {
+		t.Fatalf("resolve requested token models: %v", err)
+	}
+	if len(models) != 1 || models[0] != "gpt-5.2" {
+		t.Fatalf("unexpected visible models: %#v", models)
+	}
+
+	rawModels, err := resolveRequestedTokenModelsRaw(1, "")
+	if err != nil {
+		t.Fatalf("resolve raw token models: %v", err)
+	}
+	if len(rawModels) != 2 {
+		t.Fatalf("raw models should not be visibility-filtered: %#v", rawModels)
 	}
 }
 

@@ -105,7 +105,7 @@ func resolveRequestedTokenGroups(userId int, requestedGroup string) ([]string, e
 	return []string{group}, nil
 }
 
-func resolveRequestedTokenModels(userId int, requestedGroup string) ([]string, error) {
+func resolveRequestedTokenModelsRaw(userId int, requestedGroup string) ([]string, error) {
 	groups, err := resolveRequestedTokenGroups(userId, requestedGroup)
 	if err != nil {
 		return nil, err
@@ -113,11 +113,27 @@ func resolveRequestedTokenModels(userId int, requestedGroup string) ([]string, e
 	return collectGroupModels(groups, shouldAcceptUnsetRatioModel(userId)), nil
 }
 
-func resolveTokenAllowedModels(userId int, token *model.Token) ([]string, error) {
+func filterModelsVisibleToUser(userId int, models []string) ([]string, error) {
+	userCache, err := model.GetUserCache(userId)
+	if err != nil {
+		return nil, err
+	}
+	return model.FilterModelsByVisibility(models, userCache.Role), nil
+}
+
+func resolveRequestedTokenModels(userId int, requestedGroup string) ([]string, error) {
+	models, err := resolveRequestedTokenModelsRaw(userId, requestedGroup)
+	if err != nil {
+		return nil, err
+	}
+	return filterModelsVisibleToUser(userId, models)
+}
+
+func resolveTokenAllowedModelsRaw(userId int, token *model.Token) ([]string, error) {
 	if token == nil {
 		return nil, fmt.Errorf("token is nil")
 	}
-	models, err := resolveRequestedTokenModels(userId, token.Group)
+	models, err := resolveRequestedTokenModelsRaw(userId, token.Group)
 	if err != nil {
 		return nil, err
 	}
@@ -132,6 +148,14 @@ func resolveTokenAllowedModels(userId int, token *model.Token) ([]string, error)
 		}
 	}
 	return filtered, nil
+}
+
+func resolveTokenAllowedModels(userId int, token *model.Token) ([]string, error) {
+	models, err := resolveTokenAllowedModelsRaw(userId, token)
+	if err != nil {
+		return nil, err
+	}
+	return filterModelsVisibleToUser(userId, models)
 }
 
 func buildTokenModelOptions(userId int, token *model.Token, requestedGroup string) ([]tokenModelOption, error) {

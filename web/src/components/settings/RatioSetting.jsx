@@ -26,6 +26,7 @@ import GroupRatioSettings from '../../pages/Setting/Ratio/GroupRatioSettings';
 import ModelRatioNotSetEditor from '../../pages/Setting/Ratio/ModelRationNotSetEditor';
 import UpstreamRatioSync from '../../pages/Setting/Ratio/UpstreamRatioSync';
 import ToolPriceSettings from '../../pages/Setting/Ratio/ToolPriceSettings';
+import ModelPermissionSettings from '../../pages/Setting/Ratio/ModelPermissionSettings';
 
 import { API, showError, toBoolean } from '../../helpers';
 
@@ -106,6 +107,9 @@ const RatioSetting = () => {
           </Tabs.TabPane>
           <Tabs.TabPane tab={t('未设置价格模型')} itemKey='unset_models'>
             <ModelRatioNotSetEditor options={inputs} refresh={onRefresh} />
+          </Tabs.TabPane>
+          <Tabs.TabPane tab={t('模型权限设置')} itemKey='model_permissions'>
+            <ModelPermissionSettings />
           </Tabs.TabPane>
           <Tabs.TabPane tab={t('上游倍率同步')} itemKey='upstream_sync'>
             <UpstreamRatioSync options={inputs} refresh={onRefresh} />

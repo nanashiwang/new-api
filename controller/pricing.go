@@ -9,7 +9,8 @@ import (
 )
 
 func GetPricing(c *gin.Context) {
-	pricing := model.GetPricing()
+	role := getRequestRole(c)
+	pricing := model.FilterPricingByVisibility(model.GetPricing(), role)
 	userId, exists := c.Get("id")
 	usableGroup := map[string]string{}
 	groupRatio := map[string]float64{}

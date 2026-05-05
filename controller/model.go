@@ -111,6 +111,7 @@ func init() {
 
 func ListModels(c *gin.Context, modelType int) {
 	userOpenAiModels := make([]dto.OpenAIModels, 0)
+	role := getRequestRole(c)
 
 	acceptUnsetRatioModel := operation_setting.SelfUseModeEnabled
 	if !acceptUnsetRatioModel {
@@ -133,6 +134,9 @@ func ListModels(c *gin.Context, modelType int) {
 			tokenModelLimit = map[string]bool{}
 		}
 		for allowModel, _ := range tokenModelLimit {
+			if !model.IsModelVisibleToRole(allowModel, role) {
+				continue
+			}
 			if !acceptUnsetRatioModel {
 				_, _, exist := ratio_setting.GetModelRatioOrPrice(allowModel)
 				if !exist {
@@ -181,6 +185,9 @@ func ListModels(c *gin.Context, modelType int) {
 			models = model.GetGroupEnabledModels(group)
 		}
 		for _, modelName := range models {
+			if !model.IsModelVisibleToRole(modelName, role) {
+				continue
+			}
 			if !acceptUnsetRatioModel {
 				_, _, exist := ratio_setting.GetModelRatioOrPrice(modelName)
 				if !exist {
@@ -213,11 +220,17 @@ func ListModels(c *gin.Context, modelType int) {
 				Type:        "model",
 			}
 		}
+		firstID := ""
+		lastID := ""
+		if len(useranthropicModels) > 0 {
+			firstID = useranthropicModels[0].ID
+			lastID = useranthropicModels[len(useranthropicModels)-1].ID
+		}
 		c.JSON(200, gin.H{
 			"data":     useranthropicModels,
-			"first_id": useranthropicModels[0].ID,
+			"first_id": firstID,
 			"has_more": false,
-			"last_id":  useranthropicModels[len(useranthropicModels)-1].ID,
+			"last_id":  lastID,
 		})
 	case constant.ChannelTypeGemini:
 		userGeminiModels := make([]dto.GeminiModel, len(userOpenAiModels))
@@ -248,9 +261,17 @@ func ChannelListModels(c *gin.Context) {
 }
 
 func DashboardListModels(c *gin.Context) {
+	data := channelId2Models
+	role := getRequestRole(c)
+	if role < common.RoleAdminUser {
+		data = make(map[int][]string, len(channelId2Models))
+		for channelType, models := range channelId2Models {
+			data[channelType] = model.FilterModelsByVisibility(models, role)
+		}
+	}
 	c.JSON(200, gin.H{
 		"success": true,
-		"data":    channelId2Models,
+		"data":    data,
 	})
 }
 
@@ -263,6 +284,18 @@ func EnabledListModels(c *gin.Context) {
 
 func RetrieveModel(c *gin.Context, modelType int) {
 	modelId := c.Param("model")
+	if modelId == "" || !model.IsModelVisibleToRole(modelId, getRequestRole(c)) {
+		openAIError := types.OpenAIError{
+			Message: fmt.Sprintf("The model '%s' does not exist", modelId),
+			Type:    "invalid_request_error",
+			Param:   "model",
+			Code:    "model_not_found",
+		}
+		c.JSON(200, gin.H{
+			"error": openAIError,
+		})
+		return
+	}
 	if aiModel, ok := openAIModelsMap[modelId]; ok {
 		switch modelType {
 		case constant.ChannelTypeAnthropic:

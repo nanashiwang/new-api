@@ -111,15 +111,28 @@ func TestToken(c *gin.Context) {
 		common.ApiError(c, fmt.Errorf("model 不能为空"))
 		return
 	}
-	isAllowed := false
-	matchName := ratio_setting.FormatMatchingModelName(req.Model)
-	modelOptions, err := buildTokenModelOptions(userId, token, "")
+	userCache, err := model.GetUserCache(userId)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	for _, modelOption := range modelOptions {
-		if modelOption.Name == req.Model || ratio_setting.FormatMatchingModelName(modelOption.Name) == matchName {
+	if !model.IsModelCallableByRole(req.Model, userCache.Role) {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无权调用此模型",
+			"time":    0.0,
+		})
+		return
+	}
+	isAllowed := false
+	matchName := ratio_setting.FormatMatchingModelName(req.Model)
+	models, err := resolveTokenAllowedModelsRaw(userId, token)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	for _, modelName := range models {
+		if modelName == req.Model || ratio_setting.FormatMatchingModelName(modelName) == matchName {
 			isAllowed = true
 			break
 		}

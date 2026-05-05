@@ -818,6 +818,7 @@ func GetUserModels(c *gin.Context) {
 			}
 		}
 	}
+	models = model.FilterModelsByVisibility(models, user.Role)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",

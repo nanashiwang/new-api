@@ -212,6 +212,11 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.GET("/channel_affinity_cache", controller.GetChannelAffinityCacheStats)
 			optionRoute.DELETE("/channel_affinity_cache", controller.ClearChannelAffinityCache)
 			optionRoute.POST("/rest_model_ratio", controller.ResetModelRatio)
+			optionRoute.GET("/model_permissions", controller.ListModelPermissions)
+			optionRoute.POST("/model_permissions", controller.CreateModelPermission)
+			optionRoute.GET("/model_permissions/candidates", controller.GetModelPermissionCandidates)
+			optionRoute.PUT("/model_permissions/:id", controller.UpdateModelPermission)
+			optionRoute.DELETE("/model_permissions/:id", controller.DeleteModelPermission)
 			optionRoute.POST("/migrate_console_setting", controller.MigrateConsoleSetting) // 用于迁移检测的旧键，下个版本会删除
 		}
 
