@@ -72,7 +72,7 @@ func TestModelMappedHelperKeepsCodexAutoReviewForCompact(t *testing.T) {
 	}
 }
 
-func TestModelMappedHelperMapsCodexAutoReviewForOpenAIChannel(t *testing.T) {
+func TestModelMappedHelperKeepsCodexAutoReviewForOpenAIChannelWithoutMapping(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
@@ -90,13 +90,13 @@ func TestModelMappedHelperMapsCodexAutoReviewForOpenAIChannel(t *testing.T) {
 	if err := ModelMappedHelper(c, info, request); err != nil {
 		t.Fatalf("model mapped helper: %v", err)
 	}
-	if !info.IsModelMapped {
-		t.Fatal("codex-auto-review should be model-mapped for openai channel")
+	if info.IsModelMapped {
+		t.Fatal("codex-auto-review should not be model-mapped without channel mapping")
 	}
-	if info.UpstreamModelName != constant.CodexAutoReviewRoutingModel {
-		t.Fatalf("upstream model = %q, want %q", info.UpstreamModelName, constant.CodexAutoReviewRoutingModel)
+	if info.UpstreamModelName != constant.CodexAutoReviewModel {
+		t.Fatalf("upstream model = %q, want %q", info.UpstreamModelName, constant.CodexAutoReviewModel)
 	}
-	if request.Model != constant.CodexAutoReviewRoutingModel {
-		t.Fatalf("request model = %q, want %q", request.Model, constant.CodexAutoReviewRoutingModel)
+	if request.Model != constant.CodexAutoReviewModel {
+		t.Fatalf("request model = %q, want %q", request.Model, constant.CodexAutoReviewModel)
 	}
 }

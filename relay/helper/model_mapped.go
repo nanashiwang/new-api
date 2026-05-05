@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	appcommon "github.com/QuantumNous/new-api/common"
-	appconstant "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -65,13 +64,6 @@ func ModelMappedHelper(c *gin.Context, info *relaycommon.RelayInfo, request dto.
 		if info.IsModelMapped {
 			info.UpstreamModelName = currentModel
 		}
-	}
-
-	if !info.IsModelMapped &&
-		mappingModelName == appconstant.CodexAutoReviewModel &&
-		appconstant.ShouldMapCodexAutoReviewForChannelType(info.ChannelType) {
-		info.UpstreamModelName = appconstant.CodexAutoReviewRoutingModel
-		info.IsModelMapped = true
 	}
 
 	if isResponsesCompact {

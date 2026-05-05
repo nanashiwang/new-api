@@ -14,7 +14,3 @@ func IsHiddenModel(modelName string) bool {
 func IsCodexAutoReviewCompatibleChannelType(channelType int) bool {
 	return channelType == ChannelTypeCodex || channelType == ChannelTypeOpenAI
 }
-
-func ShouldMapCodexAutoReviewForChannelType(channelType int) bool {
-	return channelType == ChannelTypeOpenAI
-}
