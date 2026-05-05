@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -28,6 +29,17 @@ import (
 var openAIModels []dto.OpenAIModels
 var openAIModelsMap map[string]dto.OpenAIModels
 var channelId2Models map[int][]string
+
+func isHiddenRelayModel(modelName string) bool {
+	modelName = strings.TrimSpace(modelName)
+	if constant.IsHiddenModel(modelName) {
+		return true
+	}
+	if strings.HasSuffix(modelName, ratio_setting.CompactModelSuffix) {
+		return constant.IsHiddenModel(strings.TrimSuffix(modelName, ratio_setting.CompactModelSuffix))
+	}
+	return false
+}
 
 func init() {
 	// https://platform.openai.com/docs/models/model-endpoint-compatibility
@@ -134,6 +146,9 @@ func ListModels(c *gin.Context, modelType int) {
 			tokenModelLimit = map[string]bool{}
 		}
 		for allowModel, _ := range tokenModelLimit {
+			if isHiddenRelayModel(allowModel) {
+				continue
+			}
 			if !model.IsModelVisibleToRole(allowModel, role) {
 				continue
 			}
@@ -185,6 +200,9 @@ func ListModels(c *gin.Context, modelType int) {
 			models = model.GetGroupEnabledModels(group)
 		}
 		for _, modelName := range models {
+			if isHiddenRelayModel(modelName) {
+				continue
+			}
 			if !model.IsModelVisibleToRole(modelName, role) {
 				continue
 			}

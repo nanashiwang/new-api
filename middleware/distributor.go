@@ -58,7 +58,8 @@ func Distribute() func(c *gin.Context) {
 		}
 		if shouldSelectChannel && strings.TrimSpace(modelRequest.Model) != "" {
 			role := getModelPermissionRole(c)
-			if !model.IsModelCallableByRole(modelRequest.Model, role) {
+			permissionModel := ratio_setting.FormatMatchingModelName(modelRequest.Model)
+			if !model.IsModelCallableByRole(permissionModel, role) {
 				abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("无权调用模型 %s", modelRequest.Model), types.ErrorCodeAccessDenied)
 				return
 			}
@@ -201,6 +202,9 @@ func tryAffinityChannel(c *gin.Context, modelName string, usingGroup string, cli
 	if err != nil || preferred == nil {
 		return nil, "", false
 	}
+	if service.IsCodexAutoReviewRequestModel(modelName) && preferred.Type != constant.ChannelTypeCodex {
+		return nil, "", false
+	}
 	if !IsTokenChannelAllowed(c, preferred.Id) || !service.IsChannelAllowedForClient(preferred, clientID) {
 		return nil, "", false
 	}
@@ -234,6 +238,9 @@ func selectChannelForRequest(c *gin.Context, modelName string, usingGroup string
 		}
 		if !service.IsChannelAllowedForClient(channel, clientID) {
 			return nil, usingGroup, types.NewErrorWithStatusCode(errors.New("当前客户端工具不允许使用该渠道"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
+		}
+		if service.IsCodexAutoReviewRequestModel(modelName) && channel.Type != constant.ChannelTypeCodex {
+			return nil, usingGroup, types.NewErrorWithStatusCode(errors.New("codex-auto-review only supports codex channel"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
 		}
 		if service.IsChannelUnavailableForRequest(channel) {
 			excludeChannels = appendUniqueChannelID(excludeChannels, channel.Id)

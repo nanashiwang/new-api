@@ -139,3 +139,94 @@ func TestGetRandomSatisfiedChannel_RespectsAllowedChannels(t *testing.T) {
 		t.Fatalf("expected allowed channel 1, got %d", channel.Id)
 	}
 }
+
+func TestGetRandomSatisfiedChannel_MapsCodexAutoReviewToRoutingModel(t *testing.T) {
+	originMemoryCacheEnabled := common.MemoryCacheEnabled
+	originGroupMap := group2model2channels
+	originChannels := channelsIDM
+	common.MemoryCacheEnabled = true
+	group2model2channels = map[string]map[string][]int{
+		"default": {
+			constant.CodexAutoReviewRoutingModel: {1},
+		},
+	}
+	priority := int64(0)
+	weight := uint(100)
+	channelsIDM = map[int]*Channel{
+		1: {Id: 1, Name: "codex", Type: constant.ChannelTypeCodex, Weight: &weight, Priority: &priority},
+	}
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = originMemoryCacheEnabled
+		group2model2channels = originGroupMap
+		channelsIDM = originChannels
+	})
+
+	channel, err := GetRandomSatisfiedChannel("default", constant.CodexAutoReviewModel, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("get channel: %v", err)
+	}
+	if channel == nil {
+		t.Fatal("expected channel, got nil")
+	}
+	if channel.Id != 1 {
+		t.Fatalf("expected codex channel 1, got %d", channel.Id)
+	}
+}
+
+func TestGetChannelDB_MapsCodexAutoReviewToRoutingModel(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+
+	originDB := DB
+	originLogDB := LOG_DB
+	originMemoryCacheEnabled := common.MemoryCacheEnabled
+	DB = db
+	LOG_DB = db
+	common.MemoryCacheEnabled = false
+	t.Cleanup(func() {
+		DB = originDB
+		LOG_DB = originLogDB
+		common.MemoryCacheEnabled = originMemoryCacheEnabled
+	})
+
+	if err := db.AutoMigrate(&Channel{}, &Ability{}); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+
+	channel := Channel{
+		Id:     1,
+		Name:   "codex",
+		Key:    "sk-codex",
+		Type:   constant.ChannelTypeCodex,
+		Group:  "default",
+		Models: constant.CodexAutoReviewRoutingModel,
+		Status: common.ChannelStatusEnabled,
+	}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+	ability := Ability{
+		Group:     "default",
+		Model:     constant.CodexAutoReviewRoutingModel,
+		ChannelId: 1,
+		Enabled:   true,
+		Priority:  common.GetPointer[int64](0),
+		Weight:    100,
+	}
+	if err := db.Create(&ability).Error; err != nil {
+		t.Fatalf("seed ability: %v", err)
+	}
+
+	got, err := GetChannel("default", constant.CodexAutoReviewModel, 0, nil, nil)
+	if err != nil {
+		t.Fatalf("get channel: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected channel, got nil")
+	}
+	if got.Id != 1 {
+		t.Fatalf("expected codex channel 1, got %d", got.Id)
+	}
+}

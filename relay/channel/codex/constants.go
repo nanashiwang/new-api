@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/samber/lo"
 )
@@ -11,7 +12,11 @@ var baseModelList = []string{
 	"gpt-5.2", "gpt-5.2-codex", "gpt-5.3-codex",
 }
 
-var ModelList = withCompactModelSuffix(baseModelList)
+var hiddenModelList = []string{
+	constant.CodexAutoReviewModel,
+}
+
+var ModelList = lo.Uniq(append(withCompactModelSuffix(baseModelList), hiddenModelList...))
 
 const ChannelName = "codex"
 

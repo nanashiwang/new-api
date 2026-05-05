@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/samber/lo"
 	"gorm.io/gorm"
@@ -125,12 +126,19 @@ func GetChannel(group string, model string, retry int, allowedChannels []int, ex
 
 	var err error = nil
 	channelQuery, err := getChannelQuery(group, model, retry, allowedChannels, excludeChannels)
-	if err != nil {
-		return nil, err
-	}
-	if common.UsingSQLite || common.UsingPostgreSQL {
+	if err == nil {
 		err = channelQuery.Order("weight DESC").Find(&abilities).Error
-	} else {
+	}
+	normalizedModel := ratio_setting.FormatMatchingModelName(model)
+	if (err != nil || len(abilities) == 0) && normalizedModel != "" && normalizedModel != model {
+		channelQuery, normalizedErr := getChannelQuery(group, normalizedModel, retry, allowedChannels, excludeChannels)
+		if normalizedErr != nil {
+			if err != nil {
+				return nil, err
+			}
+			return nil, normalizedErr
+		}
+		abilities = nil
 		err = channelQuery.Order("weight DESC").Find(&abilities).Error
 	}
 	if err != nil {

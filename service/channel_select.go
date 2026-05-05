@@ -2,12 +2,14 @@ package service
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 )
 
@@ -102,6 +104,17 @@ func (p *RetryParam) getCachedTagChannelIDs(tag string, allowedChannels []int) [
 	return ids
 }
 
+func IsCodexAutoReviewRequestModel(modelName string) bool {
+	modelName = strings.TrimSpace(modelName)
+	if constant.IsHiddenModel(modelName) {
+		return true
+	}
+	if strings.HasSuffix(modelName, ratio_setting.CompactModelSuffix) {
+		return constant.IsHiddenModel(strings.TrimSuffix(modelName, ratio_setting.CompactModelSuffix))
+	}
+	return false
+}
+
 // CacheGetRandomSatisfiedChannel tries to get a random channel that satisfies the requirements.
 // 尝试获取一个满足要求的随机渠道。
 //
@@ -152,6 +165,11 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 	filters = append(filters, func(ch *model.Channel) bool {
 		return !IsChannelUnavailableForRequest(ch)
 	})
+	if IsCodexAutoReviewRequestModel(param.ModelName) {
+		filters = append(filters, func(ch *model.Channel) bool {
+			return ch != nil && ch.Type == constant.ChannelTypeCodex
+		})
+	}
 
 	if param.TokenGroup == "auto" {
 		if len(setting.GetAutoGroups()) == 0 {
