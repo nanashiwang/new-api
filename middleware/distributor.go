@@ -202,7 +202,7 @@ func tryAffinityChannel(c *gin.Context, modelName string, usingGroup string, cli
 	if err != nil || preferred == nil {
 		return nil, "", false
 	}
-	if service.IsCodexAutoReviewRequestModel(modelName) && preferred.Type != constant.ChannelTypeCodex {
+	if service.IsCodexAutoReviewRequestModel(modelName) && !constant.IsCodexAutoReviewCompatibleChannelType(preferred.Type) {
 		return nil, "", false
 	}
 	if !IsTokenChannelAllowed(c, preferred.Id) || !service.IsChannelAllowedForClient(preferred, clientID) {
@@ -239,8 +239,8 @@ func selectChannelForRequest(c *gin.Context, modelName string, usingGroup string
 		if !service.IsChannelAllowedForClient(channel, clientID) {
 			return nil, usingGroup, types.NewErrorWithStatusCode(errors.New("当前客户端工具不允许使用该渠道"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
 		}
-		if service.IsCodexAutoReviewRequestModel(modelName) && channel.Type != constant.ChannelTypeCodex {
-			return nil, usingGroup, types.NewErrorWithStatusCode(errors.New("codex-auto-review only supports codex channel"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
+		if service.IsCodexAutoReviewRequestModel(modelName) && !constant.IsCodexAutoReviewCompatibleChannelType(channel.Type) {
+			return nil, usingGroup, types.NewErrorWithStatusCode(errors.New("codex-auto-review only supports codex or openai channel"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
 		}
 		if service.IsChannelUnavailableForRequest(channel) {
 			excludeChannels = appendUniqueChannelID(excludeChannels, channel.Id)

@@ -1,21 +1,22 @@
 package helper
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
+	appcommon "github.com/QuantumNous/new-api/common"
+	appconstant "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
-	"github.com/QuantumNous/new-api/relay/common"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 )
 
-func ModelMappedHelper(c *gin.Context, info *common.RelayInfo, request dto.Request) error {
+func ModelMappedHelper(c *gin.Context, info *relaycommon.RelayInfo, request dto.Request) error {
 	if info.ChannelMeta == nil {
-		info.ChannelMeta = &common.ChannelMeta{}
+		info.ChannelMeta = &relaycommon.ChannelMeta{}
 	}
 
 	isResponsesCompact := info.RelayMode == relayconstant.RelayModeResponsesCompact
@@ -29,7 +30,7 @@ func ModelMappedHelper(c *gin.Context, info *common.RelayInfo, request dto.Reque
 	modelMapping := c.GetString("model_mapping")
 	if modelMapping != "" && modelMapping != "{}" {
 		modelMap := make(map[string]string)
-		err := json.Unmarshal([]byte(modelMapping), &modelMap)
+		err := appcommon.Unmarshal([]byte(modelMapping), &modelMap)
 		if err != nil {
 			return fmt.Errorf("unmarshal_model_mapping_failed")
 		}
@@ -64,6 +65,13 @@ func ModelMappedHelper(c *gin.Context, info *common.RelayInfo, request dto.Reque
 		if info.IsModelMapped {
 			info.UpstreamModelName = currentModel
 		}
+	}
+
+	if !info.IsModelMapped &&
+		mappingModelName == appconstant.CodexAutoReviewModel &&
+		appconstant.ShouldMapCodexAutoReviewForChannelType(info.ChannelType) {
+		info.UpstreamModelName = appconstant.CodexAutoReviewRoutingModel
+		info.IsModelMapped = true
 	}
 
 	if isResponsesCompact {

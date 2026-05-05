@@ -167,7 +167,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 	})
 	if IsCodexAutoReviewRequestModel(param.ModelName) {
 		filters = append(filters, func(ch *model.Channel) bool {
-			return ch != nil && ch.Type == constant.ChannelTypeCodex
+			return ch != nil && constant.IsCodexAutoReviewCompatibleChannelType(ch.Type)
 		})
 	}
 

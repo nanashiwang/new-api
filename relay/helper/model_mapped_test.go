@@ -23,6 +23,7 @@ func TestModelMappedHelperKeepsCodexAutoReviewWithoutMapping(t *testing.T) {
 		OriginModelName: constant.CodexAutoReviewModel,
 		RelayMode:       relayconstant.RelayModeResponses,
 		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:       constant.ChannelTypeCodex,
 			UpstreamModelName: constant.CodexAutoReviewModel,
 		},
 	}
@@ -52,6 +53,7 @@ func TestModelMappedHelperKeepsCodexAutoReviewForCompact(t *testing.T) {
 		OriginModelName: originModel,
 		RelayMode:       relayconstant.RelayModeResponsesCompact,
 		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:       constant.ChannelTypeCodex,
 			UpstreamModelName: originModel,
 		},
 	}
@@ -67,5 +69,34 @@ func TestModelMappedHelperKeepsCodexAutoReviewForCompact(t *testing.T) {
 	}
 	if request.Model != constant.CodexAutoReviewModel {
 		t.Fatalf("compact request model = %q, want %q", request.Model, constant.CodexAutoReviewModel)
+	}
+}
+
+func TestModelMappedHelperMapsCodexAutoReviewForOpenAIChannel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	request := &dto.OpenAIResponsesRequest{Model: constant.CodexAutoReviewModel}
+	info := &relaycommon.RelayInfo{
+		OriginModelName: constant.CodexAutoReviewModel,
+		RelayMode:       relayconstant.RelayModeResponses,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:       constant.ChannelTypeOpenAI,
+			UpstreamModelName: constant.CodexAutoReviewModel,
+		},
+	}
+
+	if err := ModelMappedHelper(c, info, request); err != nil {
+		t.Fatalf("model mapped helper: %v", err)
+	}
+	if !info.IsModelMapped {
+		t.Fatal("codex-auto-review should be model-mapped for openai channel")
+	}
+	if info.UpstreamModelName != constant.CodexAutoReviewRoutingModel {
+		t.Fatalf("upstream model = %q, want %q", info.UpstreamModelName, constant.CodexAutoReviewRoutingModel)
+	}
+	if request.Model != constant.CodexAutoReviewRoutingModel {
+		t.Fatalf("request model = %q, want %q", request.Model, constant.CodexAutoReviewRoutingModel)
 	}
 }

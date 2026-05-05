@@ -13,7 +13,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestCacheGetRandomSatisfiedChannel_CodexAutoReviewRequiresCodexChannel(t *testing.T) {
+func TestCacheGetRandomSatisfiedChannel_CodexAutoReviewAllowsOpenAICompatibleChannel(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -37,7 +37,7 @@ func TestCacheGetRandomSatisfiedChannel_CodexAutoReviewRequiresCodexChannel(t *t
 
 	channels := []model.Channel{
 		{Id: 1, Name: "openai-codex-model", Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled},
-		{Id: 2, Name: "codex", Type: constant.ChannelTypeCodex, Status: common.ChannelStatusEnabled},
+		{Id: 2, Name: "claude-codex-model", Type: constant.ChannelTypeAnthropic, Status: common.ChannelStatusEnabled},
 	}
 	if err := db.Create(&channels).Error; err != nil {
 		t.Fatalf("seed channels: %v", err)
@@ -63,9 +63,9 @@ func TestCacheGetRandomSatisfiedChannel_CodexAutoReviewRequiresCodexChannel(t *t
 		t.Fatalf("get channel: %v", err)
 	}
 	if got == nil {
-		t.Fatal("expected codex channel, got nil")
+		t.Fatal("expected openai channel, got nil")
 	}
-	if got.Id != 2 {
-		t.Fatalf("expected codex channel 2, got %d", got.Id)
+	if got.Id != 1 {
+		t.Fatalf("expected openai channel 1, got %d", got.Id)
 	}
 }

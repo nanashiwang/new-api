@@ -10,3 +10,11 @@ const (
 func IsHiddenModel(modelName string) bool {
 	return strings.TrimSpace(modelName) == CodexAutoReviewModel
 }
+
+func IsCodexAutoReviewCompatibleChannelType(channelType int) bool {
+	return channelType == ChannelTypeCodex || channelType == ChannelTypeOpenAI
+}
+
+func ShouldMapCodexAutoReviewForChannelType(channelType int) bool {
+	return channelType == ChannelTypeOpenAI
+}
