@@ -212,6 +212,10 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 			if imageRequest.Quality == "" {
 				imageRequest.Quality = "auto"
 			}
+		} else if strings.HasPrefix(imageRequest.Model, "gpt-image-2") {
+			if imageRequest.Quality == "" {
+				imageRequest.Quality = "medium"
+			}
 		}
 
 		//if imageRequest.Prompt == "" {
