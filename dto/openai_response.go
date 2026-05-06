@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/types"
 )
 
@@ -352,8 +353,43 @@ type ResponsesOutput struct {
 	Size      string                          `json:"size"`
 	CallId    string                          `json:"call_id,omitempty"`
 	Name      string                          `json:"name,omitempty"`
-	Arguments string                          `json:"arguments,omitempty"`
+	Arguments ResponsesArguments              `json:"arguments,omitempty"`
 	Action    json.RawMessage                 `json:"action,omitempty"`
+}
+
+// ResponsesArguments accepts provider-native JSON but always marshals as the
+// string required by the OpenAI Responses API wire format.
+type ResponsesArguments json.RawMessage
+
+func (r ResponsesArguments) MarshalJSON() ([]byte, error) {
+	return common.Marshal(common.JsonRawMessageToString(json.RawMessage(r)))
+}
+
+func (r *ResponsesArguments) UnmarshalJSON(data []byte) error {
+	if r == nil {
+		return nil
+	}
+	var value string
+	if err := common.Unmarshal(data, &value); err == nil {
+		*r = ResponsesArguments([]byte(value))
+		return nil
+	}
+	cp := append([]byte(nil), data...)
+	*r = ResponsesArguments(cp)
+	return nil
+}
+
+// ArgumentsString returns function call arguments in the string form expected by Chat Completions.
+func (r *ResponsesOutput) ArgumentsString() string {
+	if r == nil {
+		return ""
+	}
+	return ResponsesArgumentsString(json.RawMessage(r.Arguments))
+}
+
+// ResponsesArgumentsString returns function call arguments in the string form expected by Chat Completions.
+func ResponsesArgumentsString(arguments json.RawMessage) string {
+	return common.JsonRawMessageToString(arguments)
 }
 
 type ResponsesOutputContent struct {

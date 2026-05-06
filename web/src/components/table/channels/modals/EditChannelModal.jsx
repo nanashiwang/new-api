@@ -263,6 +263,27 @@ const EditChannelModal = (props) => {
       return [];
     }
   }, [inputs.model_mapping]);
+  const redirectModelKeyList = useMemo(() => {
+    const mapping = inputs.model_mapping;
+    if (typeof mapping !== 'string') return [];
+    const trimmed = mapping.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return [];
+      }
+      return Array.from(
+        new Set(
+          Object.keys(parsed)
+            .map((value) => (typeof value === 'string' ? value.trim() : ''))
+            .filter(Boolean),
+        ),
+      );
+    } catch (error) {
+      return [];
+    }
+  }, [inputs.model_mapping]);
   const modelSearchMatchedCount = useMemo(() => {
     const keyword = modelSearchValue.trim();
     if (!keyword) {
@@ -4523,6 +4544,7 @@ const EditChannelModal = (props) => {
         models={fetchedModels}
         selected={inputs.models}
         redirectModels={redirectModelList}
+        redirectSourceModels={redirectModelKeyList}
         onConfirm={(selectedModels) => {
           handleInputChange('models', selectedModels);
           showSuccess(t('模型列表已更新'));

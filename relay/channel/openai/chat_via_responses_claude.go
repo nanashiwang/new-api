@@ -274,8 +274,9 @@ func OaiResponsesToClaudeStreamHandler(c *gin.Context, info *relaycommon.RelayIn
 				}) {
 					return false
 				}
-				if streamResp.Item.Arguments != "" {
-					if !sendToolArgsDelta(callID, streamResp.Item.Arguments) {
+				itemArgs := streamResp.Item.ArgumentsString()
+				if itemArgs != "" {
+					if !sendToolArgsDelta(callID, itemArgs) {
 						return false
 					}
 				}
@@ -382,7 +383,7 @@ func OaiResponsesToClaudeStreamHandler(c *gin.Context, info *relaycommon.RelayIn
 						return false
 					}
 				}
-				newArgs := streamResp.Item.Arguments
+				newArgs := streamResp.Item.ArgumentsString()
 				if newArgs != "" {
 					prevArgs := toolCallArgsByCallID[callID]
 					argsDelta := newArgs

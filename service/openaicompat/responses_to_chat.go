@@ -64,7 +64,7 @@ func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesRespons
 			Type: "function",
 			Function: dto.FunctionResponse{
 				Name:      name,
-				Arguments: out.Arguments,
+				Arguments: out.ArgumentsString(),
 			},
 		})
 	}

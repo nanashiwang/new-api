@@ -215,7 +215,7 @@ func TestResponsesToChat_ToolCallsExtractedWithText(t *testing.T) {
 				Type:      "function_call",
 				CallId:    "call_123",
 				Name:      "get_weather",
-				Arguments: `{"city":"Tokyo"}`,
+				Arguments: dto.ResponsesArguments(`{"city":"Tokyo"}`),
 			},
 		},
 	}
@@ -250,7 +250,7 @@ func TestResponsesToChat_ToolCallsOnlyNilContent(t *testing.T) {
 				Type:      "function_call",
 				CallId:    "call_456",
 				Name:      "search",
-				Arguments: `{"q":"test"}`,
+				Arguments: dto.ResponsesArguments(`{"q":"test"}`),
 			},
 		},
 	}
