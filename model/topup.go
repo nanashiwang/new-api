@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -12,18 +13,40 @@ import (
 )
 
 type TopUp struct {
-	Id            int     `json:"id"`
-	UserId        int     `json:"user_id" gorm:"index"`
-	Amount        int64   `json:"amount"`
-	Money         float64 `json:"money"`
-	TradeNo       string  `json:"trade_no" gorm:"unique;type:varchar(255);index"`
-	PaymentMethod string  `json:"payment_method" gorm:"type:varchar(50)"`
-	CreateTime    int64   `json:"create_time"`
-	CompleteTime  int64   `json:"complete_time"`
-	Status        string  `json:"status"`
-	Username      string  `json:"username,omitempty" gorm:"column:username;->"`
-	DisplayName   string  `json:"display_name,omitempty" gorm:"column:display_name;->"`
+	Id              int     `json:"id"`
+	UserId          int     `json:"user_id" gorm:"index"`
+	Amount          int64   `json:"amount"`
+	Money           float64 `json:"money"`
+	TradeNo         string  `json:"trade_no" gorm:"unique;type:varchar(255);index"`
+	PaymentMethod   string  `json:"payment_method" gorm:"type:varchar(50)"`
+	PaymentProvider string  `json:"payment_provider" gorm:"type:varchar(50);default:''"`
+	CreateTime      int64   `json:"create_time"`
+	CompleteTime    int64   `json:"complete_time"`
+	Status          string  `json:"status"`
+	Username        string  `json:"username,omitempty" gorm:"column:username;->"`
+	DisplayName     string  `json:"display_name,omitempty" gorm:"column:display_name;->"`
 }
+
+const (
+	PaymentMethodStripe       = "stripe"
+	PaymentMethodCreem        = "creem"
+	PaymentMethodWaffo        = "waffo"
+	PaymentMethodWaffoPancake = "waffo_pancake"
+)
+
+const (
+	PaymentProviderEpay         = "epay"
+	PaymentProviderStripe       = "stripe"
+	PaymentProviderCreem        = "creem"
+	PaymentProviderWaffo        = "waffo"
+	PaymentProviderWaffoPancake = "waffo_pancake"
+)
+
+var (
+	ErrPaymentMethodMismatch = errors.New("payment method mismatch")
+	ErrTopUpNotFound         = errors.New("top-up not found")
+	ErrTopUpStatusInvalid    = errors.New("top-up status invalid")
+)
 
 type TopUpSearchParams struct {
 	Keyword        string
@@ -66,6 +89,74 @@ func GetTopUpByTradeNo(tradeNo string) *TopUp {
 	return topUp
 }
 
+func NormalizePaymentProvider(provider string) string {
+	return strings.ToLower(strings.TrimSpace(provider))
+}
+
+func NormalizePaymentMethod(method string) string {
+	return strings.ToLower(strings.TrimSpace(method))
+}
+
+// InferPaymentProvider keeps legacy pending orders usable after adding payment_provider.
+func InferPaymentProvider(paymentProvider string, paymentMethod string) string {
+	if provider := NormalizePaymentProvider(paymentProvider); provider != "" {
+		return provider
+	}
+	switch NormalizePaymentMethod(paymentMethod) {
+	case PaymentMethodStripe:
+		return PaymentProviderStripe
+	case PaymentMethodCreem:
+		return PaymentProviderCreem
+	case PaymentMethodWaffo:
+		return PaymentProviderWaffo
+	case PaymentMethodWaffoPancake:
+		return PaymentProviderWaffoPancake
+	case "":
+		return ""
+	default:
+		return PaymentProviderEpay
+	}
+}
+
+func PaymentProviderMatches(orderProvider string, orderMethod string, callbackProvider string, callbackMethod string) bool {
+	expected := InferPaymentProvider(orderProvider, orderMethod)
+	actual := InferPaymentProvider(callbackProvider, callbackMethod)
+	if expected == "" || actual == "" {
+		return true
+	}
+	return expected == actual
+}
+
+func UpdatePendingTopUpStatus(tradeNo string, expectedPaymentProvider string, targetStatus string) error {
+	if tradeNo == "" {
+		return errors.New("未提供支付单号")
+	}
+
+	refCol := "`trade_no`"
+	if common.UsingPostgreSQL {
+		refCol = `"trade_no"`
+	}
+
+	return DB.Transaction(func(tx *gorm.DB) error {
+		topUp := &TopUp{}
+		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", tradeNo).First(topUp).Error; err != nil {
+			return ErrTopUpNotFound
+		}
+		if expectedPaymentProvider != "" && !PaymentProviderMatches(topUp.PaymentProvider, topUp.PaymentMethod, expectedPaymentProvider, "") {
+			return ErrPaymentMethodMismatch
+		}
+		if topUp.PaymentProvider == "" && expectedPaymentProvider != "" {
+			topUp.PaymentProvider = expectedPaymentProvider
+		}
+		if topUp.Status != common.TopUpStatusPending {
+			return ErrTopUpStatusInvalid
+		}
+
+		topUp.Status = targetStatus
+		return tx.Save(topUp).Error
+	})
+}
+
 func Recharge(referenceId string, customerId string, callerIp string) (err error) {
 	if referenceId == "" {
 		return errors.New("未提供支付单号")
@@ -85,10 +176,20 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 			return errors.New("充值订单不存在")
 		}
 
+		if !PaymentProviderMatches(topUp.PaymentProvider, topUp.PaymentMethod, PaymentProviderStripe, PaymentMethodStripe) {
+			return ErrPaymentMethodMismatch
+		}
+
 		if topUp.Status != common.TopUpStatusPending {
 			return errors.New("充值订单状态错误")
 		}
 
+		if topUp.PaymentProvider == "" {
+			topUp.PaymentProvider = PaymentProviderStripe
+		}
+		if topUp.PaymentMethod == "" {
+			topUp.PaymentMethod = PaymentMethodStripe
+		}
 		topUp.CompleteTime = common.GetTimestamp()
 		topUp.Status = common.TopUpStatusSuccess
 		err = tx.Save(topUp).Error
@@ -285,7 +386,7 @@ func CalculateGrantedQuotaForTopUp(topUp *TopUp) (int, error) {
 	if topUp == nil {
 		return 0, errors.New("top-up is nil")
 	}
-	if topUp.PaymentMethod == "stripe" {
+	if InferPaymentProvider(topUp.PaymentProvider, topUp.PaymentMethod) == PaymentProviderStripe {
 		dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
 		quotaToAdd := int(decimal.NewFromFloat(topUp.Money).Mul(dQuotaPerUnit).IntPart())
 		if quotaToAdd <= 0 {
@@ -324,6 +425,10 @@ func recordQuotaBenefitGrantTx(tx *gorm.DB, topUp *TopUp, quotaDelta int, contex
 }
 
 func CompleteTopUpByTradeNo(tradeNo string, source string, callerIp string, adminExtras map[string]interface{}) error {
+	return CompleteTopUpByTradeNoWithPayment(tradeNo, source, callerIp, "", "", adminExtras)
+}
+
+func CompleteTopUpByTradeNoWithPayment(tradeNo string, source string, callerIp string, actualPaymentMethod string, paymentProvider string, adminExtras map[string]interface{}) error {
 	if tradeNo == "" {
 		return errors.New("trade number is required")
 	}
@@ -352,6 +457,18 @@ func CompleteTopUpByTradeNo(tradeNo string, source string, callerIp string, admi
 
 		if topUp.Status != common.TopUpStatusPending {
 			return errors.New("top-up order is not pending")
+		}
+
+		actualPaymentMethod = NormalizePaymentMethod(actualPaymentMethod)
+		paymentProvider = InferPaymentProvider(paymentProvider, actualPaymentMethod)
+		if paymentProvider != "" && !PaymentProviderMatches(topUp.PaymentProvider, topUp.PaymentMethod, paymentProvider, actualPaymentMethod) {
+			return ErrPaymentMethodMismatch
+		}
+		if topUp.PaymentProvider == "" {
+			topUp.PaymentProvider = InferPaymentProvider(paymentProvider, topUp.PaymentMethod)
+		}
+		if topUp.PaymentMethod == "" && actualPaymentMethod != "" {
+			topUp.PaymentMethod = actualPaymentMethod
 		}
 
 		calculatedQuota, calcErr := CalculateGrantedQuotaForTopUp(topUp)
@@ -428,10 +545,20 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 			return errors.New("充值订单不存在")
 		}
 
+		if !PaymentProviderMatches(topUp.PaymentProvider, topUp.PaymentMethod, PaymentProviderCreem, PaymentMethodCreem) {
+			return ErrPaymentMethodMismatch
+		}
+
 		if topUp.Status != common.TopUpStatusPending {
 			return errors.New("充值订单状态错误")
 		}
 
+		if topUp.PaymentProvider == "" {
+			topUp.PaymentProvider = PaymentProviderCreem
+		}
+		if topUp.PaymentMethod == "" {
+			topUp.PaymentMethod = PaymentMethodCreem
+		}
 		topUp.CompleteTime = common.GetTimestamp()
 		topUp.Status = common.TopUpStatusSuccess
 		err = tx.Save(topUp).Error
@@ -487,4 +614,12 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 	}
 
 	return nil
+}
+
+func RechargeWaffo(tradeNo string, callerIp string) error {
+	return CompleteTopUpByTradeNoWithPayment(tradeNo, PaymentProviderWaffo, callerIp, PaymentMethodWaffo, PaymentProviderWaffo, nil)
+}
+
+func RechargeWaffoPancake(tradeNo string) error {
+	return CompleteTopUpByTradeNoWithPayment(tradeNo, PaymentProviderWaffoPancake, "", PaymentMethodWaffoPancake, PaymentProviderWaffoPancake, nil)
 }

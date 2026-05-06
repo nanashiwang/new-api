@@ -102,6 +102,7 @@ func SubscriptionRequestCreemPay(c *gin.Context) {
 		PurchaseQuantity:          purchaseQuantity,
 		TradeNo:                   referenceId,
 		PaymentMethod:             PaymentMethodCreem,
+		PaymentProvider:           model.PaymentProviderCreem,
 		PurchaseMode:              purchaseMode,
 		RenewTargetSubscriptionId: renewTargetSubId,
 		CreateTime:                time.Now().Unix(),

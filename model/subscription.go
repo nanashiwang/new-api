@@ -231,9 +231,10 @@ type SubscriptionOrder struct {
 	// PurchaseQuantity 表示本次购买份数，默认 1。
 	PurchaseQuantity int `json:"purchase_quantity" gorm:"type:int;not null;default:1"`
 
-	TradeNo       string `json:"trade_no" gorm:"unique;type:varchar(255);index"`
-	PaymentMethod string `json:"payment_method" gorm:"type:varchar(50)"`
-	PurchaseMode  string `json:"purchase_mode" gorm:"type:varchar(16);not null;default:'stack'"`
+	TradeNo         string `json:"trade_no" gorm:"unique;type:varchar(255);index"`
+	PaymentMethod   string `json:"payment_method" gorm:"type:varchar(50)"`
+	PaymentProvider string `json:"payment_provider" gorm:"type:varchar(50);default:''"`
+	PurchaseMode    string `json:"purchase_mode" gorm:"type:varchar(16);not null;default:'stack'"`
 	// RenewTargetSubscriptionId 仅在 purchase_mode=renew 时生效。
 	RenewTargetSubscriptionId int    `json:"renew_target_subscription_id" gorm:"index;default:0"`
 	Status                    string `json:"status"`
@@ -885,13 +886,17 @@ func renewUserSubscriptionByPlanTx(tx *gorm.DB, userId int, plan *SubscriptionPl
 // - renew: 仅续费同 plan 生效订阅；无可续费目标时不回退到叠加
 // - renew_extend: 续费式购买；无生效订阅时先创建 1 条，再按同条顺延
 func CompleteSubscriptionOrder(tradeNo string, providerPayload string) error {
+	return CompleteSubscriptionOrderWithPayment(tradeNo, providerPayload, "", "")
+}
+
+func CompleteSubscriptionOrderWithPayment(tradeNo string, providerPayload string, actualPaymentMethod string, paymentProvider string) error {
 	if tradeNo == "" {
 		return errors.New("tradeNo is empty")
 	}
 
 	result := subscriptionOrderCompletionResult{}
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		coreResult, err := completeSubscriptionOrderCoreTx(tx, tradeNo, providerPayload)
+		coreResult, err := completeSubscriptionOrderCoreTx(tx, tradeNo, providerPayload, actualPaymentMethod, paymentProvider)
 		if err != nil {
 			return err
 		}
@@ -946,7 +951,7 @@ type subscriptionOrderCompletionResult struct {
 	IssueSummary     string
 }
 
-func completeSubscriptionOrderCoreTx(tx *gorm.DB, tradeNo string, providerPayload string) (subscriptionOrderCompletionResult, error) {
+func completeSubscriptionOrderCoreTx(tx *gorm.DB, tradeNo string, providerPayload string, actualPaymentMethod string, paymentProvider string) (subscriptionOrderCompletionResult, error) {
 	if tx == nil {
 		return subscriptionOrderCompletionResult{}, errors.New("tx is nil")
 	}
@@ -973,6 +978,19 @@ func completeSubscriptionOrderCoreTx(tx *gorm.DB, tradeNo string, providerPayloa
 	if order.Status != common.TopUpStatusPending {
 		return subscriptionOrderCompletionResult{}, ErrSubscriptionOrderStatusInvalid
 	}
+
+	actualPaymentMethod = NormalizePaymentMethod(actualPaymentMethod)
+	paymentProvider = InferPaymentProvider(paymentProvider, actualPaymentMethod)
+	if paymentProvider != "" && !PaymentProviderMatches(order.PaymentProvider, order.PaymentMethod, paymentProvider, actualPaymentMethod) {
+		return subscriptionOrderCompletionResult{}, ErrPaymentMethodMismatch
+	}
+	if order.PaymentProvider == "" {
+		order.PaymentProvider = InferPaymentProvider(paymentProvider, order.PaymentMethod)
+	}
+	if order.PaymentMethod == "" && actualPaymentMethod != "" {
+		order.PaymentMethod = actualPaymentMethod
+	}
+	result.PaymentMethod = order.PaymentMethod
 
 	plan, err := getSubscriptionPlanByIdTx(tx, order.PlanId)
 	if err != nil {
@@ -1086,20 +1104,24 @@ func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
 	}
 	if result.RowsAffected == 0 {
 		topup = TopUp{
-			UserId:        order.UserId,
-			Amount:        0,
-			Money:         order.Money,
-			TradeNo:       order.TradeNo,
-			PaymentMethod: order.PaymentMethod,
-			CreateTime:    order.CreateTime,
-			CompleteTime:  now,
-			Status:        common.TopUpStatusSuccess,
+			UserId:          order.UserId,
+			Amount:          0,
+			Money:           order.Money,
+			TradeNo:         order.TradeNo,
+			PaymentMethod:   order.PaymentMethod,
+			PaymentProvider: order.PaymentProvider,
+			CreateTime:      order.CreateTime,
+			CompleteTime:    now,
+			Status:          common.TopUpStatusSuccess,
 		}
 		return session.Create(&topup).Error
 	}
 	topup.Money = order.Money
 	if topup.PaymentMethod == "" {
 		topup.PaymentMethod = order.PaymentMethod
+	}
+	if topup.PaymentProvider == "" {
+		topup.PaymentProvider = order.PaymentProvider
 	}
 	if topup.CreateTime == 0 {
 		topup.CreateTime = order.CreateTime

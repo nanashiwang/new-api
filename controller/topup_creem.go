@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	PaymentMethodCreem   = "creem"
+	PaymentMethodCreem   = model.PaymentMethodCreem
 	CreemSignatureHeader = "creem-signature"
 )
 
@@ -107,13 +107,14 @@ func (*CreemAdaptor) RequestPay(c *gin.Context, req *CreemPayRequest) {
 
 	// 先创建订单记录，使用产品配置的金额和充值额度
 	topUp := &model.TopUp{
-		UserId:        id,
-		Amount:        selectedProduct.Quota, // 充值额度
-		Money:         selectedProduct.Price, // 支付金额
-		TradeNo:       referenceId,
-		PaymentMethod: PaymentMethodCreem,
-		CreateTime:    time.Now().Unix(),
-		Status:        common.TopUpStatusPending,
+		UserId:          id,
+		Amount:          selectedProduct.Quota, // 充值额度
+		Money:           selectedProduct.Price, // 支付金额
+		TradeNo:         referenceId,
+		PaymentMethod:   PaymentMethodCreem,
+		PaymentProvider: model.PaymentProviderCreem,
+		CreateTime:      time.Now().Unix(),
+		Status:          common.TopUpStatusPending,
 	}
 	err = topUp.Insert()
 	if err != nil {
@@ -307,6 +308,7 @@ func handleCheckoutCompleted(c *gin.Context, event *CreemWebhookEvent) {
 		validationInput := service.PaymentCallbackValidationInput{
 			TradeNo:         referenceId,
 			PaymentMethod:   PaymentMethodCreem,
+			PaymentProvider: model.PaymentProviderCreem,
 			ProviderAmount:  payAmount,
 			Currency:        event.Object.Order.Currency,
 			Source:          "subscription_creem_webhook",
@@ -322,7 +324,7 @@ func handleCheckoutCompleted(c *gin.Context, event *CreemWebhookEvent) {
 			c.Status(http.StatusOK)
 			return
 		}
-		if err := model.CompleteSubscriptionOrder(referenceId, common.GetJsonString(event)); err != nil {
+		if err := model.CompleteSubscriptionOrderWithPayment(referenceId, common.GetJsonString(event), PaymentMethodCreem, model.PaymentProviderCreem); err != nil {
 			service.RecordSubscriptionProcessingRiskCase(validationInput, err)
 			log.Printf("Creem订阅订单处理失败: %s, 订单号: %s", err.Error(), referenceId)
 			c.AbortWithStatus(http.StatusInternalServerError)
@@ -350,6 +352,7 @@ func handleCheckoutCompleted(c *gin.Context, event *CreemWebhookEvent) {
 	checkResult, err := service.ValidateTopUpCallback(service.PaymentCallbackValidationInput{
 		TradeNo:         referenceId,
 		PaymentMethod:   PaymentMethodCreem,
+		PaymentProvider: model.PaymentProviderCreem,
 		ProviderAmount:  payAmount,
 		Currency:        event.Object.Order.Currency,
 		Source:          "creem_webhook",

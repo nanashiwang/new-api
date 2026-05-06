@@ -102,6 +102,7 @@ func SubscriptionRequestStripePay(c *gin.Context) {
 		PurchaseQuantity:          purchaseQuantity,
 		TradeNo:                   referenceId,
 		PaymentMethod:             PaymentMethodStripe,
+		PaymentProvider:           model.PaymentProviderStripe,
 		PurchaseMode:              purchaseMode,
 		RenewTargetSubscriptionId: renewTargetSubId,
 		CreateTime:                time.Now().Unix(),

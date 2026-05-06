@@ -55,6 +55,7 @@ const RechargeCard = ({
   enableOnlineTopUp,
   enableStripeTopUp,
   enableCreemTopUp,
+  enableWaffoTopUp,
   creemProducts,
   creemPreTopUp,
   presetAmounts,
@@ -230,19 +231,19 @@ const RechargeCard = ({
           <div className='py-8 flex justify-center'>
             <Spin size='large' />
           </div>
-        ) : enableOnlineTopUp || enableStripeTopUp || enableCreemTopUp ? (
+        ) : enableOnlineTopUp || enableStripeTopUp || enableCreemTopUp || enableWaffoTopUp ? (
           <Form
             getFormApi={(api) => (onlineFormApiRef.current = api)}
             initValues={{ topUpCount: topUpCount }}
           >
             <div className='space-y-6'>
-              {(enableOnlineTopUp || enableStripeTopUp) && (
+              {(enableOnlineTopUp || enableStripeTopUp || enableWaffoTopUp) && (
                 <Row gutter={12}>
                   <Col xs={24} sm={24} md={24} lg={10} xl={10}>
                     <Form.InputNumber
                       field='topUpCount'
                       label={t('充值数量')}
-                      disabled={!enableOnlineTopUp && !enableStripeTopUp}
+                      disabled={!enableOnlineTopUp && !enableStripeTopUp && !enableWaffoTopUp}
                       placeholder={
                         t('充值数量，最低 ') + renderQuotaWithAmount(minTopUp)
                       }
@@ -306,10 +307,15 @@ const RechargeCard = ({
                               const minTopupVal =
                                 Number(payMethod.min_topup) || 0;
                               const isStripe = payMethod.type === 'stripe';
+                              const isWaffo =
+                                typeof payMethod.type === 'string' &&
+                                (payMethod.type === 'waffo' ||
+                                  payMethod.type.startsWith('waffo:'));
                               const isSelected = payWay === payMethod.type;
                               const disabled =
-                                (!enableOnlineTopUp && !isStripe) ||
+                                (!enableOnlineTopUp && !isStripe && !isWaffo) ||
                                 (!enableStripeTopUp && isStripe) ||
+                                (!enableWaffoTopUp && isWaffo) ||
                                 minTopupVal > Number(topUpCount || 0) ||
                                 amountLoading;
 
@@ -322,7 +328,17 @@ const RechargeCard = ({
                                   disabled={disabled}
                                   aria-pressed={isSelected}
                                   icon={
-                                    payMethod.type === 'alipay' ? (
+                                    payMethod.icon ? (
+                                      <img
+                                        src={payMethod.icon}
+                                        alt=''
+                                        style={{
+                                          width: 18,
+                                          height: 18,
+                                          objectFit: 'contain',
+                                        }}
+                                      />
+                                    ) : payMethod.type === 'alipay' ? (
                                       <SiAlipay size={18} color='#1677FF' />
                                     ) : payMethod.type === 'wxpay' ? (
                                       <SiWechat size={18} color='#07C160' />
@@ -377,7 +393,7 @@ const RechargeCard = ({
                 </Row>
               )}
 
-              {(enableOnlineTopUp || enableStripeTopUp) && (
+              {(enableOnlineTopUp || enableStripeTopUp || enableWaffoTopUp) && (
                 <Form.Slot
                   label={
                     <div className='flex items-center gap-2'>
@@ -489,7 +505,7 @@ const RechargeCard = ({
                 </Form.Slot>
               )}
 
-              {(enableOnlineTopUp || enableStripeTopUp) && (
+              {(enableOnlineTopUp || enableStripeTopUp || enableWaffoTopUp) && (
                 <div className='flex justify-end'>
                   <Button
                     theme='solid'

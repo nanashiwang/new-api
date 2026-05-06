@@ -23,6 +23,8 @@ import SettingsGeneralPayment from '../../pages/Setting/Payment/SettingsGeneralP
 import SettingsPaymentGateway from '../../pages/Setting/Payment/SettingsPaymentGateway';
 import SettingsPaymentGatewayStripe from '../../pages/Setting/Payment/SettingsPaymentGatewayStripe';
 import SettingsPaymentGatewayCreem from '../../pages/Setting/Payment/SettingsPaymentGatewayCreem';
+import SettingsPaymentGatewayWaffo from '../../pages/Setting/Payment/SettingsPaymentGatewayWaffo';
+import SettingsPaymentGatewayWaffoPancake from '../../pages/Setting/Payment/SettingsPaymentGatewayWaffoPancake';
 import { API, showError, toBoolean } from '../../helpers';
 import { useTranslation } from 'react-i18next';
 
@@ -47,6 +49,35 @@ const PaymentSetting = () => {
     StripeUnitPrice: 8.0,
     StripeMinTopUp: 1,
     StripePromotionCodesEnabled: false,
+
+    WaffoEnabled: false,
+    WaffoApiKey: '',
+    WaffoPrivateKey: '',
+    WaffoPublicCert: '',
+    WaffoSandboxPublicCert: '',
+    WaffoSandboxApiKey: '',
+    WaffoSandboxPrivateKey: '',
+    WaffoSandbox: false,
+    WaffoMerchantId: '',
+    WaffoCurrency: 'USD',
+    WaffoUnitPrice: 1.0,
+    WaffoMinTopUp: 1,
+    WaffoNotifyUrl: '',
+    WaffoReturnUrl: '',
+    WaffoPayMethods: '',
+
+    WaffoPancakeEnabled: false,
+    WaffoPancakeSandbox: false,
+    WaffoPancakeMerchantID: '',
+    WaffoPancakePrivateKey: '',
+    WaffoPancakeWebhookPublicKey: '',
+    WaffoPancakeWebhookTestKey: '',
+    WaffoPancakeStoreID: '',
+    WaffoPancakeProductID: '',
+    WaffoPancakeReturnURL: '',
+    WaffoPancakeCurrency: 'USD',
+    WaffoPancakeUnitPrice: 1.0,
+    WaffoPancakeMinTopUp: 1,
   });
 
   let [loading, setLoading] = useState(false);
@@ -98,6 +129,10 @@ const PaymentSetting = () => {
           case 'MinTopUp':
           case 'StripeUnitPrice':
           case 'StripeMinTopUp':
+          case 'WaffoUnitPrice':
+          case 'WaffoMinTopUp':
+          case 'WaffoPancakeUnitPrice':
+          case 'WaffoPancakeMinTopUp':
             newInputs[item.key] = parseFloat(item.value);
             break;
           default:
@@ -164,6 +199,19 @@ const PaymentSetting = () => {
                 refresh={onRefresh}
               />
             </Tabs.TabPane>
+            <Tabs.TabPane tab={t('Waffo 设置')} itemKey='waffo'>
+              <SettingsPaymentGatewayWaffo
+                options={inputs}
+                refresh={onRefresh}
+              />
+            </Tabs.TabPane>
+            {/* Waffo Pancake 入口保持官方默认保守状态，后端/配置代码先补齐。 */}
+            {/*<Tabs.TabPane tab={t('Waffo Pancake 设置')} itemKey='waffo-pancake'>*/}
+            {/*  <SettingsPaymentGatewayWaffoPancake*/}
+            {/*    options={inputs}*/}
+            {/*    refresh={onRefresh}*/}
+            {/*  />*/}
+            {/*</Tabs.TabPane>*/}
           </Tabs>
         </Card>
       </Spin>

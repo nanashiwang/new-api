@@ -64,6 +64,15 @@ func buildCompletionRatioMetaValue(optionValues map[string]string) string {
 	return string(jsonBytes)
 }
 
+func isVisiblePublicKeyOption(key string) bool {
+	switch key {
+	case "WaffoPancakeWebhookPublicKey", "WaffoPancakeWebhookTestKey":
+		return true
+	default:
+		return false
+	}
+}
+
 func GetOptions(c *gin.Context) {
 	var options []*model.Option
 	optionValues := make(map[string]string)
@@ -72,7 +81,7 @@ func GetOptions(c *gin.Context) {
 		value := common.Interface2String(v)
 		if strings.HasSuffix(k, "Token") ||
 			strings.HasSuffix(k, "Secret") ||
-			strings.HasSuffix(k, "Key") ||
+			(strings.HasSuffix(k, "Key") && !isVisiblePublicKeyOption(k)) ||
 			strings.HasSuffix(k, "secret") ||
 			strings.HasSuffix(k, "api_key") {
 			continue

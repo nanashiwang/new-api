@@ -15,6 +15,7 @@ var ErrPaymentCallbackRejected = errors.New("payment callback rejected")
 type PaymentCallbackValidationInput struct {
 	TradeNo               string
 	PaymentMethod         string
+	PaymentProvider       string
 	ProviderAmount        float64
 	Currency              string
 	Source                string
@@ -52,13 +53,18 @@ func ValidateTopUpCallback(input PaymentCallbackValidationInput) (PaymentCallbac
 		recordTopUpRiskCase(topUp, input, model.PaymentRiskReasonOrderStatusInvalid, 0)
 		return PaymentCallbackValidationResult{}, ErrPaymentCallbackRejected
 	}
-	if !paymentMethodMatches(topUp.PaymentMethod, input.PaymentMethod) {
+	if !model.PaymentProviderMatches(topUp.PaymentProvider, topUp.PaymentMethod, input.PaymentProvider, input.PaymentMethod) {
+		recordTopUpRiskCase(topUp, input, model.PaymentRiskReasonPaymentMethodMismatch, 0)
+		return PaymentCallbackValidationResult{}, ErrPaymentCallbackRejected
+	}
+	expectedProvider := model.InferPaymentProvider(topUp.PaymentProvider, topUp.PaymentMethod)
+	if !paymentMethodMatchesForProvider(expectedProvider, topUp.PaymentMethod, input.PaymentMethod) {
 		recordTopUpRiskCase(topUp, input, model.PaymentRiskReasonPaymentMethodMismatch, 0)
 		return PaymentCallbackValidationResult{}, ErrPaymentCallbackRejected
 	}
 
 	expectedMoney := topUp.Money
-	if strings.EqualFold(topUp.PaymentMethod, "stripe") {
+	if expectedProvider == model.PaymentProviderStripe {
 		if group, err := model.GetUserGroup(topUp.UserId, true); err == nil {
 			expectedMoney = CalculateStripeTopUpPayMoney(float64(topUp.Amount), group)
 		}
@@ -96,7 +102,12 @@ func ValidateSubscriptionCallback(input PaymentCallbackValidationInput) (Payment
 		recordSubscriptionRiskCase(order, input, model.PaymentRiskReasonOrderStatusInvalid)
 		return PaymentCallbackValidationResult{}, ErrPaymentCallbackRejected
 	}
-	if !paymentMethodMatches(order.PaymentMethod, input.PaymentMethod) {
+	if !model.PaymentProviderMatches(order.PaymentProvider, order.PaymentMethod, input.PaymentProvider, input.PaymentMethod) {
+		recordSubscriptionRiskCase(order, input, model.PaymentRiskReasonPaymentMethodMismatch)
+		return PaymentCallbackValidationResult{}, ErrPaymentCallbackRejected
+	}
+	expectedProvider := model.InferPaymentProvider(order.PaymentProvider, order.PaymentMethod)
+	if !paymentMethodMatchesForProvider(expectedProvider, order.PaymentMethod, input.PaymentMethod) {
 		recordSubscriptionRiskCase(order, input, model.PaymentRiskReasonPaymentMethodMismatch)
 		return PaymentCallbackValidationResult{}, ErrPaymentCallbackRejected
 	}
@@ -114,6 +125,20 @@ func paymentMethodMatches(expected string, actual string) bool {
 		return true
 	}
 	return strings.EqualFold(expected, actual)
+}
+
+func paymentMethodMatchesForProvider(provider string, expected string, actual string) bool {
+	if model.NormalizePaymentProvider(provider) == model.PaymentProviderEpay {
+		return true
+	}
+	return paymentMethodMatches(expected, actual)
+}
+
+func providerPaymentMethod(input PaymentCallbackValidationInput) string {
+	if strings.TrimSpace(input.ProviderPaymentMethod) != "" {
+		return strings.TrimSpace(input.ProviderPaymentMethod)
+	}
+	return strings.TrimSpace(input.PaymentMethod)
 }
 
 func paymentAmountsMatch(expected float64, actual float64) bool {
@@ -137,7 +162,7 @@ func recordTopUpRiskCase(topUp *model.TopUp, input PaymentCallbackValidationInpu
 		TradeNo:               topUp.TradeNo,
 		UserId:                topUp.UserId,
 		PaymentMethod:         topUp.PaymentMethod,
-		ProviderPaymentMethod: strings.TrimSpace(input.PaymentMethod),
+		ProviderPaymentMethod: providerPaymentMethod(input),
 		ExpectedAmount:        topUp.Amount,
 		ExpectedMoney:         expectedMoney,
 		ReceivedMoney:         input.ProviderAmount,
@@ -162,7 +187,7 @@ func recordSubscriptionRiskCase(order *model.SubscriptionOrder, input PaymentCal
 		TradeNo:               order.TradeNo,
 		UserId:                order.UserId,
 		PaymentMethod:         order.PaymentMethod,
-		ProviderPaymentMethod: strings.TrimSpace(input.PaymentMethod),
+		ProviderPaymentMethod: providerPaymentMethod(input),
 		ExpectedMoney:         order.Money,
 		ReceivedMoney:         input.ProviderAmount,
 		Currency:              strings.TrimSpace(input.Currency),
@@ -195,7 +220,7 @@ func RecordSubscriptionProcessingRiskCase(input PaymentCallbackValidationInput, 
 		TradeNo:               order.TradeNo,
 		UserId:                order.UserId,
 		PaymentMethod:         order.PaymentMethod,
-		ProviderPaymentMethod: strings.TrimSpace(input.PaymentMethod),
+		ProviderPaymentMethod: providerPaymentMethod(input),
 		ExpectedMoney:         order.Money,
 		ReceivedMoney:         input.ProviderAmount,
 		Currency:              strings.TrimSpace(input.Currency),

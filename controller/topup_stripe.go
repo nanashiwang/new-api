@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	PaymentMethodStripe = "stripe"
+	PaymentMethodStripe = model.PaymentMethodStripe
 )
 
 var stripeAdaptor = &StripeAdaptor{}
@@ -104,13 +104,14 @@ func (*StripeAdaptor) RequestPay(c *gin.Context, req *StripePayRequest) {
 	}
 
 	topUp := &model.TopUp{
-		UserId:        id,
-		Amount:        req.Amount,
-		Money:         chargedMoney,
-		TradeNo:       referenceId,
-		PaymentMethod: PaymentMethodStripe,
-		CreateTime:    time.Now().Unix(),
-		Status:        common.TopUpStatusPending,
+		UserId:          id,
+		Amount:          req.Amount,
+		Money:           chargedMoney,
+		TradeNo:         referenceId,
+		PaymentMethod:   PaymentMethodStripe,
+		PaymentProvider: model.PaymentProviderStripe,
+		CreateTime:      time.Now().Unix(),
+		Status:          common.TopUpStatusPending,
 	}
 	err = topUp.Insert()
 	if err != nil {
@@ -205,6 +206,7 @@ func sessionCompleted(event stripe.Event, callerIp string) {
 		validationInput := service.PaymentCallbackValidationInput{
 			TradeNo:         referenceId,
 			PaymentMethod:   PaymentMethodStripe,
+			PaymentProvider: model.PaymentProviderStripe,
 			ProviderAmount:  paidAmount,
 			Currency:        strings.ToUpper(event.GetObjectValue("currency")),
 			Source:          "subscription_stripe_webhook",
@@ -218,7 +220,7 @@ func sessionCompleted(event stripe.Event, callerIp string) {
 		if checkResult.AlreadyCompleted {
 			return
 		}
-		if err := model.CompleteSubscriptionOrder(referenceId, common.GetJsonString(payload)); err != nil {
+		if err := model.CompleteSubscriptionOrderWithPayment(referenceId, common.GetJsonString(payload), PaymentMethodStripe, model.PaymentProviderStripe); err != nil {
 			service.RecordSubscriptionProcessingRiskCase(validationInput, err)
 			log.Println("complete subscription order failed:", err.Error(), referenceId)
 		}
@@ -228,6 +230,7 @@ func sessionCompleted(event stripe.Event, callerIp string) {
 	checkResult, err := service.ValidateTopUpCallback(service.PaymentCallbackValidationInput{
 		TradeNo:         referenceId,
 		PaymentMethod:   PaymentMethodStripe,
+		PaymentProvider: model.PaymentProviderStripe,
 		ProviderAmount:  paidAmount,
 		Currency:        strings.ToUpper(event.GetObjectValue("currency")),
 		Source:          "stripe_webhook",

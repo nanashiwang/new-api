@@ -100,6 +100,7 @@ func SubscriptionRequestEpay(c *gin.Context) {
 		PurchaseQuantity:          purchaseQuantity,
 		TradeNo:                   tradeNo,
 		PaymentMethod:             req.PaymentMethod,
+		PaymentProvider:           model.PaymentProviderEpay,
 		PurchaseMode:              purchaseMode,
 		RenewTargetSubscriptionId: renewTargetSubId,
 		CreateTime:                time.Now().Unix(),
@@ -172,11 +173,13 @@ func SubscriptionEpayNotify(c *gin.Context) {
 	LockOrder(verifyInfo.ServiceTradeNo)
 	defer UnlockOrder(verifyInfo.ServiceTradeNo)
 	validationInput := service.PaymentCallbackValidationInput{
-		TradeNo:         verifyInfo.ServiceTradeNo,
-		PaymentMethod:   verifyInfo.Type,
-		ProviderAmount:  payAmount,
-		Source:          "subscription_epay_notify",
-		ProviderPayload: common.GetJsonString(verifyInfo),
+		TradeNo:               verifyInfo.ServiceTradeNo,
+		PaymentMethod:         verifyInfo.Type,
+		PaymentProvider:       model.PaymentProviderEpay,
+		ProviderAmount:        payAmount,
+		Source:                "subscription_epay_notify",
+		ProviderPayload:       common.GetJsonString(verifyInfo),
+		ProviderPaymentMethod: verifyInfo.Type,
 	}
 	checkResult, err := service.ValidateSubscriptionCallback(validationInput)
 	if err != nil {
@@ -188,7 +191,7 @@ func SubscriptionEpayNotify(c *gin.Context) {
 		return
 	}
 
-	if err := model.CompleteSubscriptionOrder(verifyInfo.ServiceTradeNo, common.GetJsonString(verifyInfo)); err != nil {
+	if err := model.CompleteSubscriptionOrderWithPayment(verifyInfo.ServiceTradeNo, common.GetJsonString(verifyInfo), verifyInfo.Type, model.PaymentProviderEpay); err != nil {
 		service.RecordSubscriptionProcessingRiskCase(validationInput, err)
 		_, _ = c.Writer.Write([]byte("fail"))
 		return
@@ -240,11 +243,13 @@ func SubscriptionEpayReturn(c *gin.Context) {
 		LockOrder(verifyInfo.ServiceTradeNo)
 		defer UnlockOrder(verifyInfo.ServiceTradeNo)
 		validationInput := service.PaymentCallbackValidationInput{
-			TradeNo:         verifyInfo.ServiceTradeNo,
-			PaymentMethod:   verifyInfo.Type,
-			ProviderAmount:  payAmount,
-			Source:          "subscription_epay_return",
-			ProviderPayload: common.GetJsonString(verifyInfo),
+			TradeNo:               verifyInfo.ServiceTradeNo,
+			PaymentMethod:         verifyInfo.Type,
+			PaymentProvider:       model.PaymentProviderEpay,
+			ProviderAmount:        payAmount,
+			Source:                "subscription_epay_return",
+			ProviderPayload:       common.GetJsonString(verifyInfo),
+			ProviderPaymentMethod: verifyInfo.Type,
 		}
 		checkResult, err := service.ValidateSubscriptionCallback(validationInput)
 		if err != nil {
@@ -255,7 +260,7 @@ func SubscriptionEpayReturn(c *gin.Context) {
 			c.Redirect(http.StatusFound, system_setting.ServerAddress+"/console/subscription?pay=success")
 			return
 		}
-		if err := model.CompleteSubscriptionOrder(verifyInfo.ServiceTradeNo, common.GetJsonString(verifyInfo)); err != nil {
+		if err := model.CompleteSubscriptionOrderWithPayment(verifyInfo.ServiceTradeNo, common.GetJsonString(verifyInfo), verifyInfo.Type, model.PaymentProviderEpay); err != nil {
 			service.RecordSubscriptionProcessingRiskCase(validationInput, err)
 			c.Redirect(http.StatusFound, system_setting.ServerAddress+"/console/subscription?pay=fail")
 			return

@@ -116,6 +116,59 @@ func TestValidateTopUpCallback_RejectsPaymentMethodMismatch(t *testing.T) {
 	require.Equal(t, "stripe", riskCase.ProviderPaymentMethod)
 }
 
+func TestValidateTopUpCallback_RejectsPaymentProviderMismatch(t *testing.T) {
+	setupPaymentValidationTestDB(t)
+
+	user := createPaymentValidationUser(t, "payment-provider-mismatch", "default")
+	topUp := createPaymentValidationTopUp(t, user.Id, "TOPUP-PROVIDER-MISMATCH-001", "alipay", 100, 16)
+	require.NoError(t, model.DB.Model(topUp).Update("payment_provider", model.PaymentProviderEpay).Error)
+
+	result, err := ValidateTopUpCallback(PaymentCallbackValidationInput{
+		TradeNo:         topUp.TradeNo,
+		PaymentMethod:   model.PaymentMethodStripe,
+		PaymentProvider: model.PaymentProviderStripe,
+		ProviderAmount:  16,
+		Source:          "stripe_webhook",
+		Currency:        "USD",
+	})
+
+	require.ErrorIs(t, err, ErrPaymentCallbackRejected)
+	require.False(t, result.AlreadyCompleted)
+
+	riskCase, err := model.GetPaymentRiskCaseByRecord(model.PaymentRiskRecordTypeTopUp, topUp.TradeNo)
+	require.NoError(t, err)
+	require.Equal(t, model.PaymentRiskReasonPaymentMethodMismatch, riskCase.Reason)
+	require.Equal(t, topUp.PaymentMethod, riskCase.PaymentMethod)
+	require.Equal(t, model.PaymentMethodStripe, riskCase.ProviderPaymentMethod)
+}
+
+func TestValidateTopUpCallback_AllowsEpayProviderMethodDrift(t *testing.T) {
+	setupPaymentValidationTestDB(t)
+
+	user := createPaymentValidationUser(t, "epay-method-drift", "default")
+	topUp := createPaymentValidationTopUp(t, user.Id, "TOPUP-EPAY-DRIFT-001", "alipay", 100, 16)
+	require.NoError(t, model.DB.Model(topUp).Update("payment_provider", model.PaymentProviderEpay).Error)
+
+	result, err := ValidateTopUpCallback(PaymentCallbackValidationInput{
+		TradeNo:               topUp.TradeNo,
+		PaymentMethod:         "wxpay",
+		PaymentProvider:       model.PaymentProviderEpay,
+		ProviderPaymentMethod: "wxpay",
+		ProviderAmount:        16,
+		Source:                "epay_notify",
+		Currency:              "CNY",
+	})
+
+	require.NoError(t, err)
+	require.False(t, result.AlreadyCompleted)
+
+	var count int64
+	require.NoError(t, model.DB.Model(&model.PaymentRiskCase{}).
+		Where("record_type = ? AND trade_no = ?", model.PaymentRiskRecordTypeTopUp, topUp.TradeNo).
+		Count(&count).Error)
+	require.Zero(t, count)
+}
+
 func TestValidateTopUpCallback_RejectsAmountMismatch(t *testing.T) {
 	setupPaymentValidationTestDB(t)
 	withStripePriceConfig(t)
@@ -222,6 +275,32 @@ func TestValidateSubscriptionCallback_RejectsNonPositiveAmount(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, model.PaymentRiskReasonAmountMismatch, riskCase.Reason)
 	require.Equal(t, 0.0, riskCase.ReceivedMoney)
+}
+
+func TestValidateSubscriptionCallback_RejectsPaymentProviderMismatch(t *testing.T) {
+	setupPaymentValidationTestDB(t)
+
+	user := createPaymentValidationUser(t, "subscription-provider-mismatch", "default")
+	order := createPaymentValidationSubscriptionOrder(t, user.Id, "SUB-PROVIDER-MISMATCH-001", "alipay", 88)
+	require.NoError(t, model.DB.Model(order).Update("payment_provider", model.PaymentProviderEpay).Error)
+
+	result, err := ValidateSubscriptionCallback(PaymentCallbackValidationInput{
+		TradeNo:         order.TradeNo,
+		PaymentMethod:   model.PaymentMethodStripe,
+		PaymentProvider: model.PaymentProviderStripe,
+		ProviderAmount:  88,
+		Source:          "subscription_stripe_webhook",
+		Currency:        "USD",
+	})
+
+	require.ErrorIs(t, err, ErrPaymentCallbackRejected)
+	require.False(t, result.AlreadyCompleted)
+
+	riskCase, err := model.GetPaymentRiskCaseByRecord(model.PaymentRiskRecordTypeSubscription, order.TradeNo)
+	require.NoError(t, err)
+	require.Equal(t, model.PaymentRiskReasonPaymentMethodMismatch, riskCase.Reason)
+	require.Equal(t, order.PaymentMethod, riskCase.PaymentMethod)
+	require.Equal(t, model.PaymentMethodStripe, riskCase.ProviderPaymentMethod)
 }
 
 func TestValidateSubscriptionCallback_AllowsMatchingAmount(t *testing.T) {

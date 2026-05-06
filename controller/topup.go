@@ -27,7 +27,7 @@ func GetTopUpInfo(c *gin.Context) {
 	payMethods := operation_setting.PayMethods
 
 	// 如果启用了 Stripe 支付，添加到支付方法列表
-	if isStripeWebhookEnabled() {
+	if isStripeTopUpEnabled() {
 		// 检查是否已经包含 Stripe
 		hasStripe := false
 		for _, method := range payMethods {
@@ -48,16 +48,47 @@ func GetTopUpInfo(c *gin.Context) {
 		}
 	}
 
+	enableWaffo := isWaffoTopUpEnabled()
+	if enableWaffo {
+		hasWaffo := false
+		for _, method := range payMethods {
+			if method["type"] == model.PaymentMethodWaffo {
+				hasWaffo = true
+				break
+			}
+		}
+		if !hasWaffo {
+			payMethods = append(payMethods, map[string]string{
+				"name":      "Waffo (Global Payment)",
+				"type":      model.PaymentMethodWaffo,
+				"color":     "rgba(var(--semi-blue-5), 1)",
+				"min_topup": strconv.Itoa(setting.WaffoMinTopUp),
+			})
+		}
+	}
+
+	enableWaffoPancake := isWaffoPancakeTopUpEnabled()
+
 	data := gin.H{
-		"enable_online_topup": operation_setting.PayAddress != "" && operation_setting.EpayId != "" && operation_setting.EpayKey != "",
-		"enable_stripe_topup": isStripeWebhookEnabled(),
-		"enable_creem_topup":  setting.CreemApiKey != "" && setting.CreemProducts != "[]",
-		"creem_products":      setting.CreemProducts,
-		"pay_methods":         payMethods,
-		"min_topup":           operation_setting.MinTopUp,
-		"stripe_min_topup":    setting.StripeMinTopUp,
-		"amount_options":      operation_setting.GetPaymentSetting().AmountOptions,
-		"discount":            operation_setting.GetPaymentSetting().AmountDiscount,
+		"enable_online_topup":        isEpayTopUpEnabled(),
+		"enable_stripe_topup":        isStripeTopUpEnabled(),
+		"enable_creem_topup":         isCreemTopUpEnabled(),
+		"enable_waffo_topup":         enableWaffo,
+		"enable_waffo_pancake_topup": enableWaffoPancake,
+		"waffo_pay_methods": func() interface{} {
+			if enableWaffo {
+				return setting.GetWaffoPayMethods()
+			}
+			return nil
+		}(),
+		"creem_products":          setting.CreemProducts,
+		"pay_methods":             payMethods,
+		"min_topup":               operation_setting.MinTopUp,
+		"stripe_min_topup":        setting.StripeMinTopUp,
+		"waffo_min_topup":         setting.WaffoMinTopUp,
+		"waffo_pancake_min_topup": setting.WaffoPancakeMinTopUp,
+		"amount_options":          operation_setting.GetPaymentSetting().AmountOptions,
+		"discount":                operation_setting.GetPaymentSetting().AmountDiscount,
 	}
 	common.ApiSuccess(c, data)
 }
@@ -166,13 +197,14 @@ func RequestEpay(c *gin.Context) {
 		amount = dAmount.Div(dQuotaPerUnit).IntPart()
 	}
 	topUp := &model.TopUp{
-		UserId:        id,
-		Amount:        amount,
-		Money:         payMoney,
-		TradeNo:       tradeNo,
-		PaymentMethod: req.PaymentMethod,
-		CreateTime:    time.Now().Unix(),
-		Status:        common.TopUpStatusPending,
+		UserId:          id,
+		Amount:          amount,
+		Money:           payMoney,
+		TradeNo:         tradeNo,
+		PaymentMethod:   req.PaymentMethod,
+		PaymentProvider: model.PaymentProviderEpay,
+		CreateTime:      time.Now().Unix(),
+		Status:          common.TopUpStatusPending,
 	}
 	err = topUp.Insert()
 	if err != nil {
@@ -264,11 +296,13 @@ func EpayNotify(c *gin.Context) {
 	LockOrder(verifyInfo.ServiceTradeNo)
 	defer UnlockOrder(verifyInfo.ServiceTradeNo)
 	checkResult, err := service.ValidateTopUpCallback(service.PaymentCallbackValidationInput{
-		TradeNo:         verifyInfo.ServiceTradeNo,
-		PaymentMethod:   verifyInfo.Type,
-		ProviderAmount:  payAmount,
-		Source:          "epay_notify",
-		ProviderPayload: common.GetJsonString(verifyInfo),
+		TradeNo:               verifyInfo.ServiceTradeNo,
+		PaymentMethod:         verifyInfo.Type,
+		PaymentProvider:       model.PaymentProviderEpay,
+		ProviderAmount:        payAmount,
+		Source:                "epay_notify",
+		ProviderPayload:       common.GetJsonString(verifyInfo),
+		ProviderPaymentMethod: verifyInfo.Type,
 	})
 	if err != nil {
 		log.Printf("epay notify validation failed: trade_no=%s err=%s", verifyInfo.ServiceTradeNo, err.Error())
@@ -279,7 +313,7 @@ func EpayNotify(c *gin.Context) {
 		_, _ = c.Writer.Write([]byte("success"))
 		return
 	}
-	if err := model.CompleteTopUpByTradeNo(verifyInfo.ServiceTradeNo, "epay", c.ClientIP(), nil); err != nil {
+	if err := model.CompleteTopUpByTradeNoWithPayment(verifyInfo.ServiceTradeNo, "epay", c.ClientIP(), verifyInfo.Type, model.PaymentProviderEpay, nil); err != nil {
 		log.Printf("epay notify complete order failed: trade_no=%s err=%s", verifyInfo.ServiceTradeNo, err.Error())
 		_, _ = c.Writer.Write([]byte("fail"))
 		return
@@ -314,11 +348,13 @@ func EpayReturn(c *gin.Context) {
 		LockOrder(verifyInfo.ServiceTradeNo)
 		defer UnlockOrder(verifyInfo.ServiceTradeNo)
 		checkResult, err := service.ValidateTopUpCallback(service.PaymentCallbackValidationInput{
-			TradeNo:         verifyInfo.ServiceTradeNo,
-			PaymentMethod:   verifyInfo.Type,
-			ProviderAmount:  payAmount,
-			Source:          "epay_return",
-			ProviderPayload: common.GetJsonString(verifyInfo),
+			TradeNo:               verifyInfo.ServiceTradeNo,
+			PaymentMethod:         verifyInfo.Type,
+			PaymentProvider:       model.PaymentProviderEpay,
+			ProviderAmount:        payAmount,
+			Source:                "epay_return",
+			ProviderPayload:       common.GetJsonString(verifyInfo),
+			ProviderPaymentMethod: verifyInfo.Type,
 		})
 		if err != nil {
 			log.Printf("epay return validation failed: trade_no=%s err=%s", verifyInfo.ServiceTradeNo, err.Error())
@@ -329,7 +365,7 @@ func EpayReturn(c *gin.Context) {
 			c.Redirect(http.StatusFound, successURL)
 			return
 		}
-		if err := model.CompleteTopUpByTradeNo(verifyInfo.ServiceTradeNo, "epay_return", c.ClientIP(), nil); err != nil {
+		if err := model.CompleteTopUpByTradeNoWithPayment(verifyInfo.ServiceTradeNo, "epay_return", c.ClientIP(), verifyInfo.Type, model.PaymentProviderEpay, nil); err != nil {
 			log.Printf("epay return complete order failed: trade_no=%s err=%s", verifyInfo.ServiceTradeNo, err.Error())
 			c.Redirect(http.StatusFound, failURL)
 			return
