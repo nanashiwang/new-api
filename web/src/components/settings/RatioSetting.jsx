@@ -111,7 +111,7 @@ const RatioSetting = () => {
           <Tabs.TabPane tab={t('模型权限设置')} itemKey='model_permissions'>
             <ModelPermissionSettings />
           </Tabs.TabPane>
-          <Tabs.TabPane tab={t('上游倍率同步')} itemKey='upstream_sync'>
+          <Tabs.TabPane tab={t('上游价格同步')} itemKey='upstream_sync'>
             <UpstreamRatioSync options={inputs} refresh={onRefresh} />
           </Tabs.TabPane>
           <Tabs.TabPane tab={t('工具调用定价')} itemKey='tool_price'>

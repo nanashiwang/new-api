@@ -1050,16 +1050,20 @@ export function useModelPricingEditorState({
             tieredOutput['billing_setting.billing_expr'][model.name] = finalBillingExpr;
           }
         }
-        if (model.billingMode === 'tiered_expr') {
-          continue;
-        }
-
-        const serialized = serializeModel(model, t);
-        Object.entries(serialized).forEach(([key, value]) => {
-          if (value !== null) {
-            output[key][model.name] = value;
+        // Always serialize ratio/price values for all models, including tiered_expr.
+        // They are fallback values while billing_setting propagates across instances.
+        try {
+          const serialized = serializeModel(model, t);
+          Object.entries(serialized).forEach(([key, value]) => {
+            if (value !== null) {
+              output[key][model.name] = value;
+            }
+          });
+        } catch (e) {
+          if (model.billingMode !== 'tiered_expr') {
+            throw e;
           }
-        });
+        }
       }
 
       const requestQueue = [

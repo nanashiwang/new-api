@@ -338,9 +338,9 @@ var completionRatioMap = types.NewRWMap[string, float64]()
 var defaultCompletionRatio = map[string]float64{
 	"gpt-4-gizmo-*":          2,
 	"gpt-4o-gizmo-*":         3,
-	"gpt-4-all":               2,
-	"gpt-image-1":             8,   // $40 / 1M image output tokens
-	"gpt-image-2":             6,   // $30 / 1M image output tokens
+	"gpt-4-all":              2,
+	"gpt-image-1":            8, // $40 / 1M image output tokens
+	"gpt-image-2":            6, // $30 / 1M image output tokens
 	"gpt-image-2-2026-04-21": 6,
 }
 
@@ -677,8 +677,8 @@ func ModelRatio2JSONString() string {
 }
 
 var defaultImageRatio = map[string]float64{
-	"gpt-image-1":             2,   // $10 / 1M image input tokens
-	"gpt-image-2":             1.6, // $8 / 1M image input tokens
+	"gpt-image-1":            2,   // $10 / 1M image input tokens
+	"gpt-image-2":            1.6, // $8 / 1M image input tokens
 	"gpt-image-2-2026-04-21": 1.6,
 }
 var imageRatioMap = types.NewRWMap[string, float64]()
@@ -727,6 +727,18 @@ func GetModelPriceCopy() map[string]float64 {
 
 func GetCompletionRatioCopy() map[string]float64 {
 	return completionRatioMap.ReadAll()
+}
+
+func GetImageRatioCopy() map[string]float64 {
+	return imageRatioMap.ReadAll()
+}
+
+func GetAudioRatioCopy() map[string]float64 {
+	return audioRatioMap.ReadAll()
+}
+
+func GetAudioCompletionRatioCopy() map[string]float64 {
+	return audioCompletionRatioMap.ReadAll()
 }
 
 // 转换模型名，减少渠道必须配置各种带参数模型
