@@ -431,10 +431,12 @@ const TopupHistoryModal = ({
     currentPage,
     currentPageSize,
     currentFilters,
+    viewMode = 'self',
   ) => {
     setWithdrawalLoading(true);
     try {
-      const base = userIsAdmin
+      const isAdminView = viewMode === 'admin' && userIsAdmin;
+      const base = isAdminView
         ? '/api/user/aff-withdrawals'
         : '/api/user/aff-withdrawals/self';
       const searchParams = new URLSearchParams({
@@ -444,7 +446,7 @@ const TopupHistoryModal = ({
       if (currentFilters.status) {
         searchParams.set('status', currentFilters.status);
       }
-      if (userIsAdmin && currentFilters.username) {
+      if (isAdminView && currentFilters.username) {
         searchParams.set('username', currentFilters.username.trim());
       }
 
@@ -528,18 +530,24 @@ const TopupHistoryModal = ({
   };
 
   const refreshWithdrawals = async () => {
+    const mode = activeTab === 'withdrawals' ? 'admin' : 'self';
     await loadWithdrawals(
       withdrawalPage,
       withdrawalPageSize,
       withdrawalAppliedFilters,
+      mode,
     );
   };
 
   useEffect(() => {
     if (visible && initialTab) {
-      setActiveTab(initialTab);
+      const safeTab =
+        !userIsAdmin && initialTab === 'withdrawals'
+          ? 'my-withdrawals'
+          : initialTab;
+      setActiveTab(safeTab);
     }
-  }, [visible, initialTab]);
+  }, [visible, initialTab, userIsAdmin]);
 
   useEffect(() => {
     if (!visible) {
@@ -576,13 +584,18 @@ const TopupHistoryModal = ({
   ]);
 
   useEffect(() => {
-    if (!visible || activeTab !== 'withdrawals') {
+    if (!visible) {
       return;
     }
+    if (activeTab !== 'withdrawals' && activeTab !== 'my-withdrawals') {
+      return;
+    }
+    const mode = activeTab === 'withdrawals' ? 'admin' : 'self';
     loadWithdrawals(
       withdrawalPage,
       withdrawalPageSize,
       withdrawalAppliedFilters,
+      mode,
     );
   }, [
     visible,
@@ -1442,6 +1455,7 @@ const TopupHistoryModal = ({
   }, [riskFilters]);
 
   const withdrawalColumns = useMemo(() => {
+    const isReviewMode = userIsAdmin && activeTab === 'withdrawals';
     const columns = [
       {
         title: t('状态'),
@@ -1452,7 +1466,7 @@ const TopupHistoryModal = ({
       },
     ];
 
-    if (userIsAdmin) {
+    if (isReviewMode) {
       columns.push({
         title: t('用户'),
         key: 'username',
@@ -1544,7 +1558,7 @@ const TopupHistoryModal = ({
       },
     );
 
-    if (userIsAdmin) {
+    if (isReviewMode) {
       columns.push({
         title: t('操作'),
         key: 'action',
@@ -1580,6 +1594,7 @@ const TopupHistoryModal = ({
     return columns;
   }, [
     userIsAdmin,
+    activeTab,
     withdrawalFilters,
     withdrawalPage,
     withdrawalPageSize,
@@ -1819,7 +1834,7 @@ const TopupHistoryModal = ({
           border: '1px solid var(--semi-color-border)',
         }}
       >
-        {userIsAdmin ? (
+        {userIsAdmin && activeTab === 'withdrawals' ? (
           <div style={{ minWidth: 180, flex: 1 }}>
             <div
               className='text-xs mb-1'
@@ -2118,7 +2133,7 @@ const TopupHistoryModal = ({
         scroll={{ x: '100%' }}
         empty={buildTableEmpty(
           t,
-          userIsAdmin ? '暂无提现审核记录' : '暂无提现记录',
+          activeTab === 'withdrawals' ? '暂无提现审核记录' : '暂无提现订单',
         )}
       />
     </>
@@ -2139,6 +2154,9 @@ const TopupHistoryModal = ({
             <Tabs.TabPane tab={t('支付记录')} itemKey='records'>
               {renderRecordsTable()}
             </Tabs.TabPane>
+            <Tabs.TabPane tab={t('提现订单')} itemKey='my-withdrawals'>
+              {renderWithdrawalTable()}
+            </Tabs.TabPane>
             <Tabs.TabPane tab={t('对账看板')} itemKey='dashboard'>
               {renderDashboardBoard()}
             </Tabs.TabPane>
@@ -2154,7 +2172,7 @@ const TopupHistoryModal = ({
             <Tabs.TabPane tab={t('支付记录')} itemKey='records'>
               {renderRecordsTable()}
             </Tabs.TabPane>
-            <Tabs.TabPane tab={t('提现记录')} itemKey='withdrawals'>
+            <Tabs.TabPane tab={t('提现订单')} itemKey='my-withdrawals'>
               {renderWithdrawalTable()}
             </Tabs.TabPane>
           </Tabs>

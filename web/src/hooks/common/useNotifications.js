@@ -23,19 +23,22 @@ import { API, isAdmin } from '../../helpers';
 export const useNotifications = (statusState) => {
   const [noticeVisible, setNoticeVisible] = useState(false);
   const [announcementUnread, setAnnouncementUnread] = useState(0);
+  const [pendingWithdrawals, setPendingWithdrawals] = useState([]);
   const [pendingWithdrawalCount, setPendingWithdrawalCount] = useState(0);
   const admin = isAdmin();
 
   const announcements = statusState?.status?.announcements || [];
 
-  const fetchPendingWithdrawalCount = async () => {
+  const fetchPendingWithdrawals = async () => {
     if (!admin) return;
     try {
       const res = await API.get(
-        '/api/user/aff-withdrawals?status=pending&p=1&page_size=1',
+        '/api/user/aff-withdrawals?status=pending&p=1&page_size=5',
       );
       if (res?.data?.success) {
-        setPendingWithdrawalCount(Number(res.data.data?.total) || 0);
+        const data = res.data.data || {};
+        setPendingWithdrawals(Array.isArray(data.items) ? data.items : []);
+        setPendingWithdrawalCount(Number(data.total) || 0);
       }
     } catch (_) {
       // silent: keep previous value to avoid badge flicker
@@ -79,12 +82,12 @@ export const useNotifications = (statusState) => {
   }, [announcements]);
 
   useEffect(() => {
-    fetchPendingWithdrawalCount();
+    fetchPendingWithdrawals();
   }, [admin]);
 
   // 操作函数
   const handleNoticeOpen = () => {
-    fetchPendingWithdrawalCount();
+    fetchPendingWithdrawals();
     setNoticeVisible(true);
   };
 
@@ -110,6 +113,7 @@ export const useNotifications = (statusState) => {
     unreadCount: announcementUnread + (admin ? pendingWithdrawalCount : 0),
     announcementUnread,
     pendingWithdrawalCount,
+    pendingWithdrawals,
     isAdminUser: admin,
     announcements,
     handleNoticeOpen,

@@ -816,8 +816,8 @@ const TopUp = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
     const tab = searchParams.get('tab');
-    if (tab === 'withdrawals') {
-      openHistoryTab('withdrawals');
+    if (tab === 'withdrawals' || tab === 'my-withdrawals') {
+      openHistoryTab(tab);
       const next = new URLSearchParams(searchParams);
       next.delete('tab');
       setSearchParams(next, { replace: true });
@@ -1508,7 +1508,7 @@ const TopUp = () => {
             renderQuota={renderQuota}
             onOpenTransfer={tryOpenTransfer}
             onOpenWithdrawal={tryOpenWithdrawal}
-            openWithdrawalHistory={() => openHistoryTab('withdrawals')}
+            openWithdrawalHistory={() => openHistoryTab('my-withdrawals')}
             affLink={affLink}
             handleAffLinkClick={handleAffLinkClick}
           />

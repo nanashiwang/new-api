@@ -19,16 +19,24 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React, { useEffect, useState, useContext, useMemo } from 'react';
 import {
+  Avatar,
   Button,
   Modal,
   Empty,
   Tabs,
   TabPane,
   Timeline,
+  Typography,
 } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { API, showError, getRelativeTime } from '../../helpers';
+import {
+  API,
+  showError,
+  getRelativeTime,
+  renderQuota,
+  stringToColor,
+} from '../../helpers';
 import { marked } from 'marked';
 import {
   IllustrationNoContent,
@@ -37,6 +45,8 @@ import {
 import { StatusContext } from '../../context/Status';
 import { Bell, Megaphone, Wallet } from 'lucide-react';
 
+const { Text } = Typography;
+
 const NoticeModal = ({
   visible,
   onClose,
@@ -44,6 +54,7 @@ const NoticeModal = ({
   defaultTab = 'inApp',
   unreadKeys = [],
   pendingWithdrawalCount = 0,
+  pendingWithdrawals = [],
   showWithdrawalTab = false,
 }) => {
   const { t } = useTranslation();
@@ -231,23 +242,67 @@ const NoticeModal = ({
         </div>
       );
     }
+    const goToReview = () => {
+      onClose();
+      navigate('/console/topup?tab=withdrawals');
+    };
     return (
-      <div className='py-12 flex flex-col items-center gap-4'>
-        <div className='text-base'>
-          {t('当前有 {{count}} 条待审核提现申请', {
-            count: pendingWithdrawalCount,
+      <div className='max-h-[55vh] overflow-y-auto card-content-scroll pr-2'>
+        <div className='flex items-center justify-between mb-3 px-1'>
+          <Text type='tertiary' size='small'>
+            {t('共 {{count}} 条待审核', { count: pendingWithdrawalCount })}
+          </Text>
+          <Button
+            type='primary'
+            theme='solid'
+            size='small'
+            onClick={goToReview}
+          >
+            {t('前往审核')}
+          </Button>
+        </div>
+        <div className='flex flex-col gap-2'>
+          {pendingWithdrawals.map((item) => {
+            const name = item.username || item.display_name || `#${item.user_id}`;
+            const ts = item.created_at ? item.created_at * 1000 : null;
+            return (
+              <div
+                key={item.id}
+                className='flex items-center justify-between gap-3 p-3 rounded-md bg-gray-50 dark:bg-zinc-800/50'
+              >
+                <div className='flex items-center gap-2 min-w-0 flex-1'>
+                  <Avatar size='small' color={stringToColor(name)}>
+                    {name.slice(0, 1).toUpperCase()}
+                  </Avatar>
+                  <div className='flex flex-col leading-tight min-w-0 flex-1'>
+                    <Text size='small' ellipsis={{ showTooltip: true }}>
+                      {name}
+                    </Text>
+                    <Text type='tertiary' size='small'>
+                      {ts ? getRelativeTime(ts) : ''}
+                    </Text>
+                  </div>
+                </div>
+                <Text strong size='small' className='flex-shrink-0'>
+                  {renderQuota(item.quota || 0)}
+                </Text>
+              </div>
+            );
           })}
         </div>
-        <Button
-          type='primary'
-          theme='solid'
-          onClick={() => {
-            onClose();
-            navigate('/console/topup?tab=withdrawals');
-          }}
-        >
-          {t('前往审核')}
-        </Button>
+        {pendingWithdrawalCount > pendingWithdrawals.length && (
+          <div className='text-center mt-3'>
+            <Text
+              type='tertiary'
+              size='small'
+              link
+              style={{ cursor: 'pointer' }}
+              onClick={goToReview}
+            >
+              {t('查看全部 {{count}} 条', { count: pendingWithdrawalCount })}
+            </Text>
+          </div>
+        )}
       </div>
     );
   };

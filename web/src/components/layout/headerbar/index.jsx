@@ -59,6 +59,7 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
     unreadCount,
     announcementUnread,
     pendingWithdrawalCount,
+    pendingWithdrawals,
     isAdminUser,
     handleNoticeOpen,
     handleNoticeClose,
@@ -82,6 +83,7 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
         }
         unreadKeys={getUnreadKeys()}
         pendingWithdrawalCount={pendingWithdrawalCount}
+        pendingWithdrawals={pendingWithdrawals}
         showWithdrawalTab={isAdminUser}
       />
 
