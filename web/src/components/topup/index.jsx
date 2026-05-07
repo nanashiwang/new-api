@@ -35,11 +35,35 @@ import {
   displayAmountToQuota,
   quotaToDisplayAmount,
 } from '../../helpers/quota';
-import { getPaymentCurrencySymbol, formatWindowLimitShort, formatConcurrencyLabel } from '../../helpers/render';
-import { Button, Card, Form, Modal, Select, Space, Tag, Toast, Typography, Divider } from '@douyinfe/semi-ui';
+import {
+  getPaymentCurrencySymbol,
+  formatWindowLimitShort,
+  formatConcurrencyLabel,
+} from '../../helpers/render';
+import {
+  Button,
+  Card,
+  Form,
+  Modal,
+  Select,
+  Space,
+  Tag,
+  Toast,
+  Typography,
+  Divider,
+} from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { useDebouncedCallback } from 'use-debounce';
-import { ArrowRight, Clock3, Coins, Gauge, ShieldCheck, Zap, Sparkles, BellRing } from 'lucide-react';
+import {
+  ArrowRight,
+  Clock3,
+  Coins,
+  Gauge,
+  ShieldCheck,
+  Zap,
+  Sparkles,
+  BellRing,
+} from 'lucide-react';
 import { IconGift } from '@douyinfe/semi-icons';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
@@ -47,6 +71,7 @@ import { StatusContext } from '../../context/Status';
 import RechargeCard from './RechargeCard';
 import InvitationCard from './InvitationCard';
 import TransferModal from './modals/TransferModal';
+import WithdrawalModal from './modals/WithdrawalModal';
 import PaymentConfirmModal from './modals/PaymentConfirmModal';
 import TopupHistoryModal from './modals/TopupHistoryModal';
 import SellableTokenIssuanceModal from '../sellable-tokens/SellableTokenIssuanceModal';
@@ -69,7 +94,8 @@ const PERIOD_LABELS = {
   custom: '自定义',
 };
 
-const renderPeriodLabel = (t, period) => t(PERIOD_LABELS[period] || PERIOD_LABELS.custom);
+const renderPeriodLabel = (t, period) =>
+  t(PERIOD_LABELS[period] || PERIOD_LABELS.custom);
 const renderValidityLabel = (t, validitySeconds) =>
   Number(validitySeconds || 0) > 0
     ? `${Number(validitySeconds || 0)}s`
@@ -120,12 +146,23 @@ const TopUp = () => {
   // 邀请状态
   const [affLink, setAffLink] = useState('');
   const [openTransfer, setOpenTransfer] = useState(false);
+  const [openWithdrawal, setOpenWithdrawal] = useState(false);
+  const [withdrawalSubmitting, setWithdrawalSubmitting] = useState(false);
+  const [alipayAccount, setAlipayAccount] = useState('');
+  const [alipayName, setAlipayName] = useState('');
   const [transferAmount, setTransferAmount] = useState(() => {
     const minTransferAmount = quotaToDisplayAmount(getQuotaPerUnit());
     return getCurrencyConfig().type === 'TOKENS'
       ? minTransferAmount
       : roundCurrencyAmountUp(minTransferAmount);
   });
+  const [withdrawalAmount, setWithdrawalAmount] = useState(() => {
+    const minWithdrawalAmount = quotaToDisplayAmount(getQuotaPerUnit());
+    return getCurrencyConfig().type === 'TOKENS'
+      ? minWithdrawalAmount
+      : roundCurrencyAmountUp(minWithdrawalAmount);
+  });
+  const [historyInitialTab, setHistoryInitialTab] = useState('records');
 
   // 计费弹窗状态
   const [openHistory, setOpenHistory] = useState(false);
@@ -280,13 +317,9 @@ const TopUp = () => {
         const retry = Number(body?.error?.retry_after) || 60;
         const scope = body?.error?.scope;
         if (scope === 'RDF') {
-          showError(
-            t('兑换失败次数过多，{{sec}} 秒后再试', { sec: retry }),
-          );
+          showError(t('兑换失败次数过多，{{sec}} 秒后再试', { sec: retry }));
         } else {
-          showError(
-            t('兑换次数过于频繁，{{sec}} 秒后再试', { sec: retry }),
-          );
+          showError(t('兑换次数过于频繁，{{sec}} 秒后再试', { sec: retry }));
         }
       } else {
         showError(t('请求失败'));
@@ -311,7 +344,10 @@ const TopUp = () => {
       const res = await API.get('/api/user/sellable-token/issuances', {
         params: { status: 'pending' },
       });
-      if (res.data?.success) setPendingSellableIssuances(Array.isArray(res.data.data) ? res.data.data : []);
+      if (res.data?.success)
+        setPendingSellableIssuances(
+          Array.isArray(res.data.data) ? res.data.data : [],
+        );
     } catch (error) {}
   };
 
@@ -325,9 +361,9 @@ const TopUp = () => {
           ? res.data.data.items
           : Array.isArray(res.data.data)
             ? res.data.data
-          : Array.isArray(res.data.data?.data)
-            ? res.data.data.data
-            : [];
+            : Array.isArray(res.data.data?.data)
+              ? res.data.data.data
+              : [];
         const isActiveSellableToken = (token) => {
           const statusEnabled = Number(token?.status || 0) === 1;
           if (!statusEnabled) return false;
@@ -337,16 +373,16 @@ const TopUp = () => {
             Number(token?.sellable_token_issuance_id || 0) > 0
           );
         };
-        setActiveSellableTokens(
-          items.filter(isActiveSellableToken),
-        );
+        setActiveSellableTokens(items.filter(isActiveSellableToken));
       }
     } catch (_) {}
   };
 
   const purchaseSellableToken = async (productId) => {
     try {
-      const res = await API.post('/api/user/sellable-token/purchase', { product_id: productId });
+      const res = await API.post('/api/user/sellable-token/purchase', {
+        product_id: productId,
+      });
       if (res.data?.success) {
         showSuccess(t('购买成功，请继续完成令牌发放'));
         getUserQuota();
@@ -371,10 +407,18 @@ const TopUp = () => {
         centered: true,
         content: (
           <div className='space-y-2 text-sm'>
-            <div>{t('商品')}: {product?.name || '-'}</div>
-            <div>{t('需扣除余额')}: {renderQuota(priceQuota)}</div>
-            <div>{t('当前余额')}: {renderQuota(currentQuota)}</div>
-            <div className='text-red-500'>{t('余额不足，还差')} {renderQuota(priceQuota - currentQuota)}</div>
+            <div>
+              {t('商品')}: {product?.name || '-'}
+            </div>
+            <div>
+              {t('需扣除余额')}: {renderQuota(priceQuota)}
+            </div>
+            <div>
+              {t('当前余额')}: {renderQuota(currentQuota)}
+            </div>
+            <div className='text-red-500'>
+              {t('余额不足，还差')} {renderQuota(priceQuota - currentQuota)}
+            </div>
           </div>
         ),
       });
@@ -388,11 +432,21 @@ const TopUp = () => {
       cancelText: t('取消'),
       content: (
         <div className='space-y-2 text-sm'>
-          <div>{t('商品')}: {product?.name || '-'}</div>
-          <div>{t('需扣除余额')}: {renderQuota(priceQuota)}</div>
-          <div>{t('当前余额')}: {renderQuota(currentQuota)}</div>
-          <div>{t('购买后剩余')}: {renderQuota(currentQuota - priceQuota)}</div>
-          <div className='text-gray-500'>{t('确认后将立即扣除钱包余额，并进入令牌发放设置。')}</div>
+          <div>
+            {t('商品')}: {product?.name || '-'}
+          </div>
+          <div>
+            {t('需扣除余额')}: {renderQuota(priceQuota)}
+          </div>
+          <div>
+            {t('当前余额')}: {renderQuota(currentQuota)}
+          </div>
+          <div>
+            {t('购买后剩余')}: {renderQuota(currentQuota - priceQuota)}
+          </div>
+          <div className='text-gray-500'>
+            {t('确认后将立即扣除钱包余额，并进入令牌发放设置。')}
+          </div>
         </div>
       ),
       onOk: async () => purchaseSellableToken(productId),
@@ -407,7 +461,11 @@ const TopUp = () => {
     window.open(topUpLink, '_blank');
   };
 
-  const fetchQuotedAmount = async (value, paymentMethod = payWay, options = {}) => {
+  const fetchQuotedAmount = async (
+    value,
+    paymentMethod = payWay,
+    options = {},
+  ) => {
     const { showErrorToast = false } = options;
     const normalizedValue = Number(value ?? topUpCount);
     if (!paymentMethod) {
@@ -420,12 +478,15 @@ const TopUp = () => {
     setAmountLoading(true);
 
     try {
-      const endpoint = paymentMethod === 'stripe'
-        ? '/api/user/stripe/amount'
-        : (paymentMethod === 'waffo' || paymentMethod.startsWith('waffo:'))
-          ? '/api/user/waffo/amount'
-          : '/api/user/amount';
-      const res = await API.post(endpoint, { amount: parseFloat(normalizedValue) });
+      const endpoint =
+        paymentMethod === 'stripe'
+          ? '/api/user/stripe/amount'
+          : paymentMethod === 'waffo' || paymentMethod.startsWith('waffo:')
+            ? '/api/user/waffo/amount'
+            : '/api/user/amount';
+      const res = await API.post(endpoint, {
+        amount: parseFloat(normalizedValue),
+      });
       if (requestId !== amountRequestRef.current) return null;
       if (res?.data?.message === 'success') {
         const quotedAmount = parseFloat(res.data.data);
@@ -499,15 +560,17 @@ const TopUp = () => {
     setConfirmLoading(true);
     try {
       const isWaffo = payWay === 'waffo' || payWay.startsWith('waffo:');
-      const endpoint = payWay === 'stripe'
-        ? '/api/user/stripe/pay'
-        : isWaffo
-          ? '/api/user/waffo/pay'
-          : '/api/user/pay';
+      const endpoint =
+        payWay === 'stripe'
+          ? '/api/user/stripe/pay'
+          : isWaffo
+            ? '/api/user/waffo/pay'
+            : '/api/user/pay';
       const payload = { amount: parseInt(topUpCount), payment_method: payWay };
       if (payWay.startsWith('waffo:')) {
         const payMethodIndex = Number(payWay.split(':')[1]);
-        if (Number.isFinite(payMethodIndex)) payload.pay_method_index = payMethodIndex;
+        if (Number.isFinite(payMethodIndex))
+          payload.pay_method_index = payMethodIndex;
       }
       const res = await API.post(endpoint, payload);
       if (res?.data?.message === 'success') {
@@ -601,7 +664,9 @@ const TopUp = () => {
     const previousPref = billingPreference;
     setBillingPreference(pref);
     try {
-      const res = await API.put('/api/subscription/self/preference', { billing_preference: pref });
+      const res = await API.put('/api/subscription/self/preference', {
+        billing_preference: pref,
+      });
       if (!res.data?.success) setBillingPreference(previousPref);
     } catch (e) {
       setBillingPreference(previousPref);
@@ -613,10 +678,17 @@ const TopUp = () => {
       const res = await API.get('/api/user/topup/info');
       if (res.data?.success) {
         const data = res.data.data;
-        setTopupInfo({ amount_options: data.amount_options || [], discount: data.discount || {} });
-        let pMethods = Array.isArray(data.pay_methods) ? data.pay_methods : JSON.parse(data.pay_methods || '[]');
+        setTopupInfo({
+          amount_options: data.amount_options || [],
+          discount: data.discount || {},
+        });
+        let pMethods = Array.isArray(data.pay_methods)
+          ? data.pay_methods
+          : JSON.parse(data.pay_methods || '[]');
         const enableWaffo = !!data.enable_waffo_topup;
-        const waffoMethods = Array.isArray(data.waffo_pay_methods) ? data.waffo_pay_methods : [];
+        const waffoMethods = Array.isArray(data.waffo_pay_methods)
+          ? data.waffo_pay_methods
+          : [];
         if (enableWaffo && waffoMethods.length > 0) {
           pMethods = pMethods.filter((m) => m.type !== 'waffo');
           pMethods = [
@@ -630,7 +702,7 @@ const TopUp = () => {
             })),
           ];
         }
-        setPayMethods(pMethods.filter(m => m.name && m.type));
+        setPayMethods(pMethods.filter((m) => m.name && m.type));
         setEnableStripeTopUp(!!data.enable_stripe_topup);
         setEnableOnlineTopUp(!!data.enable_online_topup);
         setEnableCreemTopUp(!!data.enable_creem_topup);
@@ -647,9 +719,18 @@ const TopUp = () => {
         setTopUpCount(mTopUp);
         setCreemProducts(JSON.parse(data.creem_products || '[]'));
         if (data.amount_options?.length > 0) {
-          setPresetAmounts(data.amount_options.map(v => ({ value: v, discount: data.discount[v] || 1.0 })));
+          setPresetAmounts(
+            data.amount_options.map((v) => ({
+              value: v,
+              discount: data.discount[v] || 1.0,
+            })),
+          );
         } else {
-          setPresetAmounts([1, 5, 10, 30, 50, 100, 300, 500].map(m => ({ value: mTopUp * m })));
+          setPresetAmounts(
+            [1, 5, 10, 30, 50, 100, 300, 500].map((m) => ({
+              value: mTopUp * m,
+            })),
+          );
         }
       }
     } catch (e) {}
@@ -657,7 +738,8 @@ const TopUp = () => {
 
   const getAffLink = async () => {
     const res = await API.get('/api/user/aff');
-    if (res.data?.success) setAffLink(`${window.location.origin}/register?aff=${res.data.data}`);
+    if (res.data?.success)
+      setAffLink(`${window.location.origin}/register?aff=${res.data.data}`);
   };
 
   const handleAffLinkClick = async () => {
@@ -671,11 +753,58 @@ const TopUp = () => {
   const transfer = async () => {
     const transferQuota = displayAmountToQuota(transferAmount);
     if (transferQuota < getQuotaPerUnit()) return;
-    const res = await API.post(`/api/user/aff_transfer`, { quota: transferQuota });
+    const res = await API.post(`/api/user/aff_transfer`, {
+      quota: transferQuota,
+    });
     if (res.data?.success) {
       getUserQuota();
       setOpenTransfer(false);
     }
+  };
+
+  const submitWithdrawal = async () => {
+    const withdrawalQuota = displayAmountToQuota(withdrawalAmount);
+    if (withdrawalQuota < getQuotaPerUnit()) {
+      showError(t('提现额度不能低于最低额度'));
+      return;
+    }
+    if (!alipayAccount.trim()) {
+      showError(t('请输入支付宝账号'));
+      return;
+    }
+    if (!alipayName.trim()) {
+      showError(t('请输入支付宝实名姓名'));
+      return;
+    }
+
+    setWithdrawalSubmitting(true);
+    try {
+      const res = await API.post('/api/user/aff-withdrawals', {
+        quota: withdrawalQuota,
+        alipay_account: alipayAccount.trim(),
+        alipay_name: alipayName.trim(),
+      });
+      if (res.data?.success) {
+        showSuccess(t('提现申请已提交'));
+        setOpenWithdrawal(false);
+        setAlipayAccount('');
+        setAlipayName('');
+        await getUserQuota();
+      } else {
+        showError(res.data?.message || t('提交提现失败'));
+      }
+    } catch (e) {
+      const msg =
+        e?.response?.data?.message || e?.message || t('提交提现失败');
+      showError(msg);
+    } finally {
+      setWithdrawalSubmitting(false);
+    }
+  };
+
+  const openHistoryTab = (tab) => {
+    setHistoryInitialTab(tab);
+    setOpenHistory(true);
   };
 
   const selectPresetAmount = (preset) => {
@@ -720,7 +849,14 @@ const TopUp = () => {
 
     if (payWay) setPayWay('');
     setAmount(0);
-  }, [payMethods, payWay, topUpCount, enableOnlineTopUp, enableStripeTopUp, enableWaffoTopUp]);
+  }, [
+    payMethods,
+    payWay,
+    topUpCount,
+    enableOnlineTopUp,
+    enableStripeTopUp,
+    enableWaffoTopUp,
+  ]);
 
   useEffect(() => {
     debouncedGetAmount.cancel();
@@ -733,7 +869,8 @@ const TopUp = () => {
     return () => debouncedGetAmount.cancel();
   }, [payWay, topUpCount]);
 
-  const renderAmount = () => `${getPaymentCurrencySymbol()}${Number(amount || 0).toFixed(2)}`;
+  const renderAmount = () =>
+    `${getPaymentCurrencySymbol()}${Number(amount || 0).toFixed(2)}`;
   const showSellableTokenTab =
     sellableTokenLoading ||
     sellableTokenProducts.length > 0 ||
@@ -742,11 +879,81 @@ const TopUp = () => {
 
   return (
     <div className='w-full max-w-7xl mx-auto relative min-h-screen lg:min-h-0 mt-[60px] px-2'>
-      <TransferModal t={t} openTransfer={openTransfer} transfer={transfer} handleTransferCancel={() => setOpenTransfer(false)} userState={userState} renderQuota={renderQuota} getQuotaPerUnit={getQuotaPerUnit} transferAmount={transferAmount} setTransferAmount={setTransferAmount} />
-      <PaymentConfirmModal t={t} open={open} onlineTopUp={onlineTopUp} handleCancel={() => setOpen(false)} confirmLoading={confirmLoading} topUpCount={topUpCount} renderQuotaWithAmount={renderQuotaWithAmount} amountLoading={amountLoading} renderAmount={renderAmount} payWay={payWay} payMethods={payMethods} amountNumber={amount} discountRate={topupInfo?.discount?.[topUpCount] || 1.0} />
-      <TopupHistoryModal visible={openHistory} onCancel={() => setOpenHistory(false)} t={t} />
-      <SellableTokenIssuanceModal visible={sellableTokenIssuanceVisible} issuanceId={sellableTokenIssuanceId} onCancel={() => { setSellableTokenIssuanceVisible(false); setSellableTokenIssuanceId(0); }} onSuccess={() => { setSellableTokenIssuanceVisible(false); setSellableTokenIssuanceId(0); loadPendingSellableIssuances(); loadActiveSellableTokens(); }} />
-      <SubscriptionIssuanceModal visible={subscriptionIssuanceVisible} issuanceId={subscriptionIssuanceId} onCancel={() => { setSubscriptionIssuanceVisible(false); setSubscriptionIssuanceId(0); }} onSuccess={() => { setSubscriptionIssuanceVisible(false); setSubscriptionIssuanceId(0); getSubscriptionSelf(); }} />
+      <TransferModal
+        t={t}
+        openTransfer={openTransfer}
+        transfer={transfer}
+        handleTransferCancel={() => setOpenTransfer(false)}
+        userState={userState}
+        renderQuota={renderQuota}
+        getQuotaPerUnit={getQuotaPerUnit}
+        transferAmount={transferAmount}
+        setTransferAmount={setTransferAmount}
+      />
+      <WithdrawalModal
+        t={t}
+        visible={openWithdrawal}
+        onOk={submitWithdrawal}
+        onCancel={() => setOpenWithdrawal(false)}
+        confirmLoading={withdrawalSubmitting}
+        userState={userState}
+        renderQuota={renderQuota}
+        getQuotaPerUnit={getQuotaPerUnit}
+        withdrawalAmount={withdrawalAmount}
+        setWithdrawalAmount={setWithdrawalAmount}
+        alipayAccount={alipayAccount}
+        setAlipayAccount={setAlipayAccount}
+        alipayName={alipayName}
+        setAlipayName={setAlipayName}
+      />
+      <PaymentConfirmModal
+        t={t}
+        open={open}
+        onlineTopUp={onlineTopUp}
+        handleCancel={() => setOpen(false)}
+        confirmLoading={confirmLoading}
+        topUpCount={topUpCount}
+        renderQuotaWithAmount={renderQuotaWithAmount}
+        amountLoading={amountLoading}
+        renderAmount={renderAmount}
+        payWay={payWay}
+        payMethods={payMethods}
+        amountNumber={amount}
+        discountRate={topupInfo?.discount?.[topUpCount] || 1.0}
+      />
+      <TopupHistoryModal
+        visible={openHistory}
+        onCancel={() => setOpenHistory(false)}
+        t={t}
+        initialTab={historyInitialTab}
+      />
+      <SellableTokenIssuanceModal
+        visible={sellableTokenIssuanceVisible}
+        issuanceId={sellableTokenIssuanceId}
+        onCancel={() => {
+          setSellableTokenIssuanceVisible(false);
+          setSellableTokenIssuanceId(0);
+        }}
+        onSuccess={() => {
+          setSellableTokenIssuanceVisible(false);
+          setSellableTokenIssuanceId(0);
+          loadPendingSellableIssuances();
+          loadActiveSellableTokens();
+        }}
+      />
+      <SubscriptionIssuanceModal
+        visible={subscriptionIssuanceVisible}
+        issuanceId={subscriptionIssuanceId}
+        onCancel={() => {
+          setSubscriptionIssuanceVisible(false);
+          setSubscriptionIssuanceId(0);
+        }}
+        onSuccess={() => {
+          setSubscriptionIssuanceVisible(false);
+          setSubscriptionIssuanceId(0);
+          getSubscriptionSelf();
+        }}
+      />
 
       <div className='grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.22fr)_minmax(380px,1fr)]'>
         <div>
@@ -779,7 +986,7 @@ const TopUp = () => {
             renderQuota={renderQuota}
             statusLoading={statusLoading}
             topupInfo={topupInfo}
-            onOpenHistory={() => setOpenHistory(true)}
+            onOpenHistory={() => openHistoryTab('records')}
             subscriptionLoading={subscriptionLoading}
             subscriptionPlans={subscriptionPlans}
             billingPreference={billingPreference}
@@ -797,19 +1004,88 @@ const TopUp = () => {
                   onRefresh={loadActiveSellableTokens}
                 />
 
-                {sellableTokenProducts.length === 0 ? (<Card className='!rounded-xl border border-dashed border-slate-200 bg-slate-50/50'><div className='py-12 text-center'><div className='text-base font-medium text-slate-600'>{sellableTokenLoading ? t('加载中...') : t('当前暂无可售令牌商品')}</div><div className='mt-2 text-sm text-slate-400'>{t('管理员上架后，会在这里展示可直接购买的令牌商品。')}</div></div></Card>) : (
+                {sellableTokenProducts.length === 0 ? (
+                  <Card className='!rounded-xl border border-dashed border-slate-200 bg-slate-50/50'>
+                    <div className='py-12 text-center'>
+                      <div className='text-base font-medium text-slate-600'>
+                        {sellableTokenLoading
+                          ? t('加载中...')
+                          : t('当前暂无可售令牌商品')}
+                      </div>
+                      <div className='mt-2 text-sm text-slate-400'>
+                        {t('管理员上架后，会在这里展示可直接购买的令牌商品。')}
+                      </div>
+                    </div>
+                  </Card>
+                ) : (
                   <div className='grid grid-cols-1 gap-6 px-1 xl:grid-cols-2'>
                     {sellableTokenProducts.map((item, index) => {
                       const product = item?.product || {};
                       const isRecommended =
                         index === 0 && sellableTokenProducts.length > 1;
-                      const productPriceQuota = Number(product?.price_quota || 0);
+                      const productPriceQuota = Number(
+                        product?.price_quota || 0,
+                      );
                       const productHighlights = [
-                        { icon: <Coins size={14} />, label: t('钱包售价'), value: renderQuota(productPriceQuota) },
-                        { icon: <ShieldCheck size={14} />, label: t('总额度'), value: Number(product?.total_quota || 0) === 0 ? t('不限') : renderQuota(product.total_quota) },
-                        { icon: <Clock3 size={14} />, label: t('有效期'), value: renderValidityLabel(t, product?.validity_seconds) },
-                        ...(product.package_enabled ? [{ icon: <Gauge size={14} />, label: t('周期额度'), value: `${renderQuota(product.package_limit_quota || 0)} / ${renderPeriodLabel(t, product.package_period)}` }] : []),
-                        { icon: <Zap size={14} />, label: t('速率限制'), value: (() => { const hasConcurrency = Number(product.max_concurrency || 0) > 0; const hasWindow = Number(product.window_request_limit || 0) > 0 && Number(product.window_seconds || 0) > 0; if (!hasConcurrency && !hasWindow) return t('不限'); const parts = []; if (hasConcurrency) parts.push(formatConcurrencyLabel(product.max_concurrency, t)); if (hasWindow) parts.push(formatWindowLimitShort(product.window_seconds, product.window_request_limit, t)); return parts.join(' · '); })() },
+                        {
+                          icon: <Coins size={14} />,
+                          label: t('钱包售价'),
+                          value: renderQuota(productPriceQuota),
+                        },
+                        {
+                          icon: <ShieldCheck size={14} />,
+                          label: t('总额度'),
+                          value:
+                            Number(product?.total_quota || 0) === 0
+                              ? t('不限')
+                              : renderQuota(product.total_quota),
+                        },
+                        {
+                          icon: <Clock3 size={14} />,
+                          label: t('有效期'),
+                          value: renderValidityLabel(
+                            t,
+                            product?.validity_seconds,
+                          ),
+                        },
+                        ...(product.package_enabled
+                          ? [
+                              {
+                                icon: <Gauge size={14} />,
+                                label: t('周期额度'),
+                                value: `${renderQuota(product.package_limit_quota || 0)} / ${renderPeriodLabel(t, product.package_period)}`,
+                              },
+                            ]
+                          : []),
+                        {
+                          icon: <Zap size={14} />,
+                          label: t('速率限制'),
+                          value: (() => {
+                            const hasConcurrency =
+                              Number(product.max_concurrency || 0) > 0;
+                            const hasWindow =
+                              Number(product.window_request_limit || 0) > 0 &&
+                              Number(product.window_seconds || 0) > 0;
+                            if (!hasConcurrency && !hasWindow) return t('不限');
+                            const parts = [];
+                            if (hasConcurrency)
+                              parts.push(
+                                formatConcurrencyLabel(
+                                  product.max_concurrency,
+                                  t,
+                                ),
+                              );
+                            if (hasWindow)
+                              parts.push(
+                                formatWindowLimitShort(
+                                  product.window_seconds,
+                                  product.window_request_limit,
+                                  t,
+                                ),
+                              );
+                            return parts.join(' · ');
+                          })(),
+                        },
                       ];
                       return (
                         <Card
@@ -817,7 +1093,12 @@ const TopUp = () => {
                           className={`!rounded-xl border border-slate-200 flex flex-col h-full transition-all hover:shadow-lg ${
                             isRecommended ? 'ring-2 ring-purple-500' : ''
                           }`}
-                          bodyStyle={{ padding: 20, display: 'flex', flexDirection: 'column', flex: 1 }}
+                          bodyStyle={{
+                            padding: 20,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            flex: 1,
+                          }}
                         >
                           {isRecommended && (
                             <div className='mb-3'>
@@ -847,12 +1128,27 @@ const TopUp = () => {
                           {/* 中间：参数矩阵 */}
                           <div className='grid grid-cols-2 gap-2 mb-6'>
                             {productHighlights.map((highlight) => (
-                              <div key={highlight.label} className='rounded-lg border border-slate-100 bg-slate-50/30 p-3'>
+                              <div
+                                key={highlight.label}
+                                className='rounded-lg border border-slate-100 bg-slate-50/30 p-3'
+                              >
                                 <div className='flex items-center gap-1.5 text-slate-400 mb-1'>
                                   {highlight.icon}
-                                  <Text type='tertiary' size='extra-small' className='uppercase'>{highlight.label}</Text>
+                                  <Text
+                                    type='tertiary'
+                                    size='extra-small'
+                                    className='uppercase'
+                                  >
+                                    {highlight.label}
+                                  </Text>
                                 </div>
-                                <Text strong size='small' className='text-slate-800'>{highlight.value}</Text>
+                                <Text
+                                  strong
+                                  size='small'
+                                  className='text-slate-800'
+                                >
+                                  {highlight.value}
+                                </Text>
                               </div>
                             ))}
                           </div>
@@ -866,7 +1162,9 @@ const TopUp = () => {
                                 type='primary'
                                 className='!rounded-lg'
                                 icon={<ArrowRight size={16} />}
-                                onClick={() => confirmPurchaseSellableToken(product)}
+                                onClick={() =>
+                                  confirmPurchaseSellableToken(product)
+                                }
                               >
                                 {t('立即购买')}
                               </Button>
@@ -883,147 +1181,405 @@ const TopUp = () => {
         </div>
         <div className='space-y-6'>
           {/* 待发放动作卡片 - 移至侧边栏顶部 */}
-          {(pendingSellableIssuances.length > 0 || pendingSubscriptionIssuances.length > 0) && (
-            <Card className='!rounded-xl border border-orange-100 bg-orange-50/10' bodyStyle={{ padding: '12px' }}>
+          {(pendingSellableIssuances.length > 0 ||
+            pendingSubscriptionIssuances.length > 0) && (
+            <Card
+              className='!rounded-xl border border-orange-100 bg-orange-50/10'
+              bodyStyle={{ padding: '12px' }}
+            >
               <div className='flex items-center gap-2 mb-3'>
                 <BellRing size={16} className='text-orange-500' />
-                <Text strong size='small'>{t('待完成动作')}</Text>
+                <Text strong size='small'>
+                  {t('待完成动作')}
+                </Text>
               </div>
               <div className='space-y-2'>
                 {pendingSellableIssuances.length > 0 && (
                   <div className='flex items-center justify-between gap-3 p-2 rounded-lg bg-white border border-orange-100'>
                     <div className='flex items-center gap-2 overflow-hidden'>
-                      <div className='flex h-6 w-6 items-center justify-center rounded-full bg-orange-50 text-orange-600 flex-shrink-0'><Coins size={12} /></div>
-                      <Text size='small' className='truncate'>{t('令牌待发放')} ({pendingSellableIssuances.length})</Text>
+                      <div className='flex h-6 w-6 items-center justify-center rounded-full bg-orange-50 text-orange-600 flex-shrink-0'>
+                        <Coins size={12} />
+                      </div>
+                      <Text size='small' className='truncate'>
+                        {t('令牌待发放')} ({pendingSellableIssuances.length})
+                      </Text>
                     </div>
                     <Space spacing={4}>
-                      <Button theme='solid' type='primary' size='extra-small' className='!rounded-full' onClick={() => { const nextId = Number(pendingSellableIssuances?.[0]?.issuance?.id || pendingSellableIssuances?.[0]?.id || 0); setSellableTokenIssuanceId(nextId); setSellableTokenIssuanceVisible(true); }}>{t('继续')}</Button>
-                      <Button theme='light' type='warning' size='extra-small' className='!rounded-full' onClick={() => {
-                        if (pendingSellableIssuances.length === 1) {
-                          const item = pendingSellableIssuances[0];
-                          const itemId = Number(item?.issuance?.id || item?.id || 0);
-                          const productName = item?.product?.name || item?.issuance?.product?.name || '-';
-                          const sourceType = item?.issuance?.source_type || item?.source_type || '';
-                          Modal.confirm({
-                            title: t('确认取消'),
-                            content: (
-                              <div className='space-y-1 text-sm'>
-                                <div>{t('商品')}: {productName}</div>
-                                {sourceType === 'wallet' && <div className='text-orange-600'>{t('钱包购买的将退还额度')}</div>}
-                                {sourceType !== 'wallet' && <div className='text-gray-500'>{t('兑换码/管理员发放不退还额度')}</div>}
-                                <div className='text-red-500 mt-2'>{t('此操作不可恢复')}</div>
-                              </div>
-                            ),
-                            centered: true,
-                            okType: 'danger',
-                            okText: t('确认取消'),
-                            onOk: async () => {
-                              try {
-                                const res = await API.post(`/api/user/sellable-token/issuances/${itemId}/cancel`);
-                                if (res.data?.success) {
-                                  showSuccess(t('已取消'));
-                                  loadPendingSellableIssuances();
-                                  getUserQuota();
-                                } else {
-                                  showError(res.data?.message || t('取消失败'));
+                      <Button
+                        theme='solid'
+                        type='primary'
+                        size='extra-small'
+                        className='!rounded-full'
+                        onClick={() => {
+                          const nextId = Number(
+                            pendingSellableIssuances?.[0]?.issuance?.id ||
+                              pendingSellableIssuances?.[0]?.id ||
+                              0,
+                          );
+                          setSellableTokenIssuanceId(nextId);
+                          setSellableTokenIssuanceVisible(true);
+                        }}
+                      >
+                        {t('继续')}
+                      </Button>
+                      <Button
+                        theme='light'
+                        type='warning'
+                        size='extra-small'
+                        className='!rounded-full'
+                        onClick={() => {
+                          if (pendingSellableIssuances.length === 1) {
+                            const item = pendingSellableIssuances[0];
+                            const itemId = Number(
+                              item?.issuance?.id || item?.id || 0,
+                            );
+                            const productName =
+                              item?.product?.name ||
+                              item?.issuance?.product?.name ||
+                              '-';
+                            const sourceType =
+                              item?.issuance?.source_type ||
+                              item?.source_type ||
+                              '';
+                            Modal.confirm({
+                              title: t('确认取消'),
+                              content: (
+                                <div className='space-y-1 text-sm'>
+                                  <div>
+                                    {t('商品')}: {productName}
+                                  </div>
+                                  {sourceType === 'wallet' && (
+                                    <div className='text-orange-600'>
+                                      {t('钱包购买的将退还额度')}
+                                    </div>
+                                  )}
+                                  {sourceType !== 'wallet' && (
+                                    <div className='text-gray-500'>
+                                      {t('兑换码/管理员发放不退还额度')}
+                                    </div>
+                                  )}
+                                  <div className='text-red-500 mt-2'>
+                                    {t('此操作不可恢复')}
+                                  </div>
+                                </div>
+                              ),
+                              centered: true,
+                              okType: 'danger',
+                              okText: t('确认取消'),
+                              onOk: async () => {
+                                try {
+                                  const res = await API.post(
+                                    `/api/user/sellable-token/issuances/${itemId}/cancel`,
+                                  );
+                                  if (res.data?.success) {
+                                    showSuccess(t('已取消'));
+                                    loadPendingSellableIssuances();
+                                    getUserQuota();
+                                  } else {
+                                    showError(
+                                      res.data?.message || t('取消失败'),
+                                    );
+                                  }
+                                } catch (e) {
+                                  showError(t('请求失败'));
                                 }
-                              } catch (e) { showError(t('请求失败')); }
-                            },
-                          });
-                        } else {
-                          Modal.confirm({
-                            title: t('取消待发放令牌'),
-                            content: (
-                              <div className='space-y-2 text-sm'>
-                                <div>{t('当前有 {{count}} 条待发放记录', { count: pendingSellableIssuances.length })}</div>
-                                <div className='text-orange-600'>{t('钱包购买的将退还额度，兑换码/管理员发放不退还')}</div>
-                                <div className='text-red-500'>{t('此操作不可恢复')}</div>
-                              </div>
-                            ),
-                            centered: true,
-                            okType: 'danger',
-                            okText: t('全部取消'),
-                            cancelText: t('逐个取消'),
-                            onOk: async () => {
-                              try {
-                                const res = await API.post('/api/user/sellable-token/issuances/cancel-all');
-                                if (res.data?.success) {
-                                  const d = res.data.data || {};
-                                  showSuccess(t('已取消 {{count}} 条', { count: d.cancelled_count || 0 }));
-                                  loadPendingSellableIssuances();
-                                  getUserQuota();
-                                } else {
-                                  showError(res.data?.message || t('取消失败'));
-                                }
-                              } catch (e) { showError(t('请求失败')); }
-                            },
-                            onCancel: () => {
-                              Modal.info({
-                                title: t('选择要取消的待发放'),
-                                content: (
-                                  <div className='space-y-2 max-h-64 overflow-y-auto'>
-                                    {pendingSellableIssuances.map((item) => {
-                                      const itemId = Number(item?.issuance?.id || item?.id || 0);
-                                      const productName = item?.product?.name || item?.issuance?.product?.name || '-';
-                                      const sourceType = item?.issuance?.source_type || item?.source_type || '';
-                                      return (
-                                        <div key={itemId} className='flex items-center justify-between p-2 rounded-lg border border-slate-100'>
-                                          <div className='min-w-0'>
-                                            <div className='text-sm font-medium truncate'>{productName}</div>
-                                            <div className='text-xs text-gray-500'>{sourceType === 'wallet' ? t('钱包购买·可退') : t('不退还额度')}</div>
-                                          </div>
-                                          <Button size='small' type='danger' onClick={async () => {
-                                            try {
-                                              const res = await API.post(`/api/user/sellable-token/issuances/${itemId}/cancel`);
-                                              if (res.data?.success) {
-                                                showSuccess(t('已取消'));
-                                                loadPendingSellableIssuances();
-                                                getUserQuota();
-                                              } else {
-                                                showError(res.data?.message || t('取消失败'));
-                                              }
-                                            } catch (e) { showError(t('请求失败')); }
-                                          }}>{t('取消')}</Button>
-                                        </div>
-                                      );
+                              },
+                            });
+                          } else {
+                            Modal.confirm({
+                              title: t('取消待发放令牌'),
+                              content: (
+                                <div className='space-y-2 text-sm'>
+                                  <div>
+                                    {t('当前有 {{count}} 条待发放记录', {
+                                      count: pendingSellableIssuances.length,
                                     })}
                                   </div>
-                                ),
-                                centered: true,
-                                okText: t('关闭'),
-                              });
-                            },
-                          });
-                        }
-                      }}>{t('取消')}</Button>
+                                  <div className='text-orange-600'>
+                                    {t(
+                                      '钱包购买的将退还额度，兑换码/管理员发放不退还',
+                                    )}
+                                  </div>
+                                  <div className='text-red-500'>
+                                    {t('此操作不可恢复')}
+                                  </div>
+                                </div>
+                              ),
+                              centered: true,
+                              okType: 'danger',
+                              okText: t('全部取消'),
+                              cancelText: t('逐个取消'),
+                              onOk: async () => {
+                                try {
+                                  const res = await API.post(
+                                    '/api/user/sellable-token/issuances/cancel-all',
+                                  );
+                                  if (res.data?.success) {
+                                    const d = res.data.data || {};
+                                    showSuccess(
+                                      t('已取消 {{count}} 条', {
+                                        count: d.cancelled_count || 0,
+                                      }),
+                                    );
+                                    loadPendingSellableIssuances();
+                                    getUserQuota();
+                                  } else {
+                                    showError(
+                                      res.data?.message || t('取消失败'),
+                                    );
+                                  }
+                                } catch (e) {
+                                  showError(t('请求失败'));
+                                }
+                              },
+                              onCancel: () => {
+                                Modal.info({
+                                  title: t('选择要取消的待发放'),
+                                  content: (
+                                    <div className='space-y-2 max-h-64 overflow-y-auto'>
+                                      {pendingSellableIssuances.map((item) => {
+                                        const itemId = Number(
+                                          item?.issuance?.id || item?.id || 0,
+                                        );
+                                        const productName =
+                                          item?.product?.name ||
+                                          item?.issuance?.product?.name ||
+                                          '-';
+                                        const sourceType =
+                                          item?.issuance?.source_type ||
+                                          item?.source_type ||
+                                          '';
+                                        return (
+                                          <div
+                                            key={itemId}
+                                            className='flex items-center justify-between p-2 rounded-lg border border-slate-100'
+                                          >
+                                            <div className='min-w-0'>
+                                              <div className='text-sm font-medium truncate'>
+                                                {productName}
+                                              </div>
+                                              <div className='text-xs text-gray-500'>
+                                                {sourceType === 'wallet'
+                                                  ? t('钱包购买·可退')
+                                                  : t('不退还额度')}
+                                              </div>
+                                            </div>
+                                            <Button
+                                              size='small'
+                                              type='danger'
+                                              onClick={async () => {
+                                                try {
+                                                  const res = await API.post(
+                                                    `/api/user/sellable-token/issuances/${itemId}/cancel`,
+                                                  );
+                                                  if (res.data?.success) {
+                                                    showSuccess(t('已取消'));
+                                                    loadPendingSellableIssuances();
+                                                    getUserQuota();
+                                                  } else {
+                                                    showError(
+                                                      res.data?.message ||
+                                                        t('取消失败'),
+                                                    );
+                                                  }
+                                                } catch (e) {
+                                                  showError(t('请求失败'));
+                                                }
+                                              }}
+                                            >
+                                              {t('取消')}
+                                            </Button>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  ),
+                                  centered: true,
+                                  okText: t('关闭'),
+                                });
+                              },
+                            });
+                          }
+                        }}
+                      >
+                        {t('取消')}
+                      </Button>
                     </Space>
                   </div>
                 )}
                 {pendingSubscriptionIssuances.length > 0 && (
                   <div className='flex items-center justify-between gap-3 p-2 rounded-lg bg-white border border-purple-100'>
                     <div className='flex items-center gap-2 overflow-hidden'>
-                      <div className='flex h-6 w-6 items-center justify-center rounded-full bg-purple-50 text-purple-600 flex-shrink-0'><Sparkles size={12} /></div>
-                      <Text size='small' className='truncate'>{t('套餐待发放')} ({pendingSubscriptionIssuances.length})</Text>
+                      <div className='flex h-6 w-6 items-center justify-center rounded-full bg-purple-50 text-purple-600 flex-shrink-0'>
+                        <Sparkles size={12} />
+                      </div>
+                      <Text size='small' className='truncate'>
+                        {t('套餐待发放')} ({pendingSubscriptionIssuances.length}
+                        )
+                      </Text>
                     </div>
-                    <Button theme='solid' type='primary' size='extra-small' className='!rounded-full' onClick={() => { const nextId = Number(pendingSubscriptionIssuances?.[0]?.id || 0); setSubscriptionIssuanceId(nextId); setSubscriptionIssuanceVisible(true); }}>{t('继续')}</Button>
+                    <Button
+                      theme='solid'
+                      type='primary'
+                      size='extra-small'
+                      className='!rounded-full'
+                      onClick={() => {
+                        const nextId = Number(
+                          pendingSubscriptionIssuances?.[0]?.id || 0,
+                        );
+                        setSubscriptionIssuanceId(nextId);
+                        setSubscriptionIssuanceVisible(true);
+                      }}
+                    >
+                      {t('继续')}
+                    </Button>
                   </div>
                 )}
               </div>
             </Card>
           )}
 
-          <InvitationCard t={t} userState={userState} renderQuota={renderQuota} setOpenTransfer={setOpenTransfer} affLink={affLink} handleAffLinkClick={handleAffLinkClick} />
-          <Card className='!rounded-xl shadow-sm border border-slate-200' title={<Text type='tertiary' strong size='small'>{t('兑换码充值')}</Text>} bodyStyle={{ padding: '12px' }}>
+          <InvitationCard
+            t={t}
+            userState={userState}
+            renderQuota={renderQuota}
+            setOpenTransfer={setOpenTransfer}
+            setOpenWithdrawal={setOpenWithdrawal}
+            openWithdrawalHistory={() => openHistoryTab('withdrawals')}
+            affLink={affLink}
+            handleAffLinkClick={handleAffLinkClick}
+          />
+          <Card
+            className='!rounded-xl shadow-sm border border-slate-200'
+            title={
+              <Text type='tertiary' strong size='small'>
+                {t('兑换码充值')}
+              </Text>
+            }
+            bodyStyle={{ padding: '12px' }}
+          >
             <Form initValues={{ redemptionCode }}>
-              <Form.Input field='redemptionCode' noLabel placeholder={t('请输入兑换码')} value={redemptionCode} onChange={setRedemptionCode} prefix={<IconGift />} suffix={<Button type='primary' theme='solid' size='small' onClick={() => topUp()} loading={isSubmitting}>{t('立即兑换')}</Button>} showClear style={{ width: '100%' }} extraText={topUpLink && (<Text type='tertiary' size='extra-small'>{t('在找兑换码？')}<Text type='secondary' underline className='cursor-pointer' onClick={openTopUpLink}>{t('购买兑换码')}</Text></Text>)} />
+              <Form.Input
+                field='redemptionCode'
+                noLabel
+                placeholder={t('请输入兑换码')}
+                value={redemptionCode}
+                onChange={setRedemptionCode}
+                prefix={<IconGift />}
+                suffix={
+                  <Button
+                    type='primary'
+                    theme='solid'
+                    size='small'
+                    onClick={() => topUp()}
+                    loading={isSubmitting}
+                  >
+                    {t('立即兑换')}
+                  </Button>
+                }
+                showClear
+                style={{ width: '100%' }}
+                extraText={
+                  topUpLink && (
+                    <Text type='tertiary' size='extra-small'>
+                      {t('在找兑换码？')}
+                      <Text
+                        type='secondary'
+                        underline
+                        className='cursor-pointer'
+                        onClick={openTopUpLink}
+                      >
+                        {t('购买兑换码')}
+                      </Text>
+                    </Text>
+                  )
+                }
+              />
             </Form>
           </Card>
         </div>
       </div>
 
-      <Modal title={t('选择续费目标')} visible={redeemTargetModalOpen} onOk={() => topUp(selectedRenewTargetId, selectedPurchaseMode || 'renew')} onCancel={() => { setRedeemTargetModalOpen(false); setSelectedRenewTargetId(0); }} size='small' centered confirmLoading={isSubmitting}><p>{t('当前套餐存在多条可续费订阅，请选择要续费的目标')}：{redeemTargetPlanTitle || '-'}</p><Select value={selectedRenewTargetId} onChange={v => setSelectedRenewTargetId(Number(v || 0))} style={{ width: '100%' }} optionList={redeemTargetOptions.map(sub => ({ label: `${t('订阅')} #${sub.id} · ${t('到期时间')} ${timestamp2string(sub.end_time)}`, value: sub.id }))} /></Modal>
-      <Modal title={t('选择兑换方式')} visible={purchaseModeModalOpen} onOk={() => { setPurchaseModeModalOpen(false); topUp(0, selectedPurchaseMode); }} onCancel={() => setPurchaseModeModalOpen(false)} size='small' centered confirmLoading={isSubmitting}><p>{t('您正在兑换套餐')}：{purchaseModePlanTitle || '-'}</p><p>{t('请选择兑换方式')}：</p><Select value={selectedPurchaseMode} onChange={setSelectedPurchaseMode} style={{ width: '100%' }} optionList={[{ label: t('叠加（新增一条订阅）'), value: 'stack' }, { label: t('续费（延长现有订阅）'), value: 'renew' }]} /></Modal>
-      <Modal title={t('确定要充值 $')} visible={creemOpen} onOk={onlineCreemTopUp} onCancel={() => setCreemOpen(false)} maskClosable={false} size='small' centered confirmLoading={confirmLoading}>{selectedCreemProduct && (<div className='space-y-2'><p>{t('产品名称')}：{selectedCreemProduct.name}</p><p>{t('价格')}：{selectedCreemProduct.currency === 'EUR' ? '€' : '$'}{selectedCreemProduct.price}</p><p>{t('充值额度')}：{selectedCreemProduct.quota}</p><p>{t('是否确认充值？')}</p></div>)}</Modal>
+      <Modal
+        title={t('选择续费目标')}
+        visible={redeemTargetModalOpen}
+        onOk={() =>
+          topUp(selectedRenewTargetId, selectedPurchaseMode || 'renew')
+        }
+        onCancel={() => {
+          setRedeemTargetModalOpen(false);
+          setSelectedRenewTargetId(0);
+        }}
+        size='small'
+        centered
+        confirmLoading={isSubmitting}
+      >
+        <p>
+          {t('当前套餐存在多条可续费订阅，请选择要续费的目标')}：
+          {redeemTargetPlanTitle || '-'}
+        </p>
+        <Select
+          value={selectedRenewTargetId}
+          onChange={(v) => setSelectedRenewTargetId(Number(v || 0))}
+          style={{ width: '100%' }}
+          optionList={redeemTargetOptions.map((sub) => ({
+            label: `${t('订阅')} #${sub.id} · ${t('到期时间')} ${timestamp2string(sub.end_time)}`,
+            value: sub.id,
+          }))}
+        />
+      </Modal>
+      <Modal
+        title={t('选择兑换方式')}
+        visible={purchaseModeModalOpen}
+        onOk={() => {
+          setPurchaseModeModalOpen(false);
+          topUp(0, selectedPurchaseMode);
+        }}
+        onCancel={() => setPurchaseModeModalOpen(false)}
+        size='small'
+        centered
+        confirmLoading={isSubmitting}
+      >
+        <p>
+          {t('您正在兑换套餐')}：{purchaseModePlanTitle || '-'}
+        </p>
+        <p>{t('请选择兑换方式')}：</p>
+        <Select
+          value={selectedPurchaseMode}
+          onChange={setSelectedPurchaseMode}
+          style={{ width: '100%' }}
+          optionList={[
+            { label: t('叠加（新增一条订阅）'), value: 'stack' },
+            { label: t('续费（延长现有订阅）'), value: 'renew' },
+          ]}
+        />
+      </Modal>
+      <Modal
+        title={t('确定要充值 $')}
+        visible={creemOpen}
+        onOk={onlineCreemTopUp}
+        onCancel={() => setCreemOpen(false)}
+        maskClosable={false}
+        size='small'
+        centered
+        confirmLoading={confirmLoading}
+      >
+        {selectedCreemProduct && (
+          <div className='space-y-2'>
+            <p>
+              {t('产品名称')}：{selectedCreemProduct.name}
+            </p>
+            <p>
+              {t('价格')}：{selectedCreemProduct.currency === 'EUR' ? '€' : '$'}
+              {selectedCreemProduct.price}
+            </p>
+            <p>
+              {t('充值额度')}：{selectedCreemProduct.quota}
+            </p>
+            <p>{t('是否确认充值？')}</p>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

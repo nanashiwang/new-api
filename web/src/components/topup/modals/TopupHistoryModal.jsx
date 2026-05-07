@@ -49,6 +49,7 @@ import {
   timestamp2string,
 } from '../../../helpers';
 import { isAdmin } from '../../../helpers/utils';
+import { getPaymentCurrencySymbol } from '../../../helpers/render';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 import PaymentRiskCaseDetailModal from './PaymentRiskCaseDetailModal';
 
@@ -106,6 +107,11 @@ const EMPTY_RISK_FILTERS = {
   reason: '',
 };
 
+const EMPTY_WITHDRAWAL_FILTERS = {
+  username: '',
+  status: '',
+};
+
 const STATUS_OPTIONS = [
   { label: '全部状态', value: '' },
   { label: '待支付', value: 'pending' },
@@ -141,6 +147,19 @@ const RISK_STATUS_OPTIONS = [
   { label: '已确认', value: 'confirmed' },
   { label: '已回退', value: 'reversed' },
   { label: '已作废', value: 'voided' },
+];
+
+const WITHDRAWAL_STATUS_CONFIG = {
+  pending: { color: 'orange', label: '待审核' },
+  approved: { color: 'green', label: '已通过' },
+  rejected: { color: 'red', label: '已驳回' },
+};
+
+const WITHDRAWAL_STATUS_OPTIONS = [
+  { label: '全部状态', value: '' },
+  { label: '待审核', value: 'pending' },
+  { label: '已通过', value: 'approved' },
+  { label: '已驳回', value: 'rejected' },
 ];
 
 const RISK_RECORD_TYPE_OPTIONS = [
@@ -189,11 +208,23 @@ function formatMoney(value, currency = 'CNY') {
   return `${symbol}${amount.toFixed(2)}${upperCurrency && !symbol ? ` ${upperCurrency}` : ''}`;
 }
 
+function formatAmountCents(cents) {
+  return `${getPaymentCurrencySymbol()}${(Number(cents || 0) / 100).toFixed(2)}`;
+}
+
+function maskAlipayAccount(account) {
+  const text = String(account || '');
+  if (text.length <= 4) return text ? '****' : '-';
+  return `${text.slice(0, 2)}****${text.slice(-2)}`;
+}
+
 function buildTableEmpty(t, description) {
   return (
     <Empty
       image={<IllustrationNoResult style={{ width: 150, height: 150 }} />}
-      darkModeImage={<IllustrationNoResultDark style={{ width: 150, height: 150 }} />}
+      darkModeImage={
+        <IllustrationNoResultDark style={{ width: 150, height: 150 }} />
+      }
       description={t(description)}
       style={{ padding: 30 }}
     />
@@ -248,7 +279,12 @@ function normalizeDashboardStats(stats) {
   };
 }
 
-const TopupHistoryModal = ({ visible, onCancel, t }) => {
+const TopupHistoryModal = ({
+  visible,
+  onCancel,
+  t,
+  initialTab = 'records',
+}) => {
   const [loading, setLoading] = useState(false);
   const [topups, setTopups] = useState([]);
   const [total, setTotal] = useState(0);
@@ -263,7 +299,9 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
   const [dashboardStats, setDashboardStats] = useState(null);
   const [dashboardRankings, setDashboardRankings] = useState([]);
   const [dashboardPreset, setDashboardPreset] = useState('today');
-  const [dashboardDateRange, setDashboardDateRange] = useState(() => createDashboardDateRange('today'));
+  const [dashboardDateRange, setDashboardDateRange] = useState(() =>
+    createDashboardDateRange('today'),
+  );
   const [dashboardRankLimit, setDashboardRankLimit] = useState(10);
 
   const [riskLoading, setRiskLoading] = useState(false);
@@ -272,10 +310,30 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
   const [riskPage, setRiskPage] = useState(1);
   const [riskPageSize, setRiskPageSize] = useState(10);
   const [riskFilters, setRiskFilters] = useState(EMPTY_RISK_FILTERS);
-  const [riskAppliedFilters, setRiskAppliedFilters] = useState(EMPTY_RISK_FILTERS);
+  const [riskAppliedFilters, setRiskAppliedFilters] =
+    useState(EMPTY_RISK_FILTERS);
   const [riskDetailVisible, setRiskDetailVisible] = useState(false);
   const [selectedRiskCaseId, setSelectedRiskCaseId] = useState(0);
   const [selectedRiskCaseSeed, setSelectedRiskCaseSeed] = useState(null);
+
+  const [withdrawalLoading, setWithdrawalLoading] = useState(false);
+  const [withdrawals, setWithdrawals] = useState([]);
+  const [withdrawalTotal, setWithdrawalTotal] = useState(0);
+  const [withdrawalPage, setWithdrawalPage] = useState(1);
+  const [withdrawalPageSize, setWithdrawalPageSize] = useState(10);
+  const [withdrawalFilters, setWithdrawalFilters] = useState(
+    EMPTY_WITHDRAWAL_FILTERS,
+  );
+  const [withdrawalAppliedFilters, setWithdrawalAppliedFilters] = useState(
+    EMPTY_WITHDRAWAL_FILTERS,
+  );
+  const [reviewState, setReviewState] = useState({
+    visible: false,
+    action: null,
+    record: null,
+  });
+  const [reviewRemark, setReviewRemark] = useState('');
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
 
   const isMobile = useIsMobile();
   const userIsAdmin = useMemo(() => isAdmin(), []);
@@ -283,7 +341,9 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
   const loadTopups = async (currentPage, currentPageSize, currentFilters) => {
     setLoading(true);
     try {
-      const base = userIsAdmin ? '/api/user/payment-records' : '/api/user/payment-records/self';
+      const base = userIsAdmin
+        ? '/api/user/payment-records'
+        : '/api/user/payment-records/self';
       const searchParams = new URLSearchParams({
         p: String(currentPage),
         page_size: String(currentPageSize),
@@ -318,7 +378,11 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
     }
   };
 
-  const loadRiskCases = async (currentPage, currentPageSize, currentFilters) => {
+  const loadRiskCases = async (
+    currentPage,
+    currentPageSize,
+    currentFilters,
+  ) => {
     if (!userIsAdmin) {
       return;
     }
@@ -345,7 +409,9 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
         searchParams.set('reason', currentFilters.reason);
       }
 
-      const res = await API.get(`/api/user/payment-risk-cases?${searchParams.toString()}`);
+      const res = await API.get(
+        `/api/user/payment-risk-cases?${searchParams.toString()}`,
+      );
       const { success, message, data } = res.data || {};
       if (!success) {
         Toast.error({ content: t(message || '加载异常单失败') });
@@ -361,7 +427,46 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
     }
   };
 
-  const loadDashboard = async (dateRange = dashboardDateRange, limit = dashboardRankLimit) => {
+  const loadWithdrawals = async (
+    currentPage,
+    currentPageSize,
+    currentFilters,
+  ) => {
+    setWithdrawalLoading(true);
+    try {
+      const base = userIsAdmin
+        ? '/api/user/aff-withdrawals'
+        : '/api/user/aff-withdrawals/self';
+      const searchParams = new URLSearchParams({
+        p: String(currentPage),
+        page_size: String(currentPageSize),
+      });
+      if (currentFilters.status) {
+        searchParams.set('status', currentFilters.status);
+      }
+      if (userIsAdmin && currentFilters.username) {
+        searchParams.set('username', currentFilters.username.trim());
+      }
+
+      const res = await API.get(`${base}?${searchParams.toString()}`);
+      const { success, message, data } = res.data || {};
+      if (!success) {
+        Toast.error({ content: t(message || '加载提现记录失败') });
+        return;
+      }
+      setWithdrawals(data?.items || []);
+      setWithdrawalTotal(data?.total || 0);
+    } catch (error) {
+      Toast.error({ content: t('加载提现记录失败') });
+    } finally {
+      setWithdrawalLoading(false);
+    }
+  };
+
+  const loadDashboard = async (
+    dateRange = dashboardDateRange,
+    limit = dashboardRankLimit,
+  ) => {
     if (!userIsAdmin) {
       return;
     }
@@ -392,7 +497,9 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
         return;
       }
       if (!rankingsPayload.success) {
-        Toast.error({ content: t(rankingsPayload.message || '加载充值榜单失败') });
+        Toast.error({
+          content: t(rankingsPayload.message || '加载充值榜单失败'),
+        });
         return;
       }
 
@@ -420,6 +527,20 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
     await loadRiskCases(riskPage, riskPageSize, riskAppliedFilters);
   };
 
+  const refreshWithdrawals = async () => {
+    await loadWithdrawals(
+      withdrawalPage,
+      withdrawalPageSize,
+      withdrawalAppliedFilters,
+    );
+  };
+
+  useEffect(() => {
+    if (visible && initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [visible, initialTab]);
+
   useEffect(() => {
     if (!visible) {
       return;
@@ -445,7 +566,32 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
     if (activeTab === 'risk') {
       loadRiskCases(riskPage, riskPageSize, riskAppliedFilters);
     }
-  }, [visible, activeTab, riskPage, riskPageSize, riskAppliedFilters, userIsAdmin]);
+  }, [
+    visible,
+    activeTab,
+    riskPage,
+    riskPageSize,
+    riskAppliedFilters,
+    userIsAdmin,
+  ]);
+
+  useEffect(() => {
+    if (!visible || activeTab !== 'withdrawals') {
+      return;
+    }
+    loadWithdrawals(
+      withdrawalPage,
+      withdrawalPageSize,
+      withdrawalAppliedFilters,
+    );
+  }, [
+    visible,
+    activeTab,
+    withdrawalPage,
+    withdrawalPageSize,
+    withdrawalAppliedFilters,
+    userIsAdmin,
+  ]);
 
   const handleFilterChange = (key, value) => {
     setFilters((prev) => ({
@@ -492,17 +638,48 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
     setRiskAppliedFilters(EMPTY_RISK_FILTERS);
   };
 
+  const handleWithdrawalFilterChange = (key, value) => {
+    setWithdrawalFilters((prev) => ({
+      ...prev,
+      [key]: value || '',
+    }));
+  };
+
+  const applyWithdrawalFilters = (nextFilters = withdrawalFilters) => {
+    setWithdrawalPage(1);
+    setWithdrawalAppliedFilters({
+      ...nextFilters,
+      username: nextFilters.username.trim(),
+    });
+  };
+
+  const resetWithdrawalFilters = () => {
+    setWithdrawalPage(1);
+    setWithdrawalFilters(EMPTY_WITHDRAWAL_FILTERS);
+    setWithdrawalAppliedFilters(EMPTY_WITHDRAWAL_FILTERS);
+  };
+
   const activeFilterTags = useMemo(() => {
     const tags = [];
     if (appliedFilters.username) {
-      tags.push({ key: 'username', label: `ID/用户名: ${appliedFilters.username}` });
+      tags.push({
+        key: 'username',
+        label: `ID/用户名: ${appliedFilters.username}`,
+      });
     }
     if (appliedFilters.status) {
-      const found = STATUS_OPTIONS.find((option) => option.value === appliedFilters.status);
-      tags.push({ key: 'status', label: `状态: ${found ? found.label : appliedFilters.status}` });
+      const found = STATUS_OPTIONS.find(
+        (option) => option.value === appliedFilters.status,
+      );
+      tags.push({
+        key: 'status',
+        label: `状态: ${found ? found.label : appliedFilters.status}`,
+      });
     }
     if (appliedFilters.paymentMethod) {
-      const found = PAYMENT_OPTIONS.find((option) => option.value === appliedFilters.paymentMethod);
+      const found = PAYMENT_OPTIONS.find(
+        (option) => option.value === appliedFilters.paymentMethod,
+      );
       tags.push({
         key: 'paymentMethod',
         label: `支付方式: ${found ? found.label : appliedFilters.paymentMethod}`,
@@ -525,6 +702,12 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
       const nextFilters = { ...riskFilters, username };
       setRiskFilters(nextFilters);
       applyRiskFilters(nextFilters);
+      return;
+    }
+    if (activeTab === 'withdrawals') {
+      const nextFilters = { ...withdrawalFilters, username };
+      setWithdrawalFilters(nextFilters);
+      applyWithdrawalFilters(nextFilters);
       return;
     }
     const nextFilters = { ...filters, username };
@@ -643,8 +826,63 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
     await Promise.all([refreshRecords(), refreshRiskCases()]);
   };
 
+  const handleReviewWithdrawal = async (record, action, remark = '') => {
+    const id = Number(record?.id || 0);
+    if (!id) return false;
+    try {
+      const res = await API.post(`/api/user/aff-withdrawals/${id}/${action}`, {
+        admin_remark: remark,
+      });
+      const { success, message } = res.data || {};
+      if (!success) {
+        Toast.error({ content: t(message || '审核提现失败') });
+        return false;
+      }
+      Toast.success({
+        content: t(action === 'approve' ? '提现已通过' : '提现已驳回'),
+      });
+      await refreshWithdrawals();
+      return true;
+    } catch (error) {
+      const msg =
+        error?.response?.data?.message || error?.message || '审核提现失败';
+      Toast.error({ content: t(msg) });
+      return false;
+    }
+  };
+
+  const confirmApproveWithdrawal = (record) => {
+    setReviewRemark('');
+    setReviewState({ visible: true, action: 'approve', record });
+  };
+
+  const confirmRejectWithdrawal = (record) => {
+    setReviewRemark('');
+    setReviewState({ visible: true, action: 'reject', record });
+  };
+
+  const closeReviewModal = () => {
+    setReviewState({ visible: false, action: null, record: null });
+    setReviewRemark('');
+  };
+
+  const submitReviewModal = async () => {
+    const { record, action } = reviewState;
+    if (!record || !action) return;
+    setReviewSubmitting(true);
+    try {
+      const ok = await handleReviewWithdrawal(record, action, reviewRemark.trim());
+      if (ok) closeReviewModal();
+    } finally {
+      setReviewSubmitting(false);
+    }
+  };
+
   const renderStatusBadge = (status) => {
-    const config = STATUS_CONFIG[status] || { type: 'primary', label: status || '-' };
+    const config = STATUS_CONFIG[status] || {
+      type: 'primary',
+      label: status || '-',
+    };
     return (
       <span className='flex items-center gap-2'>
         <Badge dot type={config.type} />
@@ -663,7 +901,10 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
   };
 
   const renderRiskStatusTag = (status) => {
-    const config = RISK_STATUS_CONFIG[status] || { color: 'grey', label: status || '-' };
+    const config = RISK_STATUS_CONFIG[status] || {
+      color: 'grey',
+      label: status || '-',
+    };
     return (
       <Tag color={config.color} shape='circle' size='small'>
         {t(config.label)}
@@ -671,11 +912,26 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
     );
   };
 
-  const renderRiskReason = (reason) => t(RISK_REASON_MAP[reason] || reason || '-');
+  const renderRiskReason = (reason) =>
+    t(RISK_REASON_MAP[reason] || reason || '-');
 
-  const isSellableTokenPurchase = (record) => record?.record_type === 'sellable_token_purchase';
+  const renderWithdrawalStatusTag = (status) => {
+    const config = WITHDRAWAL_STATUS_CONFIG[status] || {
+      color: 'grey',
+      label: status || '-',
+    };
+    return (
+      <Tag color={config.color} shape='circle' size='small'>
+        {t(config.label)}
+      </Tag>
+    );
+  };
 
-  const isSubscriptionTopup = (record) => resolveOrderType(record) === 'subscription';
+  const isSellableTokenPurchase = (record) =>
+    record?.record_type === 'sellable_token_purchase';
+
+  const isSubscriptionTopup = (record) =>
+    resolveOrderType(record) === 'subscription';
 
   const renderRecordType = (record) => {
     if (isSellableTokenPurchase(record)) {
@@ -685,7 +941,10 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
             {t('钱包购买')}
           </Tag>
           <div className='mt-1'>
-            <Text ellipsis={{ showTooltip: true }} style={{ maxWidth: 180, display: 'inline-block' }}>
+            <Text
+              ellipsis={{ showTooltip: true }}
+              style={{ maxWidth: 180, display: 'inline-block' }}
+            >
               {record?.product_name || t('可售令牌')}
             </Text>
           </div>
@@ -713,7 +972,9 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
     return (
       <Text
         copyable={text !== '-'}
-        ellipsis={{ showTooltip: { opts: { style: { wordBreak: 'break-all' } } } }}
+        ellipsis={{
+          showTooltip: { opts: { style: { wordBreak: 'break-all' } } },
+        }}
         style={{ width: 170, display: 'inline-block' }}
       >
         {text}
@@ -783,7 +1044,9 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
                 >
                   {username}
                 </Text>
-                {displayName ? <Text type='tertiary'>{displayName}</Text> : null}
+                {displayName ? (
+                  <Text type='tertiary'>{displayName}</Text>
+                ) : null}
               </div>
             </Space>
           );
@@ -827,7 +1090,9 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
         key: 'money',
         render: (money, record) => {
           if (isSellableTokenPurchase(record)) {
-            return <Text type='danger'>{renderQuota(record?.amount ?? 0)}</Text>;
+            return (
+              <Text type='danger'>{renderQuota(record?.amount ?? 0)}</Text>
+            );
           }
           return <Text type='danger'>{formatMoney(money)}</Text>;
         },
@@ -860,7 +1125,11 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
         render: (_, record) => {
           const actionButtons = [];
 
-          if (record?.record_type === 'topup' && record?.status === 'pending' && !record?.risk_case_id) {
+          if (
+            record?.record_type === 'topup' &&
+            record?.status === 'pending' &&
+            !record?.risk_case_id
+          ) {
             actionButtons.push(
               <Button
                 key='complete'
@@ -884,7 +1153,8 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
                   openRiskCaseDetail(record.risk_case_id, {
                     id: record.risk_case_id,
                     trade_no: record.trade_no,
-                    record_type: resolveRiskRecordType(record) || resolveOrderType(record),
+                    record_type:
+                      resolveRiskRecordType(record) || resolveOrderType(record),
                     status: record.risk_status,
                     reason: record.risk_reason,
                     user_id: record.user_id,
@@ -925,7 +1195,10 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
     return columns;
   }, [userIsAdmin, filters, riskFilters]);
 
-  const dashboardData = useMemo(() => normalizeDashboardStats(dashboardStats), [dashboardStats]);
+  const dashboardData = useMemo(
+    () => normalizeDashboardStats(dashboardStats),
+    [dashboardStats],
+  );
 
   const dashboardSummaryCards = useMemo(() => {
     const totals = dashboardData.totals;
@@ -965,11 +1238,13 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
   }, [dashboardData, t]);
 
   const dashboardPaymentMethods = useMemo(() => {
-    const items = Object.entries(dashboardData.payment_methods || {}).map(([method, stats]) => ({
-      method,
-      money: Number(stats?.money || 0),
-      orderCount: Number(stats?.order_count || 0),
-    }));
+    const items = Object.entries(dashboardData.payment_methods || {}).map(
+      ([method, stats]) => ({
+        method,
+        money: Number(stats?.money || 0),
+        orderCount: Number(stats?.order_count || 0),
+      }),
+    );
     items.sort((left, right) => {
       if (left.money !== right.money) {
         return right.money - left.money;
@@ -1017,7 +1292,9 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
                     ID: {record.user_id}
                   </Text>
                 ) : null}
-                {record.display_name ? <Text type='tertiary'>{record.display_name}</Text> : null}
+                {record.display_name ? (
+                  <Text type='tertiary'>{record.display_name}</Text>
+                ) : null}
               </div>
             </Space>
           );
@@ -1033,7 +1310,9 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
         title: t('成功金额'),
         key: 'success_money',
         width: 120,
-        render: (_, record) => <Text type='success'>{formatMoney(record?.success_money)}</Text>,
+        render: (_, record) => (
+          <Text type='success'>{formatMoney(record?.success_money)}</Text>
+        ),
       },
       {
         title: t('订单数'),
@@ -1045,7 +1324,9 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
         title: t('待支付金额'),
         key: 'pending_money',
         width: 120,
-        render: (_, record) => <Text type='warning'>{formatMoney(record?.pending_money)}</Text>,
+        render: (_, record) => (
+          <Text type='warning'>{formatMoney(record?.pending_money)}</Text>
+        ),
       },
     ],
     [t, openRecordTabForUsername],
@@ -1061,7 +1342,11 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
           <div className='flex flex-col gap-1'>
             <Space wrap>
               <Tag shape='circle' color='grey' size='small'>
-                {t(RECORD_TYPE_MAP[record.record_type] || record.record_type || '-')}
+                {t(
+                  RECORD_TYPE_MAP[record.record_type] ||
+                    record.record_type ||
+                    '-',
+                )}
               </Tag>
               {renderRiskStatusTag(record.status)}
             </Space>
@@ -1095,7 +1380,9 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
                     ID: {record.user_id}
                   </Text>
                 ) : null}
-                {record.display_name ? <Text type='tertiary'>{record.display_name}</Text> : null}
+                {record.display_name ? (
+                  <Text type='tertiary'>{record.display_name}</Text>
+                ) : null}
               </div>
             </Space>
           );
@@ -1108,7 +1395,12 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
           <div className='flex flex-col gap-1'>
             <Text>{renderRiskReason(record.reason)}</Text>
             <Text type='tertiary' size='small'>
-              {t('订单状态')}: {t(STATUS_CONFIG[record.order_status]?.label || record.order_status || '-')}
+              {t('订单状态')}:{' '}
+              {t(
+                STATUS_CONFIG[record.order_status]?.label ||
+                  record.order_status ||
+                  '-',
+              )}
             </Text>
           </div>
         ),
@@ -1137,13 +1429,163 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
         title: t('操作'),
         key: 'action',
         render: (_, record) => (
-          <Button size='small' theme='outline' onClick={() => openRiskCaseDetail(record.id, record)}>
+          <Button
+            size='small'
+            theme='outline'
+            onClick={() => openRiskCaseDetail(record.id, record)}
+          >
             {t('查看详情')}
           </Button>
         ),
       },
     ];
   }, [riskFilters]);
+
+  const withdrawalColumns = useMemo(() => {
+    const columns = [
+      {
+        title: t('状态'),
+        dataIndex: 'status',
+        key: 'status',
+        width: 100,
+        render: renderWithdrawalStatusTag,
+      },
+    ];
+
+    if (userIsAdmin) {
+      columns.push({
+        title: t('用户'),
+        key: 'username',
+        width: 180,
+        render: (_, record) => {
+          if (!record?.username) {
+            return <Text type='tertiary'>-</Text>;
+          }
+          return (
+            <Space spacing={8} align='center'>
+              <Avatar size='extra-small' color={stringToColor(record.username)}>
+                {record.username.slice(0, 1).toUpperCase()}
+              </Avatar>
+              <div className='flex flex-col leading-5'>
+                <Text type='tertiary' size='small'>
+                  ID: {record.user_id}
+                </Text>
+                <Text
+                  link
+                  size='small'
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => filterByUsername(record.username)}
+                >
+                  {record.username}
+                </Text>
+                {record.display_name ? (
+                  <Text type='tertiary'>{record.display_name}</Text>
+                ) : null}
+              </div>
+            </Space>
+          );
+        },
+      });
+    }
+
+    columns.push(
+      {
+        title: t('提现额度'),
+        dataIndex: 'quota',
+        key: 'quota',
+        width: 130,
+        render: (quota) => <Text strong>{renderQuota(quota || 0)}</Text>,
+      },
+      {
+        title: t('预计到账'),
+        dataIndex: 'amount_cents',
+        key: 'amount_cents',
+        width: 120,
+        render: (amountCents) => (
+          <Text type='danger'>{formatAmountCents(amountCents)}</Text>
+        ),
+      },
+      {
+        title: t('支付宝信息'),
+        key: 'alipay',
+        width: 220,
+        render: (_, record) => (
+          <div className='flex flex-col gap-1'>
+            <Text copyable={userIsAdmin}>
+              {userIsAdmin
+                ? record?.alipay_account || '-'
+                : maskAlipayAccount(record?.alipay_account)}
+            </Text>
+            <Text type='tertiary' size='small'>
+              {record?.alipay_name || '-'}
+            </Text>
+          </div>
+        ),
+      },
+      {
+        title: t('提交时间'),
+        dataIndex: 'created_at',
+        key: 'created_at',
+        width: 150,
+        render: (value) => (value ? timestamp2string(value) : '-'),
+      },
+      {
+        title: t('审核时间'),
+        dataIndex: 'reviewed_at',
+        key: 'reviewed_at',
+        width: 150,
+        render: (value) => (value ? timestamp2string(value) : '-'),
+      },
+      {
+        title: t('备注'),
+        dataIndex: 'admin_remark',
+        key: 'admin_remark',
+        render: (value) => value || <Text type='tertiary'>-</Text>,
+      },
+    );
+
+    if (userIsAdmin) {
+      columns.push({
+        title: t('操作'),
+        key: 'action',
+        width: 150,
+        render: (_, record) => {
+          if (record?.status !== 'pending') {
+            return <Text type='tertiary'>-</Text>;
+          }
+          return (
+            <Space wrap>
+              <Button
+                size='small'
+                type='primary'
+                theme='outline'
+                onClick={() => confirmApproveWithdrawal(record)}
+              >
+                {t('通过')}
+              </Button>
+              <Button
+                size='small'
+                type='danger'
+                theme='outline'
+                onClick={() => confirmRejectWithdrawal(record)}
+              >
+                {t('驳回')}
+              </Button>
+            </Space>
+          );
+        },
+      });
+    }
+
+    return columns;
+  }, [
+    userIsAdmin,
+    withdrawalFilters,
+    withdrawalPage,
+    withdrawalPageSize,
+    withdrawalAppliedFilters,
+    t,
+  ]);
 
   const renderRecordFilterPanel = () => (
     <div className='mb-3'>
@@ -1203,7 +1645,10 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
         >
           {userIsAdmin ? (
             <div style={{ minWidth: 160, flex: 1 }}>
-              <div className='text-xs mb-1' style={{ color: 'var(--semi-color-text-2)' }}>
+              <div
+                className='text-xs mb-1'
+                style={{ color: 'var(--semi-color-text-2)' }}
+              >
                 ID/用户名
               </div>
               <Input
@@ -1217,7 +1662,10 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
             </div>
           ) : null}
           <div style={{ minWidth: 120, flex: 1 }}>
-            <div className='text-xs mb-1' style={{ color: 'var(--semi-color-text-2)' }}>
+            <div
+              className='text-xs mb-1'
+              style={{ color: 'var(--semi-color-text-2)' }}
+            >
               {t('状态')}
             </div>
             <Select
@@ -1232,7 +1680,10 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
             />
           </div>
           <div style={{ minWidth: 130, flex: 1 }}>
-            <div className='text-xs mb-1' style={{ color: 'var(--semi-color-text-2)' }}>
+            <div
+              className='text-xs mb-1'
+              style={{ color: 'var(--semi-color-text-2)' }}
+            >
               {t('支付方式')}
             </div>
             <Select
@@ -1261,7 +1712,10 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
         }}
       >
         <div style={{ minWidth: 220, flex: 2 }}>
-          <div className='text-xs mb-1' style={{ color: 'var(--semi-color-text-2)' }}>
+          <div
+            className='text-xs mb-1'
+            style={{ color: 'var(--semi-color-text-2)' }}
+          >
             {t('订单号')}
           </div>
           <Input
@@ -1275,7 +1729,10 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
           />
         </div>
         <div style={{ minWidth: 160, flex: 1 }}>
-          <div className='text-xs mb-1' style={{ color: 'var(--semi-color-text-2)' }}>
+          <div
+            className='text-xs mb-1'
+            style={{ color: 'var(--semi-color-text-2)' }}
+          >
             ID/用户名
           </div>
           <Input
@@ -1288,7 +1745,10 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
           />
         </div>
         <div style={{ minWidth: 120, flex: 1 }}>
-          <div className='text-xs mb-1' style={{ color: 'var(--semi-color-text-2)' }}>
+          <div
+            className='text-xs mb-1'
+            style={{ color: 'var(--semi-color-text-2)' }}
+          >
             {t('状态')}
           </div>
           <Select
@@ -1303,7 +1763,10 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
           />
         </div>
         <div style={{ minWidth: 130, flex: 1 }}>
-          <div className='text-xs mb-1' style={{ color: 'var(--semi-color-text-2)' }}>
+          <div
+            className='text-xs mb-1'
+            style={{ color: 'var(--semi-color-text-2)' }}
+          >
             {t('订单类型')}
           </div>
           <Select
@@ -1318,7 +1781,10 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
           />
         </div>
         <div style={{ minWidth: 160, flex: 1 }}>
-          <div className='text-xs mb-1' style={{ color: 'var(--semi-color-text-2)' }}>
+          <div
+            className='text-xs mb-1'
+            style={{ color: 'var(--semi-color-text-2)' }}
+          >
             {t('异常原因')}
           </div>
           <Select
@@ -1344,6 +1810,69 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
     </div>
   );
 
+  const renderWithdrawalFilterPanel = () => (
+    <div className='mb-3'>
+      <div
+        className='rounded-lg p-3 flex flex-wrap items-end gap-3'
+        style={{
+          background: 'var(--semi-color-fill-0)',
+          border: '1px solid var(--semi-color-border)',
+        }}
+      >
+        {userIsAdmin ? (
+          <div style={{ minWidth: 180, flex: 1 }}>
+            <div
+              className='text-xs mb-1'
+              style={{ color: 'var(--semi-color-text-2)' }}
+            >
+              ID/用户名
+            </div>
+            <Input
+              placeholder={t('ID/用户名')}
+              value={withdrawalFilters.username}
+              onChange={(value) =>
+                handleWithdrawalFilterChange('username', value)
+              }
+              onEnterPress={() => applyWithdrawalFilters()}
+              showClear
+              size='small'
+            />
+          </div>
+        ) : null}
+        <div style={{ minWidth: 140, flex: 1 }}>
+          <div
+            className='text-xs mb-1'
+            style={{ color: 'var(--semi-color-text-2)' }}
+          >
+            {t('状态')}
+          </div>
+          <Select
+            value={withdrawalFilters.status}
+            optionList={WITHDRAWAL_STATUS_OPTIONS.map((item) => ({
+              ...item,
+              label: t(item.label),
+            }))}
+            onChange={(value) => handleWithdrawalFilterChange('status', value)}
+            size='small'
+            style={{ width: '100%' }}
+          />
+        </div>
+        <Space>
+          <Button type='primary' onClick={() => applyWithdrawalFilters()}>
+            {t('搜索')}
+          </Button>
+          <Button
+            theme='borderless'
+            type='tertiary'
+            onClick={resetWithdrawalFilters}
+          >
+            {t('重置')}
+          </Button>
+        </Space>
+      </div>
+    </div>
+  );
+
   const renderRecordsTable = () => (
     <>
       {renderRecordFilterPanel()}
@@ -1351,7 +1880,9 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
         columns={recordColumns}
         dataSource={topups}
         loading={loading}
-        rowKey={(record) => `${record?.record_type || 'topup'}-${record?.id || '0'}`}
+        rowKey={(record) =>
+          `${record?.record_type || 'topup'}-${record?.id || '0'}`
+        }
         size='small'
         pagination={{
           currentPage: page,
@@ -1381,7 +1912,10 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
         }}
       >
         <div style={{ minWidth: 260, flex: 2 }}>
-          <div className='text-xs mb-1' style={{ color: 'var(--semi-color-text-2)' }}>
+          <div
+            className='text-xs mb-1'
+            style={{ color: 'var(--semi-color-text-2)' }}
+          >
             {t('时间范围')}
           </div>
           <Space wrap>
@@ -1399,7 +1933,10 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
           </Space>
         </div>
         <div style={{ minWidth: 280, flex: 2 }}>
-          <div className='text-xs mb-1' style={{ color: 'var(--semi-color-text-2)' }}>
+          <div
+            className='text-xs mb-1'
+            style={{ color: 'var(--semi-color-text-2)' }}
+          >
             {t('自定义时间')}
           </div>
           <DatePicker
@@ -1410,7 +1947,10 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
           />
         </div>
         <div style={{ minWidth: 120 }}>
-          <div className='text-xs mb-1' style={{ color: 'var(--semi-color-text-2)' }}>
+          <div
+            className='text-xs mb-1'
+            style={{ color: 'var(--semi-color-text-2)' }}
+          >
             {t('榜单条数')}
           </div>
           <Select
@@ -1424,7 +1964,11 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
             style={{ width: '100%' }}
           />
         </div>
-        <Button type='primary' loading={dashboardLoading} onClick={refreshDashboard}>
+        <Button
+          type='primary'
+          loading={dashboardLoading}
+          onClick={refreshDashboard}
+        >
           {t('刷新')}
         </Button>
       </div>
@@ -1432,7 +1976,9 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
       <div
         className='grid gap-3'
         style={{
-          gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(180px, 1fr))',
+          gridTemplateColumns: isMobile
+            ? '1fr'
+            : 'repeat(auto-fit, minmax(180px, 1fr))',
         }}
       >
         {dashboardSummaryCards.map((item) => (
@@ -1459,7 +2005,9 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
       <div
         className='grid gap-4'
         style={{
-          gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.6fr) minmax(280px, 1fr)',
+          gridTemplateColumns: isMobile
+            ? '1fr'
+            : 'minmax(0, 1.6fr) minmax(280px, 1fr)',
         }}
       >
         <Card
@@ -1475,7 +2023,9 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
             columns={dashboardRankingColumns}
             dataSource={dashboardRankings}
             loading={dashboardLoading}
-            rowKey={(record) => String(record?.user_id || record?.username || '')}
+            rowKey={(record) =>
+              String(record?.user_id || record?.username || '')
+            }
             size='small'
             pagination={false}
             scroll={{ x: '100%' }}
@@ -1497,7 +2047,10 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
           ) : (
             <div className='space-y-3'>
               {dashboardPaymentMethods.map((item) => (
-                <div key={item.method} className='flex items-center justify-between gap-3'>
+                <div
+                  key={item.method}
+                  className='flex items-center justify-between gap-3'
+                >
                   <div className='flex items-center gap-2'>
                     {renderPaymentMethod(item.method)}
                     <Text type='tertiary' size='small'>
@@ -1541,6 +2094,36 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
     </>
   );
 
+  const renderWithdrawalTable = () => (
+    <>
+      {renderWithdrawalFilterPanel()}
+      <Table
+        columns={withdrawalColumns}
+        dataSource={withdrawals}
+        loading={withdrawalLoading}
+        rowKey={(record) => String(record?.id || 0)}
+        size='small'
+        pagination={{
+          currentPage: withdrawalPage,
+          pageSize: withdrawalPageSize,
+          total: withdrawalTotal,
+          showSizeChanger: true,
+          pageSizeOpts: [10, 20, 50, 100],
+          onPageChange: (currentPage) => setWithdrawalPage(currentPage),
+          onPageSizeChange: (currentPageSize) => {
+            setWithdrawalPageSize(currentPageSize);
+            setWithdrawalPage(1);
+          },
+        }}
+        scroll={{ x: '100%' }}
+        empty={buildTableEmpty(
+          t,
+          userIsAdmin ? '暂无提现审核记录' : '暂无提现记录',
+        )}
+      />
+    </>
+  );
+
   return (
     <>
       <Modal
@@ -1559,12 +2142,22 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
             <Tabs.TabPane tab={t('对账看板')} itemKey='dashboard'>
               {renderDashboardBoard()}
             </Tabs.TabPane>
+            <Tabs.TabPane tab={t('提现审核')} itemKey='withdrawals'>
+              {renderWithdrawalTable()}
+            </Tabs.TabPane>
             <Tabs.TabPane tab={t('异常单')} itemKey='risk'>
               {renderRiskCaseTable()}
             </Tabs.TabPane>
           </Tabs>
         ) : (
-          renderRecordsTable()
+          <Tabs type='card' activeKey={activeTab} onChange={setActiveTab}>
+            <Tabs.TabPane tab={t('支付记录')} itemKey='records'>
+              {renderRecordsTable()}
+            </Tabs.TabPane>
+            <Tabs.TabPane tab={t('提现记录')} itemKey='withdrawals'>
+              {renderWithdrawalTable()}
+            </Tabs.TabPane>
+          </Tabs>
         )}
       </Modal>
 
@@ -1576,6 +2169,37 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
         onResolved={handleRiskCaseResolved}
         t={t}
       />
+
+      <Modal
+        title={t(
+          reviewState.action === 'approve' ? '通过提现申请' : '驳回提现申请',
+        )}
+        visible={reviewState.visible}
+        onOk={submitReviewModal}
+        onCancel={closeReviewModal}
+        confirmLoading={reviewSubmitting}
+        maskClosable={false}
+        okButtonProps={
+          reviewState.action === 'reject' ? { type: 'danger' } : undefined
+        }
+      >
+        <div className='space-y-3'>
+          <div>
+            {t(
+              reviewState.action === 'approve'
+                ? '请确认已通过支付宝完成转账后再点击通过。'
+                : '驳回后会把冻结的待使用收益退回给用户。',
+            )}
+          </div>
+          <Input
+            placeholder={t('审核备注，可选')}
+            value={reviewRemark}
+            onChange={setReviewRemark}
+            maxLength={255}
+            showClear
+          />
+        </div>
+      </Modal>
     </>
   );
 };

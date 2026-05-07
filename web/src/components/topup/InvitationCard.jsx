@@ -27,7 +27,15 @@ import {
   Badge,
   Space,
 } from '@douyinfe/semi-ui';
-import { Copy, Users, BarChart2, TrendingUp, Gift, Zap } from 'lucide-react';
+import {
+  Copy,
+  Users,
+  BarChart2,
+  TrendingUp,
+  Gift,
+  Zap,
+  Wallet,
+} from 'lucide-react';
 
 const { Text } = Typography;
 
@@ -36,9 +44,14 @@ const InvitationCard = ({
   userState,
   renderQuota,
   setOpenTransfer,
+  setOpenWithdrawal,
+  openWithdrawalHistory,
   affLink,
   handleAffLinkClick,
 }) => {
+  const hasAvailableReward =
+    !!userState?.user?.aff_quota && userState?.user?.aff_quota > 0;
+
   return (
     <Card className='!rounded-2xl shadow-sm border-0'>
       {/* 卡片头部 */}
@@ -76,20 +89,30 @@ const InvitationCard = ({
                   <Text strong style={{ color: 'white', fontSize: '16px' }}>
                     {t('收益统计')}
                   </Text>
-                  <Button
-                    type='primary'
-                    theme='solid'
-                    size='small'
-                    disabled={
-                      !userState?.user?.aff_quota ||
-                      userState?.user?.aff_quota <= 0
-                    }
-                    onClick={() => setOpenTransfer(true)}
-                    className='!rounded-lg'
-                  >
-                    <Zap size={12} className='mr-1' />
-                    {t('划转到余额')}
-                  </Button>
+                  <Space spacing={8}>
+                    <Button
+                      type='primary'
+                      theme='solid'
+                      size='small'
+                      disabled={!hasAvailableReward}
+                      onClick={() => setOpenTransfer(true)}
+                      className='!rounded-lg'
+                    >
+                      <Zap size={12} className='mr-1' />
+                      {t('划转到余额')}
+                    </Button>
+                    <Button
+                      type='warning'
+                      theme='solid'
+                      size='small'
+                      disabled={!hasAvailableReward}
+                      onClick={() => setOpenWithdrawal(true)}
+                      className='!rounded-lg'
+                    >
+                      <Wallet size={12} className='mr-1' />
+                      {t('提现')}
+                    </Button>
+                  </Space>
                 </div>
 
                 {/* 统计数据 */}
@@ -191,6 +214,16 @@ const InvitationCard = ({
               </Button>
             }
           />
+          <div className='mt-2 flex justify-end'>
+            <Button
+              size='small'
+              theme='borderless'
+              type='tertiary'
+              onClick={openWithdrawalHistory}
+            >
+              {t('我的提现记录')}
+            </Button>
+          </div>
         </Card>
 
         {/* 奖励说明 */}
@@ -210,6 +243,13 @@ const InvitationCard = ({
               <Badge dot type='success' />
               <Text type='tertiary' className='text-sm'>
                 {t('通过划转功能将奖励额度转入到您的账户余额中')}
+              </Text>
+            </div>
+
+            <div className='flex items-start gap-2'>
+              <Badge dot type='success' />
+              <Text type='tertiary' className='text-sm'>
+                {t('也可以提交提现申请，管理员审核后通过支付宝转账')}
               </Text>
             </div>
 
