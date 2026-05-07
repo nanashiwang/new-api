@@ -807,6 +807,52 @@ const TopUp = () => {
     setOpenHistory(true);
   };
 
+  const tryOpenTransfer = () => {
+    const minQuota = getQuotaPerUnit();
+    const currentQuota = Number(userState?.user?.aff_quota || 0);
+    if (currentQuota < minQuota) {
+      showError(
+        t('待使用收益不足最低划转额度 {{min}}', {
+          min: renderQuota(minQuota),
+        }),
+      );
+      return;
+    }
+    const isTokens = getCurrencyConfig().type === 'TOKENS';
+    const minDisplay = isTokens
+      ? minQuota
+      : roundCurrencyAmountUp(quotaToDisplayAmount(minQuota));
+    const maxDisplay = isTokens
+      ? currentQuota
+      : roundCurrencyAmountDown(quotaToDisplayAmount(currentQuota));
+    const initial = Math.min(minDisplay, maxDisplay) || minDisplay;
+    setTransferAmount(initial);
+    setOpenTransfer(true);
+  };
+
+  const tryOpenWithdrawal = () => {
+    const minQuota = getQuotaPerUnit();
+    const currentQuota = Number(userState?.user?.aff_quota || 0);
+    if (currentQuota < minQuota) {
+      showError(
+        t('待使用收益不足最低提现额度 {{min}}', {
+          min: renderQuota(minQuota),
+        }),
+      );
+      return;
+    }
+    const isTokens = getCurrencyConfig().type === 'TOKENS';
+    const minDisplay = isTokens
+      ? minQuota
+      : roundCurrencyAmountUp(quotaToDisplayAmount(minQuota));
+    const maxDisplay = isTokens
+      ? currentQuota
+      : roundCurrencyAmountDown(quotaToDisplayAmount(currentQuota));
+    const initial = Math.min(minDisplay, maxDisplay) || minDisplay;
+    setWithdrawalAmount(initial);
+    setOpenWithdrawal(true);
+  };
+
   const selectPresetAmount = (preset) => {
     setTopUpCount(preset.value);
     setSelectedPreset(preset.value);
@@ -1443,8 +1489,8 @@ const TopUp = () => {
             t={t}
             userState={userState}
             renderQuota={renderQuota}
-            setOpenTransfer={setOpenTransfer}
-            setOpenWithdrawal={setOpenWithdrawal}
+            onOpenTransfer={tryOpenTransfer}
+            onOpenWithdrawal={tryOpenWithdrawal}
             openWithdrawalHistory={() => openHistoryTab('withdrawals')}
             affLink={affLink}
             handleAffLinkClick={handleAffLinkClick}

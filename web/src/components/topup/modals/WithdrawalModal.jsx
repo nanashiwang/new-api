@@ -77,9 +77,17 @@ const WithdrawalModal = ({
         quotaToDisplayAmount(userState?.user?.aff_quota || 0),
       );
 
+  const safeWithdrawalAmount = useMemo(() => {
+    const v = Number(withdrawalAmount);
+    if (!Number.isFinite(v) || v <= 0) return 0;
+    if (v < minWithdrawalAmount) return 0;
+    if (v > maxWithdrawalAmount) return 0;
+    return v;
+  }, [withdrawalAmount, minWithdrawalAmount, maxWithdrawalAmount]);
+
   const estimatedQuota = useMemo(
-    () => displayAmountToQuota(withdrawalAmount),
-    [withdrawalAmount],
+    () => displayAmountToQuota(safeWithdrawalAmount),
+    [safeWithdrawalAmount],
   );
   const estimatedPaymentAmount = useMemo(() => {
     const price = getTopUpPrice();

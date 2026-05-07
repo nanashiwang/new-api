@@ -43,8 +43,8 @@ const InvitationCard = ({
   t,
   userState,
   renderQuota,
-  setOpenTransfer,
-  setOpenWithdrawal,
+  onOpenTransfer,
+  onOpenWithdrawal,
   openWithdrawalHistory,
   affLink,
   handleAffLinkClick,
@@ -95,7 +95,7 @@ const InvitationCard = ({
                       theme='solid'
                       size='small'
                       disabled={!hasAvailableReward}
-                      onClick={() => setOpenTransfer(true)}
+                      onClick={() => onOpenTransfer && onOpenTransfer()}
                       className='!rounded-lg'
                     >
                       <Zap size={12} className='mr-1' />
@@ -106,7 +106,7 @@ const InvitationCard = ({
                       theme='solid'
                       size='small'
                       disabled={!hasAvailableReward}
-                      onClick={() => setOpenWithdrawal(true)}
+                      onClick={() => onOpenWithdrawal && onOpenWithdrawal()}
                       className='!rounded-lg'
                     >
                       <Wallet size={12} className='mr-1' />
