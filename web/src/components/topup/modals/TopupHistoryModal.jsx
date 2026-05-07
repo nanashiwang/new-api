@@ -2147,7 +2147,7 @@ const TopupHistoryModal = ({
         onCancel={onCancel}
         footer={null}
         size={isMobile ? 'full-width' : 'large'}
-        style={isMobile ? undefined : { width: '1180px', maxWidth: '95vw' }}
+        style={isMobile ? undefined : { width: '1400px', maxWidth: '95vw' }}
       >
         {userIsAdmin ? (
           <Tabs type='card' activeKey={activeTab} onChange={setActiveTab}>

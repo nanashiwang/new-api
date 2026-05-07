@@ -21,7 +21,6 @@ import React, { useMemo } from 'react';
 import { Input, InputNumber, Modal, Typography } from '@douyinfe/semi-ui';
 import { Wallet } from 'lucide-react';
 import { getCurrencyConfig } from '../../../helpers';
-import { getPaymentCurrencySymbol } from '../../../helpers/render';
 import {
   displayAmountToQuota,
   quotaToDisplayAmount,
@@ -48,7 +47,7 @@ const getTopUpPrice = () => {
 };
 
 const formatPaymentAmount = (value) =>
-  `${getPaymentCurrencySymbol()}${Number(value || 0).toFixed(2)}`;
+  `¥${Number(value || 0).toFixed(2)}`;
 
 const WithdrawalModal = ({
   t,
