@@ -27,6 +27,7 @@ import {
   Timeline,
 } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { API, showError, getRelativeTime } from '../../helpers';
 import { marked } from 'marked';
 import {
@@ -34,7 +35,7 @@ import {
   IllustrationNoContentDark,
 } from '@douyinfe/semi-illustrations';
 import { StatusContext } from '../../context/Status';
-import { Bell, Megaphone } from 'lucide-react';
+import { Bell, Megaphone, Wallet } from 'lucide-react';
 
 const NoticeModal = ({
   visible,
@@ -42,8 +43,11 @@ const NoticeModal = ({
   isMobile,
   defaultTab = 'inApp',
   unreadKeys = [],
+  pendingWithdrawalCount = 0,
+  showWithdrawalTab = false,
 }) => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [noticeContent, setNoticeContent] = useState('');
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState(defaultTab);
@@ -205,7 +209,47 @@ const NoticeModal = ({
     if (activeTab === 'inApp') {
       return renderMarkdownNotice();
     }
+    if (activeTab === 'withdrawals') {
+      return renderWithdrawalTab();
+    }
     return renderAnnouncementTimeline();
+  };
+
+  const renderWithdrawalTab = () => {
+    if (pendingWithdrawalCount === 0) {
+      return (
+        <div className='py-12'>
+          <Empty
+            image={
+              <IllustrationNoContent style={{ width: 150, height: 150 }} />
+            }
+            darkModeImage={
+              <IllustrationNoContentDark style={{ width: 150, height: 150 }} />
+            }
+            description={t('暂无待审核提现申请')}
+          />
+        </div>
+      );
+    }
+    return (
+      <div className='py-12 flex flex-col items-center gap-4'>
+        <div className='text-base'>
+          {t('当前有 {{count}} 条待审核提现申请', {
+            count: pendingWithdrawalCount,
+          })}
+        </div>
+        <Button
+          type='primary'
+          theme='solid'
+          onClick={() => {
+            onClose();
+            navigate('/console/topup?tab=withdrawals');
+          }}
+        >
+          {t('前往审核')}
+        </Button>
+      </div>
+    );
   };
 
   return (
@@ -230,6 +274,23 @@ const NoticeModal = ({
               }
               itemKey='system'
             />
+            {showWithdrawalTab && (
+              <TabPane
+                tab={
+                  <span className='flex items-center gap-1'>
+                    <Wallet size={14} /> {t('提现审核')}
+                    {pendingWithdrawalCount > 0 && (
+                      <span className='ml-1 px-1.5 rounded-full bg-red-500 text-white text-xs'>
+                        {pendingWithdrawalCount > 99
+                          ? '99+'
+                          : pendingWithdrawalCount}
+                      </span>
+                    )}
+                  </span>
+                }
+                itemKey='withdrawals'
+              />
+            )}
           </Tabs>
         </div>
       }

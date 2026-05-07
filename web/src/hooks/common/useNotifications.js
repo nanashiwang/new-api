@@ -18,12 +18,29 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { useState, useEffect } from 'react';
+import { API, isAdmin } from '../../helpers';
 
 export const useNotifications = (statusState) => {
   const [noticeVisible, setNoticeVisible] = useState(false);
-  const [unreadCount, setUnreadCount] = useState(0);
+  const [announcementUnread, setAnnouncementUnread] = useState(0);
+  const [pendingWithdrawalCount, setPendingWithdrawalCount] = useState(0);
+  const admin = isAdmin();
 
   const announcements = statusState?.status?.announcements || [];
+
+  const fetchPendingWithdrawalCount = async () => {
+    if (!admin) return;
+    try {
+      const res = await API.get(
+        '/api/user/aff-withdrawals?status=pending&p=1&page_size=1',
+      );
+      if (res?.data?.success) {
+        setPendingWithdrawalCount(Number(res.data.data?.total) || 0);
+      }
+    } catch (_) {
+      // silent: keep previous value to avoid badge flicker
+    }
+  };
 
   // Helper functions
   const getAnnouncementKey = (a) =>
@@ -58,11 +75,16 @@ export const useNotifications = (statusState) => {
 
   // Effects
   useEffect(() => {
-    setUnreadCount(calculateUnreadCount());
+    setAnnouncementUnread(calculateUnreadCount());
   }, [announcements]);
+
+  useEffect(() => {
+    fetchPendingWithdrawalCount();
+  }, [admin]);
 
   // 操作函数
   const handleNoticeOpen = () => {
+    fetchPendingWithdrawalCount();
     setNoticeVisible(true);
   };
 
@@ -80,12 +102,15 @@ export const useNotifications = (statusState) => {
       );
       localStorage.setItem('notice_read_keys', JSON.stringify(mergedKeys));
     }
-    setUnreadCount(0);
+    setAnnouncementUnread(0);
   };
 
   return {
     noticeVisible,
-    unreadCount,
+    unreadCount: announcementUnread + (admin ? pendingWithdrawalCount : 0),
+    announcementUnread,
+    pendingWithdrawalCount,
+    isAdminUser: admin,
     announcements,
     handleNoticeOpen,
     handleNoticeClose,

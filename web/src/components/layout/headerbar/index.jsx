@@ -57,6 +57,9 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
   const {
     noticeVisible,
     unreadCount,
+    announcementUnread,
+    pendingWithdrawalCount,
+    isAdminUser,
     handleNoticeOpen,
     handleNoticeClose,
     getUnreadKeys,
@@ -70,8 +73,16 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
         visible={noticeVisible}
         onClose={handleNoticeClose}
         isMobile={isMobile}
-        defaultTab={unreadCount > 0 ? 'system' : 'inApp'}
+        defaultTab={
+          isAdminUser && pendingWithdrawalCount > 0
+            ? 'withdrawals'
+            : announcementUnread > 0
+              ? 'system'
+              : 'inApp'
+        }
         unreadKeys={getUnreadKeys()}
+        pendingWithdrawalCount={pendingWithdrawalCount}
+        showWithdrawalTab={isAdminUser}
       />
 
       <div className='w-full px-2'>

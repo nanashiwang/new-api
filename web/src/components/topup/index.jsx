@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useEffect, useState, useContext, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   API,
   showError,
@@ -811,6 +812,17 @@ const TopUp = () => {
     setHistoryInitialTab(tab);
     setOpenHistory(true);
   };
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab === 'withdrawals') {
+      openHistoryTab('withdrawals');
+      const next = new URLSearchParams(searchParams);
+      next.delete('tab');
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams]);
 
   const tryOpenTransfer = () => {
     const minQuota = getQuotaPerUnit();
