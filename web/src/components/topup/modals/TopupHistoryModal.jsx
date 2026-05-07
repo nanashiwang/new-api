@@ -49,7 +49,6 @@ import {
   timestamp2string,
 } from '../../../helpers';
 import { isAdmin } from '../../../helpers/utils';
-import { getPaymentCurrencySymbol } from '../../../helpers/render';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 import PaymentRiskCaseDetailModal from './PaymentRiskCaseDetailModal';
 
@@ -209,7 +208,7 @@ function formatMoney(value, currency = 'CNY') {
 }
 
 function formatAmountCents(cents) {
-  return `${getPaymentCurrencySymbol()}${(Number(cents || 0) / 100).toFixed(2)}`;
+  return `¥${(Number(cents || 0) / 100).toFixed(2)}`;
 }
 
 function maskAlipayAccount(account) {
@@ -2157,11 +2156,11 @@ const TopupHistoryModal = ({
             <Tabs.TabPane tab={t('提现订单')} itemKey='my-withdrawals'>
               {renderWithdrawalTable()}
             </Tabs.TabPane>
-            <Tabs.TabPane tab={t('对账看板')} itemKey='dashboard'>
-              {renderDashboardBoard()}
-            </Tabs.TabPane>
             <Tabs.TabPane tab={t('提现审核')} itemKey='withdrawals'>
               {renderWithdrawalTable()}
+            </Tabs.TabPane>
+            <Tabs.TabPane tab={t('对账看板')} itemKey='dashboard'>
+              {renderDashboardBoard()}
             </Tabs.TabPane>
             <Tabs.TabPane tab={t('异常单')} itemKey='risk'>
               {renderRiskCaseTable()}
