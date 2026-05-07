@@ -159,6 +159,7 @@ func main() {
 
 	// Initialize HTTP server
 	server := gin.New()
+	configureTrustedProxies(server)
 	server.Use(gin.CustomRecovery(func(c *gin.Context, err any) {
 		common.SysLog(fmt.Sprintf("panic detected: %v", err))
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -201,6 +202,35 @@ func main() {
 	err = server.Run(":" + port)
 	if err != nil {
 		common.FatalLog("failed to start HTTP server: " + err.Error())
+	}
+}
+
+func configureTrustedProxies(server *gin.Engine) {
+	raw := strings.TrimSpace(os.Getenv("TRUSTED_PROXIES"))
+	if raw == "" {
+		common.SysLog("TRUSTED_PROXIES not set; registration IP audit uses Gin default proxy trust behavior")
+		return
+	}
+	if strings.EqualFold(raw, "none") {
+		if err := server.SetTrustedProxies(nil); err != nil {
+			common.SysError("failed to configure TRUSTED_PROXIES=none: " + err.Error())
+		}
+		return
+	}
+
+	proxies := make([]string, 0)
+	for _, item := range strings.Split(raw, ",") {
+		proxy := strings.TrimSpace(item)
+		if proxy != "" {
+			proxies = append(proxies, proxy)
+		}
+	}
+	if len(proxies) == 0 {
+		common.SysLog("TRUSTED_PROXIES is empty after parsing; keep Gin default proxy trust behavior")
+		return
+	}
+	if err := server.SetTrustedProxies(proxies); err != nil {
+		common.SysError("failed to configure TRUSTED_PROXIES: " + err.Error())
 	}
 }
 

@@ -24,6 +24,7 @@ import {
   SideSheet,
   Space,
   Select,
+  Input,
   InputNumber,
   Divider,
   Typography,
@@ -66,6 +67,19 @@ const UsersFilters = ({
       { label: t('全部状态'), value: '' },
       { label: t('已启用'), value: '1' },
       { label: t('已禁用'), value: '2' },
+    ],
+    [t],
+  );
+  const registerSourceOptions = useMemo(
+    () => [
+      { label: t('密码注册'), value: 'password' },
+      { label: t('管理员创建'), value: 'admin' },
+      { label: 'GitHub', value: 'github' },
+      { label: 'Discord', value: 'discord' },
+      { label: 'OIDC', value: 'oidc' },
+      { label: 'LinuxDO', value: 'linuxdo' },
+      { label: 'WeChat', value: 'wechat' },
+      { label: t('未知来源'), value: 'unknown' },
     ],
     [t],
   );
@@ -293,6 +307,33 @@ const UsersFilters = ({
                 optionList={statusOptions}
                 placeholder={t('状态')}
                 showClear
+              />
+              <Select
+                value={draftAdvancedFilters.searchRegisterSource}
+                onChange={(value) =>
+                  setDraftAdvancedFilters((prev) => ({
+                    ...prev,
+                    searchRegisterSource:
+                      value === null || value === undefined ? '' : value,
+                  }))
+                }
+                optionList={registerSourceOptions}
+                placeholder={t('注册来源')}
+                showClear
+                style={{ width: '100%' }}
+              />
+              <Input
+                value={draftAdvancedFilters.searchRegisterIp}
+                onChange={(value) =>
+                  setDraftAdvancedFilters((prev) => ({
+                    ...prev,
+                    searchRegisterIp:
+                      value === null || value === undefined ? '' : value,
+                  }))
+                }
+                placeholder={t('注册 IP')}
+                showClear
+                style={{ width: '100%' }}
               />
               <Select
                 value={draftAdvancedFilters.searchHasInviter}

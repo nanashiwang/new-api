@@ -5350,7 +5350,13 @@
     "whsec_xxx 的 Webhook 签名密钥，敏感信息不显示": "Khóa chữ ký Webhook cho whsec_xxx, thông tin nhạy cảm không được hiển thị",
     "Worker地址": "Địa chỉ Worker",
     "Worker密钥": "Khóa Worker",
-    "X 也可以小于 1，当折扣用。想做\"只给输出加价\"或\"额外加固定费用\"，请直接写完整计费公式。": ""
+    "X 也可以小于 1，当折扣用。想做\"只给输出加价\"或\"额外加固定费用\"，请直接写完整计费公式。": "",
+    "注册来源": "Nguồn đăng ký",
+    "注册 IP": "IP đăng ký",
+    "密码注册": "Đăng ký bằng mật khẩu",
+    "管理员创建": "Do quản trị viên tạo",
+    "OAuth 注册": "Đăng ký OAuth",
+    "未知来源": "Nguồn không xác định"
   },
   "?????? 0 ??? 7 ????": {},
   "?????? 0 ???????": {}

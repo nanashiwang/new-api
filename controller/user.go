@@ -185,6 +185,7 @@ func Register(c *gin.Context) {
 		InviterId:   inviterId,
 		Role:        common.RoleCommonUser, // 明确设置角色为普通用户
 	}
+	applyUserRegisterAudit(c, &cleanUser, model.UserRegisterSourcePassword)
 	if common.EmailVerificationEnabled {
 		cleanUser.Email = user.Email
 	}
@@ -353,6 +354,8 @@ func SearchUsers(c *gin.Context) {
 		common.ApiError(c, errors.New("参数 used_balance_min 不能大于 used_balance_max"))
 		return
 	}
+	registerSource := strings.TrimSpace(c.Query("register_source"))
+	registerIP := strings.TrimSpace(c.Query("register_ip"))
 
 	sortBy, sortOrder, idSortOrder, balanceSortOrder, usedQuotaSortOrder, err := parseUserSortQuery(c)
 	if err != nil {
@@ -376,6 +379,8 @@ func SearchUsers(c *gin.Context) {
 		WalletMax:             walletMax,
 		UsedBalanceMin:        usedBalanceMin,
 		UsedBalanceMax:        usedBalanceMax,
+		RegisterSource:        registerSource,
+		RegisterIP:            registerIP,
 		SortBy:                sortBy,
 		SortOrder:             sortOrder,
 		IdSortOrder:           idSortOrder,
@@ -1131,6 +1136,7 @@ func CreateUser(c *gin.Context) {
 		Remark:      user.Remark,
 		Role:        user.Role, // 保持管理员设置的角色
 	}
+	applyUserRegisterAudit(c, &cleanUser, model.UserRegisterSourceAdmin)
 	if err := cleanUser.Insert(0); err != nil {
 		common.ApiError(c, err)
 		return

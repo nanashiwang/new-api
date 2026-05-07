@@ -67,6 +67,79 @@ const renderRole = (role, t) => {
   }
 };
 
+const getRegisterSourceMeta = (source, t) => {
+  const raw = typeof source === 'string' ? source.trim() : '';
+  const normalized = raw || 'unknown';
+  if (normalized.startsWith('custom_oauth:')) {
+    const provider = normalized.slice('custom_oauth:'.length) || t('未知来源');
+    return {
+      label: `${t('OAuth 注册')}: ${provider}`,
+      color: 'light-blue',
+      raw: normalized,
+    };
+  }
+  switch (normalized) {
+    case 'password':
+      return { label: t('密码注册'), color: 'blue', raw: normalized };
+    case 'admin':
+      return { label: t('管理员创建'), color: 'green', raw: normalized };
+    case 'github':
+      return { label: 'GitHub', color: 'light-blue', raw: normalized };
+    case 'discord':
+      return { label: 'Discord', color: 'light-blue', raw: normalized };
+    case 'oidc':
+      return { label: 'OIDC', color: 'light-blue', raw: normalized };
+    case 'linuxdo':
+      return { label: 'LinuxDO', color: 'light-blue', raw: normalized };
+    case 'wechat':
+      return { label: 'WeChat', color: 'light-blue', raw: normalized };
+    default:
+      return { label: t('未知来源'), color: 'grey', raw: normalized };
+  }
+};
+
+const renderRegisterSource = (source, record, t) => {
+  const meta = getRegisterSourceMeta(source, t);
+  const tooltipContent = (
+    <div className='text-xs max-w-xs break-all'>
+      <div>
+        {t('注册来源')}: {meta.raw}
+      </div>
+      <div>
+        {t('注册 IP')}: {record?.register_ip || '-'}
+      </div>
+      {record?.register_user_agent ? (
+        <div>User-Agent: {record.register_user_agent}</div>
+      ) : null}
+    </div>
+  );
+  return (
+    <Tooltip content={tooltipContent} position='top'>
+      <Tag color={meta.color} shape='circle'>
+        {meta.label}
+      </Tag>
+    </Tooltip>
+  );
+};
+
+const renderRegisterIP = (ip, record) => {
+  const value = typeof ip === 'string' && ip.trim() ? ip.trim() : '-';
+  if (value === '-') {
+    return (
+      <Tag color='white' shape='circle'>
+        -
+      </Tag>
+    );
+  }
+  return (
+    <Tooltip content={record?.register_user_agent || value} position='top'>
+      <Tag color='white' shape='circle'>
+        {value}
+      </Tag>
+    </Tooltip>
+  );
+};
+
 /**
  * 渲染用户名，存在备注时一并展示。
  */
@@ -548,6 +621,16 @@ export const getUsersColumns = ({
       title: t('用户名'),
       dataIndex: 'username',
       render: (text, record) => renderUsername(text, record),
+    },
+    {
+      title: t('注册来源'),
+      dataIndex: 'register_source',
+      render: (text, record) => renderRegisterSource(text, record, t),
+    },
+    {
+      title: t('注册 IP'),
+      dataIndex: 'register_ip',
+      render: (text, record) => renderRegisterIP(text, record),
     },
     {
       title: t('状态'),

@@ -40,6 +40,8 @@ const DEFAULT_ADVANCED_FILTERS = {
   // 将已用额度筛选放在高级面板，保持工具栏紧凑。
   searchUsedBalanceMin: '',
   searchUsedBalanceMax: '',
+  searchRegisterSource: '',
+  searchRegisterIp: '',
   // 复合排序支持 ID、钱包额度、已使用额度同时生效。
   searchIdSortOrder: '',
   searchWalletSortOrder: '',
@@ -132,6 +134,8 @@ export const useUsersData = () => {
       searchWalletMax: next.searchWalletMax ?? '',
       searchUsedBalanceMin: next.searchUsedBalanceMin ?? '',
       searchUsedBalanceMax: next.searchUsedBalanceMax ?? '',
+      searchRegisterSource: next.searchRegisterSource ?? '',
+      searchRegisterIp: next.searchRegisterIp ?? '',
       searchIdSortOrder: next.searchIdSortOrder ?? '',
       searchWalletSortOrder: next.searchWalletSortOrder ?? '',
       searchUsedQuotaSortOrder: next.searchUsedQuotaSortOrder ?? '',
@@ -362,6 +366,12 @@ export const useUsersData = () => {
         resolvedAdvanced.searchUsedBalanceMax !== undefined
       ) {
         params.used_balance_max = resolvedAdvanced.searchUsedBalanceMax;
+      }
+      if (resolvedAdvanced.searchRegisterSource !== '') {
+        params.register_source = resolvedAdvanced.searchRegisterSource.trim();
+      }
+      if (resolvedAdvanced.searchRegisterIp !== '') {
+        params.register_ip = resolvedAdvanced.searchRegisterIp.trim();
       }
       const res = await API.get('/api/user/search', { params });
       if (!isLatestRequest(reqId)) {

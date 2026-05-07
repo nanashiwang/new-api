@@ -5041,7 +5041,13 @@
     "whsec_xxx 的 Webhook 签名密钥，敏感信息不显示": "Clé de signature Webhook whsec_xxx, les informations sensibles ne sont pas affichées",
     "Worker地址": "Adresse du Worker",
     "Worker密钥": "Clé du Worker",
-    "X 也可以小于 1，当折扣用。想做\"只给输出加价\"或\"额外加固定费用\"，请直接写完整计费公式。": ""
+    "X 也可以小于 1，当折扣用。想做\"只给输出加价\"或\"额外加固定费用\"，请直接写完整计费公式。": "",
+    "注册来源": "Source d'inscription",
+    "注册 IP": "IP d'inscription",
+    "密码注册": "Inscription par mot de passe",
+    "管理员创建": "Créé par l'administrateur",
+    "OAuth 注册": "Inscription OAuth",
+    "未知来源": "Source inconnue"
   },
   "?????? 0 ??? 7 ????": {},
   "?????? 0 ???????": {}

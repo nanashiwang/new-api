@@ -215,6 +215,58 @@ func TestSearchUsersWithParams_WalletBalanceFilterUsesCurrentQuotaOnly(t *testin
 	assert.Equal(t, walletRich.Id, users[0].Id)
 }
 
+func TestSearchUsersWithParams_RegisterAuditFilters(t *testing.T) {
+	setupUserSubscriptionFilterTest(t)
+
+	passwordUser := createUserForSubscriptionFilterTest(t, "source_password")
+	require.NoError(t, DB.Model(passwordUser).Updates(map[string]any{
+		"register_source": UserRegisterSourcePassword,
+		"register_ip":     "203.0.113.10",
+	}).Error)
+	adminUser := createUserForSubscriptionFilterTest(t, "source_admin")
+	require.NoError(t, DB.Model(adminUser).Updates(map[string]any{
+		"register_source": UserRegisterSourceAdmin,
+		"register_ip":     "203.0.113.11",
+	}).Error)
+	legacyUser := createUserForSubscriptionFilterTest(t, "source_legacy")
+
+	users, total, err := SearchUsersWithParams(UserSearchParams{
+		RegisterSource: UserRegisterSourcePassword,
+		StartIdx:       0,
+		PageSize:       10,
+		SortBy:         "id",
+		SortOrder:      "asc",
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, users, 1)
+	require.Equal(t, passwordUser.Id, users[0].Id)
+
+	users, total, err = SearchUsersWithParams(UserSearchParams{
+		RegisterIP: "203.0.113.11",
+		StartIdx:   0,
+		PageSize:   10,
+		SortBy:     "id",
+		SortOrder:  "asc",
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, users, 1)
+	require.Equal(t, adminUser.Id, users[0].Id)
+
+	users, total, err = SearchUsersWithParams(UserSearchParams{
+		RegisterSource: UserRegisterSourceUnknown,
+		StartIdx:       0,
+		PageSize:       10,
+		SortBy:         "id",
+		SortOrder:      "asc",
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, users, 1)
+	require.Equal(t, legacyUser.Id, users[0].Id)
+}
+
 func TestGetAllUsers_AggregatesSubscriptionQuotaWithResetAwareView(t *testing.T) {
 	setupUserSubscriptionFilterTest(t)
 	now := common.GetTimestamp()
