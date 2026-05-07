@@ -86,6 +86,11 @@ const roundCurrencyAmountUp = (amount) => {
   return Math.ceil(cents - 0.01) / 100;
 };
 
+const roundCurrencyAmountDown = (amount) => {
+  const numericAmount = Number(amount || 0);
+  return Math.floor(numericAmount * 100 + 1e-8) / 100;
+};
+
 const PERIOD_LABELS = {
   hourly: '每小时',
   daily: '每日',
