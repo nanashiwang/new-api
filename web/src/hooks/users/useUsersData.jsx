@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { useState, useEffect } from 'react';
+import { Modal } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { API, showError, showSuccess } from '../../helpers';
 import { useTableCompactMode } from '../common/useTableCompactMode';
@@ -96,6 +97,7 @@ export const useUsersData = () => {
   // 弹窗状态
   const [showAddUser, setShowAddUser] = useState(false);
   const [showEditUser, setShowEditUser] = useState(false);
+  const [showIPBlacklist, setShowIPBlacklist] = useState(false);
   const [editingUser, setEditingUser] = useState({
     id: undefined,
   });
@@ -487,6 +489,99 @@ export const useUsersData = () => {
     }
   };
 
+  const showCurrentIPBlacklistConfirm = (data, retry) => {
+    Modal.confirm({
+      title: t('确认拉黑当前 IP'),
+      content: t(
+        '规则 {{rule}} 会拉黑你当前访问 IP {{ip}}。确认后你可能无法继续访问后台。',
+        {
+          rule: data?.rule || '',
+          ip: data?.client_ip || '',
+        },
+      ),
+      type: 'warning',
+      onOk: retry,
+    });
+  };
+
+  const blacklistUserIP = async (user, confirmCurrentIP = false) => {
+    const ip = typeof user?.register_ip === 'string' ? user.register_ip.trim() : '';
+    if (!ip) {
+      showError(t('该用户没有注册 IP'));
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await API.post('/api/user/ip-blacklist', {
+        ip,
+        source_user_id: user.id,
+        reason: user?.username
+          ? `${t('用户管理拉黑注册 IP')}: ${user.username}`
+          : t('用户管理拉黑注册 IP'),
+        confirm_current_ip: confirmCurrentIP,
+      });
+      const { success, message, data } = res.data || {};
+      if (!success) {
+        if (data?.code === 'current_ip_requires_confirmation' && !confirmCurrentIP) {
+          showCurrentIPBlacklistConfirm(data, () =>
+            blacklistUserIP(user, true),
+          );
+          return;
+        }
+        showError(message || t('操作失败，请重试'));
+        return;
+      }
+      if (data?.created === false) {
+        showSuccess(t('该 IP 已在黑名单中'));
+      } else {
+        showSuccess(t('已拉黑注册 IP'));
+      }
+    } catch (error) {
+      showError(error?.message || t('操作失败，请重试'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const batchBlacklistSelectedIPs = async (confirmCurrentIP = false) => {
+    if (selectedKeys.length === 0) {
+      showError(t('请至少选择一个用户！'));
+      return;
+    }
+    setLoading(true);
+    try {
+      const userIds = selectedKeys.map((user) => user.id);
+      const res = await API.post('/api/user/ip-blacklist/batch', {
+        user_ids: userIds,
+        reason: t('用户管理批量拉黑注册 IP'),
+        confirm_current_ip: confirmCurrentIP,
+      });
+      const { success, message, data } = res.data || {};
+      if (!success) {
+        if (data?.code === 'current_ip_requires_confirmation' && !confirmCurrentIP) {
+          showCurrentIPBlacklistConfirm(data, () =>
+            batchBlacklistSelectedIPs(true),
+          );
+          return;
+        }
+        showError(message || t('批量操作失败'));
+        return;
+      }
+      showSuccess(
+        t('批量拉黑完成: {{created}}个新增, {{existing}}个已存在, {{skipped}}个跳过, {{failed}}个失败', {
+          created: Number(data?.created_count || 0),
+          existing: Number(data?.existing_count || 0),
+          skipped: Number(data?.skipped_count || 0),
+          failed: Number(data?.failed_count || 0),
+        }),
+      );
+    } catch (error) {
+      showError(error?.message || t('批量操作失败'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const resetUserPasskey = async (user) => {
     if (!user) {
       return;
@@ -721,9 +816,11 @@ export const useUsersData = () => {
     // 弹窗状态
     showAddUser,
     showEditUser,
+    showIPBlacklist,
     editingUser,
     setShowAddUser,
     setShowEditUser,
+    setShowIPBlacklist,
     setEditingUser,
 
     // 表单状态
@@ -744,6 +841,8 @@ export const useUsersData = () => {
     searchUsers,
     manageUser,
     batchManageUsers,
+    blacklistUserIP,
+    batchBlacklistSelectedIPs,
     resetUserPasskey,
     resetUserTwoFA,
     handlePageChange,

@@ -25,6 +25,7 @@ import UsersFilters from './UsersFilters';
 import UsersDescription from './UsersDescription';
 import AddUserModal from './modals/AddUserModal';
 import EditUserModal from './modals/EditUserModal';
+import IPBlacklistModal from './modals/IPBlacklistModal';
 import { useUsersData } from '../../../hooks/users/useUsersData';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 import { createCardProPagination } from '../../../helpers/utils';
@@ -39,6 +40,8 @@ const UsersPage = () => {
     showEditUser,
     editingUser,
     setShowAddUser,
+    showIPBlacklist,
+    setShowIPBlacklist,
     closeAddUser,
     closeEditUser,
     refresh,
@@ -79,6 +82,12 @@ const UsersPage = () => {
         editingUser={editingUser}
       />
 
+      <IPBlacklistModal
+        visible={showIPBlacklist}
+        onCancel={() => setShowIPBlacklist(false)}
+        t={t}
+      />
+
       <CardPro
         type='type1'
         descriptionArea={
@@ -92,8 +101,10 @@ const UsersPage = () => {
           <div className='flex flex-col md:flex-row justify-between items-center gap-2 w-full'>
             <UsersActions
               setShowAddUser={setShowAddUser}
+              setShowIPBlacklist={setShowIPBlacklist}
               selectedKeys={usersData.selectedKeys}
               batchManageUsers={usersData.batchManageUsers}
+              batchBlacklistSelectedIPs={usersData.batchBlacklistSelectedIPs}
               loading={usersData.loading}
               t={t}
             />

@@ -59,6 +59,7 @@ const UsersTable = (usersData) => {
     refresh,
     resetUserPasskey,
     resetUserTwoFA,
+    blacklistUserIP,
     t,
   } = usersData;
 
@@ -216,6 +217,7 @@ const UsersTable = (usersData) => {
       showUserSellableTokensModal: showUserSellableTokensUserModal,
       showInviteRelationsModal: showInviteRelationsUserModal,
       openInviteRelationsUser: showInviteRelationsUserModal,
+      blacklistUserIP,
     });
   }, [
     t,
@@ -230,6 +232,7 @@ const UsersTable = (usersData) => {
     showUserSubscriptionsUserModal,
     showUserSellableTokensUserModal,
     showInviteRelationsUserModal,
+    blacklistUserIP,
   ]);
 
   // Handle compact mode by removing fixed positioning

@@ -503,6 +503,7 @@ const renderOperations = (
     showResetTwoFAModal,
     showUserSubscriptionsModal,
     showUserSellableTokensModal,
+    blacklistUserIP,
     t,
   },
 ) => {
@@ -520,6 +521,20 @@ const renderOperations = (
       node: 'item',
       name: t('令牌情况'),
       onClick: () => showUserSellableTokensModal(record),
+    },
+    {
+      node: 'divider',
+    },
+    {
+      node: 'item',
+      name: t('拉黑注册 IP'),
+      disabled: !record?.register_ip,
+      type: 'danger',
+      onClick: () => {
+        if (record?.register_ip) {
+          blacklistUserIP?.(record);
+        }
+      },
     },
     {
       node: 'divider',
@@ -611,6 +626,7 @@ export const getUsersColumns = ({
   showUserSellableTokensModal,
   showInviteRelationsModal,
   openInviteRelationsUser,
+  blacklistUserIP,
 }) => {
   return [
     {
@@ -722,6 +738,7 @@ export const getUsersColumns = ({
           showResetTwoFAModal,
           showUserSubscriptionsModal,
           showUserSellableTokensModal,
+          blacklistUserIP,
           t,
         }),
     },

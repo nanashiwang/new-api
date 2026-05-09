@@ -22,8 +22,10 @@ import { Button, Modal } from '@douyinfe/semi-ui';
 
 const UsersActions = ({
   setShowAddUser,
+  setShowIPBlacklist,
   selectedKeys = [],
   batchManageUsers,
+  batchBlacklistSelectedIPs,
   loading = false,
   t,
 }) => {
@@ -48,10 +50,32 @@ const UsersActions = ({
     });
   };
 
+  const handleBatchBlacklistIP = () => {
+    if (!selectedKeys || selectedKeys.length === 0) {
+      return;
+    }
+    Modal.confirm({
+      title: t('批量拉黑注册 IP'),
+      content: t('确定要拉黑所选用户的注册 IP 吗？'),
+      type: 'warning',
+      onOk: async () => {
+        await batchBlacklistSelectedIPs?.();
+      },
+    });
+  };
+
   return (
     <div className='flex flex-wrap gap-2 w-full md:w-auto order-2 md:order-1'>
       <Button className='w-full md:w-auto' onClick={handleAddUser} size='small'>
         {t('添加用户')}
+      </Button>
+      <Button
+        type='tertiary'
+        className='w-full md:w-auto'
+        onClick={() => setShowIPBlacklist?.(true)}
+        size='small'
+      >
+        {t('IP 黑名单')}
       </Button>
       <Button
         type='tertiary'
@@ -72,6 +96,16 @@ const UsersActions = ({
         size='small'
       >
         {t('批量禁用')}
+      </Button>
+      <Button
+        type='danger'
+        className='flex-1 md:flex-initial'
+        onClick={handleBatchBlacklistIP}
+        disabled={selectedKeys.length === 0 || loading}
+        loading={loading}
+        size='small'
+      >
+        {t('批量拉黑IP')}
       </Button>
       <Button
         type='danger'
