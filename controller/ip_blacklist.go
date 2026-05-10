@@ -25,6 +25,12 @@ type batchCreateIPBlacklistRequest struct {
 	ConfirmCurrentIP bool   `json:"confirm_current_ip"`
 }
 
+type manageIPBlacklistUsersRequest struct {
+	Action  string `json:"action"`
+	Scope   string `json:"scope"`
+	UserIDs []int  `json:"user_ids"`
+}
+
 func GetIPBlacklists(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	items, total, err := model.SearchIPBlacklists(c.Query("keyword"), pageInfo)
@@ -107,6 +113,80 @@ func BatchCreateIPBlacklist(c *gin.Context) {
 			"rule_ids":       collectIPBlacklistIDs(result.Items),
 		})
 	}
+	common.ApiSuccess(c, result)
+}
+
+func GetIPBlacklistUsers(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiError(c, model.ErrIPBlacklistNotFound)
+		return
+	}
+	pageInfo := common.GetPageQuery(c)
+	users, total, err := model.SearchUsersByIPBlacklistID(id, pageInfo)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(users)
+	common.ApiSuccess(c, pageInfo)
+}
+
+func ManageIPBlacklistUsers(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiError(c, model.ErrIPBlacklistNotFound)
+		return
+	}
+	req := manageIPBlacklistUsersRequest{}
+	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+
+	action := strings.ToLower(strings.TrimSpace(req.Action))
+	if action != "disable" && action != "delete" {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	scope := strings.ToLower(strings.TrimSpace(req.Scope))
+	if scope == "" {
+		scope = "selected"
+	}
+	if scope != "selected" && scope != "all" {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+
+	matchedIDs, err := model.GetUserIDsByIPBlacklistID(id)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	allowedIDs := make(map[int]struct{}, len(matchedIDs))
+	for _, matchedID := range matchedIDs {
+		allowedIDs[matchedID] = struct{}{}
+	}
+
+	targetIDs := matchedIDs
+	if scope == "selected" {
+		targetIDs = deduplicatePositiveIDs(req.UserIDs)
+		if len(targetIDs) == 0 {
+			common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+			return
+		}
+	}
+
+	result := manageMatchedUsers(c, targetIDs, allowedIDs, action)
+	recordIPBlacklistManageLog(c, c.GetInt("id"), "管理 IP 黑名单命中用户", gin.H{
+		"rule_id":       id,
+		"manage_action": action,
+		"scope":         scope,
+		"target_ids":    targetIDs,
+		"success_count": result["success_count"],
+		"failed_count":  result["failed_count"],
+	})
 	common.ApiSuccess(c, result)
 }
 
@@ -196,4 +276,92 @@ func collectIPBlacklistIDs(items []*model.IPBlacklist) []int {
 		}
 	}
 	return ids
+}
+
+func deduplicatePositiveIDs(ids []int) []int {
+	seen := make(map[int]struct{}, len(ids))
+	result := make([]int, 0, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		result = append(result, id)
+	}
+	return result
+}
+
+func manageMatchedUsers(c *gin.Context, targetIDs []int, allowedIDs map[int]struct{}, action string) gin.H {
+	myRole := c.GetInt("role")
+	updatedUsers := make([]*model.User, 0, len(targetIDs))
+	failed := make([]gin.H, 0)
+
+	for _, id := range deduplicatePositiveIDs(targetIDs) {
+		if _, ok := allowedIDs[id]; !ok {
+			failed = append(failed, gin.H{
+				"id":      id,
+				"message": "用户不属于该 IP 黑名单规则",
+			})
+			continue
+		}
+
+		user := model.User{Id: id}
+		model.DB.Unscoped().Where(&user).First(&user)
+		if user.Id == 0 {
+			failed = append(failed, gin.H{
+				"id":      id,
+				"message": "用户不存在",
+			})
+			continue
+		}
+		if user.DeletedAt.Valid {
+			failed = append(failed, gin.H{
+				"id":      id,
+				"message": "用户已注销",
+			})
+			continue
+		}
+		if myRole <= user.Role && myRole != common.RoleRootUser {
+			failed = append(failed, gin.H{
+				"id":      id,
+				"message": "权限不足",
+			})
+			continue
+		}
+		if err := applyManageAction(&user, action, myRole); err != nil {
+			failed = append(failed, gin.H{
+				"id":      id,
+				"message": err.Error(),
+			})
+			continue
+		}
+		if shouldInvalidateManagedUserCaches(action) {
+			if err := invalidateManagedUserCaches(user.Id); err != nil {
+				failed = append(failed, gin.H{
+					"id":      id,
+					"message": err.Error(),
+				})
+				continue
+			}
+		}
+		updatedUsers = append(updatedUsers, &user)
+	}
+
+	updated := make([]gin.H, 0, len(updatedUsers))
+	for _, user := range updatedUsers {
+		updated = append(updated, gin.H{
+			"id":     user.Id,
+			"role":   user.Role,
+			"status": user.Status,
+		})
+	}
+	return gin.H{
+		"success_count": len(updated),
+		"failed_count":  len(failed),
+		"updated":       updated,
+		"failed":        failed,
+	}
 }

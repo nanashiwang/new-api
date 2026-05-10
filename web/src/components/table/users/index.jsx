@@ -85,6 +85,7 @@ const UsersPage = () => {
       <IPBlacklistModal
         visible={showIPBlacklist}
         onCancel={() => setShowIPBlacklist(false)}
+        onChanged={refresh}
         t={t}
       />
 

@@ -30,12 +30,27 @@ type IPBlacklist struct {
 	CreatedBy    int    `json:"created_by" gorm:"type:int;column:created_by;index"`
 	CreatedAt    int64  `json:"created_at" gorm:"autoCreateTime;column:created_at"`
 	UpdatedAt    int64  `json:"updated_at" gorm:"autoUpdateTime;column:updated_at"`
+
+	MatchedUserCount int            `json:"matched_user_count" gorm:"-"`
+	MatchedUsers     []*UserPreview `json:"matched_users,omitempty" gorm:"-"`
 }
 
 type CompiledIPBlacklistRule struct {
 	Id      int
 	CIDR    string
 	Network *net.IPNet
+}
+
+type UserPreview struct {
+	Id             int    `json:"id"`
+	Username       string `json:"username"`
+	DisplayName    string `json:"display_name"`
+	Role           int    `json:"role"`
+	Status         int    `json:"status"`
+	RegisterIP     string `json:"register_ip"`
+	RegisterSource string `json:"register_source"`
+	CreatedAt      int64  `json:"created_at"`
+	DeletedAt      bool   `json:"deleted_at"`
 }
 
 type IPBlacklistBatchFailure struct {
@@ -219,7 +234,183 @@ func SearchIPBlacklists(keyword string, pageInfo *common.PageInfo) ([]*IPBlackli
 	if err := query.Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&items).Error; err != nil {
 		return nil, 0, err
 	}
+	if err := AttachIPBlacklistUserPreview(items, 5); err != nil {
+		return nil, 0, err
+	}
 	return items, total, nil
+}
+
+func AttachIPBlacklistUserPreview(items []*IPBlacklist, limit int) error {
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		users, total, err := SearchUsersByIPBlacklistRule(item, 0, limit)
+		if err != nil {
+			return err
+		}
+		item.MatchedUserCount = int(total)
+		item.MatchedUsers = users
+	}
+	return nil
+}
+
+func SearchUsersByIPBlacklistID(ruleID int, pageInfo *common.PageInfo) ([]*UserPreview, int64, error) {
+	item, err := GetIPBlacklistByID(ruleID)
+	if err != nil {
+		return nil, 0, err
+	}
+	if pageInfo == nil {
+		pageInfo = &common.PageInfo{Page: 1, PageSize: common.ItemsPerPage}
+	}
+	return SearchUsersByIPBlacklistRule(item, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+}
+
+func SearchUsersByIPBlacklistRule(item *IPBlacklist, startIdx int, pageSize int) ([]*UserPreview, int64, error) {
+	if item == nil || strings.TrimSpace(item.CIDR) == "" {
+		return []*UserPreview{}, 0, nil
+	}
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	if pageSize <= 0 {
+		pageSize = common.ItemsPerPage
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	_, network, err := net.ParseCIDR(item.CIDR)
+	if err != nil {
+		return nil, 0, err
+	}
+	ones, bits := network.Mask.Size()
+	if ones == bits {
+		ip := network.IP.String()
+		var total int64
+		query := DB.Unscoped().Model(&User{}).Where("register_ip = ?", ip)
+		if err := query.Count(&total).Error; err != nil {
+			return nil, 0, err
+		}
+		var users []*User
+		if err := query.
+			Select("id", "username", "display_name", "role", "status", "register_ip", "register_source", "created_at", "deleted_at").
+			Order("id desc").
+			Limit(pageSize).
+			Offset(startIdx).
+			Find(&users).Error; err != nil {
+			return nil, 0, err
+		}
+		return makeUserPreviews(users), total, nil
+	}
+
+	var allUsers []*User
+	if err := DB.Unscoped().
+		Select("id", "username", "display_name", "role", "status", "register_ip", "register_source", "created_at", "deleted_at").
+		Where("register_ip <> ''").
+		Order("id desc").
+		Find(&allUsers).Error; err != nil {
+		return nil, 0, err
+	}
+
+	matched := make([]*User, 0)
+	for _, user := range allUsers {
+		if user == nil {
+			continue
+		}
+		ip := net.ParseIP(strings.TrimSpace(user.RegisterIP))
+		if ip == nil {
+			continue
+		}
+		if network.Contains(ip) {
+			matched = append(matched, user)
+		}
+	}
+	total := int64(len(matched))
+	if startIdx >= len(matched) {
+		return []*UserPreview{}, total, nil
+	}
+	endIdx := startIdx + pageSize
+	if endIdx > len(matched) {
+		endIdx = len(matched)
+	}
+	return makeUserPreviews(matched[startIdx:endIdx]), total, nil
+}
+
+func makeUserPreviews(users []*User) []*UserPreview {
+	previews := make([]*UserPreview, 0, len(users))
+	for _, user := range users {
+		if user == nil {
+			continue
+		}
+		previews = append(previews, &UserPreview{
+			Id:             user.Id,
+			Username:       user.Username,
+			DisplayName:    user.DisplayName,
+			Role:           user.Role,
+			Status:         user.Status,
+			RegisterIP:     user.RegisterIP,
+			RegisterSource: user.RegisterSource,
+			CreatedAt:      user.CreatedAt,
+			DeletedAt:      user.DeletedAt.Valid,
+		})
+	}
+	return previews
+}
+
+func GetUserIDsByIPBlacklistID(ruleID int) ([]int, error) {
+	item, err := GetIPBlacklistByID(ruleID)
+	if err != nil {
+		return nil, err
+	}
+	return getUserIDsByIPBlacklistRule(item)
+}
+
+func getUserIDsByIPBlacklistRule(item *IPBlacklist) ([]int, error) {
+	if item == nil || strings.TrimSpace(item.CIDR) == "" {
+		return []int{}, nil
+	}
+	_, network, err := net.ParseCIDR(item.CIDR)
+	if err != nil {
+		return nil, err
+	}
+	ones, bits := network.Mask.Size()
+	if ones == bits {
+		ip := network.IP.String()
+		var users []User
+		if err := DB.Unscoped().
+			Select("id").
+			Where("register_ip = ?", ip).
+			Order("id desc").
+			Find(&users).Error; err != nil {
+			return nil, err
+		}
+		ids := make([]int, 0, len(users))
+		for _, user := range users {
+			ids = append(ids, user.Id)
+		}
+		return ids, nil
+	}
+
+	var users []User
+	if err := DB.Unscoped().
+		Select("id", "register_ip").
+		Where("register_ip <> ''").
+		Order("id desc").
+		Find(&users).Error; err != nil {
+		return nil, err
+	}
+	ids := make([]int, 0)
+	for _, user := range users {
+		ip := net.ParseIP(strings.TrimSpace(user.RegisterIP))
+		if ip == nil {
+			continue
+		}
+		if network.Contains(ip) {
+			ids = append(ids, user.Id)
+		}
+	}
+	return ids, nil
 }
 
 func BatchCreateIPBlacklistFromUsers(userIDs []int, reason string, createdBy int) (*IPBlacklistBatchResult, error) {

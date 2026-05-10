@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +19,8 @@ import (
 
 const UserNameMaxLength = 20
 const UserRegisterSourceMaxLength = 64
+const UserAffCodeLength = 12
+const userAffCodeGenerateMaxRetry = 16
 
 const (
 	UserRegisterSourceUnknown           = "unknown"
@@ -30,6 +33,10 @@ const (
 	UserRegisterSourceWeChat            = "wechat"
 	UserRegisterSourceCustomOAuthPrefix = "custom_oauth:"
 )
+
+var generateAffCodeCandidate = func() (string, error) {
+	return common.GenerateRandomCharsKey(UserAffCodeLength)
+}
 
 func NormalizeUserRegisterSource(source string) string {
 	source = strings.ToLower(strings.TrimSpace(source))
@@ -101,9 +108,13 @@ type User struct {
 	// 1) 直接收益：按当前配置口径（QuotaForInviter）估算每个被邀请人贡献；
 	// 2) 充值返佣：从返佣台账（InviteCommissionLedger）按 invitee 聚合已结算金额；
 	// 3) 总收益：直接收益 + 充值返佣。
-	InviteDirectIncomeQuota       int `json:"invite_direct_income_quota" gorm:"-"`
-	InviteRechargeCommissionQuota int `json:"invite_recharge_commission_quota" gorm:"-"`
-	InviteTotalIncomeQuota        int `json:"invite_total_income_quota" gorm:"-"`
+	InviteDirectIncomeQuota       int    `json:"invite_direct_income_quota" gorm:"-"`
+	InviteRechargeCommissionQuota int    `json:"invite_recharge_commission_quota" gorm:"-"`
+	InviteTotalIncomeQuota        int    `json:"invite_total_income_quota" gorm:"-"`
+	RegisterIPBlacklisted         bool   `json:"register_ip_blacklisted" gorm:"-"`
+	RegisterIPBlacklistRuleID     int    `json:"register_ip_blacklist_rule_id,omitempty" gorm:"-"`
+	RegisterIPBlacklistCIDR       string `json:"register_ip_blacklist_cidr,omitempty" gorm:"-"`
+	RegisterIPBlacklistReason     string `json:"register_ip_blacklist_reason,omitempty" gorm:"-"`
 }
 
 type UserSearchParams struct {
@@ -365,6 +376,10 @@ func GetAllUsers(pageInfo *common.PageInfo, sortBy string, sortOrder string, idS
 		tx.Rollback()
 		return nil, 0, err
 	}
+	if err = AttachUserIPBlacklistMetadata(tx, users); err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
 
 	// Commit transaction
 	if err = tx.Commit().Error; err != nil {
@@ -560,6 +575,10 @@ func SearchUsersWithParams(params UserSearchParams) ([]*User, int64, error) {
 		tx.Rollback()
 		return nil, 0, err
 	}
+	if err = AttachUserIPBlacklistMetadata(tx, users); err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
 
 	// Commit transaction
 	if err = tx.Commit().Error; err != nil {
@@ -612,6 +631,70 @@ func AttachUserInviteMetadata(tx *gorm.DB, users []*User) error {
 			continue
 		}
 		user.InviterUsername = nameByID[user.InviterId]
+	}
+	return nil
+}
+
+func AttachUserIPBlacklistMetadata(tx *gorm.DB, users []*User) error {
+	if len(users) == 0 {
+		return nil
+	}
+	if !tx.Migrator().HasTable(&IPBlacklist{}) {
+		return nil
+	}
+	for _, user := range users {
+		if user == nil {
+			continue
+		}
+		user.RegisterIPBlacklisted = false
+		user.RegisterIPBlacklistRuleID = 0
+		user.RegisterIPBlacklistCIDR = ""
+		user.RegisterIPBlacklistReason = ""
+	}
+
+	var items []IPBlacklist
+	if err := tx.Select("id", "cidr", "reason").Find(&items).Error; err != nil {
+		return err
+	}
+	if len(items) == 0 {
+		return nil
+	}
+
+	rules := make([]CompiledIPBlacklistRule, 0, len(items))
+	reasonByID := make(map[int]string, len(items))
+	for _, item := range items {
+		_, network, err := net.ParseCIDR(item.CIDR)
+		if err != nil {
+			continue
+		}
+		rules = append(rules, CompiledIPBlacklistRule{
+			Id:      item.Id,
+			CIDR:    item.CIDR,
+			Network: network,
+		})
+		reasonByID[item.Id] = item.Reason
+	}
+	if len(rules) == 0 {
+		return nil
+	}
+
+	for _, user := range users {
+		if user == nil {
+			continue
+		}
+		ip := net.ParseIP(strings.TrimSpace(user.RegisterIP))
+		if ip == nil {
+			continue
+		}
+		for _, rule := range rules {
+			if rule.Network.Contains(ip) {
+				user.RegisterIPBlacklisted = true
+				user.RegisterIPBlacklistRuleID = rule.Id
+				user.RegisterIPBlacklistCIDR = rule.CIDR
+				user.RegisterIPBlacklistReason = reasonByID[rule.Id]
+				break
+			}
+		}
 	}
 	return nil
 }
@@ -1082,12 +1165,37 @@ func GetUserById(id int, selectAll bool) (*User, error) {
 }
 
 func GetUserIdByAffCode(affCode string) (int, error) {
+	affCode = strings.TrimSpace(affCode)
 	if affCode == "" {
 		return 0, errors.New("affCode 为空！")
 	}
 	var user User
-	err := DB.Select("id").First(&user, "aff_code = ?", affCode).Error
+	err := DB.Select("id").First(&user, "aff_code = ? AND status = ?", affCode, common.UserStatusEnabled).Error
 	return user.Id, err
+}
+
+func GenerateUniqueAffCode() (string, error) {
+	return generateUniqueAffCode(DB)
+}
+
+func generateUniqueAffCode(db *gorm.DB) (string, error) {
+	if db == nil {
+		return "", errors.New("db is nil")
+	}
+	for i := 0; i < userAffCodeGenerateMaxRetry; i++ {
+		code, err := generateAffCodeCandidate()
+		if err != nil {
+			return "", err
+		}
+		var count int64
+		if err = db.Unscoped().Model(&User{}).Where("aff_code = ?", code).Count(&count).Error; err != nil {
+			return "", err
+		}
+		if count == 0 {
+			return code, nil
+		}
+	}
+	return "", errors.New("生成邀请码失败，请重试")
 }
 
 func DeleteUserById(id int) (err error) {
@@ -1181,7 +1289,13 @@ func (user *User) Insert(inviterId int) error {
 	}
 	user.Quota = common.QuotaForNewUser
 	//user.SetAccessToken(common.GetUUID())
-	user.AffCode = common.GetRandomString(4)
+	if strings.TrimSpace(user.AffCode) == "" {
+		user.AffCode, err = GenerateUniqueAffCode()
+		if err != nil {
+			return err
+		}
+	}
+	user.InviterId = inviterId
 	user.RegisterSource = NormalizeUserRegisterSource(user.RegisterSource)
 
 	// 初始化用户设置，包括默认的边栏配置
@@ -1246,7 +1360,13 @@ func (user *User) InsertWithTx(tx *gorm.DB, inviterId int) error {
 		}
 	}
 	user.Quota = common.QuotaForNewUser
-	user.AffCode = common.GetRandomString(4)
+	if strings.TrimSpace(user.AffCode) == "" {
+		user.AffCode, err = generateUniqueAffCode(tx)
+		if err != nil {
+			return err
+		}
+	}
+	user.InviterId = inviterId
 	user.RegisterSource = NormalizeUserRegisterSource(user.RegisterSource)
 
 	// 初始化用户设置

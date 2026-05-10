@@ -189,11 +189,17 @@ const RegisterForm = () => {
     }
     setWechatCodeSubmitLoading(true);
     try {
-      const res = await API.get(
-        `/api/oauth/wechat?code=${inputs.wechat_verification_code}`,
-      );
+      const params = new URLSearchParams({
+        code: inputs.wechat_verification_code,
+      });
+      const savedAffCode = localStorage.getItem('aff');
+      if (savedAffCode) {
+        params.set('aff', savedAffCode);
+      }
+      const res = await API.get(`/api/oauth/wechat?${params.toString()}`);
       const { success, message, data } = res.data;
       if (success) {
+        localStorage.removeItem('aff');
         userDispatch({ type: 'login', payload: data });
         localStorage.setItem('user', JSON.stringify(data));
         setUserData(data);
@@ -241,6 +247,7 @@ const RegisterForm = () => {
         );
         const { success, message } = res.data;
         if (success) {
+          localStorage.removeItem('aff');
           navigate('/login');
           showSuccess('注册成功！');
         } else {
@@ -377,6 +384,7 @@ const RegisterForm = () => {
       const res = await API.get(`/api/oauth/telegram/login`, { params });
       const { success, message, data } = res.data;
       if (success) {
+        localStorage.removeItem('aff');
         userDispatch({ type: 'login', payload: data });
         localStorage.setItem('user', JSON.stringify(data));
         showSuccess('登录成功！');

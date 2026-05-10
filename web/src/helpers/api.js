@@ -254,7 +254,7 @@ export async function getOAuthState() {
   let path = '/api/oauth/state';
   let affCode = localStorage.getItem('aff');
   if (affCode && affCode.length > 0) {
-    path += `?aff=${affCode}`;
+    path += `?aff=${encodeURIComponent(affCode)}`;
   }
   const res = await API.get(path);
   const { success, message, data } = res.data;

@@ -95,7 +95,8 @@ func WeChatAuth(c *gin.Context) {
 			user.Status = common.UserStatusEnabled
 			applyUserRegisterAudit(c, &user, model.UserRegisterSourceWeChat)
 
-			if err := user.Insert(0); err != nil {
+			inviterId := resolveInviterIDByAffCode(c.Query("aff"))
+			if err := user.Insert(inviterId); err != nil {
 				c.JSON(http.StatusOK, gin.H{
 					"success": false,
 					"message": err.Error(),

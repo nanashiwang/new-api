@@ -36,6 +36,18 @@ type accountBindRequest struct {
 
 var invalidateManagedUserCaches = model.InvalidateUserAndTokenCaches
 
+func resolveInviterIDByAffCode(affCode string) int {
+	affCode = strings.TrimSpace(affCode)
+	if affCode == "" {
+		return 0
+	}
+	inviterId, err := model.GetUserIdByAffCode(affCode)
+	if err != nil {
+		return 0
+	}
+	return inviterId
+}
+
 func Login(c *gin.Context) {
 	if !common.PasswordLoginEnabled {
 		common.ApiErrorI18n(c, i18n.MsgUserPasswordLoginDisabled)
@@ -177,7 +189,7 @@ func Register(c *gin.Context) {
 		return
 	}
 	affCode := user.AffCode // this code is the inviter's code, not the user's own code
-	inviterId, _ := model.GetUserIdByAffCode(affCode)
+	inviterId := resolveInviterIDByAffCode(affCode)
 	cleanUser := model.User{
 		Username:    user.Username,
 		Password:    user.Password,
@@ -640,7 +652,12 @@ func GetAffCode(c *gin.Context) {
 		return
 	}
 	if user.AffCode == "" {
-		user.AffCode = common.GetRandomString(4)
+		affCode, err := model.GenerateUniqueAffCode()
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		user.AffCode = affCode
 		if err := user.Update(false); err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,

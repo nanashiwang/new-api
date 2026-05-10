@@ -155,6 +155,8 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.GET("/ip-blacklist", controller.GetIPBlacklists)
 				adminRoute.POST("/ip-blacklist", controller.CreateIPBlacklist)
 				adminRoute.POST("/ip-blacklist/batch", controller.BatchCreateIPBlacklist)
+				adminRoute.GET("/ip-blacklist/:id/users", controller.GetIPBlacklistUsers)
+				adminRoute.POST("/ip-blacklist/:id/users/manage", controller.ManageIPBlacklistUsers)
 				adminRoute.DELETE("/ip-blacklist/:id", controller.DeleteIPBlacklist)
 				adminRoute.GET("/:id/invite-relations", controller.GetUserInviteRelations)
 				adminRoute.GET("/:id/sellable-token/summary", controller.AdminGetUserSellableTokenSummary)

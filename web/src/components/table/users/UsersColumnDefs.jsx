@@ -122,7 +122,7 @@ const renderRegisterSource = (source, record, t) => {
   );
 };
 
-const renderRegisterIP = (ip, record) => {
+const renderRegisterIP = (ip, record, t) => {
   const value = typeof ip === 'string' && ip.trim() ? ip.trim() : '-';
   if (value === '-') {
     return (
@@ -131,12 +131,34 @@ const renderRegisterIP = (ip, record) => {
       </Tag>
     );
   }
+  const blacklistTooltip = (
+    <div className='text-xs max-w-xs break-all'>
+      <div>{t('注册 IP 已拉黑')}</div>
+      <div>
+        {t('命中规则')}: {record?.register_ip_blacklist_cidr || '-'}
+      </div>
+      {record?.register_ip_blacklist_reason ? (
+        <div>
+          {t('原因')}: {record.register_ip_blacklist_reason}
+        </div>
+      ) : null}
+    </div>
+  );
   return (
-    <Tooltip content={record?.register_user_agent || value} position='top'>
-      <Tag color='white' shape='circle'>
-        {value}
-      </Tag>
-    </Tooltip>
+    <Space spacing={4} wrap>
+      <Tooltip content={record?.register_user_agent || value} position='top'>
+        <Tag color='white' shape='circle'>
+          {value}
+        </Tag>
+      </Tooltip>
+      {record?.register_ip_blacklisted ? (
+        <Tooltip content={blacklistTooltip} position='top'>
+          <Tag color='red' shape='circle'>
+            {t('已拉黑')}
+          </Tag>
+        </Tooltip>
+      ) : null}
+    </Space>
   );
 };
 
@@ -205,6 +227,11 @@ const renderStatistics = (text, record, showEnableDisableModal, t) => {
       <div>
         {t('调用次数')}: {renderNumber(record.request_count)}
       </div>
+      {record?.register_ip_blacklisted ? (
+        <div>
+          {t('注册 IP 已拉黑')}: {record.register_ip_blacklist_cidr || '-'}
+        </div>
+      ) : null}
     </div>
   );
 
@@ -646,7 +673,7 @@ export const getUsersColumns = ({
     {
       title: t('注册 IP'),
       dataIndex: 'register_ip',
-      render: (text, record) => renderRegisterIP(text, record),
+      render: (text, record) => renderRegisterIP(text, record, t),
     },
     {
       title: t('状态'),

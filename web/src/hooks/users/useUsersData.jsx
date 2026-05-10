@@ -536,6 +536,7 @@ export const useUsersData = () => {
       } else {
         showSuccess(t('已拉黑注册 IP'));
       }
+      await refresh();
     } catch (error) {
       showError(error?.message || t('操作失败，请重试'));
     } finally {
@@ -575,6 +576,7 @@ export const useUsersData = () => {
           failed: Number(data?.failed_count || 0),
         }),
       );
+      await refresh();
     } catch (error) {
       showError(error?.message || t('批量操作失败'));
     } finally {

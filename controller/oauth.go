@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
@@ -23,9 +24,11 @@ func providerParams(name string) map[string]any {
 func GenerateOAuthCode(c *gin.Context) {
 	session := sessions.Default(c)
 	state := common.GetRandomString(12)
-	affCode := c.Query("aff")
+	affCode := strings.TrimSpace(c.Query("aff"))
 	if affCode != "" {
 		session.Set("aff", affCode)
+	} else {
+		session.Delete("aff")
 	}
 	session.Set("oauth_state", state)
 	err := session.Save()
@@ -124,6 +127,8 @@ func HandleOAuth(c *gin.Context) {
 	}
 
 	// 9. Setup login
+	session.Delete("aff")
+	session.Delete("oauth_state")
 	setupLogin(user, c)
 }
 
@@ -265,7 +270,9 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 	affCode := session.Get("aff")
 	inviterId := 0
 	if affCode != nil {
-		inviterId, _ = model.GetUserIdByAffCode(affCode.(string))
+		if affCodeStr, ok := affCode.(string); ok {
+			inviterId = resolveInviterIDByAffCode(affCodeStr)
+		}
 	}
 
 	// Use transaction to ensure user creation and OAuth binding are atomic
