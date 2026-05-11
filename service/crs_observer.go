@@ -116,9 +116,13 @@ func BuildCRSObserverSummary(sites []*model.CRSSite, accounts []*model.CRSAccoun
 func fetchCRSObserverSnapshots(site *model.CRSSite, token string, syncedAt int64) ([]*model.CRSAccountSnapshot, error) {
 	snapshots := make([]*model.CRSAccountSnapshot, 0)
 	warnings := make([]string, 0)
+	currentToken := token
 
 	for _, endpoint := range crsRemoteAccountEndpoints {
-		accounts, err := fetchCRSRemoteAccountList(site.BaseURL(), token, endpoint.Path)
+		accounts, refreshed, err := fetchCRSRemoteAccountList(site, currentToken, endpoint.Path)
+		if refreshed != "" {
+			currentToken = refreshed
+		}
 		if err != nil {
 			if errors.Is(err, errCRSObserverEndpointUnsupported) {
 				continue
@@ -128,7 +132,10 @@ func fetchCRSObserverSnapshots(site *model.CRSSite, token string, syncedAt int64
 		}
 		for _, account := range accounts {
 			var balancePayload map[string]any
-			balancePayload, err = fetchCRSRemoteAccountBalance(site.BaseURL(), token, endpoint.Platform, getStringValue(account["id"]))
+			balancePayload, refreshed, err = fetchCRSRemoteAccountBalance(site, currentToken, endpoint.Platform, getStringValue(account["id"]))
+			if refreshed != "" {
+				currentToken = refreshed
+			}
 			if err != nil && !errors.Is(err, errCRSObserverEndpointUnsupported) {
 				balancePayload = map[string]any{
 					"data": map[string]any{
@@ -156,40 +163,56 @@ func fetchCRSObserverSnapshots(site *model.CRSSite, token string, syncedAt int64
 	return snapshots, errors.New(strings.Join(warnings, "; "))
 }
 
-func fetchCRSRemoteAccountList(baseURL, token, path string) ([]map[string]any, error) {
-	payload, err := fetchCRSAuthJSON(baseURL, token, path)
+func fetchCRSRemoteAccountList(site *model.CRSSite, token, path string) ([]map[string]any, string, error) {
+	payload, refreshed, err := fetchCRSAuthJSON(site, token, path)
 	if err != nil {
-		return nil, err
+		return nil, refreshed, err
 	}
 
 	items, err := unwrapCRSDataArray(payload)
 	if err != nil {
-		return nil, err
+		return nil, refreshed, err
 	}
-	return items, nil
+	return items, refreshed, nil
 }
 
-func fetchCRSRemoteAccountBalance(baseURL, token, platform, accountID string) (map[string]any, error) {
+func fetchCRSRemoteAccountBalance(site *model.CRSSite, token, platform, accountID string) (map[string]any, string, error) {
 	if strings.TrimSpace(accountID) == "" {
-		return nil, errors.New("crs_observer:empty_account_id")
+		return nil, "", errors.New("crs_observer:empty_account_id")
 	}
 	query := neturl.Values{}
 	query.Set("platform", platform)
 	query.Set("queryApi", "false")
 	path := fmt.Sprintf("/admin/accounts/%s/balance?%s", neturl.PathEscape(accountID), query.Encode())
 
-	payload, err := fetchCRSAuthJSON(baseURL, token, path)
+	payload, refreshed, err := fetchCRSAuthJSON(site, token, path)
 	if err != nil {
-		return nil, err
+		return nil, refreshed, err
 	}
 	data, ok := payload.(map[string]any)
 	if !ok {
-		return nil, errors.New("crs_observer:invalid_balance_payload")
+		return nil, refreshed, errors.New("crs_observer:invalid_balance_payload")
 	}
-	return data, nil
+	return data, refreshed, nil
 }
 
-func fetchCRSAuthJSON(baseURL, token, path string) (any, error) {
+// fetchCRSAuthJSON 包装 fetchCRSAuthJSONOnce,如果首次返回 401(上游 session 已失效)则强制重新登录后重试一次。
+// 第二个返回值为非空字符串表示 token 已被刷新,调用方应在后续调用中使用该新 token,避免循环里反复触发登录。
+func fetchCRSAuthJSON(site *model.CRSSite, token, path string) (any, string, error) {
+	baseURL := site.BaseURL()
+	payload, err := fetchCRSAuthJSONOnce(baseURL, token, path)
+	if err == nil || !isCRSAuthExpired(err) {
+		return payload, "", err
+	}
+	newToken, renewErr := forceRenewCRSToken(site)
+	if renewErr != nil {
+		return nil, "", err // 保留原始 401 错误
+	}
+	payload, retryErr := fetchCRSAuthJSONOnce(baseURL, newToken, path)
+	return payload, newToken, retryErr
+}
+
+func fetchCRSAuthJSONOnce(baseURL, token, path string) (any, error) {
 	fullURL := strings.TrimRight(baseURL, "/") + path
 	if err := validateCRSURL(fullURL); err != nil {
 		return nil, fmt.Errorf("%w: %v", model.ErrCRSSiteHostInvalid, err)

@@ -248,7 +248,7 @@ func RefreshCRSSite(site *model.CRSSite) (*CRSDashboardData, error) {
 		return nil, err
 	}
 
-	rawBytes, dashData, err := FetchCRSDashboard(baseURL, token)
+	rawBytes, dashData, err := fetchCRSDashboardWithRetry(site, token)
 	if err != nil {
 		syncErr := err.Error()
 		_ = model.PersistCRSSiteStats(site.Id, "", 0, "", model.CRSSiteStatusError, syncErr)
@@ -258,6 +258,21 @@ func RefreshCRSSite(site *model.CRSSite) (*CRSDashboardData, error) {
 	rawStr := string(rawBytes)
 	_ = model.PersistCRSSiteStats(site.Id, "", 0, rawStr, model.CRSSiteStatusSynced, "")
 	return dashData, nil
+}
+
+// fetchCRSDashboardWithRetry 在 FetchCRSDashboard 返回 401 时,自动强制重新登录并重试一次。
+// 涵盖了上游 CRS Redis 重启 / session 被驱逐 / 24h 不活跃过期等本地 TTL 还未到的场景。
+func fetchCRSDashboardWithRetry(site *model.CRSSite, token string) ([]byte, *CRSDashboardData, error) {
+	baseURL := site.BaseURL()
+	raw, data, err := FetchCRSDashboard(baseURL, token)
+	if err == nil || !isCRSAuthExpired(err) {
+		return raw, data, err
+	}
+	newToken, renewErr := forceRenewCRSToken(site)
+	if renewErr != nil {
+		return nil, nil, err // 保留原始 401 错误,而非把登录失败错误透传
+	}
+	return FetchCRSDashboard(baseURL, newToken)
 }
 
 // resolveOrRenewCRSToken 从缓存取 token（至少还有 60 秒有效期），过期则重新登录。
@@ -279,12 +294,7 @@ func resolveOrRenewCRSToken(site *model.CRSSite) (string, error) {
 		return "", err
 	}
 
-	var expiresAt int64
-	if expiresIn > 0 {
-		expiresAt = now + expiresIn
-	} else {
-		expiresAt = now + 86400
-	}
+	expiresAt := computeCRSTokenExpiresAt(now, expiresIn)
 
 	encrypted, encErr := model.EncryptCRSSecret(token)
 	if encErr != nil {
@@ -294,6 +304,49 @@ func resolveOrRenewCRSToken(site *model.CRSSite) (string, error) {
 	site.TokenEncrypted = encrypted
 	site.TokenExpiresAt = expiresAt
 	return token, nil
+}
+
+// forceRenewCRSToken 清空本地缓存的 token 并立即重新登录,用于 401 自愈路径。
+// 内存中的 site.TokenEncrypted/TokenExpiresAt 被清零,resolveOrRenewCRSToken 因此一定会重登,
+// 重登成功后会把新 token 持久化到 DB。
+func forceRenewCRSToken(site *model.CRSSite) (string, error) {
+	site.TokenEncrypted = ""
+	site.TokenExpiresAt = 0
+	return resolveOrRenewCRSToken(site)
+}
+
+// isCRSAuthExpired 判断 err 是否对应 CRS 端 session 失效(HTTP 401 或上游典型文案)。
+// 上游 CRS 在 src/middleware/auth.js 中针对 Redis 中 session 缺失会返回 "Invalid admin token" /
+// "Invalid or expired admin session";不活跃超时则返回 "Session expired"。
+func isCRSAuthExpired(err error) bool {
+	if err == nil {
+		return false
+	}
+	if !errors.Is(err, model.ErrCRSSiteRequestFailure) {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "HTTP 401") ||
+		strings.Contains(s, "Invalid admin token") ||
+		strings.Contains(s, "Invalid or expired admin session") ||
+		strings.Contains(s, "Session expired") ||
+		strings.Contains(s, "Admin session has expired")
+}
+
+// computeCRSTokenExpiresAt 计算本地缓存 token 的失效时间戳。
+// CRS 端 expiresIn 默认是 86400000(毫秒,见 config/config.example.js),
+// 历史/其他配置可能返回秒,这里做启发式判断:>1e9 的值视作毫秒。
+func computeCRSTokenExpiresAt(now, expiresIn int64) int64 {
+	const fallbackSeconds = int64(86400)
+	const msThreshold = int64(1_000_000_000) // 1e9 秒约 31.7 年,正常 session TTL 不会到这个量级
+	switch {
+	case expiresIn <= 0:
+		return now + fallbackSeconds
+	case expiresIn > msThreshold:
+		return now + expiresIn/1000
+	default:
+		return now + expiresIn
+	}
 }
 
 // RefreshAllCRSSites 并发刷新所有站点，返回每个站点 ID 和错误（nil 表示成功）。
