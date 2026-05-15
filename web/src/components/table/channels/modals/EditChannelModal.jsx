@@ -177,6 +177,7 @@ const EditChannelModal = (props) => {
     thinking_to_content: false,
     proxy: '',
     pass_through_body_enabled: false,
+    chat_completions_to_responses_mode: 'inherit',
     system_prompt: '',
     system_prompt_override: false,
     settings: '',
@@ -486,6 +487,7 @@ const EditChannelModal = (props) => {
     thinking_to_content: false,
     proxy: '',
     pass_through_body_enabled: false,
+    chat_completions_to_responses_mode: 'inherit',
     system_prompt: '',
     client_restriction_mode: '',
     client_restriction_clients: [],
@@ -748,6 +750,8 @@ const EditChannelModal = (props) => {
           data.proxy = parsedSettings.proxy || '';
           data.pass_through_body_enabled =
             parsedSettings.pass_through_body_enabled || false;
+          data.chat_completions_to_responses_mode =
+            parsedSettings.chat_completions_to_responses_mode || 'inherit';
           data.system_prompt = parsedSettings.system_prompt || '';
           data.system_prompt_override =
             parsedSettings.system_prompt_override || false;
@@ -768,6 +772,7 @@ const EditChannelModal = (props) => {
           data.thinking_to_content = false;
           data.proxy = '';
           data.pass_through_body_enabled = false;
+          data.chat_completions_to_responses_mode = 'inherit';
           data.system_prompt = '';
           data.system_prompt_override = false;
           data.client_restriction_mode = '';
@@ -782,6 +787,7 @@ const EditChannelModal = (props) => {
         data.thinking_to_content = false;
         data.proxy = '';
         data.pass_through_body_enabled = false;
+        data.chat_completions_to_responses_mode = 'inherit';
         data.system_prompt = '';
         data.system_prompt_override = false;
         data.client_restriction_mode = '';
@@ -905,6 +911,8 @@ const EditChannelModal = (props) => {
         thinking_to_content: data.thinking_to_content,
         proxy: data.proxy,
         pass_through_body_enabled: data.pass_through_body_enabled,
+        chat_completions_to_responses_mode:
+          data.chat_completions_to_responses_mode || 'inherit',
         system_prompt: data.system_prompt,
         system_prompt_override: data.system_prompt_override || false,
       });
@@ -1348,6 +1356,7 @@ const EditChannelModal = (props) => {
       thinking_to_content: false,
       proxy: '',
       pass_through_body_enabled: false,
+      chat_completions_to_responses_mode: 'inherit',
       system_prompt: '',
       system_prompt_override: false,
       client_restriction_mode: '',
@@ -1730,6 +1739,8 @@ const EditChannelModal = (props) => {
       thinking_to_content: localInputs.thinking_to_content || false,
       proxy: localInputs.proxy || '',
       pass_through_body_enabled: localInputs.pass_through_body_enabled || false,
+      chat_completions_to_responses_mode:
+        localInputs.chat_completions_to_responses_mode || 'inherit',
       system_prompt: localInputs.system_prompt || '',
       system_prompt_override: localInputs.system_prompt_override || false,
       client_restriction_mode: localInputs.client_restriction_mode || '',
@@ -3873,6 +3884,25 @@ const EditChannelModal = (props) => {
                         />
 
                         <Form.Select
+                          field='chat_completions_to_responses_mode'
+                          label={t('Chat 转 Responses 桥接')}
+                          optionList={CAPABILITY_MODE_OPTIONS}
+                          value={
+                            inputs.chat_completions_to_responses_mode ||
+                            'inherit'
+                          }
+                          onChange={(value) =>
+                            handleChannelSettingsChange(
+                              'chat_completions_to_responses_mode',
+                              value,
+                            )
+                          }
+                          extraText={t(
+                            '控制 /v1/chat/completions 请求是否自动桥接到 /v1/responses。上游只支持 Chat Completions 时请强制关闭。',
+                          )}
+                        />
+
+                        <Form.Select
                           field='responses_stream_options_mode'
                           label={t('Responses stream_options 支持')}
                           optionList={CAPABILITY_MODE_OPTIONS}
@@ -3994,6 +4024,25 @@ const EditChannelModal = (props) => {
                           }
                           extraText={t(
                             '控制 chat -> responses 桥接是否启用。若上游不支持 /v1/responses，可强制关闭。',
+                          )}
+                        />
+
+                        <Form.Select
+                          field='chat_completions_to_responses_mode'
+                          label={t('Chat 转 Responses 桥接')}
+                          optionList={CAPABILITY_MODE_OPTIONS}
+                          value={
+                            inputs.chat_completions_to_responses_mode ||
+                            'inherit'
+                          }
+                          onChange={(value) =>
+                            handleChannelSettingsChange(
+                              'chat_completions_to_responses_mode',
+                              value,
+                            )
+                          }
+                          extraText={t(
+                            '控制 /v1/chat/completions 请求是否自动桥接到 /v1/responses。上游只支持 Chat Completions 时请强制关闭。',
                           )}
                         />
 
