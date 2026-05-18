@@ -97,6 +97,7 @@ func main() {
 	go model.UpdateQuotaData()
 	model.StartProfitBoardAggregateSyncTask()
 	model.StartProfitBoardRemoteObserverSyncTask()
+	model.StartProfitBoardLowBalanceAutoDisableTask()
 
 	if os.Getenv("CHANNEL_UPDATE_FREQUENCY") != "" {
 		frequency, err := strconv.Atoi(os.Getenv("CHANNEL_UPDATE_FREQUENCY"))

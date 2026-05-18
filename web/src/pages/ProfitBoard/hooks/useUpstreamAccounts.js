@@ -268,6 +268,10 @@ export const useUpstreamAccounts = ({
         password_masked: account.password_masked || '',
         resource_display_mode: account.resource_display_mode || 'both',
         low_balance_threshold_usd: account.low_balance_threshold_usd || 0,
+        low_balance_auto_disable_enabled:
+          !!account.low_balance_auto_disable_enabled,
+        low_balance_check_interval_seconds:
+          account.low_balance_check_interval_seconds || 300,
         enabled: account.enabled !== false,
       });
       setAccountDraftTouched({});

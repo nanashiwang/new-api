@@ -538,6 +538,8 @@ export const createDefaultUpstreamAccountDraft = () => ({
   password_masked: '',
   resource_display_mode: 'both',
   low_balance_threshold_usd: 0,
+  low_balance_auto_disable_enabled: false,
+  low_balance_check_interval_seconds: 300,
   enabled: true,
 });
 
@@ -609,6 +611,15 @@ export const prepareUpstreamAccountDraftForSave = (
     resource_display_mode: normalizeUpstreamAccountResourceDisplayMode(
       draft?.resource_display_mode,
       accountType,
+    ),
+    low_balance_threshold_usd: clampNumber(
+      draft?.low_balance_threshold_usd,
+    ),
+    low_balance_auto_disable_enabled:
+      !!draft?.low_balance_auto_disable_enabled,
+    low_balance_check_interval_seconds: Math.max(
+      60,
+      Math.round(Number(draft?.low_balance_check_interval_seconds || 300)),
     ),
   };
 };

@@ -395,6 +395,69 @@ const AccountEditSideSheet = ({
             </div>
           )}
 
+          <div className='grid gap-3 rounded-xl border border-semi-color-border bg-semi-color-fill-0 p-3'>
+            <div className='flex items-center justify-between gap-3'>
+              <div>
+                <Text strong size='small'>
+                  {t('低余额自动禁用绑定渠道')}
+                </Text>
+                <Text type='tertiary' size='small' className='mt-1 block'>
+                  {t('钱包余额低于阈值时，自动禁用收益看板中绑定该账户的渠道')}
+                </Text>
+              </div>
+              <Switch
+                checked={!!accountDraft.low_balance_auto_disable_enabled}
+                onChange={(checked) =>
+                  updateAccountDraftField(
+                    'low_balance_auto_disable_enabled',
+                    checked,
+                  )
+                }
+                size='small'
+              />
+            </div>
+            <div className='grid gap-3 sm:grid-cols-2'>
+              <div>
+                <Text type='tertiary' size='small' className='mb-1 block'>
+                  {t('钱包余额阈值')}
+                </Text>
+                <InputNumber
+                  min={0}
+                  precision={6}
+                  value={accountDraft.low_balance_threshold_usd || 0}
+                  suffix='USD'
+                  onChange={(value) =>
+                    updateAccountDraftField(
+                      'low_balance_threshold_usd',
+                      value,
+                    )
+                  }
+                  style={{ width: '100%' }}
+                />
+                <FieldMessage message={t('0 代表只提醒，不触发自动禁用')} />
+              </div>
+              <div>
+                <Text type='tertiary' size='small' className='mb-1 block'>
+                  {t('检查周期')}
+                </Text>
+                <InputNumber
+                  min={60}
+                  step={60}
+                  value={accountDraft.low_balance_check_interval_seconds || 300}
+                  suffix={t('秒')}
+                  onChange={(value) =>
+                    updateAccountDraftField(
+                      'low_balance_check_interval_seconds',
+                      value,
+                    )
+                  }
+                  style={{ width: '100%' }}
+                />
+                <FieldMessage message={t('系统会按此周期同步余额并判断是否禁用')} />
+              </div>
+            </div>
+          </div>
+
           <div>
             <Text type='tertiary' size='small' className='mb-1 block'>
               {t('备注')}

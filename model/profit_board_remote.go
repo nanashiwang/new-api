@@ -929,6 +929,10 @@ func listProfitBoardRemoteSuccessSnapshots(selectionSignature string, comboID st
 }
 
 func profitBoardRemoteObserverNeedsSync(latest *ProfitBoardRemoteSnapshot, configHash string, force bool) bool {
+	return profitBoardRemoteObserverNeedsSyncWithMinInterval(latest, configHash, force, profitBoardRemoteSyncMinIntervalSeconds)
+}
+
+func profitBoardRemoteObserverNeedsSyncWithMinInterval(latest *ProfitBoardRemoteSnapshot, configHash string, force bool, minIntervalSeconds int64) bool {
 	if force || latest == nil {
 		return true
 	}
@@ -938,17 +942,24 @@ func profitBoardRemoteObserverNeedsSync(latest *ProfitBoardRemoteSnapshot, confi
 	if latest.Status != profitBoardRemoteSnapshotStatusSuccess {
 		return true
 	}
-	return common.GetTimestamp()-latest.SyncedAt >= profitBoardRemoteSyncMinIntervalSeconds
+	if minIntervalSeconds < 0 {
+		minIntervalSeconds = profitBoardRemoteSyncMinIntervalSeconds
+	}
+	return common.GetTimestamp()-latest.SyncedAt >= minIntervalSeconds
 }
 
 func syncProfitBoardRemoteObserverSnapshot(selectionSignature string, batch ProfitBoardBatchInfo, config ProfitBoardRemoteObserverConfig, force bool) (*ProfitBoardRemoteSnapshot, *ProfitBoardRemoteSnapshot, error) {
+	return syncProfitBoardRemoteObserverSnapshotWithMinInterval(selectionSignature, batch, config, force, profitBoardRemoteSyncMinIntervalSeconds)
+}
+
+func syncProfitBoardRemoteObserverSnapshotWithMinInterval(selectionSignature string, batch ProfitBoardBatchInfo, config ProfitBoardRemoteObserverConfig, force bool, minIntervalSeconds int64) (*ProfitBoardRemoteSnapshot, *ProfitBoardRemoteSnapshot, error) {
 	config = normalizeProfitBoardRemoteObserverConfig(config)
 	latestAny, err := getLatestProfitBoardRemoteSnapshot(selectionSignature, batch.Id)
 	if err != nil {
 		return nil, nil, err
 	}
 	configHash := profitBoardRemoteObserverConfigHash(config)
-	if !profitBoardRemoteObserverNeedsSync(latestAny, configHash, force) {
+	if !profitBoardRemoteObserverNeedsSyncWithMinInterval(latestAny, configHash, force, minIntervalSeconds) {
 		latestSuccess, successErr := getLatestProfitBoardRemoteSuccessSnapshot(selectionSignature, batch.Id, configHash)
 		return latestAny, latestSuccess, successErr
 	}

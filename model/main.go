@@ -698,6 +698,11 @@ func ensureProfitBoardUpstreamAccountColumnsSQLite() error {
 		{Name: "resource_display_mode", DDL: "`resource_display_mode` varchar(24) DEFAULT 'both'"},
 		{Name: "email", DDL: "`email` varchar(255)"},
 		{Name: "password_encrypted", DDL: "`password_encrypted` text"},
+		{Name: "low_balance_auto_disable_enabled", DDL: "`low_balance_auto_disable_enabled` numeric DEFAULT 0"},
+		{Name: "low_balance_check_interval_seconds", DDL: "`low_balance_check_interval_seconds` integer DEFAULT 300"},
+		{Name: "low_balance_last_checked_at", DDL: "`low_balance_last_checked_at` bigint DEFAULT 0"},
+		{Name: "low_balance_last_auto_disabled_at", DDL: "`low_balance_last_auto_disabled_at` bigint DEFAULT 0"},
+		{Name: "low_balance_last_auto_disabled_count", DDL: "`low_balance_last_auto_disabled_count` integer DEFAULT 0"},
 	}
 	for _, col := range required {
 		if _, ok := existing[col.Name]; ok {

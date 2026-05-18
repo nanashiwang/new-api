@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 
@@ -23,62 +25,74 @@ var (
 
 const profitBoardUpstreamAccountSnapshotComboID = "wallet"
 
+var profitBoardLowBalanceAutoDisableOnce sync.Once
+
 type ProfitBoardUpstreamAccount struct {
-	Id                     int     `json:"id"`
-	Name                   string  `json:"name" gorm:"type:varchar(128);not null"`
-	Remark                 string  `json:"remark,omitempty" gorm:"type:text"`
-	AccountType            string  `json:"account_type" gorm:"type:varchar(24);index;not null"`
-	BaseURL                string  `json:"base_url" gorm:"type:varchar(255);not null"`
-	UserID                 int     `json:"user_id" gorm:"index;not null"`
-	Email                  string  `json:"email,omitempty" gorm:"type:varchar(255);index"`
-	AccessToken            string  `json:"access_token,omitempty" gorm:"-"`
-	AccessTokenMasked      string  `json:"access_token_masked,omitempty" gorm:"-"`
-	AccessTokenEncrypted   string  `json:"-" gorm:"type:text;not null"`
-	Password               string  `json:"password,omitempty" gorm:"-"`
-	PasswordMasked         string  `json:"password_masked,omitempty" gorm:"-"`
-	PasswordEncrypted      string  `json:"-" gorm:"type:text"`
-	Enabled                bool    `json:"enabled" gorm:"default:true"`
-	ResourceDisplayMode    string  `json:"resource_display_mode" gorm:"type:varchar(24);default:both"`
-	LowBalanceThresholdUSD float64 `json:"low_balance_threshold_usd" gorm:"type:decimal(18,6);default:0"`
-	CreatedAt              int64   `json:"created_at" gorm:"bigint;index"`
-	UpdatedAt              int64   `json:"updated_at" gorm:"bigint;index"`
+	Id                              int     `json:"id"`
+	Name                            string  `json:"name" gorm:"type:varchar(128);not null"`
+	Remark                          string  `json:"remark,omitempty" gorm:"type:text"`
+	AccountType                     string  `json:"account_type" gorm:"type:varchar(24);index;not null"`
+	BaseURL                         string  `json:"base_url" gorm:"type:varchar(255);not null"`
+	UserID                          int     `json:"user_id" gorm:"index;not null"`
+	Email                           string  `json:"email,omitempty" gorm:"type:varchar(255);index"`
+	AccessToken                     string  `json:"access_token,omitempty" gorm:"-"`
+	AccessTokenMasked               string  `json:"access_token_masked,omitempty" gorm:"-"`
+	AccessTokenEncrypted            string  `json:"-" gorm:"type:text;not null"`
+	Password                        string  `json:"password,omitempty" gorm:"-"`
+	PasswordMasked                  string  `json:"password_masked,omitempty" gorm:"-"`
+	PasswordEncrypted               string  `json:"-" gorm:"type:text"`
+	Enabled                         bool    `json:"enabled" gorm:"default:true"`
+	ResourceDisplayMode             string  `json:"resource_display_mode" gorm:"type:varchar(24);default:both"`
+	LowBalanceThresholdUSD          float64 `json:"low_balance_threshold_usd" gorm:"type:decimal(18,6);default:0"`
+	LowBalanceAutoDisableEnabled    bool    `json:"low_balance_auto_disable_enabled" gorm:"default:false"`
+	LowBalanceCheckIntervalSeconds  int     `json:"low_balance_check_interval_seconds" gorm:"type:int;default:300"`
+	LowBalanceLastCheckedAt         int64   `json:"low_balance_last_checked_at" gorm:"bigint;default:0"`
+	LowBalanceLastAutoDisabledAt    int64   `json:"low_balance_last_auto_disabled_at" gorm:"bigint;default:0"`
+	LowBalanceLastAutoDisabledCount int     `json:"low_balance_last_auto_disabled_count" gorm:"type:int;default:0"`
+	CreatedAt                       int64   `json:"created_at" gorm:"bigint;index"`
+	UpdatedAt                       int64   `json:"updated_at" gorm:"bigint;index"`
 }
 
 type ProfitBoardUpstreamAccountOption struct {
-	Id                           int     `json:"id"`
-	Name                         string  `json:"name"`
-	Remark                       string  `json:"remark,omitempty"`
-	AccountType                  string  `json:"account_type"`
-	BaseURL                      string  `json:"base_url"`
-	UserID                       int     `json:"user_id"`
-	Email                        string  `json:"email,omitempty"`
-	Enabled                      bool    `json:"enabled"`
-	ResourceDisplayMode          string  `json:"resource_display_mode"`
-	AccessTokenMasked            string  `json:"access_token_masked,omitempty"`
-	PasswordMasked               string  `json:"password_masked,omitempty"`
-	Status                       string  `json:"status,omitempty"`
-	ErrorMessage                 string  `json:"error_message,omitempty"`
-	LastSyncedAt                 int64   `json:"last_synced_at"`
-	LastSuccessAt                int64   `json:"last_success_at"`
-	WalletBalanceUSD             float64 `json:"wallet_balance_usd"`
-	WalletQuotaUSD               float64 `json:"wallet_quota_usd"`
-	WalletUsedTotalUSD           float64 `json:"wallet_used_total_usd"`
-	WalletUsedQuotaUSD           float64 `json:"wallet_used_quota_usd"`
-	PeriodUsedUSD                float64 `json:"period_used_usd"`
-	SubscriptionRemainingUSD     float64 `json:"subscription_remaining_quota_usd"`
-	SubscriptionTotalQuotaUSD    float64 `json:"subscription_total_quota_usd"`
-	SubscriptionUsedQuotaUSD     float64 `json:"subscription_used_quota_usd"`
-	SubscriptionCount            int     `json:"subscription_count"`
-	SubscriptionEarliestExpireAt int64   `json:"subscription_earliest_expire_at"`
-	HasSubscriptionData          bool    `json:"has_subscription_data"`
-	SubscriptionHasUnlimited     bool    `json:"subscription_has_unlimited"`
-	ObservedCostUSD              float64 `json:"observed_cost_usd"`
-	RemoteQuotaPerUnit           float64 `json:"remote_quota_per_unit"`
-	QuotaPerUnitMismatch         bool    `json:"quota_per_unit_mismatch"`
-	LowBalanceThresholdUSD       float64 `json:"low_balance_threshold_usd"`
-	LowBalanceAlert              bool    `json:"low_balance_alert"`
-	BaselineReady                bool    `json:"baseline_ready"`
-	SnapshotCount                int     `json:"snapshot_count"`
+	Id                              int     `json:"id"`
+	Name                            string  `json:"name"`
+	Remark                          string  `json:"remark,omitempty"`
+	AccountType                     string  `json:"account_type"`
+	BaseURL                         string  `json:"base_url"`
+	UserID                          int     `json:"user_id"`
+	Email                           string  `json:"email,omitempty"`
+	Enabled                         bool    `json:"enabled"`
+	ResourceDisplayMode             string  `json:"resource_display_mode"`
+	AccessTokenMasked               string  `json:"access_token_masked,omitempty"`
+	PasswordMasked                  string  `json:"password_masked,omitempty"`
+	Status                          string  `json:"status,omitempty"`
+	ErrorMessage                    string  `json:"error_message,omitempty"`
+	LastSyncedAt                    int64   `json:"last_synced_at"`
+	LastSuccessAt                   int64   `json:"last_success_at"`
+	WalletBalanceUSD                float64 `json:"wallet_balance_usd"`
+	WalletQuotaUSD                  float64 `json:"wallet_quota_usd"`
+	WalletUsedTotalUSD              float64 `json:"wallet_used_total_usd"`
+	WalletUsedQuotaUSD              float64 `json:"wallet_used_quota_usd"`
+	PeriodUsedUSD                   float64 `json:"period_used_usd"`
+	SubscriptionRemainingUSD        float64 `json:"subscription_remaining_quota_usd"`
+	SubscriptionTotalQuotaUSD       float64 `json:"subscription_total_quota_usd"`
+	SubscriptionUsedQuotaUSD        float64 `json:"subscription_used_quota_usd"`
+	SubscriptionCount               int     `json:"subscription_count"`
+	SubscriptionEarliestExpireAt    int64   `json:"subscription_earliest_expire_at"`
+	HasSubscriptionData             bool    `json:"has_subscription_data"`
+	SubscriptionHasUnlimited        bool    `json:"subscription_has_unlimited"`
+	ObservedCostUSD                 float64 `json:"observed_cost_usd"`
+	RemoteQuotaPerUnit              float64 `json:"remote_quota_per_unit"`
+	QuotaPerUnitMismatch            bool    `json:"quota_per_unit_mismatch"`
+	LowBalanceThresholdUSD          float64 `json:"low_balance_threshold_usd"`
+	LowBalanceAlert                 bool    `json:"low_balance_alert"`
+	LowBalanceAutoDisableEnabled    bool    `json:"low_balance_auto_disable_enabled"`
+	LowBalanceCheckIntervalSeconds  int     `json:"low_balance_check_interval_seconds"`
+	LowBalanceLastCheckedAt         int64   `json:"low_balance_last_checked_at"`
+	LowBalanceLastAutoDisabledAt    int64   `json:"low_balance_last_auto_disabled_at"`
+	LowBalanceLastAutoDisabledCount int     `json:"low_balance_last_auto_disabled_count"`
+	BaselineReady                   bool    `json:"baseline_ready"`
+	SnapshotCount                   int     `json:"snapshot_count"`
 }
 
 type profitBoardUpstreamAccountObservedAggregate struct {
@@ -214,6 +228,9 @@ func normalizeProfitBoardUpstreamAccount(account ProfitBoardUpstreamAccount) Pro
 	if account.LowBalanceThresholdUSD < 0 {
 		account.LowBalanceThresholdUSD = 0
 	}
+	if account.LowBalanceCheckIntervalSeconds < 60 {
+		account.LowBalanceCheckIntervalSeconds = 300
+	}
 	account.ResourceDisplayMode = normalizeProfitBoardUpstreamAccountResourceDisplayMode(account.ResourceDisplayMode)
 	if account.AccountType == ProfitBoardUpstreamAccountTypeSub2API {
 		account.UserID = 0
@@ -306,39 +323,44 @@ func buildProfitBoardUpstreamAccountOption(
 	threshold := roundProfitBoardAmount(account.LowBalanceThresholdUSD)
 	lowBalanceAlert := threshold > 0 && state.WalletBalanceUSD <= threshold
 	return ProfitBoardUpstreamAccountOption{
-		Id:                           account.Id,
-		Name:                         account.Name,
-		Remark:                       account.Remark,
-		AccountType:                  account.AccountType,
-		BaseURL:                      account.BaseURL,
-		UserID:                       account.UserID,
-		Email:                        account.Email,
-		Enabled:                      account.Enabled,
-		ResourceDisplayMode:          account.ResourceDisplayMode,
-		AccessTokenMasked:            maskProfitBoardRemoteSecret(statefulProfitBoardUpstreamToken(account)),
-		PasswordMasked:               maskProfitBoardRemoteSecret(statefulProfitBoardUpstreamPassword(account)),
-		Status:                       state.Status,
-		ErrorMessage:                 state.ErrorMessage,
-		LastSyncedAt:                 state.LastSyncedAt,
-		LastSuccessAt:                state.LastSuccessAt,
-		WalletBalanceUSD:             state.WalletBalanceUSD,
-		WalletQuotaUSD:               state.WalletQuotaUSD,
-		WalletUsedTotalUSD:           state.WalletUsedTotalUSD,
-		WalletUsedQuotaUSD:           state.WalletUsedQuotaUSD,
-		PeriodUsedUSD:                state.PeriodUsedUSD,
-		SubscriptionRemainingUSD:     state.SubscriptionRemainingUSD,
-		SubscriptionTotalQuotaUSD:    state.SubscriptionTotalQuotaUSD,
-		SubscriptionUsedQuotaUSD:     state.SubscriptionUsedQuotaUSD,
-		SubscriptionCount:            state.SubscriptionCount,
-		SubscriptionEarliestExpireAt: state.SubscriptionEarliestExpireAt,
-		HasSubscriptionData:          state.HasSubscriptionData,
-		SubscriptionHasUnlimited:     state.SubscriptionHasUnlimited,
-		ObservedCostUSD:              state.PeriodUsedUSD,
-		RemoteQuotaPerUnit:           state.RemoteQuotaPerUnit,
-		QuotaPerUnitMismatch:         state.QuotaPerUnitMismatch,
-		LowBalanceThresholdUSD:       threshold,
-		LowBalanceAlert:              lowBalanceAlert,
-		BaselineReady:                state.BaselineReady,
+		Id:                              account.Id,
+		Name:                            account.Name,
+		Remark:                          account.Remark,
+		AccountType:                     account.AccountType,
+		BaseURL:                         account.BaseURL,
+		UserID:                          account.UserID,
+		Email:                           account.Email,
+		Enabled:                         account.Enabled,
+		ResourceDisplayMode:             account.ResourceDisplayMode,
+		AccessTokenMasked:               maskProfitBoardRemoteSecret(statefulProfitBoardUpstreamToken(account)),
+		PasswordMasked:                  maskProfitBoardRemoteSecret(statefulProfitBoardUpstreamPassword(account)),
+		Status:                          state.Status,
+		ErrorMessage:                    state.ErrorMessage,
+		LastSyncedAt:                    state.LastSyncedAt,
+		LastSuccessAt:                   state.LastSuccessAt,
+		WalletBalanceUSD:                state.WalletBalanceUSD,
+		WalletQuotaUSD:                  state.WalletQuotaUSD,
+		WalletUsedTotalUSD:              state.WalletUsedTotalUSD,
+		WalletUsedQuotaUSD:              state.WalletUsedQuotaUSD,
+		PeriodUsedUSD:                   state.PeriodUsedUSD,
+		SubscriptionRemainingUSD:        state.SubscriptionRemainingUSD,
+		SubscriptionTotalQuotaUSD:       state.SubscriptionTotalQuotaUSD,
+		SubscriptionUsedQuotaUSD:        state.SubscriptionUsedQuotaUSD,
+		SubscriptionCount:               state.SubscriptionCount,
+		SubscriptionEarliestExpireAt:    state.SubscriptionEarliestExpireAt,
+		HasSubscriptionData:             state.HasSubscriptionData,
+		SubscriptionHasUnlimited:        state.SubscriptionHasUnlimited,
+		ObservedCostUSD:                 state.PeriodUsedUSD,
+		RemoteQuotaPerUnit:              state.RemoteQuotaPerUnit,
+		QuotaPerUnitMismatch:            state.QuotaPerUnitMismatch,
+		LowBalanceThresholdUSD:          threshold,
+		LowBalanceAlert:                 lowBalanceAlert,
+		LowBalanceAutoDisableEnabled:    account.LowBalanceAutoDisableEnabled,
+		LowBalanceCheckIntervalSeconds:  account.LowBalanceCheckIntervalSeconds,
+		LowBalanceLastCheckedAt:         account.LowBalanceLastCheckedAt,
+		LowBalanceLastAutoDisabledAt:    account.LowBalanceLastAutoDisabledAt,
+		LowBalanceLastAutoDisabledCount: account.LowBalanceLastAutoDisabledCount,
+		BaselineReady:                   state.BaselineReady,
 	}
 }
 
@@ -463,6 +485,8 @@ func SaveProfitBoardUpstreamAccount(account ProfitBoardUpstreamAccount) (*Profit
 		existing.Enabled = account.Enabled
 		existing.ResourceDisplayMode = account.ResourceDisplayMode
 		existing.LowBalanceThresholdUSD = account.LowBalanceThresholdUSD
+		existing.LowBalanceAutoDisableEnabled = account.LowBalanceAutoDisableEnabled
+		existing.LowBalanceCheckIntervalSeconds = account.LowBalanceCheckIntervalSeconds
 		if err := DB.Save(&existing).Error; err != nil {
 			return nil, err
 		}
@@ -619,6 +643,279 @@ func SyncAllProfitBoardUpstreamAccounts(force bool) ([]ProfitBoardUpstreamAccoun
 	}
 	sortProfitBoardUpstreamAccountOptions(options)
 	return options, nil
+}
+
+func syncProfitBoardUpstreamAccountForLowBalanceCheck(account ProfitBoardUpstreamAccount) (*ProfitBoardUpstreamAccountOption, error) {
+	account = normalizeProfitBoardUpstreamAccount(account)
+	config := account.remoteObserverConfig()
+	config.Enabled = true
+	signature := profitBoardUpstreamAccountSnapshotSignature(account.Id)
+	batch := profitBoardUpstreamAccountSnapshotBatch(account)
+	latestAny, latestSuccess, err := syncProfitBoardRemoteObserverSnapshotWithMinInterval(
+		signature,
+		batch,
+		config,
+		false,
+		int64(account.LowBalanceCheckIntervalSeconds),
+	)
+	if err != nil {
+		return nil, err
+	}
+	state := buildProfitBoardRemoteObserverState(signature, batch, config, latestAny, latestSuccess, 0)
+	option := buildProfitBoardUpstreamAccountOption(account, state)
+	return &option, nil
+}
+
+type profitBoardLowBalanceBoundChannel struct {
+	Id             int
+	Name           string
+	Type           int
+	Status         int
+	MatchedBatches []string
+}
+
+type ProfitBoardLowBalanceAutoDisableResult struct {
+	AccountID         int     `json:"account_id"`
+	AccountName       string  `json:"account_name"`
+	WalletBalanceUSD  float64 `json:"wallet_balance_usd"`
+	ThresholdUSD      float64 `json:"threshold_usd"`
+	DisabledCount     int     `json:"disabled_count"`
+	CheckedAt         int64   `json:"checked_at"`
+	Skipped           bool    `json:"skipped"`
+	SkipReason        string  `json:"skip_reason,omitempty"`
+	MatchedChannelIDs []int   `json:"matched_channel_ids,omitempty"`
+}
+
+func accountDueForLowBalanceCheck(account ProfitBoardUpstreamAccount, now int64, force bool) bool {
+	if force {
+		return true
+	}
+	interval := account.LowBalanceCheckIntervalSeconds
+	if interval < 60 {
+		interval = 300
+	}
+	return account.LowBalanceLastCheckedAt <= 0 || now-account.LowBalanceLastCheckedAt >= int64(interval)
+}
+
+func autoDisableProfitBoardLowBalanceChannel(channelId int, reason string) (bool, error) {
+	channel, err := GetChannelById(channelId, true)
+	if err != nil {
+		return false, err
+	}
+	if channel.Status != common.ChannelStatusEnabled {
+		return false, nil
+	}
+	info := channel.GetOtherInfo()
+	info["status_reason"] = reason
+	info["status_time"] = common.GetTimestamp()
+	channel.SetOtherInfo(info)
+	channel.Status = common.ChannelStatusAutoDisabled
+	if err := channel.SaveWithoutKey(); err != nil {
+		return false, err
+	}
+	if err := UpdateAbilityStatus(channel.Id, false); err != nil {
+		common.SysLog(fmt.Sprintf("failed to update ability status: channel_id=%d, error=%v", channel.Id, err))
+	}
+	if common.MemoryCacheEnabled {
+		CacheUpdateChannelStatus(channel.Id, common.ChannelStatusAutoDisabled)
+	}
+	return true, nil
+}
+
+func collectProfitBoardLowBalanceBoundChannels(accountID int) (map[int]*profitBoardLowBalanceBoundChannel, error) {
+	records := make([]ProfitBoardConfig, 0)
+	if err := DB.Find(&records).Error; err != nil {
+		return nil, err
+	}
+
+	result := make(map[int]*profitBoardLowBalanceBoundChannel)
+	for _, record := range records {
+		payload, err := payloadFromProfitBoardConfigRecord(record)
+		if err != nil {
+			return nil, err
+		}
+		if payload == nil || len(payload.Batches) == 0 {
+			continue
+		}
+		comboConfigs := normalizeProfitBoardComboConfigs(payload.Batches, payload.ComboConfigs, payload.SharedSite, payload.Site, payload.Upstream)
+		comboByID := make(map[string]ProfitBoardComboPricingConfig, len(comboConfigs))
+		for _, combo := range comboConfigs {
+			comboByID[combo.ComboId] = combo
+		}
+		for _, batch := range payload.Batches {
+			combo := comboByID[batch.Id]
+			if combo.UpstreamMode != ProfitBoardUpstreamModeWallet || combo.UpstreamAccountID != accountID {
+				continue
+			}
+			resolved, _, err := resolveProfitBoardBatch(batch, false)
+			if err != nil {
+				return nil, err
+			}
+			for _, channel := range resolved.ResolvedChannels {
+				current := result[channel.Id]
+				if current == nil {
+					current = &profitBoardLowBalanceBoundChannel{
+						Id:             channel.Id,
+						Name:           channel.Name,
+						Status:         channel.Status,
+						MatchedBatches: make([]string, 0, 1),
+					}
+					result[channel.Id] = current
+				}
+				current.MatchedBatches = append(current.MatchedBatches, resolved.Name)
+			}
+		}
+	}
+
+	if len(result) == 0 {
+		return result, nil
+	}
+	ids := make([]int, 0, len(result))
+	for id := range result {
+		ids = append(ids, id)
+	}
+	channels := make([]Channel, 0, len(ids))
+	if err := DB.Select("id, name, type, status, auto_ban, channel_info").Where("id IN ?", ids).Find(&channels).Error; err != nil {
+		return nil, err
+	}
+	for _, channel := range channels {
+		if current := result[channel.Id]; current != nil {
+			current.Name = channel.Name
+			current.Type = channel.Type
+			current.Status = channel.Status
+		}
+	}
+	return result, nil
+}
+
+func checkProfitBoardUpstreamAccountLowBalance(accountID int, force bool) (*ProfitBoardLowBalanceAutoDisableResult, error) {
+	account, err := getProfitBoardUpstreamAccountByID(accountID)
+	if err != nil {
+		return nil, err
+	}
+	normalizedAccount := normalizeProfitBoardUpstreamAccount(*account)
+	account = &normalizedAccount
+	now := common.GetTimestamp()
+	result := &ProfitBoardLowBalanceAutoDisableResult{
+		AccountID:         account.Id,
+		AccountName:       account.Name,
+		ThresholdUSD:      roundProfitBoardAmount(account.LowBalanceThresholdUSD),
+		CheckedAt:         now,
+		Skipped:           true,
+		MatchedChannelIDs: make([]int, 0),
+	}
+	if !account.Enabled {
+		result.SkipReason = "account_disabled"
+		return result, nil
+	}
+	if !account.LowBalanceAutoDisableEnabled {
+		result.SkipReason = "auto_disable_disabled"
+		return result, nil
+	}
+	if account.LowBalanceThresholdUSD <= 0 {
+		result.SkipReason = "threshold_disabled"
+		return result, nil
+	}
+	if !accountDueForLowBalanceCheck(*account, now, force) {
+		result.SkipReason = "not_due"
+		return result, nil
+	}
+
+	option, err := syncProfitBoardUpstreamAccountForLowBalanceCheck(*account)
+	if err != nil {
+		_ = DB.Model(&ProfitBoardUpstreamAccount{}).Where("id = ?", account.Id).Update("low_balance_last_checked_at", now).Error
+		return nil, err
+	}
+	result.WalletBalanceUSD = option.WalletBalanceUSD
+	result.Skipped = false
+	threshold := roundProfitBoardAmount(account.LowBalanceThresholdUSD)
+	if threshold <= 0 || option.WalletBalanceUSD > threshold {
+		updates := map[string]any{
+			"low_balance_last_checked_at":          now,
+			"low_balance_last_auto_disabled_count": 0,
+		}
+		if err := DB.Model(&ProfitBoardUpstreamAccount{}).Where("id = ?", account.Id).Updates(updates).Error; err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
+
+	channels, err := collectProfitBoardLowBalanceBoundChannels(account.Id)
+	if err != nil {
+		return nil, err
+	}
+	reason := fmt.Sprintf("收益看板上游账户「%s」钱包余额 $%.6f 低于阈值 $%.6f", account.Name, option.WalletBalanceUSD, threshold)
+	disabledCount := 0
+	for _, channel := range channels {
+		result.MatchedChannelIDs = append(result.MatchedChannelIDs, channel.Id)
+		if channel.Status != common.ChannelStatusEnabled {
+			continue
+		}
+		disabled, disableErr := autoDisableProfitBoardLowBalanceChannel(channel.Id, reason)
+		if disableErr != nil {
+			return nil, disableErr
+		}
+		if disabled {
+			disabledCount++
+		}
+	}
+	sort.Ints(result.MatchedChannelIDs)
+	result.DisabledCount = disabledCount
+	updates := map[string]any{
+		"low_balance_last_checked_at":          now,
+		"low_balance_last_auto_disabled_count": disabledCount,
+	}
+	if disabledCount > 0 {
+		updates["low_balance_last_auto_disabled_at"] = now
+	}
+	if err := DB.Model(&ProfitBoardUpstreamAccount{}).Where("id = ?", account.Id).Updates(updates).Error; err != nil {
+		return nil, err
+	}
+	if disabledCount > 0 {
+		common.SysLog(fmt.Sprintf("profit board low balance disabled %d channels for account %d", disabledCount, account.Id))
+	}
+	return result, nil
+}
+
+func RunProfitBoardLowBalanceAutoDisableCheck(force bool) ([]ProfitBoardLowBalanceAutoDisableResult, error) {
+	accounts, err := listProfitBoardUpstreamAccounts()
+	if err != nil {
+		return nil, err
+	}
+	results := make([]ProfitBoardLowBalanceAutoDisableResult, 0, len(accounts))
+	for _, account := range accounts {
+		if !account.LowBalanceAutoDisableEnabled {
+			continue
+		}
+		result, checkErr := checkProfitBoardUpstreamAccountLowBalance(account.Id, force)
+		if checkErr != nil {
+			return results, checkErr
+		}
+		if result != nil {
+			results = append(results, *result)
+		}
+	}
+	return results, nil
+}
+
+func StartProfitBoardLowBalanceAutoDisableTask() {
+	profitBoardLowBalanceAutoDisableOnce.Do(func() {
+		if !common.IsMasterNode {
+			return
+		}
+
+		go func() {
+			common.SysLog("profit board low balance auto-disable task started")
+			ticker := time.NewTicker(time.Minute)
+			defer ticker.Stop()
+
+			for range ticker.C {
+				if _, err := RunProfitBoardLowBalanceAutoDisableCheck(false); err != nil {
+					common.SysError("profit board low balance auto-disable failed: " + err.Error())
+				}
+			}
+		}()
+	})
 }
 
 func collectProfitBoardUpstreamAccountObservedAggregate(accountID int, startTimestamp int64, endTimestamp int64, granularity string, customIntervalMinutes int, forceSync bool) (*profitBoardUpstreamAccountObservedAggregate, error) {

@@ -1523,6 +1523,100 @@ func TestGetProfitBoardUpstreamAccountTrendUsesPeriodUsedUSD(t *testing.T) {
 	}
 }
 
+func TestProfitBoardLowBalanceAutoDisableBoundChannels(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	originQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 1000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originQuotaPerUnit
+	})
+
+	account := ProfitBoardUpstreamAccount{
+		Name:                           "低余额账户",
+		AccountType:                    ProfitBoardUpstreamAccountTypeNewAPI,
+		BaseURL:                        "https://remote.example.com",
+		UserID:                         42,
+		Enabled:                        true,
+		LowBalanceThresholdUSD:         1.0,
+		LowBalanceAutoDisableEnabled:   true,
+		LowBalanceCheckIntervalSeconds: 60,
+		CreatedAt:                      1,
+		UpdatedAt:                      1,
+	}
+	encryptedToken, err := encryptProfitBoardRemoteSecret("remote-token")
+	if err != nil {
+		t.Fatalf("encrypt token: %v", err)
+	}
+	account.AccessTokenEncrypted = encryptedToken
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+
+	autoBan := 1
+	channels := []Channel{
+		{Id: 1, Name: "bound-1", Status: common.ChannelStatusEnabled, AutoBan: &autoBan},
+		{Id: 2, Name: "bound-2", Status: common.ChannelStatusEnabled, AutoBan: &autoBan},
+		{Id: 3, Name: "unbound", Status: common.ChannelStatusEnabled, AutoBan: &autoBan},
+	}
+	for _, channel := range channels {
+		if err := db.Create(&channel).Error; err != nil {
+			t.Fatalf("create channel: %v", err)
+		}
+	}
+
+	payload := ProfitBoardConfigPayload{
+		Batches: []ProfitBoardBatch{{
+			Id:         "wallet-batch",
+			Name:       "钱包组合",
+			ScopeType:  ProfitBoardScopeChannel,
+			ChannelIDs: []int{1, 2},
+		}},
+		ComboConfigs: []ProfitBoardComboPricingConfig{{
+			ComboId:           "wallet-batch",
+			UpstreamMode:      ProfitBoardUpstreamModeWallet,
+			UpstreamAccountID: account.Id,
+		}},
+		Upstream: ProfitBoardTokenPricingConfig{CostSource: ProfitBoardCostSourceManualOnly},
+		Site:     ProfitBoardTokenPricingConfig{PricingMode: ProfitBoardSitePricingManual},
+	}
+	if _, _, err := SaveProfitBoardConfig(payload); err != nil {
+		t.Fatalf("SaveProfitBoardConfig: %v", err)
+	}
+
+	config := account.remoteObserverConfig()
+	signature := profitBoardUpstreamAccountSnapshotSignature(account.Id)
+	now := common.GetTimestamp()
+	seedProfitBoardRemoteSnapshot(t, signature, profitBoardUpstreamAccountSnapshotComboID, config, now-60, 800, 120, nil)
+
+	results, err := RunProfitBoardLowBalanceAutoDisableCheck(true)
+	if err != nil {
+		t.Fatalf("RunProfitBoardLowBalanceAutoDisableCheck: %v", err)
+	}
+	if len(results) != 1 || results[0].DisabledCount != 2 {
+		t.Fatalf("unexpected auto-disable results: %+v", results)
+	}
+
+	var refreshed []Channel
+	if err := db.Order("id asc").Find(&refreshed).Error; err != nil {
+		t.Fatalf("load channels: %v", err)
+	}
+	if refreshed[0].Status != common.ChannelStatusAutoDisabled || refreshed[1].Status != common.ChannelStatusAutoDisabled {
+		t.Fatalf("bound channels should be auto disabled: %+v", refreshed)
+	}
+	if refreshed[2].Status != common.ChannelStatusEnabled {
+		t.Fatalf("unbound channel should remain enabled: %+v", refreshed[2])
+	}
+
+	var refreshedAccount ProfitBoardUpstreamAccount
+	if err := db.First(&refreshedAccount, "id = ?", account.Id).Error; err != nil {
+		t.Fatalf("load account: %v", err)
+	}
+	if refreshedAccount.LowBalanceLastCheckedAt == 0 || refreshedAccount.LowBalanceLastAutoDisabledCount != 2 {
+		t.Fatalf("unexpected account check metadata: %+v", refreshedAccount)
+	}
+}
+
 func TestSyncProfitBoardSub2APIAccountFetchesBalance(t *testing.T) {
 	setupProfitBoardTestDB(t)
 	allowProfitBoardTestPrivateFetch(t)
