@@ -284,8 +284,11 @@ export const useTokensData = (openFluentNotification) => {
 
     const needsKey =
       url.startsWith('fluent') ||
+      url.startsWith('ccswitch') ||
       url.includes('{key}') ||
-      url.includes('{cherryConfig}');
+      url.includes('{cherryConfig}') ||
+      url.includes('{aionuiConfig}') ||
+      url.includes('{deepchatConfig}');
     let apiKey = '';
     let rawKey = '';
     if (needsKey) {
@@ -321,6 +324,37 @@ export const useTokensData = (openFluentNotification) => {
         encodeToBase64(JSON.stringify(cherryConfig)),
       );
       url = url.replaceAll('{cherryConfig}', encodedConfig);
+    } else if (url.includes('{aionuiConfig}') === true) {
+      let aionuiConfig = {
+        platform: 'new-api',
+        baseUrl: serverAddress,
+        apiKey,
+      };
+      let encodedConfig = encodeURIComponent(
+        encodeToBase64(JSON.stringify(aionuiConfig)),
+      );
+      url = url.replaceAll('{aionuiConfig}', encodedConfig);
+    } else if (url.includes('{deepchatConfig}') === true) {
+      let deepchatConfig = {
+        id: 'new-api',
+        baseUrl: serverAddress,
+        apiKey,
+      };
+      let encodedConfig = encodeURIComponent(
+        encodeToBase64(JSON.stringify(deepchatConfig)),
+      );
+      url = url.replaceAll('{deepchatConfig}', encodedConfig);
+    } else if (url.startsWith('ccswitch')) {
+      const endpoint = `${serverAddress}/v1`;
+      const params = new URLSearchParams();
+      params.set('resource', 'provider');
+      params.set('app', 'codex');
+      params.set('name', record?.name || 'new-api');
+      params.set('endpoint', endpoint);
+      params.set('apiKey', apiKey);
+      params.set('homepage', serverAddress);
+      params.set('enabled', 'true');
+      url = `ccswitch://v1/import?${params.toString()}`;
     } else {
       let encodedServerAddress = encodeURIComponent(serverAddress);
       url = url.replaceAll('{address}', encodedServerAddress);
@@ -366,8 +400,7 @@ export const useTokensData = (openFluentNotification) => {
   // 搜索 Token 函数
   const searchTokens = async (page = 1, size = pageSize) => {
     const normalizedPage = Number.isInteger(page) && page > 0 ? page : 1;
-    const normalizedSize =
-      Number.isInteger(size) && size > 0 ? size : pageSize;
+    const normalizedSize = Number.isInteger(size) && size > 0 ? size : pageSize;
 
     const {
       searchKeyword,

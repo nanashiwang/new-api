@@ -19,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
+	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/router"
 	"github.com/QuantumNous/new-api/service"
@@ -95,6 +96,7 @@ func main() {
 
 	// 数据看板
 	go model.UpdateQuotaData()
+	perfmetrics.Init()
 	model.StartProfitBoardAggregateSyncTask()
 	model.StartProfitBoardRemoteObserverSyncTask()
 	model.StartProfitBoardLowBalanceAutoDisableTask()

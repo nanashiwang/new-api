@@ -41,6 +41,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const quotaRequestGuard = useLatestRequestGuard();
   const uptimeRequestGuard = useLatestRequestGuard();
   const userQuotaRequestGuard = useLatestRequestGuard();
+  const perfMetricsRequestGuard = useLatestRequestGuard();
 
   // ========== 基础状态 ==========
   const [loading, setLoading] = useState(false);
@@ -70,6 +71,8 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const [pieData, setPieData] = useState([{ type: 'null', value: '0' }]);
   const [lineData, setLineData] = useState([]);
   const [modelColors, setModelColors] = useState({});
+  const [perfMetricsSummary, setPerfMetricsSummary] = useState([]);
+  const [perfMetricsLoading, setPerfMetricsLoading] = useState(false);
 
   // ========== 图表状态 ==========
   const [activeChartTab, setActiveChartTab] = useState('1');
@@ -259,6 +262,40 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     }
   }, [inputs, isAdminUser, userQuotaRequestGuard]);
 
+  const loadPerfMetricsSummary = useCallback(async () => {
+    const requestId = perfMetricsRequestGuard.createRequestId();
+    setPerfMetricsLoading(true);
+    try {
+      const start = Date.parse(inputs.start_timestamp) / 1000;
+      const end = Date.parse(inputs.end_timestamp) / 1000;
+      const hours =
+        Number.isFinite(start) && Number.isFinite(end) && end > start
+          ? Math.max(1, Math.ceil((end - start) / 3600))
+          : 24;
+      const res = await API.get(
+        `/api/perf-metrics/summary?hours=${Math.min(hours, 24 * 30)}`,
+      );
+      if (!perfMetricsRequestGuard.isLatestRequest(requestId)) {
+        return [];
+      }
+      const { success, message, data } = res.data;
+      if (success) {
+        const models = data?.models || [];
+        setPerfMetricsSummary(models);
+        return models;
+      }
+      showError(message);
+      return [];
+    } catch (err) {
+      console.error(err);
+      return [];
+    } finally {
+      if (perfMetricsRequestGuard.isLatestRequest(requestId)) {
+        setPerfMetricsLoading(false);
+      }
+    }
+  }, [inputs.start_timestamp, inputs.end_timestamp, perfMetricsRequestGuard]);
+
   const getUserData = useCallback(async () => {
     let res = await API.get(`/api/user/self`);
     const { success, message, data } = res.data;
@@ -273,8 +310,9 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const refresh = useCallback(async () => {
     const data = await loadQuotaData();
     await loadUptimeData();
+    await loadPerfMetricsSummary();
     return data;
-  }, [loadQuotaData, loadUptimeData]);
+  }, [loadQuotaData, loadUptimeData, loadPerfMetricsSummary]);
 
   const handleSearchConfirm = useCallback(
     async (updateChartDataCallback) => {
@@ -326,6 +364,8 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     setLineData,
     modelColors,
     setModelColors,
+    perfMetricsSummary,
+    perfMetricsLoading,
 
     // 图表状态
     activeChartTab,
@@ -360,6 +400,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     loadQuotaData,
     loadUserQuotaData,
     loadUptimeData,
+    loadPerfMetricsSummary,
     getUserData,
     refresh,
     handleSearchConfirm,

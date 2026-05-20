@@ -36,6 +36,12 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.POST("/usage/public_token/stats/batch", middleware.PublicTokenUsageRateLimit(), controller.GetPublicTokenBatchStats)
 		apiRouter.POST("/usage/public_token/logs", middleware.PublicTokenUsageRateLimit(), controller.GetPublicTokenLogs)
 		apiRouter.GET("/pricing", middleware.TryUserAuth(), controller.GetPricing)
+		perfMetricsRoute := apiRouter.Group("/perf-metrics")
+		perfMetricsRoute.Use(middleware.TryUserAuth())
+		{
+			perfMetricsRoute.GET("/summary", controller.GetPerfMetricsSummary)
+			perfMetricsRoute.GET("", controller.GetPerfMetrics)
+		}
 		apiRouter.GET("/verification", middleware.EmailVerificationRateLimit(), middleware.TurnstileCheck(), controller.SendEmailVerification)
 		apiRouter.GET("/reset_password", middleware.CriticalRateLimit(), middleware.TurnstileCheck(), controller.SendPasswordResetEmail)
 		apiRouter.POST("/user/reset", middleware.CriticalRateLimit(), controller.ResetPassword)

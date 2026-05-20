@@ -281,7 +281,9 @@ export default function SettingsChats(props) {
   const highlightKeywords = (text) => {
     if (!text) return text;
 
-    const parts = text.split(/(\{address\}|\{key\})/g);
+    const parts = text.split(
+      /(\{address\}|\{key\}|\{cherryConfig\}|\{aionuiConfig\}|\{deepchatConfig\})/g,
+    );
     return parts.map((part, index) => {
       if (part === '{address}') {
         return (
@@ -292,6 +294,16 @@ export default function SettingsChats(props) {
       } else if (part === '{key}') {
         return (
           <span key={index} style={{ color: '#ff6b35', fontWeight: 600 }}>
+            {part}
+          </span>
+        );
+      } else if (
+        part === '{cherryConfig}' ||
+        part === '{aionuiConfig}' ||
+        part === '{deepchatConfig}'
+      ) {
+        return (
+          <span key={index} style={{ color: '#16a34a', fontWeight: 600 }}>
             {part}
           </span>
         );

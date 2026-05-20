@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Card, Tabs, TabPane } from '@douyinfe/semi-ui';
+import { Card, Tabs, TabPane, Table } from '@douyinfe/semi-ui';
 import { PieChart } from 'lucide-react';
 import { VChart } from '@visactor/react-vchart';
 
@@ -31,6 +31,8 @@ const ChartsPanel = ({
   spec_rank_bar,
   spec_user_rank,
   spec_user_trend,
+  perfMetricsSummary,
+  perfMetricsLoading,
   isAdminUser,
   CARD_PROPS,
   CHART_CONFIG,
@@ -38,6 +40,49 @@ const ChartsPanel = ({
   hasApiInfoPanel,
   t,
 }) => {
+  const perfMetricColumns = [
+    {
+      title: t('模型'),
+      dataIndex: 'model_name',
+      render: (text, record) => (
+        <span className='font-medium'>
+          {record.rank}. {text}
+        </span>
+      ),
+    },
+    {
+      title: t('请求数'),
+      dataIndex: 'request_count',
+      render: (value) => Number(value || 0).toLocaleString(),
+    },
+    {
+      title: t('平均延迟'),
+      dataIndex: 'avg_latency_ms',
+      render: (value) => `${Number(value || 0).toLocaleString()} ms`,
+    },
+    {
+      title: 'TTFT',
+      dataIndex: 'avg_ttft_ms',
+      render: (value) => `${Number(value || 0).toLocaleString()} ms`,
+    },
+    {
+      title: t('成功率'),
+      dataIndex: 'success_rate',
+      render: (value) => `${Number(value || 0).toFixed(2)}%`,
+    },
+    {
+      title: t('平均TPS'),
+      dataIndex: 'avg_tps',
+      render: (value) => Number(value || 0).toFixed(2),
+    },
+  ];
+  const perfMetricData = (perfMetricsSummary || [])
+    .slice(0, 10)
+    .map((item, index) => ({
+      ...item,
+      rank: index + 1,
+    }));
+
   return (
     <Card
       {...CARD_PROPS}
@@ -63,6 +108,7 @@ const ChartsPanel = ({
             {isAdminUser && (
               <TabPane tab={<span>{t('用户消耗趋势')}</span>} itemKey='6' />
             )}
+            <TabPane tab={<span>{t('性能表现')}</span>} itemKey='7' />
           </Tabs>
         </div>
       }
@@ -86,6 +132,18 @@ const ChartsPanel = ({
         )}
         {activeChartTab === '6' && isAdminUser && (
           <VChart spec={spec_user_trend} option={CHART_CONFIG} />
+        )}
+        {activeChartTab === '7' && (
+          <div className='h-full overflow-auto p-2'>
+            <Table
+              columns={perfMetricColumns}
+              dataSource={perfMetricData}
+              pagination={false}
+              loading={perfMetricsLoading}
+              rowKey='model_name'
+              size='small'
+            />
+          </div>
         )}
       </div>
     </Card>
