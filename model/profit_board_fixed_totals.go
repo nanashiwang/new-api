@@ -45,27 +45,29 @@ func applyProfitBoardComboFixedTotals(report *ProfitBoardReport, comboPricingMap
 		batchSummary.ActualProfitUSD -= comboPricing.UpstreamFixedTotalAmount
 	}
 
-	for _, batch := range batches {
-		comboPricing := comboPricingMap[batch.Id]
-		createdAt := batchCreatedAt[batch.Id]
-		if !profitBoardTimestampInRange(createdAt, startTimestamp, endTimestamp) {
-			continue
+	if profitBoardReportHasLoadedSection(report, profitBoardSectionTimeseries) {
+		for _, batch := range batches {
+			comboPricing := comboPricingMap[batch.Id]
+			createdAt := batchCreatedAt[batch.Id]
+			if !profitBoardTimestampInRange(createdAt, startTimestamp, endTimestamp) {
+				continue
+			}
+			bucketTimestamp, bucketLabel := buildProfitBoardBucket(createdAt, granularity, customIntervalMinutes)
+			point := getOrCreateProfitBoardTimeseriesPoint(report, batch.Id, batch.Name, bucketTimestamp, bucketLabel)
+			if allocation.EligibleBatchRequestCount[batch.Id] > 0 || batchRequestCount[batch.Id] == 0 {
+				siteFixedCNY := profitBoardConfiguredSiteRevenueCNY(comboPricing.SiteFixedTotalAmount, comboPricing)
+				point.ConfiguredSiteRevenueUSD += comboPricing.SiteFixedTotalAmount
+				point.ConfiguredSiteRevenueCNY += siteFixedCNY
+				point.ConfiguredProfitUSD += comboPricing.SiteFixedTotalAmount
+				point.ConfiguredProfitCNY += siteFixedCNY
+			}
+			upstreamFixedCNY := profitBoardConfiguredUpstreamCostCNY(comboPricing.UpstreamFixedTotalAmount, comboPricing)
+			point.UpstreamCostUSD += comboPricing.UpstreamFixedTotalAmount
+			point.UpstreamCostCNY += upstreamFixedCNY
+			point.ConfiguredProfitUSD -= comboPricing.UpstreamFixedTotalAmount
+			point.ConfiguredProfitCNY -= upstreamFixedCNY
+			point.ActualProfitUSD -= comboPricing.UpstreamFixedTotalAmount
 		}
-		bucketTimestamp, bucketLabel := buildProfitBoardBucket(createdAt, granularity, customIntervalMinutes)
-		point := getOrCreateProfitBoardTimeseriesPoint(report, batch.Id, batch.Name, bucketTimestamp, bucketLabel)
-		if allocation.EligibleBatchRequestCount[batch.Id] > 0 || batchRequestCount[batch.Id] == 0 {
-			siteFixedCNY := profitBoardConfiguredSiteRevenueCNY(comboPricing.SiteFixedTotalAmount, comboPricing)
-			point.ConfiguredSiteRevenueUSD += comboPricing.SiteFixedTotalAmount
-			point.ConfiguredSiteRevenueCNY += siteFixedCNY
-			point.ConfiguredProfitUSD += comboPricing.SiteFixedTotalAmount
-			point.ConfiguredProfitCNY += siteFixedCNY
-		}
-		upstreamFixedCNY := profitBoardConfiguredUpstreamCostCNY(comboPricing.UpstreamFixedTotalAmount, comboPricing)
-		point.UpstreamCostUSD += comboPricing.UpstreamFixedTotalAmount
-		point.UpstreamCostCNY += upstreamFixedCNY
-		point.ConfiguredProfitUSD -= comboPricing.UpstreamFixedTotalAmount
-		point.ConfiguredProfitCNY -= upstreamFixedCNY
-		point.ActualProfitUSD -= comboPricing.UpstreamFixedTotalAmount
 	}
 
 	for index := range report.ChannelBreakdown {

@@ -363,6 +363,7 @@ func profitBoardPersistedComboConfigMap(signature string) (map[string]ProfitBoar
 func profitBoardHasPersistedSiteConfig(persistedSite profitBoardPersistedSiteConfig) bool {
 	return len(persistedSite.ComboConfigs) > 0 ||
 		len(persistedSite.SharedSite.ModelNames) > 0 ||
+		len(persistedSite.ExcludedUserIDs) > 0 ||
 		persistedSite.LegacySite.PricingMode != "" ||
 		persistedSite.LegacySite.Group != "" ||
 		len(persistedSite.LegacySite.ModelNames) > 0
@@ -394,6 +395,7 @@ func payloadFromProfitBoardConfigRecord(record ProfitBoardConfig) (*ProfitBoardC
 	if err := common.UnmarshalJsonStr(record.SiteConfig, &persistedSite); err == nil && profitBoardHasPersistedSiteConfig(persistedSite) {
 		payload.Site = normalizeProfitBoardPricingConfig(persistedSite.LegacySite, true)
 		payload.SharedSite = normalizeProfitBoardSharedSiteConfig(persistedSite.SharedSite, payload.Site)
+		payload.ExcludedUserIDs = normalizeProfitBoardExcludedUserIDs(persistedSite.ExcludedUserIDs)
 		payload.ComboConfigs = normalizeProfitBoardComboConfigs(payload.Batches, persistedSite.ComboConfigs, payload.SharedSite, payload.Site, payload.Upstream)
 		return payload, nil
 	}

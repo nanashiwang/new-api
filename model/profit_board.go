@@ -624,6 +624,18 @@ func profitBoardSectionSet(sections []string) map[string]struct{} {
 	return set
 }
 
+func profitBoardReportHasLoadedSection(report *ProfitBoardReport, section string) bool {
+	if report == nil || strings.TrimSpace(section) == "" {
+		return false
+	}
+	for _, loaded := range report.Meta.LoadedSections {
+		if loaded == section {
+			return true
+		}
+	}
+	return false
+}
+
 func profitBoardShouldUseHourlyBase(granularity string, customIntervalMinutes int) bool {
 	switch strings.ToLower(strings.TrimSpace(granularity)) {
 	case "", "hour", "day", "week", "month":
@@ -3609,6 +3621,11 @@ func generateProfitBoardReport(query ProfitBoardQuery, applyDetailLimit bool) (*
 
 func GenerateProfitBoardOverview(payload ProfitBoardConfigPayload) (*ProfitBoardReport, error) {
 	if profitBoardAggregateSummaryEnabled() {
+		if snapshot, found, err := GetProfitBoardOverviewSnapshot(payload); err != nil {
+			return nil, err
+		} else if found {
+			return snapshot, nil
+		}
 		return generateProfitBoardOverviewSummary(payload)
 	}
 	normalizedBatches, signature, _, err := normalizeProfitBoardBatches(payload.Batches, payload.Selection)

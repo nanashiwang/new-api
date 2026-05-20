@@ -461,15 +461,26 @@ func StartProfitBoardAggregateSyncTask() {
 		if !common.IsMasterNode {
 			return
 		}
+		syncSnapshots := func() {
+			if err := SyncProfitBoardOverviewSnapshots(); err != nil {
+				common.SysError("profit board overview snapshot sync failed: " + err.Error())
+			}
+		}
 		go func() {
 			common.SysLog("profit board aggregate sync task started")
-			_ = SyncProfitBoardAggregate(true)
+			if err := SyncProfitBoardAggregate(true); err != nil {
+				common.SysError("profit board aggregate sync failed: " + err.Error())
+			} else {
+				syncSnapshots()
+			}
 			ticker := time.NewTicker(profitBoardAggregateSyncInterval())
 			defer ticker.Stop()
 			for range ticker.C {
 				if err := SyncProfitBoardAggregate(true); err != nil {
 					common.SysError("profit board aggregate sync failed: " + err.Error())
+					continue
 				}
+				syncSnapshots()
 			}
 		}()
 	})
@@ -1194,10 +1205,10 @@ func accumulateProfitBoardSegment(
 }
 
 func generateProfitBoardSummaryReport(query ProfitBoardQuery) (*ProfitBoardReport, error) {
-	return generateProfitBoardSummaryReportInternal(query, false)
+	return generateProfitBoardSummaryReportInternal(query, false, true)
 }
 
-func generateProfitBoardSummaryReportInternal(query ProfitBoardQuery, cumulativeOverview bool) (*ProfitBoardReport, error) {
+func generateProfitBoardSummaryReportInternal(query ProfitBoardQuery, cumulativeOverview bool, useCache bool) (*ProfitBoardReport, error) {
 	normalizedQuery, signature, err := normalizeProfitBoardQuery(query)
 	if err != nil {
 		return nil, err
@@ -1212,7 +1223,7 @@ func generateProfitBoardSummaryReportInternal(query ProfitBoardQuery, cumulative
 		return nil, err
 	}
 	resolvedBatchFingerprint := buildProfitBoardResolvedBatchFingerprint(resolvedBatches, resolvedBatchWarnings)
-	if cacheKey := buildProfitBoardReportCacheKey(normalizedQuery, resolvedBatchFingerprint); cacheKey != "" {
+	if cacheKey := buildProfitBoardReportCacheKey(normalizedQuery, resolvedBatchFingerprint); useCache && cacheKey != "" {
 		if cached, found, cacheErr := getProfitBoardReportCache().Get(cacheKey); cacheErr == nil && found {
 			rebucketProfitBoardTimeseries(&cached, normalizedQuery.Granularity, normalizedQuery.CustomIntervalMinutes)
 			return &cached, nil
@@ -1511,13 +1522,17 @@ func generateProfitBoardSummaryReportInternal(query ProfitBoardQuery, cumulative
 		}, profitBoardWarningReasonLabels())
 		report.Warnings = uniqueProfitBoardWarnings(report.Warnings)
 	}
-	if cacheKey := buildProfitBoardReportCacheKey(normalizedQuery, resolvedBatchFingerprint); cacheKey != "" {
+	if cacheKey := buildProfitBoardReportCacheKey(normalizedQuery, resolvedBatchFingerprint); useCache && cacheKey != "" {
 		_ = getProfitBoardReportCache().SetWithTTL(cacheKey, *report, profitBoardReportCacheTTL())
 	}
 	return report, nil
 }
 
 func generateProfitBoardOverviewSummary(payload ProfitBoardConfigPayload) (*ProfitBoardReport, error) {
+	return generateProfitBoardOverviewSummaryWithCache(payload, true)
+}
+
+func generateProfitBoardOverviewSummaryWithCache(payload ProfitBoardConfigPayload, useCache bool) (*ProfitBoardReport, error) {
 	normalizedBatches, signature, _, err := normalizeProfitBoardBatches(payload.Batches, payload.Selection)
 	if err != nil {
 		return nil, err
@@ -1527,6 +1542,7 @@ func generateProfitBoardOverviewSummary(payload ProfitBoardConfigPayload) (*Prof
 	payload.SharedSite = normalizeProfitBoardSharedSiteConfig(payload.SharedSite, payload.Site)
 	payload.ExcludedUserIDs = normalizeProfitBoardExcludedUserIDs(payload.ExcludedUserIDs)
 	payload.ComboConfigs = normalizeProfitBoardComboConfigs(normalizedBatches, payload.ComboConfigs, payload.SharedSite, payload.Site, payload.Upstream)
+	payload.ComboConfigs = hydrateProfitBoardRemoteObserverSecrets(signature, payload.ComboConfigs)
 	if err = validateProfitBoardPricingConfig(payload.Upstream, false); err != nil {
 		return nil, err
 	}
@@ -1542,7 +1558,7 @@ func generateProfitBoardOverviewSummary(payload ProfitBoardConfigPayload) (*Prof
 	}
 	resolvedBatchFingerprint := buildProfitBoardResolvedBatchFingerprint(resolvedBatches, resolvedBatchWarnings)
 	overviewCacheKey := buildProfitBoardOverviewCacheKey(payload, resolvedBatchFingerprint)
-	if overviewCacheKey != "" {
+	if useCache && overviewCacheKey != "" {
 		if cached, found, cacheErr := getProfitBoardOverviewCache().Get(overviewCacheKey); cacheErr == nil && found {
 			return &cached, nil
 		}
@@ -1558,12 +1574,9 @@ func generateProfitBoardOverviewSummary(payload ProfitBoardConfigPayload) (*Prof
 		EndTimestamp:    common.GetTimestamp(),
 		Granularity:     "day",
 		Sections: []string{
-			profitBoardSectionTimeseries,
-			profitBoardSectionChannelBreakdown,
-			profitBoardSectionModelBreakdown,
 			profitBoardSectionWarningItems,
 		},
-	}, true)
+	}, true, useCache)
 	if err != nil {
 		return nil, err
 	}
@@ -1581,7 +1594,7 @@ func generateProfitBoardOverviewSummary(payload ProfitBoardConfigPayload) (*Prof
 	for index := range report.Warnings {
 		report.Warnings[index] = strings.Replace(report.Warnings[index], "部分日志", "累计总览中部分日志", 1)
 	}
-	if overviewCacheKey != "" {
+	if useCache && overviewCacheKey != "" {
 		_ = getProfitBoardOverviewCache().SetWithTTL(overviewCacheKey, *report, profitBoardReportCacheTTL())
 		_ = getProfitBoardOverviewStaleCache().SetWithTTL(overviewCacheKey, *report, 10*time.Minute)
 	}

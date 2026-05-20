@@ -125,7 +125,7 @@ func setupProfitBoardTestDB(t *testing.T) *gorm.DB {
 		initCol()
 	})
 
-	if err := db.AutoMigrate(&User{}, &Channel{}, &Log{}, &Ability{}, &Model{}, &Vendor{}, &ProfitBoardConfig{}, &ProfitBoardUpstreamAccount{}, &ProfitBoardRemoteSnapshot{}, &ProfitBoardHourlyStat{}, &ProfitBoardAggregateState{}); err != nil {
+	if err := db.AutoMigrate(&User{}, &Channel{}, &Log{}, &Ability{}, &Model{}, &Vendor{}, &ProfitBoardConfig{}, &ProfitBoardUpstreamAccount{}, &ProfitBoardRemoteSnapshot{}, &ProfitBoardHourlyStat{}, &ProfitBoardAggregateState{}, &ProfitBoardOverviewSnapshot{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db
@@ -3115,6 +3115,260 @@ func TestGenerateProfitBoardReportSupportsSections(t *testing.T) {
 	}
 	if report.Meta.LoadedSections[0] == "" {
 		t.Fatalf("expected non-empty loaded sections, got %+v", report.Meta.LoadedSections)
+	}
+}
+
+func TestGenerateProfitBoardOverviewUsesSummaryOnlySections(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	originQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 1000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originQuotaPerUnit
+	})
+
+	channel := Channel{Id: 1, Name: "overview-alpha", Tag: common.GetPointer("vip"), Status: common.ChannelStatusEnabled}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+	now := common.GetTimestamp()
+	if err := db.Create(&Log{
+		Id:               1,
+		Type:             LogTypeConsume,
+		CreatedAt:        now - 30,
+		ChannelId:        1,
+		ModelName:        "gpt-4.1",
+		PromptTokens:     1000,
+		CompletionTokens: 100,
+		Quota:            5,
+	}).Error; err != nil {
+		t.Fatalf("seed log: %v", err)
+	}
+
+	overview, err := generateProfitBoardOverviewSummaryWithCache(ProfitBoardConfigPayload{
+		Batches: []ProfitBoardBatch{{
+			Id:         "batch-1",
+			Name:       "批次 1",
+			ScopeType:  ProfitBoardScopeChannel,
+			ChannelIDs: []int{1},
+			CreatedAt:  now - 60,
+		}},
+		ComboConfigs: []ProfitBoardComboPricingConfig{{
+			ComboId:              "batch-1",
+			SiteFixedTotalAmount: 0.5,
+			SiteRules:            []ProfitBoardModelPricingRule{{IsDefault: true, InputPrice: 5, OutputPrice: 10}},
+			UpstreamRules:        []ProfitBoardModelPricingRule{{IsDefault: true, InputPrice: 2, OutputPrice: 4}},
+		}},
+		Upstream: ProfitBoardTokenPricingConfig{CostSource: ProfitBoardCostSourceManualOnly},
+		Site:     ProfitBoardTokenPricingConfig{PricingMode: ProfitBoardSitePricingManual},
+	}, false)
+	if err != nil {
+		t.Fatalf("generateProfitBoardOverviewSummaryWithCache: %v", err)
+	}
+
+	if overview.Meta.CumulativeScope != "all_time" {
+		t.Fatalf("expected all-time overview, got %+v", overview.Meta)
+	}
+	if len(overview.Meta.LoadedSections) != 1 || overview.Meta.LoadedSections[0] != profitBoardSectionWarningItems {
+		t.Fatalf("expected only warning_items section loaded, got %+v", overview.Meta.LoadedSections)
+	}
+	if len(overview.Timeseries) != 0 {
+		t.Fatalf("expected overview to skip timeseries, got %+v", overview.Timeseries)
+	}
+	if len(overview.ChannelBreakdown) != 0 {
+		t.Fatalf("expected overview to skip channel breakdown, got %+v", overview.ChannelBreakdown)
+	}
+	if len(overview.ModelBreakdown) != 0 {
+		t.Fatalf("expected overview to skip model breakdown, got %+v", overview.ModelBreakdown)
+	}
+	if overview.Summary.RequestCount != 1 || overview.Summary.ConfiguredSiteRevenueUSD != 0.506 {
+		t.Fatalf("unexpected overview summary: %+v", overview.Summary)
+	}
+}
+
+func TestProfitBoardOverviewSnapshotHitAndInvalidatesOnAggregateWatermark(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	originQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 1000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originQuotaPerUnit
+	})
+
+	channel := Channel{Id: 1, Name: "snapshot-alpha", Status: common.ChannelStatusEnabled}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+	now := common.GetTimestamp()
+	if err := db.Create(&Log{
+		Id:               1,
+		Type:             LogTypeConsume,
+		CreatedAt:        now - 60,
+		ChannelId:        1,
+		ModelName:        "gpt-4.1",
+		PromptTokens:     1000,
+		CompletionTokens: 0,
+		Quota:            5,
+	}).Error; err != nil {
+		t.Fatalf("seed log: %v", err)
+	}
+
+	payload := ProfitBoardConfigPayload{
+		Batches: []ProfitBoardBatch{{
+			Id:         "batch-1",
+			Name:       "批次 1",
+			ScopeType:  ProfitBoardScopeChannel,
+			ChannelIDs: []int{1},
+			CreatedAt:  now - 120,
+		}},
+		ComboConfigs: []ProfitBoardComboPricingConfig{{
+			ComboId:       "batch-1",
+			SiteRules:     []ProfitBoardModelPricingRule{{IsDefault: true, InputPrice: 5}},
+			UpstreamRules: []ProfitBoardModelPricingRule{{IsDefault: true, InputPrice: 2}},
+		}},
+		Upstream: ProfitBoardTokenPricingConfig{CostSource: ProfitBoardCostSourceManualOnly},
+		Site:     ProfitBoardTokenPricingConfig{PricingMode: ProfitBoardSitePricingManual},
+	}
+
+	if err := SyncProfitBoardOverviewSnapshotForPayload(payload); err != nil {
+		t.Fatalf("SyncProfitBoardOverviewSnapshotForPayload: %v", err)
+	}
+	var snapshotCount int64
+	if err := db.Model(&ProfitBoardOverviewSnapshot{}).Count(&snapshotCount).Error; err != nil {
+		t.Fatalf("count snapshots: %v", err)
+	}
+	if snapshotCount != 1 {
+		t.Fatalf("expected one snapshot, got %d", snapshotCount)
+	}
+
+	snapshot, found, err := GetProfitBoardOverviewSnapshot(payload)
+	if err != nil {
+		t.Fatalf("GetProfitBoardOverviewSnapshot: %v", err)
+	}
+	if !found {
+		t.Fatal("expected snapshot hit")
+	}
+	if snapshot.Summary.RequestCount != 1 || len(snapshot.Timeseries) != 0 {
+		t.Fatalf("unexpected snapshot report: summary=%+v timeseries=%+v", snapshot.Summary, snapshot.Timeseries)
+	}
+
+	if err := db.Create(&Log{
+		Id:               2,
+		Type:             LogTypeConsume,
+		CreatedAt:        now + 10,
+		ChannelId:        1,
+		ModelName:        "gpt-4.1",
+		PromptTokens:     1000,
+		CompletionTokens: 0,
+		Quota:            5,
+	}).Error; err != nil {
+		t.Fatalf("seed second log: %v", err)
+	}
+	if _, err := syncProfitBoardAggregateLiveToLatest(); err != nil {
+		t.Fatalf("syncProfitBoardAggregateLiveToLatest: %v", err)
+	}
+
+	_, found, err = GetProfitBoardOverviewSnapshot(payload)
+	if err != nil {
+		t.Fatalf("GetProfitBoardOverviewSnapshot after watermark change: %v", err)
+	}
+	if found {
+		t.Fatal("expected snapshot miss after aggregate watermark changed")
+	}
+}
+
+func TestProfitBoardOverviewSnapshotInvalidatesOnWalletAccountConfigChange(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	originQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 1000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originQuotaPerUnit
+	})
+
+	channel := Channel{Id: 1, Name: "wallet-alpha", Status: common.ChannelStatusEnabled}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+	now := common.GetTimestamp()
+	encryptedToken, err := encryptProfitBoardRemoteSecret("wallet-token-1")
+	if err != nil {
+		t.Fatalf("encrypt token: %v", err)
+	}
+	account := ProfitBoardUpstreamAccount{
+		Name:                 "钱包账户",
+		AccountType:          ProfitBoardUpstreamAccountTypeNewAPI,
+		BaseURL:              "https://remote.example.com",
+		UserID:               9,
+		Enabled:              true,
+		AccessTokenEncrypted: encryptedToken,
+		CreatedAt:            now - 300,
+		UpdatedAt:            now - 300,
+	}
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+	config := account.remoteObserverConfig()
+	signature := profitBoardUpstreamAccountSnapshotSignature(account.Id)
+	seedProfitBoardRemoteSnapshot(t, signature, profitBoardUpstreamAccountSnapshotComboID, config, now-180, 900, 100, nil)
+	seedProfitBoardRemoteSnapshot(t, signature, profitBoardUpstreamAccountSnapshotComboID, config, now-60, 800, 200, nil)
+	if err := db.Create(&Log{
+		Id:               1,
+		Type:             LogTypeConsume,
+		CreatedAt:        now - 120,
+		ChannelId:        1,
+		ModelName:        "gpt-4.1",
+		PromptTokens:     1000,
+		CompletionTokens: 0,
+		Quota:            5,
+	}).Error; err != nil {
+		t.Fatalf("seed log: %v", err)
+	}
+
+	payload := ProfitBoardConfigPayload{
+		Batches: []ProfitBoardBatch{{
+			Id:         "wallet-batch",
+			Name:       "钱包组合",
+			ScopeType:  ProfitBoardScopeChannel,
+			ChannelIDs: []int{1},
+			CreatedAt:  now - 240,
+		}},
+		ComboConfigs: []ProfitBoardComboPricingConfig{{
+			ComboId:           "wallet-batch",
+			UpstreamMode:      ProfitBoardUpstreamModeWallet,
+			UpstreamAccountID: account.Id,
+			SiteRules:         []ProfitBoardModelPricingRule{{IsDefault: true, InputPrice: 5}},
+		}},
+		Upstream: ProfitBoardTokenPricingConfig{CostSource: ProfitBoardCostSourceManualOnly},
+		Site:     ProfitBoardTokenPricingConfig{PricingMode: ProfitBoardSitePricingManual},
+	}
+
+	if err := SyncProfitBoardOverviewSnapshotForPayload(payload); err != nil {
+		t.Fatalf("SyncProfitBoardOverviewSnapshotForPayload: %v", err)
+	}
+	if _, found, err := GetProfitBoardOverviewSnapshot(payload); err != nil {
+		t.Fatalf("GetProfitBoardOverviewSnapshot: %v", err)
+	} else if !found {
+		t.Fatal("expected snapshot hit")
+	}
+
+	updatedToken, err := encryptProfitBoardRemoteSecret("wallet-token-2")
+	if err != nil {
+		t.Fatalf("encrypt updated token: %v", err)
+	}
+	if err := db.Model(&ProfitBoardUpstreamAccount{}).
+		Where("id = ?", account.Id).
+		Updates(map[string]any{
+			"access_token_encrypted": updatedToken,
+			"updated_at":             now + 60,
+		}).Error; err != nil {
+		t.Fatalf("update account: %v", err)
+	}
+
+	if _, found, err := GetProfitBoardOverviewSnapshot(payload); err != nil {
+		t.Fatalf("GetProfitBoardOverviewSnapshot after account change: %v", err)
+	} else if found {
+		t.Fatal("expected snapshot miss after wallet account config changed")
 	}
 }
 
