@@ -67,6 +67,7 @@ const NotificationSettings = ({
     chat: {
       enabled: true,
       playground: true,
+      imagePlayground: true,
       chat: true,
     },
     console: {
@@ -156,7 +157,12 @@ const NotificationSettings = ({
 
   const resetSidebarModules = () => {
     const defaultConfig = {
-      chat: { enabled: true, playground: true, chat: true },
+      chat: {
+        enabled: true,
+        playground: true,
+        imagePlayground: true,
+        chat: true,
+      },
       console: {
         enabled: true,
         detail: true,
@@ -207,7 +213,7 @@ const NotificationSettings = ({
           } else {
             userConf = userRes.data.data.sidebar_modules;
           }
-          setSidebarModulesUser(userConf);
+          setSidebarModulesUser(mergeAdminConfig(userConf));
         }
       } catch (error) {
         console.error('加载边栏配置失败:', error);
@@ -253,6 +259,11 @@ const NotificationSettings = ({
           key: 'playground',
           title: t('操练场'),
           description: t('AI模型测试环境'),
+        },
+        {
+          key: 'imagePlayground',
+          title: t('AI 生图'),
+          description: t('图片生成工作台'),
         },
         { key: 'chat', title: t('聊天'), description: t('聊天会话管理') },
       ],

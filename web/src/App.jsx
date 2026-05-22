@@ -51,6 +51,7 @@ const Task = lazy(() => import('./pages/Task'));
 const ModelPage = lazy(() => import('./pages/Model'));
 const ModelDeploymentPage = lazy(() => import('./pages/ModelDeployment'));
 const Playground = lazy(() => import('./pages/Playground'));
+const ImagePlayground = lazy(() => import('./pages/ImagePlayground'));
 const Subscription = lazy(() => import('./pages/Subscription'));
 const Usage = lazy(() => import('./pages/Usage'));
 const UserAgreement = lazy(() => import('./pages/UserAgreement'));
@@ -177,6 +178,16 @@ function App() {
             <PrivateRoute>
               <Suspense fallback={<Loading></Loading>} key={location.pathname}>
                 <Playground />
+              </Suspense>
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path='/console/image-playground'
+          element={
+            <PrivateRoute>
+              <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+                <ImagePlayground />
               </Suspense>
             </PrivateRoute>
           }

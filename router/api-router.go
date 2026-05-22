@@ -36,6 +36,7 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.POST("/usage/public_token/stats/batch", middleware.PublicTokenUsageRateLimit(), controller.GetPublicTokenBatchStats)
 		apiRouter.POST("/usage/public_token/logs", middleware.PublicTokenUsageRateLimit(), controller.GetPublicTokenLogs)
 		apiRouter.GET("/pricing", middleware.TryUserAuth(), controller.GetPricing)
+		apiRouter.POST("/image-playground/session", middleware.UserAuth(), controller.CreateImagePlaygroundSession)
 		perfMetricsRoute := apiRouter.Group("/perf-metrics")
 		perfMetricsRoute.Use(middleware.TryUserAuth())
 		{

@@ -13,6 +13,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const TokenSourceTypeImagePlayground = "image_playground"
+
 type Token struct {
 	Id                      int            `json:"id"`
 	UserId                  int            `json:"user_id" gorm:"index"`
@@ -417,6 +419,28 @@ func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
 	fromDB = true
 	err = DB.Where(commonKeyCol+" = ?", key).First(&token).Error
 	return token, err
+}
+
+func GetReusableImagePlaygroundToken(userId int, minExpiredTime int64) (*Token, error) {
+	token := &Token{}
+	err := DB.Where(
+		"user_id = ? AND source_type = ? AND status = ? AND expired_time > ?",
+		userId,
+		TokenSourceTypeImagePlayground,
+		common.TokenStatusEnabled,
+		minExpiredTime,
+	).Order("expired_time desc").First(token).Error
+	return token, err
+}
+
+func DeleteExpiredImagePlaygroundTokens(userId int, now int64) error {
+	return DB.Where(
+		"user_id = ? AND source_type = ? AND expired_time > ? AND expired_time < ?",
+		userId,
+		TokenSourceTypeImagePlayground,
+		0,
+		now,
+	).Delete(&Token{}).Error
 }
 
 func (token *Token) Insert() error {

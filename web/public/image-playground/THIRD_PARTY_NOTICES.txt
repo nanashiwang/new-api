@@ -1,0 +1,4 @@
+gpt_image_playground
+Source: https://github.com/CookSleep/gpt_image_playground
+Version: 0.4.2, commit cc724a7
+License: MIT. See LICENSE.gpt_image_playground in this directory.
