@@ -17,6 +17,9 @@ func SetWebRouter(router *gin.Engine, buildFS embed.FS, indexPage []byte) {
 	router.Use(gzip.Gzip(gzip.DefaultCompression))
 	router.Use(middleware.GlobalWebRateLimit())
 	router.Use(middleware.Cache())
+	if imagePlaygroundIndex, err := buildFS.ReadFile("web/dist/image-playground/index.html"); err == nil {
+		registerImagePlaygroundIndexRoutes(router, imagePlaygroundIndex)
+	}
 	router.Use(static.Serve("/", common.EmbedFolder(buildFS, "web/dist")))
 	router.NoRoute(func(c *gin.Context) {
 		c.Set(middleware.RouteTagKey, "web")
@@ -27,4 +30,13 @@ func SetWebRouter(router *gin.Engine, buildFS embed.FS, indexPage []byte) {
 		c.Header("Cache-Control", "no-cache")
 		c.Data(http.StatusOK, "text/html; charset=utf-8", indexPage)
 	})
+}
+
+func registerImagePlaygroundIndexRoutes(router *gin.Engine, indexPage []byte) {
+	serve := func(c *gin.Context) {
+		c.Header("Cache-Control", "no-cache")
+		c.Data(http.StatusOK, "text/html; charset=utf-8", indexPage)
+	}
+	router.GET("/image-playground", serve)
+	router.GET("/image-playground/", serve)
 }
