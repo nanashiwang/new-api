@@ -109,10 +109,16 @@ func createImagePlaygroundToken(userId int, now int64) (*model.Token, error) {
 }
 
 func buildImagePlaygroundOrigin(c *gin.Context) string {
+	if origin := buildImagePlaygroundRequestOrigin(c); origin != "" {
+		return origin
+	}
 	if serverAddress := strings.TrimSpace(system_setting.ServerAddress); serverAddress != "" {
 		return strings.TrimRight(serverAddress, "/")
 	}
+	return ""
+}
 
+func buildImagePlaygroundRequestOrigin(c *gin.Context) string {
 	host := firstHeaderValue(c.GetHeader("X-Forwarded-Host"))
 	if host == "" {
 		host = c.Request.Host
