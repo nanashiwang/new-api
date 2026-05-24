@@ -25,7 +25,7 @@ import { ChevronLeft } from 'lucide-react';
 import { useSidebarCollapsed } from '../../hooks/common/useSidebarCollapsed';
 import { useSidebar } from '../../hooks/common/useSidebar';
 import { useMinimumLoadingTime } from '../../hooks/common/useMinimumLoadingTime';
-import { isAdmin, isRoot, showError } from '../../helpers';
+import { API, isAdmin, isRoot, showError } from '../../helpers';
 import SkeletonWrapper from './components/SkeletonWrapper';
 
 import { Nav, Divider, Button } from '@douyinfe/semi-ui';
@@ -67,8 +67,33 @@ const SiderBar = ({ onNavigate = () => {} }) => {
   const [selectedKeys, setSelectedKeys] = useState(['home']);
   const [chatItems, setChatItems] = useState([]);
   const [openedKeys, setOpenedKeys] = useState([]);
+  const [imagePlaygroundLaunching, setImagePlaygroundLaunching] =
+    useState(false);
   const location = useLocation();
   const [routerMapState, setRouterMapState] = useState(routerMap);
+
+  const launchImagePlayground = async () => {
+    if (imagePlaygroundLaunching) return;
+    setImagePlaygroundLaunching(true);
+    setSelectedKeys(['imagePlayground']);
+    onNavigate();
+    try {
+      const res = await API.post(
+        '/api/image-playground/session',
+        {},
+        { skipGlobalLoading: true },
+      );
+      if (res.data?.success && res.data?.data?.url) {
+        window.location.assign(res.data.data.url);
+        return;
+      }
+      showError(res.data?.message || t('创建生图会话失败'));
+    } catch (e) {
+      showError(e?.message || t('创建生图会话失败'));
+    } finally {
+      setImagePlaygroundLaunching(false);
+    }
+  };
 
   const workspaceItems = useMemo(() => {
     const items = [
@@ -433,6 +458,24 @@ const SiderBar = ({ onNavigate = () => {} }) => {
 
             // 如果没有路由，直接返回元素
             if (!to) return itemElement;
+
+            if (props.itemKey === 'imagePlayground') {
+              return (
+                <button
+                  type='button'
+                  onClick={launchImagePlayground}
+                  disabled={imagePlaygroundLaunching}
+                  style={{
+                    all: 'unset',
+                    cursor: imagePlaygroundLaunching ? 'wait' : 'pointer',
+                    display: 'block',
+                    width: '100%',
+                  }}
+                >
+                  {itemElement}
+                </button>
+              );
+            }
 
             return (
               <Link

@@ -29,6 +29,7 @@ const ImagePlayground = () => {
   const [error, setError] = useState('');
 
   const createSession = useCallback(async () => {
+    let redirected = false;
     setLoading(true);
     setError('');
     try {
@@ -38,6 +39,7 @@ const ImagePlayground = () => {
         { skipGlobalLoading: true },
       );
       if (res.data?.success && res.data?.data?.url) {
+        redirected = true;
         window.location.replace(res.data.data.url);
         return;
       }
@@ -48,7 +50,9 @@ const ImagePlayground = () => {
       const message = err?.message || t('创建生图会话失败');
       setError(message);
     } finally {
-      setLoading(false);
+      if (!redirected) {
+        setLoading(false);
+      }
     }
   }, [t]);
 
