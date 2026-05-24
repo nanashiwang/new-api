@@ -27,9 +27,9 @@ import {
   timestamp2string,
   timestamp2string1,
   isDataCrossYear,
-  copy,
-  showSuccess,
-} from './utils';
+} from './date';
+import { copy } from './clipboard';
+import { showSuccess } from './toast';
 import {
   STORAGE_KEYS,
   DEFAULT_TIME_INTERVALS,

@@ -24,6 +24,122 @@ import path from 'path';
 import { codeInspectorPlugin } from 'code-inspector-plugin';
 const { vitePluginSemi } = pkg;
 
+const nodeModuleId = (id, name) =>
+  id.includes(`/node_modules/${name}/`) ||
+  id.includes(`/node_modules/${name}\\`);
+
+const scopedNodeModuleId = (id, scope, name) =>
+  id.includes(`/node_modules/${scope}/${name}/`) ||
+  id.includes(`/node_modules/${scope}\\${name}\\`);
+
+const manualChunks = (id) => {
+  if (id.includes('vite/preload-helper')) {
+    return 'preload-helper';
+  }
+
+  if (id.includes('commonjsHelpers.js')) {
+    return 'commonjs-helpers';
+  }
+
+  if (!id.includes('node_modules')) {
+    return;
+  }
+
+  if (
+    nodeModuleId(id, 'react') ||
+    nodeModuleId(id, 'react-dom') ||
+    nodeModuleId(id, 'react-router-dom')
+  ) {
+    return 'react-core';
+  }
+
+  if (
+    scopedNodeModuleId(id, '@douyinfe', 'semi-icons') ||
+    scopedNodeModuleId(id, '@douyinfe', 'semi-ui')
+  ) {
+    return 'semi-ui';
+  }
+
+  if (nodeModuleId(id, 'axios') || nodeModuleId(id, 'history')) {
+    return 'tools';
+  }
+
+  if (nodeModuleId(id, 'marked')) {
+    return 'marked';
+  }
+
+  if (nodeModuleId(id, 'react-toastify')) {
+    return 'toastify';
+  }
+
+  if (nodeModuleId(id, 'react-fireworks')) {
+    return 'fireworks';
+  }
+
+  if (
+    nodeModuleId(id, 'react-dropzone') ||
+    nodeModuleId(id, 'react-telegram-login') ||
+    nodeModuleId(id, 'react-turnstile')
+  ) {
+    return 'react-integrations';
+  }
+
+  if (
+    nodeModuleId(id, 'i18next') ||
+    nodeModuleId(id, 'react-i18next') ||
+    nodeModuleId(id, 'i18next-browser-languagedetector')
+  ) {
+    return 'i18n';
+  }
+
+  if (nodeModuleId(id, 'mermaid')) {
+    return 'mermaid';
+  }
+
+  if (
+    scopedNodeModuleId(id, '@visactor', 'vchart') ||
+    scopedNodeModuleId(id, '@visactor', 'react-vchart') ||
+    scopedNodeModuleId(id, '@visactor', 'vchart-semi-theme')
+  ) {
+    return 'vchart';
+  }
+
+  if (
+    nodeModuleId(id, 'react-markdown') ||
+    nodeModuleId(id, 'remark-gfm') ||
+    nodeModuleId(id, 'remark-math') ||
+    nodeModuleId(id, 'remark-breaks') ||
+    nodeModuleId(id, 'rehype-highlight') ||
+    nodeModuleId(id, 'rehype-katex')
+  ) {
+    return 'markdown';
+  }
+
+  if (nodeModuleId(id, 'katex')) {
+    return 'katex';
+  }
+};
+
+const shouldPreloadFromHtml = (file) =>
+  /^assets\/(react-core|semi-ui|i18n|tools|preload-helper)-/.test(file);
+
+const stripNonCriticalHtmlAssets = () => ({
+  name: 'strip-non-critical-html-assets',
+  apply: 'build',
+  enforce: 'post',
+  generateBundle(_, bundle) {
+    for (const asset of Object.values(bundle)) {
+      if (asset.type !== 'asset' || !asset.fileName.endsWith('.html')) {
+        continue;
+      }
+      asset.source = String(asset.source).replace(
+        /\s*<link rel="stylesheet" crossorigin href="\/assets\/(?:katex|MarkdownRenderer)-[^"]+\.css">/g,
+        '',
+      );
+    }
+  },
+});
+
 // https://vitejs.dev/config/
 export default defineConfig({
   resolve: {
@@ -54,6 +170,7 @@ export default defineConfig({
     vitePluginSemi({
       cssLayer: true,
     }),
+    stripNonCriticalHtmlAssets(),
   ],
   optimizeDeps: {
     esbuildOptions: {
@@ -64,40 +181,18 @@ export default defineConfig({
     },
   },
   build: {
+    modulePreload: {
+      resolveDependencies(filename, deps, { hostType }) {
+        if (hostType !== 'html') {
+          return deps;
+        }
+        return deps.filter(shouldPreloadFromHtml);
+      },
+    },
     rollupOptions: {
       output: {
-        manualChunks: {
-          'react-core': ['react', 'react-dom', 'react-router-dom'],
-          'semi-ui': ['@douyinfe/semi-icons', '@douyinfe/semi-ui'],
-          tools: ['axios', 'history', 'marked'],
-          'react-components': [
-            'react-dropzone',
-            'react-fireworks',
-            'react-telegram-login',
-            'react-toastify',
-            'react-turnstile',
-          ],
-          i18n: [
-            'i18next',
-            'react-i18next',
-            'i18next-browser-languagedetector',
-          ],
-          mermaid: ['mermaid'],
-          vchart: [
-            '@visactor/vchart',
-            '@visactor/react-vchart',
-            '@visactor/vchart-semi-theme',
-          ],
-          markdown: [
-            'react-markdown',
-            'remark-gfm',
-            'remark-math',
-            'remark-breaks',
-            'rehype-highlight',
-            'rehype-katex',
-          ],
-          katex: ['katex'],
-        },
+        hoistTransitiveImports: false,
+        manualChunks,
       },
     },
   },

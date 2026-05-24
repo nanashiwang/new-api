@@ -18,9 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { Toast } from '@douyinfe/semi-ui';
-import { toastConstants } from '../constants';
+import { toastConstants } from '../constants/toast.constants';
 import React from 'react';
-import { toast } from 'react-toastify';
 import { MOBILE_BREAKPOINT } from '../hooks/common/useIsMobile';
 import i18n from '../i18n/i18n';
 
@@ -88,7 +87,11 @@ export function showInfo(message) {
 
 export function showNotice(message, isHTML = false) {
   if (isHTML) {
-    toast(<HTMLToastContent htmlContent={message} />, showNoticeOptions);
+    Toast.info({
+      content: <HTMLToastContent htmlContent={message} />,
+      duration: 0,
+      ...showNoticeOptions,
+    });
   } else {
     Toast.info(message);
   }

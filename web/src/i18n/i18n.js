@@ -21,33 +21,85 @@ import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import LanguageDetector from 'i18next-browser-languagedetector';
 
-import enTranslation from './locales/en.json';
-import frTranslation from './locales/fr.json';
-import zhCNTranslation from './locales/zh-CN.json';
-import zhTWTranslation from './locales/zh-TW.json';
-import ruTranslation from './locales/ru.json';
-import jaTranslation from './locales/ja.json';
-import viTranslation from './locales/vi.json';
+const localeLoaders = {
+  'zh-CN': () => import('./locales/zh-CN.json'),
+  en: () => import('./locales/en.json'),
+  fr: () => import('./locales/fr.json'),
+  'zh-TW': () => import('./locales/zh-TW.json'),
+  ru: () => import('./locales/ru.json'),
+  ja: () => import('./locales/ja.json'),
+  vi: () => import('./locales/vi.json'),
+};
 
-i18n
+const normalizeLanguage = (lng) => {
+  if (!lng) return 'zh-CN';
+  if (lng.startsWith('zh-TW') || lng.startsWith('zh-HK')) return 'zh-TW';
+  if (lng.startsWith('zh')) return 'zh-CN';
+  const shortLng = lng.split('-')[0];
+  return localeLoaders[lng] ? lng : localeLoaders[shortLng] ? shortLng : 'zh-CN';
+};
+
+const loadLocale = async (lng) => {
+  const normalizedLng = normalizeLanguage(lng);
+  if (i18n.hasResourceBundle(normalizedLng, 'translation')) {
+    return normalizedLng;
+  }
+  const loader = localeLoaders[normalizedLng];
+  if (!loader) {
+    return 'zh-CN';
+  }
+  const module = await loader();
+  const resources = module.default || module;
+  i18n.addResourceBundle(
+    normalizedLng,
+    'translation',
+    resources.translation || resources,
+    true,
+    true,
+  );
+  return normalizedLng;
+};
+
+const loadLocaleWhenIdle = (lng) => {
+  const load = () => {
+    i18n.changeLanguage(lng).catch((error) => {
+      console.error('Failed to load locale:', error);
+    });
+  };
+
+  if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+    window.requestIdleCallback(load, { timeout: 4000 });
+  } else {
+    setTimeout(load, 2000);
+  }
+};
+
+const initPromise = i18n
   .use(LanguageDetector)
   .use(initReactI18next)
   .init({
     load: 'currentOnly',
-    resources: {
-      en: enTranslation,
-      'zh-CN': zhCNTranslation,
-      'zh-TW': zhTWTranslation,
-      fr: frTranslation,
-      ru: ruTranslation,
-      ja: jaTranslation,
-      vi: viTranslation,
-    },
+    resources: {},
     fallbackLng: 'zh-CN',
     nsSeparator: false,
     interpolation: {
       escapeValue: false,
     },
   });
+
+const changeLanguage = i18n.changeLanguage.bind(i18n);
+i18n.changeLanguage = async (lng, callback) => {
+  const normalizedLng = await loadLocale(lng);
+  return changeLanguage(normalizedLng, callback);
+};
+
+initPromise.then(() => {
+  const normalizedLng = normalizeLanguage(i18n.language);
+  if (normalizedLng === 'zh-CN') {
+    loadLocaleWhenIdle(normalizedLng);
+  } else {
+    i18n.changeLanguage(normalizedLng);
+  }
+});
 
 export default i18n;

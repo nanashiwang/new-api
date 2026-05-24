@@ -20,12 +20,14 @@ For commercial licensing, please contact support@quantumnous.com
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { getLucideIcon } from '../../helpers/render';
+import { getLucideIcon } from './sidebarIcons';
 import { ChevronLeft } from 'lucide-react';
 import { useSidebarCollapsed } from '../../hooks/common/useSidebarCollapsed';
 import { useSidebar } from '../../hooks/common/useSidebar';
 import { useMinimumLoadingTime } from '../../hooks/common/useMinimumLoadingTime';
-import { API, isAdmin, isRoot, showError } from '../../helpers';
+import { API } from '../../helpers/apiCore';
+import { isAdmin, isRoot } from '../../helpers/storage';
+import { showError } from '../../helpers/toast';
 import SkeletonWrapper from './components/SkeletonWrapper';
 
 import { Nav, Divider, Button } from '@douyinfe/semi-ui';

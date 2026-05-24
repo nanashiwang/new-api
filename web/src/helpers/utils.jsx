@@ -20,7 +20,6 @@ For commercial licensing, please contact support@quantumnous.com
 import { Toast, Pagination } from '@douyinfe/semi-ui';
 import { toastConstants, BILLING_PRICING_VARS, BILLING_VAR_REGEX } from '../constants';
 import React from 'react';
-import { toast } from 'react-toastify';
 import {
   THINK_TAG_REGEX,
   MESSAGE_ROLES,
@@ -164,7 +163,11 @@ export function showInfo(message) {
 
 export function showNotice(message, isHTML = false) {
   if (isHTML) {
-    toast(<HTMLToastContent htmlContent={message} />, showNoticeOptions);
+    Toast.info({
+      content: <HTMLToastContent htmlContent={message} />,
+      duration: 0,
+      ...showNoticeOptions,
+    });
   } else {
     Toast.info(message);
   }

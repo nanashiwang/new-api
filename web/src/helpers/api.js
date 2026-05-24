@@ -17,115 +17,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import {
-  getUserIdFromLocalStorage,
-  showError,
-  formatMessageForAPI,
-  isValidMessage,
-} from './utils';
-import axios from 'axios';
+import { showError } from './toast';
+import { formatMessageForAPI, isValidMessage } from './playgroundUtils';
 import { MESSAGE_ROLES } from '../constants/playground.constants';
-import { beginGlobalLoading, endGlobalLoading } from './globalLoading';
-
-const GLOBAL_LOADING_TRACKED_KEY = '__globalLoadingTracked';
-
-const createAPIHeaders = () => ({
-  'New-API-User': getUserIdFromLocalStorage(),
-  'Cache-Control': 'no-store',
-});
-
-const shouldTrackGlobalLoading = (config = {}) =>
-  config.skipGlobalLoading !== true;
-
-const markGlobalLoadingStarted = (config = {}) => {
-  if (!shouldTrackGlobalLoading(config)) {
-    return config;
-  }
-  config[GLOBAL_LOADING_TRACKED_KEY] = true;
-  beginGlobalLoading();
-  return config;
-};
-
-const markGlobalLoadingFinished = (config) => {
-  if (!config?.[GLOBAL_LOADING_TRACKED_KEY]) {
-    return;
-  }
-  delete config[GLOBAL_LOADING_TRACKED_KEY];
-  endGlobalLoading();
-};
-
-function patchAPIInstance(instance) {
-  const originalGet = instance.get.bind(instance);
-  const inFlightGetRequests = new Map();
-
-  const genKey = (url, config = {}) => {
-    const params = config.params ? JSON.stringify(config.params) : '{}';
-    return `${url}?${params}`;
-  };
-
-  instance.get = (url, config = {}) => {
-    if (config?.disableDuplicate) {
-      return originalGet(url, config);
-    }
-
-    const key = genKey(url, config);
-    if (inFlightGetRequests.has(key)) {
-      return inFlightGetRequests.get(key);
-    }
-
-    const reqPromise = originalGet(url, config).finally(() => {
-      inFlightGetRequests.delete(key);
-    });
-
-    inFlightGetRequests.set(key, reqPromise);
-    return reqPromise;
-  };
-}
-
-function attachAPIInterceptors(instance) {
-  instance.interceptors.request.use(
-    (config) => markGlobalLoadingStarted(config),
-    (error) => {
-      markGlobalLoadingFinished(error?.config);
-      return Promise.reject(error);
-    },
-  );
-
-  instance.interceptors.response.use(
-    (response) => {
-      markGlobalLoadingFinished(response.config);
-      return response;
-    },
-    (error) => {
-      markGlobalLoadingFinished(error?.config);
-      // 如果请求配置中显式要求跳过全局错误处理，则不弹出默认错误提示
-      if (error.config && error.config.skipErrorHandler) {
-        return Promise.reject(error);
-      }
-      showError(error);
-      return Promise.reject(error);
-    },
-  );
-}
-
-function createAPIInstance() {
-  const instance = axios.create({
-    baseURL: import.meta.env.VITE_REACT_APP_SERVER_URL
-      ? import.meta.env.VITE_REACT_APP_SERVER_URL
-      : '',
-    headers: createAPIHeaders(),
-  });
-
-  patchAPIInstance(instance);
-  attachAPIInterceptors(instance);
-  return instance;
-}
-
-export let API = createAPIInstance();
-
-export function updateAPI() {
-  API = createAPIInstance();
-}
+export { API, updateAPI } from './apiCore';
+import { API, updateAPI } from './apiCore';
 
 // playground
 

@@ -20,13 +20,11 @@ For commercial licensing, please contact support@quantumnous.com
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import {
-  API,
-  isAdmin,
-  setUserData,
-  showError,
-  timestamp2string,
-} from '../../helpers';
+import { API } from '../../helpers/apiCore';
+import { setUserData } from '../../helpers/data';
+import { isAdmin } from '../../helpers/storage';
+import { showError } from '../../helpers/toast';
+import { timestamp2string } from '../../helpers/date';
 import { getDefaultTime, getInitialTimestamp } from '../../helpers/dashboard';
 import { TIME_OPTIONS } from '../../constants/dashboard.constants';
 import { useIsMobile } from '../common/useIsMobile';

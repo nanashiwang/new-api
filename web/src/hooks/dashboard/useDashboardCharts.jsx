@@ -18,14 +18,13 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { useState, useCallback, useEffect } from 'react';
-import { initVChartSemiTheme } from '@visactor/vchart-semi-theme';
 import {
   modelColorMap,
   renderNumber,
   renderQuota,
   modelToColor,
   getQuotaWithUnit,
-} from '../../helpers';
+} from '../../helpers/dashboardFormat';
 import {
   processRawData,
   calculateTrendData,
@@ -537,7 +536,10 @@ export const useDashboardCharts = (
         }))
         .sort((a, b) => b.rawQuota - a.rawQuota);
 
-      const totalUserQuota = rankingData.reduce((sum, item) => sum + item.Quota, 0);
+      const totalUserQuota = rankingData.reduce(
+        (sum, item) => sum + item.Quota,
+        0,
+      );
 
       setSpecUserRank((prev) => ({
         ...prev,
@@ -569,9 +571,17 @@ export const useDashboardCharts = (
 
   // ========== 初始化图表主题 ==========
   useEffect(() => {
-    initVChartSemiTheme({
-      isWatchingThemeSwitch: true,
+    let mounted = true;
+    import('@visactor/vchart-semi-theme').then(({ initVChartSemiTheme }) => {
+      if (mounted) {
+        initVChartSemiTheme({
+          isWatchingThemeSwitch: true,
+        });
+      }
     });
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   return {

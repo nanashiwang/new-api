@@ -18,7 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { useState, useEffect } from 'react';
-import { API, isAdmin } from '../../helpers';
+import { API } from '../../helpers/apiCore';
+import { isAdmin } from '../../helpers/storage';
 
 export const useNotifications = (statusState) => {
   const [noticeVisible, setNoticeVisible] = useState(false);

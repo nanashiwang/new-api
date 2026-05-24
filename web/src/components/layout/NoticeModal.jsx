@@ -30,13 +30,10 @@ import {
 } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import {
-  API,
-  showError,
-  getRelativeTime,
-  renderQuota,
-  stringToColor,
-} from '../../helpers';
+import { API } from '../../helpers/apiCore';
+import { getRelativeTime } from '../../helpers/date';
+import { renderQuota, stringToColor } from '../../helpers/dashboardFormat';
+import { showError } from '../../helpers/toast';
 import { marked } from 'marked';
 import {
   IllustrationNoContent,
@@ -263,7 +260,8 @@ const NoticeModal = ({
         </div>
         <div className='flex flex-col gap-2'>
           {pendingWithdrawals.map((item) => {
-            const name = item.username || item.display_name || `#${item.user_id}`;
+            const name =
+              item.username || item.display_name || `#${item.user_id}`;
             const ts = item.created_at ? item.created_at * 1000 : null;
             return (
               <div

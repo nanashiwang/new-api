@@ -22,20 +22,15 @@ import { Layout } from '@douyinfe/semi-ui';
 import SiderBar from './SiderBar';
 import App from '../../App';
 import FooterBar from './Footer';
-import { ToastContainer } from 'react-toastify';
 import ErrorBoundary from '../common/ErrorBoundary';
 import React, { useContext, useEffect, useState } from 'react';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import { useSidebarCollapsed } from '../../hooks/common/useSidebarCollapsed';
 import { useTranslation } from 'react-i18next';
-import {
-  API,
-  getLogo,
-  getSystemName,
-  showError,
-  setStatusData,
-  setUserData,
-} from '../../helpers';
+import { API } from '../../helpers/apiCore';
+import { setStatusData, setUserData } from '../../helpers/data';
+import { getLogo, getSystemName } from '../../helpers/storage';
+import { showError } from '../../helpers/toast';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
 import { useLocation } from 'react-router-dom';
@@ -134,10 +129,6 @@ const PageLayout = () => {
         linkElement.href = logo;
       }
     }
-    const savedLang = localStorage.getItem('i18nextLng');
-    if (savedLang) {
-      i18n.changeLanguage(savedLang);
-    }
   }, [i18n]);
 
   if (isStandalonePage) {
@@ -147,7 +138,6 @@ const PageLayout = () => {
         <ErrorBoundary>
           <App />
         </ErrorBoundary>
-        <ToastContainer />
       </>
     );
   }
@@ -242,7 +232,6 @@ const PageLayout = () => {
           )}
         </Layout>
       </Layout>
-      <ToastContainer />
     </Layout>
   );
 };

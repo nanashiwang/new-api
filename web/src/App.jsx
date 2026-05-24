@@ -20,18 +20,22 @@ For commercial licensing, please contact support@quantumnous.com
 import React, { lazy, Suspense, useContext, useMemo } from 'react';
 import { Route, Routes, useLocation, useParams } from 'react-router-dom';
 import Loading from './components/common/ui/Loading';
-import { AuthRedirect, PrivateRoute, AdminRoute } from './helpers';
-import RegisterForm from './components/auth/RegisterForm';
-import LoginForm from './components/auth/LoginForm';
+import { AuthRedirect, PrivateRoute, AdminRoute } from './helpers/auth';
 import NotFound from './pages/NotFound';
 import Forbidden from './pages/Forbidden';
 import { StatusContext } from './context/Status';
 
-import PasswordResetForm from './components/auth/PasswordResetForm';
-import PasswordResetConfirm from './components/auth/PasswordResetConfirm';
-import OAuth2Callback from './components/auth/OAuth2Callback';
 import SetupCheck from './components/layout/SetupCheck';
 
+const RegisterForm = lazy(() => import('./components/auth/RegisterForm'));
+const LoginForm = lazy(() => import('./components/auth/LoginForm'));
+const PasswordResetForm = lazy(
+  () => import('./components/auth/PasswordResetForm'),
+);
+const PasswordResetConfirm = lazy(
+  () => import('./components/auth/PasswordResetConfirm'),
+);
+const OAuth2Callback = lazy(() => import('./components/auth/OAuth2Callback'));
 const Home = lazy(() => import('./pages/Home'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const About = lazy(() => import('./pages/About'));
