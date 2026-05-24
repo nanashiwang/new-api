@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"net"
 	"net/url"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
+	"golang.org/x/net/publicsuffix"
 	"gorm.io/gorm"
 )
 
@@ -109,6 +111,9 @@ func createImagePlaygroundToken(userId int, now int64) (*model.Token, error) {
 }
 
 func buildImagePlaygroundOrigin(c *gin.Context) string {
+	if origin := buildImagePlaygroundBrowserOrigin(c); origin != "" {
+		return origin
+	}
 	if origin := buildImagePlaygroundRequestOrigin(c); origin != "" {
 		return origin
 	}
@@ -116,6 +121,94 @@ func buildImagePlaygroundOrigin(c *gin.Context) string {
 		return strings.TrimRight(serverAddress, "/")
 	}
 	return ""
+}
+
+func buildImagePlaygroundBrowserOrigin(c *gin.Context) string {
+	if origin := parseImagePlaygroundHeaderOrigin(c.GetHeader("Origin")); isTrustedImagePlaygroundOrigin(c, origin) {
+		return origin
+	}
+
+	referer := strings.TrimSpace(c.GetHeader("Referer"))
+	if referer == "" {
+		return ""
+	}
+	parsed, err := url.Parse(referer)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return ""
+	}
+	origin := parsed.Scheme + "://" + parsed.Host
+	if isTrustedImagePlaygroundOrigin(c, origin) {
+		return origin
+	}
+	return ""
+}
+
+func parseImagePlaygroundHeaderOrigin(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return ""
+	}
+	return parsed.Scheme + "://" + parsed.Host
+}
+
+func isTrustedImagePlaygroundOrigin(c *gin.Context, origin string) bool {
+	parsedOrigin, err := url.Parse(origin)
+	if err != nil || parsedOrigin.Scheme == "" || parsedOrigin.Host == "" {
+		return false
+	}
+	if parsedOrigin.Scheme != "http" && parsedOrigin.Scheme != "https" {
+		return false
+	}
+
+	originHost := normalizeImagePlaygroundHost(parsedOrigin.Host)
+	if originHost == "" {
+		return false
+	}
+	if trustedImagePlaygroundHost(originHost, normalizeImagePlaygroundHost(firstHeaderValue(c.GetHeader("X-Forwarded-Host")))) {
+		return true
+	}
+	if trustedImagePlaygroundHost(originHost, normalizeImagePlaygroundHost(c.Request.Host)) {
+		return true
+	}
+	if serverAddress := strings.TrimSpace(system_setting.ServerAddress); serverAddress != "" {
+		if parsedServer, err := url.Parse(serverAddress); err == nil {
+			return trustedImagePlaygroundHost(originHost, normalizeImagePlaygroundHost(parsedServer.Host))
+		}
+	}
+	return false
+}
+
+func trustedImagePlaygroundHost(originHost string, trustedHost string) bool {
+	if originHost == "" || trustedHost == "" {
+		return false
+	}
+	if originHost == trustedHost {
+		return true
+	}
+	originDomain, originErr := publicsuffix.EffectiveTLDPlusOne(originHost)
+	trustedDomain, trustedErr := publicsuffix.EffectiveTLDPlusOne(trustedHost)
+	if originErr == nil && trustedErr == nil && originDomain == trustedDomain {
+		return true
+	}
+	return strings.HasSuffix(originHost, "."+trustedHost) || strings.HasSuffix(trustedHost, "."+originHost)
+}
+
+func normalizeImagePlaygroundHost(host string) string {
+	host = strings.TrimSpace(strings.ToLower(host))
+	if host == "" {
+		return ""
+	}
+	if parsed, err := url.Parse("//" + host); err == nil && parsed.Hostname() != "" {
+		host = parsed.Hostname()
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.String()
+	}
+	return strings.TrimSuffix(host, ".")
 }
 
 func buildImagePlaygroundRequestOrigin(c *gin.Context) string {

@@ -28,6 +28,44 @@ func TestBuildImagePlaygroundOriginPrefersRequestHost(t *testing.T) {
 	}
 }
 
+func TestBuildImagePlaygroundOriginPrefersTrustedOriginHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	originalServerAddress := system_setting.ServerAddress
+	system_setting.ServerAddress = "https://nan.meta-api.vip"
+	defer func() {
+		system_setting.ServerAddress = originalServerAddress
+	}()
+
+	req := httptest.NewRequest(http.MethodPost, "http://nan.meta-api.vip/api/image-playground/session", nil)
+	req.Header.Set("Origin", "https://cn.meta-api.vip")
+	req.Header.Set("X-Forwarded-Proto", "https")
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = req
+
+	if got := buildImagePlaygroundOrigin(c); got != "https://cn.meta-api.vip" {
+		t.Fatalf("buildImagePlaygroundOrigin() = %q, want %q", got, "https://cn.meta-api.vip")
+	}
+}
+
+func TestBuildImagePlaygroundOriginRejectsUntrustedOriginHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	originalServerAddress := system_setting.ServerAddress
+	system_setting.ServerAddress = "https://nan.meta-api.vip"
+	defer func() {
+		system_setting.ServerAddress = originalServerAddress
+	}()
+
+	req := httptest.NewRequest(http.MethodPost, "http://nan.meta-api.vip/api/image-playground/session", nil)
+	req.Header.Set("Origin", "https://evil.example.com")
+	req.Header.Set("X-Forwarded-Proto", "https")
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = req
+
+	if got := buildImagePlaygroundOrigin(c); got != "https://nan.meta-api.vip" {
+		t.Fatalf("buildImagePlaygroundOrigin() = %q, want %q", got, "https://nan.meta-api.vip")
+	}
+}
+
 func TestBuildImagePlaygroundOriginFallsBackToServerAddress(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	originalServerAddress := system_setting.ServerAddress
