@@ -17,10 +17,21 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { Card, Tabs, TabPane, Table } from '@douyinfe/semi-ui';
 import { PieChart } from 'lucide-react';
-import { VChart } from '@visactor/react-vchart';
+
+const VChart = lazy(() =>
+  import('@visactor/react-vchart').then((module) => ({
+    default: module.VChart,
+  })),
+);
+
+const ChartFallback = ({ t }) => (
+  <div className='h-full flex items-center justify-center text-gray-400 text-sm'>
+    {t('加载中...')}
+  </div>
+);
 
 const ChartsPanel = ({
   activeChartTab,
@@ -115,24 +126,26 @@ const ChartsPanel = ({
       bodyStyle={{ padding: 0 }}
     >
       <div className='h-96 p-2'>
-        {activeChartTab === '1' && (
-          <VChart spec={spec_line} option={CHART_CONFIG} />
-        )}
-        {activeChartTab === '2' && (
-          <VChart spec={spec_model_line} option={CHART_CONFIG} />
-        )}
-        {activeChartTab === '3' && (
-          <VChart spec={spec_pie} option={CHART_CONFIG} />
-        )}
-        {activeChartTab === '4' && (
-          <VChart spec={spec_rank_bar} option={CHART_CONFIG} />
-        )}
-        {activeChartTab === '5' && isAdminUser && (
-          <VChart spec={spec_user_rank} option={CHART_CONFIG} />
-        )}
-        {activeChartTab === '6' && isAdminUser && (
-          <VChart spec={spec_user_trend} option={CHART_CONFIG} />
-        )}
+        <Suspense fallback={<ChartFallback t={t} />}>
+          {activeChartTab === '1' && (
+            <VChart spec={spec_line} option={CHART_CONFIG} />
+          )}
+          {activeChartTab === '2' && (
+            <VChart spec={spec_model_line} option={CHART_CONFIG} />
+          )}
+          {activeChartTab === '3' && (
+            <VChart spec={spec_pie} option={CHART_CONFIG} />
+          )}
+          {activeChartTab === '4' && (
+            <VChart spec={spec_rank_bar} option={CHART_CONFIG} />
+          )}
+          {activeChartTab === '5' && isAdminUser && (
+            <VChart spec={spec_user_rank} option={CHART_CONFIG} />
+          )}
+          {activeChartTab === '6' && isAdminUser && (
+            <VChart spec={spec_user_trend} option={CHART_CONFIG} />
+          )}
+        </Suspense>
         {activeChartTab === '7' && (
           <div className='h-full overflow-auto p-2'>
             <Table
