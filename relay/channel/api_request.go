@@ -488,14 +488,40 @@ func sendPingData(c *gin.Context, mutex *sync.Mutex) error {
 func DoRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
 	return doRequest(c, req, info)
 }
+
+func newDoRequestError(c *gin.Context, err error) *types.NewAPIError {
+	if c != nil && c.Request != nil {
+		if ctxErr := c.Request.Context().Err(); ctxErr != nil {
+			logger.LogInfo(c, "request canceled by client: "+ctxErr.Error())
+			return types.NewError(ctxErr, types.ErrorCodeDoRequestFailed,
+				types.ErrOptionWithSkipRetry(),
+				types.ErrOptionWithHideErrMsg("client request canceled"))
+		}
+	}
+	logger.LogError(c, "do request failed: "+err.Error())
+	if strings.Contains(err.Error(), "timeout awaiting response headers") {
+		return types.NewErrorWithStatusCode(
+			err,
+			types.ErrorCodeDoRequestFailed,
+			http.StatusGatewayTimeout,
+			types.ErrOptionWithSkipRetry(),
+			types.ErrOptionWithHideErrMsg("upstream response header timeout"))
+	}
+	return types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
+}
+
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
 	var client *http.Client
 	var err error
+	isImageRequest := info != nil &&
+		(info.RelayMode == constant.RelayModeImagesGenerations || info.RelayMode == constant.RelayModeImagesEdits)
 	if info.ChannelSetting.Proxy != "" {
-		client, err = service.NewProxyHttpClient(info.ChannelSetting.Proxy)
+		client, err = service.NewProxyHttpClient(info.ChannelSetting.Proxy, isImageRequest)
 		if err != nil {
 			return nil, fmt.Errorf("new proxy http client failed: %w", err)
 		}
+	} else if isImageRequest {
+		client = service.GetImageHttpClient()
 	} else {
 		client = service.GetHttpClient()
 	}
@@ -522,14 +548,7 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 
 	resp, err := client.Do(req)
 	if err != nil {
-		if ctxErr := c.Request.Context().Err(); ctxErr != nil {
-			logger.LogInfo(c, "request canceled by client: "+ctxErr.Error())
-			return nil, types.NewError(ctxErr, types.ErrorCodeDoRequestFailed,
-				types.ErrOptionWithSkipRetry(),
-				types.ErrOptionWithHideErrMsg("client request canceled"))
-		}
-		logger.LogError(c, "do request failed: "+err.Error())
-		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
+		return nil, newDoRequestError(c, err)
 	}
 	if resp == nil {
 		return nil, errors.New("resp is nil")
