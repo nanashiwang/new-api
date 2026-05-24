@@ -17,22 +17,27 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  lazy,
+  Suspense,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { API, updateAPI } from '../../helpers/apiCore';
 import {
-  API,
-  getLogo,
-  showError,
-  showInfo,
-  showSuccess,
-  updateAPI,
-  getSystemName,
-  getOAuthProviderIcon,
-  setUserData,
   onDiscordOAuthClicked,
   onCustomOAuthClicked,
-} from '../../helpers';
-import Turnstile from 'react-turnstile';
+  onGitHubOAuthClicked,
+  onLinuxDOOAuthClicked,
+  onOIDCClicked,
+} from '../../helpers/api';
+import { setUserData } from '../../helpers/data';
+import { getLogo, getSystemName } from '../../helpers/storage';
+import { showError, showInfo, showSuccess } from '../../helpers/toast';
 import {
   Button,
   Card,
@@ -51,19 +56,17 @@ import {
   IconLock,
   IconKey,
 } from '@douyinfe/semi-icons';
-import {
-  onGitHubOAuthClicked,
-  onLinuxDOOAuthClicked,
-  onOIDCClicked,
-} from '../../helpers';
 import OIDCIcon from '../common/logo/OIDCIcon';
 import LinuxDoIcon from '../common/logo/LinuxDoIcon';
 import WeChatIcon from '../common/logo/WeChatIcon';
-import TelegramLoginButton from 'react-telegram-login/src';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
 import { useTranslation } from 'react-i18next';
 import { SiDiscord } from 'react-icons/si';
+
+const Turnstile = lazy(() => import('react-turnstile'));
+const TelegramLoginButton = lazy(() => import('react-telegram-login/src'));
+const OAuthProviderIcon = lazy(() => import('../common/OAuthProviderIcon'));
 
 const RegisterForm = () => {
   let navigate = useNavigate();
@@ -509,7 +512,14 @@ const RegisterForm = () => {
                       theme='outline'
                       className='w-full h-12 flex items-center justify-center !rounded-full border border-gray-200 hover:bg-gray-50 transition-colors'
                       type='tertiary'
-                      icon={getOAuthProviderIcon(provider.icon || '', 20)}
+                      icon={
+                        <Suspense fallback={null}>
+                          <OAuthProviderIcon
+                            iconName={provider.icon || ''}
+                            size={20}
+                          />
+                        </Suspense>
+                      }
                       onClick={() => handleCustomOAuthClick(provider)}
                       loading={customOAuthLoading[provider.slug]}
                     >
@@ -521,10 +531,12 @@ const RegisterForm = () => {
 
                 {status.telegram_oauth && (
                   <div className='flex justify-center my-2'>
-                    <TelegramLoginButton
-                      dataOnauth={onTelegramLoginClicked}
-                      botName={status.telegram_bot_name}
-                    />
+                    <Suspense fallback={null}>
+                      <TelegramLoginButton
+                        dataOnauth={onTelegramLoginClicked}
+                        botName={status.telegram_bot_name}
+                      />
+                    </Suspense>
                   </div>
                 )}
 
@@ -797,12 +809,14 @@ const RegisterForm = () => {
 
         {turnstileEnabled && (
           <div className='flex justify-center mt-6'>
-            <Turnstile
-              sitekey={turnstileSiteKey}
-              onVerify={(token) => {
-                setTurnstileToken(token);
-              }}
-            />
+            <Suspense fallback={null}>
+              <Turnstile
+                sitekey={turnstileSiteKey}
+                onVerify={(token) => {
+                  setTurnstileToken(token);
+                }}
+              />
+            </Suspense>
           </div>
         )}
       </div>

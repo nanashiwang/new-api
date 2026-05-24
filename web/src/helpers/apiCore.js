@@ -19,7 +19,6 @@ For commercial licensing, please contact support@quantumnous.com
 
 import axios from 'axios';
 import { getUserIdFromLocalStorage } from './storage';
-import { showError } from './toast';
 import { beginGlobalLoading, endGlobalLoading } from './globalLoading';
 
 const GLOBAL_LOADING_TRACKED_KEY = '__globalLoadingTracked';
@@ -96,7 +95,9 @@ function attachAPIInterceptors(instance) {
       if (error.config && error.config.skipErrorHandler) {
         return Promise.reject(error);
       }
-      showError(error);
+      import('./toast')
+        .then(({ showError }) => showError(error))
+        .catch(() => console.error(error));
       return Promise.reject(error);
     },
   );

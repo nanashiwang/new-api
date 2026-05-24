@@ -45,6 +45,10 @@ const manualChunks = (id) => {
     return;
   }
 
+  if (scopedNodeModuleId(id, '@babel', 'runtime')) {
+    return 'babel-runtime';
+  }
+
   if (
     nodeModuleId(id, 'react') ||
     nodeModuleId(id, 'react-dom') ||
@@ -121,7 +125,7 @@ const manualChunks = (id) => {
 };
 
 const shouldPreloadFromHtml = (file) =>
-  /^assets\/(react-core|semi-ui|i18n|tools|preload-helper)-/.test(file);
+  /^assets\/(react-core|tools|preload-helper)-/.test(file);
 
 const stripNonCriticalHtmlAssets = () => ({
   name: 'strip-non-critical-html-assets',
@@ -184,7 +188,7 @@ export default defineConfig({
     modulePreload: {
       resolveDependencies(filename, deps, { hostType }) {
         if (hostType !== 'html') {
-          return deps;
+          return [];
         }
         return deps.filter(shouldPreloadFromHtml);
       },

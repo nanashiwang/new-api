@@ -17,35 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-const getCachedStatus = () => {
-  if (typeof localStorage === 'undefined') {
-    return undefined;
-  }
-  try {
-    const cachedStatus = localStorage.getItem('status');
-    return cachedStatus ? JSON.parse(cachedStatus) : undefined;
-  } catch (error) {
-    return undefined;
-  }
-};
+import React from 'react';
+import { getOAuthProviderIcon } from '../../helpers/render';
 
-export const reducer = (state, action) => {
-  switch (action.type) {
-    case 'set':
-      return {
-        ...state,
-        status: action.payload,
-      };
-    case 'unset':
-      return {
-        ...state,
-        status: undefined,
-      };
-    default:
-      return state;
-  }
-};
+const OAuthProviderIcon = ({ iconName, size = 20 }) =>
+  getOAuthProviderIcon(iconName, size);
 
-export const initialState = {
-  status: getCachedStatus(),
-};
+export default OAuthProviderIcon;

@@ -1,0 +1,249 @@
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+
+import React, { useContext, useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import { StatusContext } from '../../context/Status';
+import { UserContext } from '../../context/User';
+import { API } from '../../helpers/apiCore';
+import { setStatusData, setUserData } from '../../helpers/data';
+import { getLogo, getSystemName } from '../../helpers/storage';
+import { useSetTheme, useTheme } from '../../context/Theme';
+import { usePublicTranslation } from '../../helpers/publicLocale';
+import Home from '../../pages/Home';
+import GlobalTopProgress from '../common/ui/GlobalTopProgress';
+
+const defaultModules = {
+  home: true,
+  console: true,
+  pricing: true,
+  docs: true,
+  about: true,
+  usage: false,
+};
+
+const parseHeaderModules = (rawConfig) => {
+  if (!rawConfig) return defaultModules;
+  try {
+    const modules = JSON.parse(rawConfig);
+    if (typeof modules.pricing === 'boolean') {
+      modules.pricing = {
+        enabled: modules.pricing,
+        requireAuth: false,
+      };
+    }
+    return modules;
+  } catch (error) {
+    return defaultModules;
+  }
+};
+
+const PublicHomeShell = () => {
+  const [userState, userDispatch] = useContext(UserContext);
+  const [statusState, statusDispatch] = useContext(StatusContext);
+  const { t, language, setLanguage } = usePublicTranslation();
+  const theme = useTheme();
+  const setTheme = useSetTheme();
+  const status = statusState?.status || {};
+  const systemName = getSystemName();
+  const logo = getLogo();
+  const modules = parseHeaderModules(status.HeaderNavModules);
+  const docsLink = status.docs_link || localStorage.getItem('docs_link') || '';
+  const showRegister = !status.self_use_mode_enabled;
+
+  const navLinks = [
+    modules.home && { text: t('首页'), to: '/' },
+    modules.console && {
+      text: t('控制台'),
+      to: userState.user ? '/console' : '/login',
+    },
+    (typeof modules.pricing === 'object'
+      ? modules.pricing.enabled
+      : modules.pricing) && {
+      text: t('模型广场'),
+      to:
+        modules.pricing?.requireAuth && !userState.user ? '/login' : '/pricing',
+    },
+    modules.docs &&
+      docsLink && { text: t('文档'), href: docsLink, external: true },
+    modules.about && { text: t('关于'), to: '/about' },
+  ].filter(Boolean);
+
+  useEffect(() => {
+    const loadUser = async () => {
+      const storedUser = localStorage.getItem('user');
+      if (!storedUser) return;
+      try {
+        userDispatch({ type: 'login', payload: JSON.parse(storedUser) });
+      } catch (error) {
+        // ignore broken cache
+      }
+      try {
+        const res = await API.get('/api/user/self', {
+          skipGlobalLoading: true,
+          skipErrorHandler: true,
+        });
+        if (res.data?.success && res.data?.data) {
+          userDispatch({ type: 'login', payload: res.data.data });
+          setUserData(res.data.data);
+        }
+      } catch (error) {
+        // keep local cache
+      }
+    };
+
+    const loadStatus = async () => {
+      try {
+        const res = await API.get('/api/status', {
+          skipGlobalLoading: true,
+          skipErrorHandler: true,
+        });
+        if (res.data?.success) {
+          statusDispatch({ type: 'set', payload: res.data.data });
+          setStatusData(res.data.data);
+          if (res.data.data.system_name) document.title = res.data.data.system_name;
+          if (res.data.data.logo) {
+            const linkElement = document.querySelector("link[rel~='icon']");
+            if (linkElement) linkElement.href = res.data.data.logo;
+          }
+        }
+      } catch (error) {
+        // render default home without blocking on status
+      }
+    };
+
+    loadUser();
+    loadStatus();
+  }, [statusDispatch, userDispatch]);
+
+  const toggleTheme = () => {
+    if (theme === 'dark') {
+      setTheme('light');
+    } else if (theme === 'light') {
+      setTheme('auto');
+    } else {
+      setTheme('dark');
+    }
+  };
+
+  const toggleLanguage = () => {
+    setLanguage(language.startsWith('zh') ? 'en' : 'zh-CN');
+  };
+
+  return (
+    <div className='public-shell min-h-screen bg-[var(--semi-color-bg-0,#fff)] text-[var(--semi-color-text-0,#111827)]'>
+      <GlobalTopProgress />
+      <header className='public-header fixed top-0 left-0 right-0 z-50 bg-white/75 dark:bg-zinc-900/75 backdrop-blur-lg'>
+        <div className='flex items-center justify-between h-16 px-2'>
+          <Link to='/' className='group flex items-center gap-2 min-w-0'>
+            <img
+              src={logo}
+              alt='logo'
+              className='w-8 h-8 rounded-full object-contain transition-transform duration-200 group-hover:scale-110'
+            />
+            <span className='hidden md:inline text-lg font-semibold truncate'>
+              {systemName}
+            </span>
+          </Link>
+
+          <nav className='flex flex-1 items-center gap-1 lg:gap-2 mx-2 md:mx-4 overflow-x-auto whitespace-nowrap scrollbar-hide'>
+            {navLinks.map((link) =>
+              link.external ? (
+                <a
+                  key={link.text}
+                  href={link.href}
+                  target='_blank'
+                  rel='noopener noreferrer'
+                  className='public-nav-link'
+                >
+                  {link.text}
+                </a>
+              ) : (
+                <Link key={link.text} to={link.to} className='public-nav-link'>
+                  {link.text}
+                </Link>
+              ),
+            )}
+          </nav>
+
+          <div className='flex items-center gap-2 md:gap-3'>
+            <button
+              type='button'
+              className='public-icon-button'
+              aria-label={t('切换主题')}
+              onClick={toggleTheme}
+            >
+              {theme === 'dark' ? 'D' : theme === 'light' ? 'L' : 'A'}
+            </button>
+            <button
+              type='button'
+              className='public-icon-button'
+              aria-label={t('common.changeLanguage')}
+              onClick={toggleLanguage}
+            >
+              文
+            </button>
+            {userState.user ? (
+              <Link to='/console/personal' className='public-user-link'>
+                <span className='public-avatar'>
+                  {userState.user.username?.[0]?.toUpperCase() || 'U'}
+                </span>
+                <span className='hidden md:inline max-w-[120px] truncate'>
+                  {userState.user.username}
+                </span>
+              </Link>
+            ) : (
+              <div className='flex items-center'>
+                <Link to='/login' className='public-login-link'>
+                  {t('登录')}
+                </Link>
+                {showRegister && (
+                  <Link to='/register' className='public-register-link'>
+                    {t('注册')}
+                  </Link>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+      <Home />
+      <footer className='public-footer'>
+        <div className='flex flex-col md:flex-row items-center justify-between w-full max-w-[1110px] gap-6 mx-auto'>
+          <span className='text-sm text-[var(--semi-color-text-1,#4b5563)]'>
+            © {new Date().getFullYear()} {systemName}. {t('版权所有')}
+          </span>
+          <span className='text-sm text-[var(--semi-color-text-1,#4b5563)]'>
+            {t('设计与开发由')}{' '}
+            <a
+              href='https://github.com/QuantumNous/new-api'
+              target='_blank'
+              rel='noopener noreferrer'
+              className='text-[var(--semi-color-primary,#1677ff)] font-medium'
+            >
+              New API
+            </a>
+          </span>
+        </div>
+      </footer>
+    </div>
+  );
+};
+
+export default PublicHomeShell;

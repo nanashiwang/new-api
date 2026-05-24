@@ -17,22 +17,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useState } from 'react';
-import {
-  API,
-  getLogo,
-  showError,
-  showInfo,
-  showSuccess,
-  getSystemName,
-} from '../../helpers';
-import Turnstile from 'react-turnstile';
+import React, { lazy, Suspense, useEffect, useState } from 'react';
+import { API } from '../../helpers/apiCore';
+import { getLogo, getSystemName } from '../../helpers/storage';
+import { showError, showInfo, showSuccess } from '../../helpers/toast';
 import { Button, Card, Form, Typography } from '@douyinfe/semi-ui';
 import { IconMail } from '@douyinfe/semi-icons';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 const { Text, Title } = Typography;
+const Turnstile = lazy(() => import('react-turnstile'));
 
 const PasswordResetForm = () => {
   const { t } = useTranslation();
@@ -175,12 +170,14 @@ const PasswordResetForm = () => {
 
             {turnstileEnabled && (
               <div className='flex justify-center mt-6'>
-                <Turnstile
-                  sitekey={turnstileSiteKey}
-                  onVerify={(token) => {
-                    setTurnstileToken(token);
-                  }}
-                />
+                <Suspense fallback={null}>
+                  <Turnstile
+                    sitekey={turnstileSiteKey}
+                    onVerify={(token) => {
+                      setTurnstileToken(token);
+                    }}
+                  />
+                </Suspense>
               </div>
             )}
           </div>

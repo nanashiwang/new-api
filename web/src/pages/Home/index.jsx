@@ -17,60 +17,46 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useContext, useEffect, useState } from 'react';
-import {
-  Button,
-  Typography,
-  Input,
-  ScrollList,
-  ScrollItem,
-} from '@douyinfe/semi-ui';
-import { API, showError, copy, showSuccess } from '../../helpers';
+import React, {
+  lazy,
+  Suspense,
+  useContext,
+  useEffect,
+  useState,
+} from 'react';
+import { API } from '../../helpers/apiCore';
+import { copy } from '../../helpers/clipboard';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import { API_ENDPOINTS } from '../../constants/common.constant';
 import { StatusContext } from '../../context/Status';
 import { useActualTheme } from '../../context/Theme';
-import { marked } from 'marked';
-import { useTranslation } from 'react-i18next';
-import {
-  IconGithubLogo,
-  IconPlay,
-  IconFile,
-  IconCopy,
-} from '@douyinfe/semi-icons';
+import { usePublicTranslation } from '../../helpers/publicLocale';
+import { Github, Play, FileText, Copy } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import NoticeModal from '../../components/layout/NoticeModal';
-import {
-  Moonshot,
-  OpenAI,
-  XAI,
-  Zhipu,
-  Volcengine,
-  Cohere,
-  Claude,
-  Gemini,
-  Suno,
-  Minimax,
-  Wenxin,
-  Spark,
-  Qingyan,
-  DeepSeek,
-  Qwen,
-  Midjourney,
-  Grok,
-  AzureAI,
-  Hunyuan,
-  Xinference,
-} from '@lobehub/icons';
 
-const { Text } = Typography;
+const PublicNoticeModal = lazy(
+  () => import('../../components/layout/PublicNoticeModal'),
+);
+
+const isRemoteHomePage = (content) => content.startsWith('https://');
+const providerBadges = [
+  'OpenAI',
+  'Claude',
+  'Gemini',
+  'Grok',
+  'DeepSeek',
+  'Qwen',
+  'Azure',
+  'Midjourney',
+  '30+',
+];
 
 const Home = () => {
-  const { t, i18n } = useTranslation();
+  const { t, language, isChinese } = usePublicTranslation();
   const [statusState] = useContext(StatusContext);
   const actualTheme = useActualTheme();
-  const [homePageContentLoaded, setHomePageContentLoaded] = useState(false);
   const [homePageContent, setHomePageContent] = useState('');
+  const [noticeContent, setNoticeContent] = useState('');
   const [noticeVisible, setNoticeVisible] = useState(false);
   const isMobile = useIsMobile();
   const isDemoSiteMode = statusState?.status?.demo_site_enabled || false;
@@ -79,42 +65,54 @@ const Home = () => {
     statusState?.status?.server_address || `${window.location.origin}`;
   const endpointItems = API_ENDPOINTS.map((e) => ({ value: e }));
   const [endpointIndex, setEndpointIndex] = useState(0);
-  const isChinese = i18n.language.startsWith('zh');
+  const useDefaultHome = homePageContent === '';
+  const currentEndpoint = endpointItems[endpointIndex]?.value || '';
 
   const displayHomePageContent = async () => {
-    setHomePageContent(localStorage.getItem('home_page_content') || '');
-    const res = await API.get('/api/home_page_content');
-    const { success, message, data } = res.data;
-    if (success) {
-      let content = data;
-      if (!data.startsWith('https://')) {
-        content = marked.parse(data);
-      }
-      setHomePageContent(content);
-      localStorage.setItem('home_page_content', content);
-
-      // 如果内容是 URL，则发送主题模式
-      if (data.startsWith('https://')) {
-        const iframe = document.querySelector('iframe');
-        if (iframe) {
-          iframe.onload = () => {
-            iframe.contentWindow.postMessage({ themeMode: actualTheme }, '*');
-            iframe.contentWindow.postMessage({ lang: i18n.language }, '*');
-          };
-        }
-      }
-    } else {
-      showError(message);
-      setHomePageContent('加载首页内容失败...');
+    const cachedContent = localStorage.getItem('home_page_content') || '';
+    if (cachedContent) {
+      setHomePageContent(cachedContent);
     }
-    setHomePageContentLoaded(true);
+
+    try {
+      const res = await API.get('/api/home_page_content', {
+        skipGlobalLoading: true,
+        skipErrorHandler: true,
+      });
+      const { success, message, data } = res.data;
+      if (success) {
+        let content = data || '';
+        if (content && !isRemoteHomePage(content)) {
+          const { marked } = await import('marked');
+          content = marked.parse(content);
+        }
+        setHomePageContent(content);
+        if (content) {
+          localStorage.setItem('home_page_content', content);
+        } else {
+          localStorage.removeItem('home_page_content');
+        }
+
+        if (isRemoteHomePage(data || '')) {
+          const iframe = document.querySelector('iframe');
+          if (iframe) {
+            iframe.onload = () => {
+              iframe.contentWindow.postMessage({ themeMode: actualTheme }, '*');
+              iframe.contentWindow.postMessage({ lang: language }, '*');
+            };
+          }
+        }
+      } else {
+        console.error(message);
+      }
+    } catch (error) {
+      if (cachedContent) return;
+      console.error('加载首页内容失败:', error);
+    }
   };
 
   const handleCopyBaseURL = async () => {
-    const ok = await copy(serverAddress);
-    if (ok) {
-      showSuccess(t('已复制到剪切板'));
-    }
+    await copy(serverAddress);
   };
 
   useEffect(() => {
@@ -123,9 +121,13 @@ const Home = () => {
       const today = new Date().toDateString();
       if (lastCloseDate !== today) {
         try {
-          const res = await API.get('/api/notice');
+          const res = await API.get('/api/notice', {
+            skipGlobalLoading: true,
+            skipErrorHandler: true,
+          });
           const { success, data } = res.data;
           if (success && data && data.trim() !== '') {
+            setNoticeContent(data.trim());
             setNoticeVisible(true);
           }
         } catch (error) {
@@ -134,7 +136,8 @@ const Home = () => {
       }
     };
 
-    checkNoticeAndShow();
+    const taskId = window.setTimeout(checkNoticeAndShow, 4500);
+    return () => window.clearTimeout(taskId);
   }, []);
 
   useEffect(() => {
@@ -150,24 +153,25 @@ const Home = () => {
 
   return (
     <div className='w-full overflow-x-hidden'>
-      <NoticeModal
-        visible={noticeVisible}
-        onClose={() => setNoticeVisible(false)}
-        isMobile={isMobile}
-      />
-      {homePageContentLoaded && homePageContent === '' ? (
-        <div className='w-full overflow-x-hidden'>
-          {/* Banner 部分 */}
-          <div className='w-full border-b border-semi-color-border min-h-[500px] md:min-h-[600px] lg:min-h-[700px] relative overflow-x-hidden'>
-            {/* 背景模糊晕染球 */}
+      {noticeVisible && (
+        <Suspense fallback={null}>
+          <PublicNoticeModal
+            visible={noticeVisible}
+            content={noticeContent}
+            onClose={() => setNoticeVisible(false)}
+          />
+        </Suspense>
+      )}
+      {useDefaultHome ? (
+        <div className='home-shell w-full overflow-x-hidden'>
+          <div className='home-hero w-full min-h-[500px] md:min-h-[600px] lg:min-h-[700px] relative overflow-x-hidden'>
             <div className='blur-ball blur-ball-indigo' />
             <div className='blur-ball blur-ball-teal' />
             <div className='flex items-center justify-center h-full px-4 py-20 md:py-24 lg:py-32 mt-10'>
-              {/* 居中内容区 */}
               <div className='flex flex-col items-center justify-center text-center max-w-4xl mx-auto'>
                 <div className='flex flex-col items-center justify-center mb-6 md:mb-8'>
                   <h1
-                    className={`text-4xl md:text-5xl lg:text-6xl xl:text-7xl font-bold text-semi-color-text-0 leading-tight ${isChinese ? 'tracking-wide md:tracking-wider' : ''}`}
+                    className={`text-4xl md:text-5xl lg:text-6xl xl:text-7xl font-bold home-text-primary leading-tight ${isChinese ? 'tracking-wide md:tracking-wider' : ''}`}
                   >
                     <>
                       {t('统一的')}
@@ -175,60 +179,57 @@ const Home = () => {
                       <span className='shine-text'>{t('大模型接口网关')}</span>
                     </>
                   </h1>
-                  <p className='text-base md:text-lg lg:text-xl text-semi-color-text-1 mt-4 md:mt-6 max-w-xl'>
+                  <p className='text-base md:text-lg lg:text-xl home-text-secondary mt-4 md:mt-6 max-w-xl'>
                     {t('更好的价格，更好的稳定性，只需要将模型基址替换为：')}
                   </p>
-                  {/* BASE URL 与端点选择 */}
                   <div className='flex flex-col md:flex-row items-center justify-center gap-4 w-full mt-4 md:mt-6 max-w-md'>
-                    <Input
-                      readonly
-                      value={serverAddress}
-                      className='flex-1 !rounded-full'
-                      size={isMobile ? 'default' : 'large'}
-                      suffix={
-                        <div className='flex items-center gap-2'>
-                          <ScrollList
-                            bodyHeight={32}
-                            style={{ border: 'unset', boxShadow: 'unset' }}
-                          >
-                            <ScrollItem
-                              mode='wheel'
-                              cycled={true}
-                              list={endpointItems}
-                              selectedIndex={endpointIndex}
-                              onSelect={({ index }) => setEndpointIndex(index)}
-                            />
-                          </ScrollList>
-                          <Button
-                            type='primary'
-                            onClick={handleCopyBaseURL}
-                            icon={<IconCopy />}
-                            className='!rounded-full'
-                          />
-                        </div>
-                      }
-                    />
+                    <div className='home-endpoint-control'>
+                      <input
+                        readOnly
+                        value={serverAddress}
+                        className='home-endpoint-input'
+                        aria-label='Base URL'
+                      />
+                      <select
+                        className='home-endpoint-select'
+                        value={currentEndpoint}
+                        onChange={(event) => {
+                          const nextIndex = endpointItems.findIndex(
+                            (item) => item.value === event.target.value,
+                          );
+                          if (nextIndex >= 0) setEndpointIndex(nextIndex);
+                        }}
+                        aria-label='API endpoint'
+                      >
+                        {endpointItems.map((item) => (
+                          <option key={item.value} value={item.value}>
+                            {item.value}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type='button'
+                        onClick={handleCopyBaseURL}
+                        className='home-copy-button'
+                        aria-label={t('已复制到剪切板')}
+                      >
+                        <Copy size={18} />
+                      </button>
+                    </div>
                   </div>
                 </div>
 
-                {/* 操作按钮 */}
                 <div className='flex flex-row gap-4 justify-center items-center'>
                   <Link to='/console'>
-                    <Button
-                      theme='solid'
-                      type='primary'
-                      size={isMobile ? 'default' : 'large'}
-                      className='!rounded-3xl px-8 py-2'
-                      icon={<IconPlay />}
-                    >
+                    <span className='home-action-button home-action-primary'>
+                      <Play size={isMobile ? 16 : 18} />
                       {t('获取密钥')}
-                    </Button>
+                    </span>
                   </Link>
                   {isDemoSiteMode && statusState?.status?.version ? (
-                    <Button
-                      size={isMobile ? 'default' : 'large'}
-                      className='flex items-center !rounded-3xl px-6 py-2'
-                      icon={<IconGithubLogo />}
+                    <button
+                      type='button'
+                      className='home-action-button home-action-secondary'
                       onClick={() =>
                         window.open(
                           'https://github.com/QuantumNous/new-api',
@@ -236,98 +237,35 @@ const Home = () => {
                         )
                       }
                     >
+                      <Github size={isMobile ? 16 : 18} />
                       {statusState.status.version}
-                    </Button>
+                    </button>
                   ) : (
                     docsLink && (
-                      <Button
-                        size={isMobile ? 'default' : 'large'}
-                        className='flex items-center !rounded-3xl px-6 py-2'
-                        icon={<IconFile />}
+                      <button
+                        type='button'
+                        className='home-action-button home-action-secondary'
                         onClick={() => window.open(docsLink, '_blank')}
                       >
+                        <FileText size={isMobile ? 16 : 18} />
                         {t('文档')}
-                      </Button>
+                      </button>
                     )
                   )}
                 </div>
 
-                {/* 框架兼容性图标 */}
                 <div className='mt-12 md:mt-16 lg:mt-20 w-full'>
                   <div className='flex items-center mb-6 md:mb-8 justify-center'>
-                    <Text
-                      type='tertiary'
-                      className='text-lg md:text-xl lg:text-2xl font-light'
-                    >
+                    <span className='home-text-tertiary text-lg md:text-xl lg:text-2xl font-light'>
                       {t('支持众多的大模型供应商')}
-                    </Text>
+                    </span>
                   </div>
-                  <div className='flex flex-wrap items-center justify-center gap-3 sm:gap-4 md:gap-6 lg:gap-8 max-w-5xl mx-auto px-4'>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Moonshot size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <OpenAI size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <XAI size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Zhipu.Color size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Volcengine.Color size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Cohere.Color size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Claude.Color size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Gemini.Color size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Suno size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Minimax.Color size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Wenxin.Color size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Spark.Color size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Qingyan.Color size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <DeepSeek.Color size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Qwen.Color size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Midjourney size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Grok size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <AzureAI.Color size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Hunyuan.Color size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Xinference.Color size={40} />
-                    </div>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 flex items-center justify-center'>
-                      <Typography.Text className='!text-lg sm:!text-xl md:!text-2xl lg:!text-3xl font-bold'>
-                        30+
-                      </Typography.Text>
-                    </div>
+                  <div className='home-provider-badges'>
+                    {providerBadges.map((provider) => (
+                      <span className='home-provider-badge' key={provider}>
+                        {provider}
+                      </span>
+                    ))}
                   </div>
                 </div>
               </div>
@@ -336,7 +274,7 @@ const Home = () => {
         </div>
       ) : (
         <div className='overflow-x-hidden w-full'>
-          {homePageContent.startsWith('https://') ? (
+          {isRemoteHomePage(homePageContent) ? (
             <iframe
               src={homePageContent}
               className='w-full h-screen border-none'

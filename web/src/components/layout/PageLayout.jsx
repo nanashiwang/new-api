@@ -19,11 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 
 import HeaderBar from './headerbar';
 import { Layout } from '@douyinfe/semi-ui';
-import SiderBar from './SiderBar';
 import App from '../../App';
 import FooterBar from './Footer';
 import ErrorBoundary from '../common/ErrorBoundary';
-import React, { useContext, useEffect, useState } from 'react';
+import React, { lazy, Suspense, useContext, useEffect, useState } from 'react';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import { useSidebarCollapsed } from '../../hooks/common/useSidebarCollapsed';
 import { useTranslation } from 'react-i18next';
@@ -36,6 +35,7 @@ import { StatusContext } from '../../context/Status';
 import { useLocation } from 'react-router-dom';
 import GlobalTopProgress from '../common/ui/GlobalTopProgress';
 const { Sider, Content, Header } = Layout;
+const SiderBar = lazy(() => import('./SiderBar'));
 
 const PageLayout = () => {
   const [, userDispatch] = useContext(UserContext);
@@ -188,11 +188,13 @@ const PageLayout = () => {
               width: 'var(--sidebar-current-width)',
             }}
           >
-            <SiderBar
-              onNavigate={() => {
-                if (isMobile) setDrawerOpen(false);
-              }}
-            />
+            <Suspense fallback={null}>
+              <SiderBar
+                onNavigate={() => {
+                  if (isMobile) setDrawerOpen(false);
+                }}
+              />
+            </Suspense>
           </Sider>
         )}
         <Layout
