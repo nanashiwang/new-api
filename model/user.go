@@ -22,6 +22,8 @@ const UserRegisterSourceMaxLength = 64
 const UserAffCodeLength = 12
 const userAffCodeGenerateMaxRetry = 16
 
+type UserRegisterConflict string
+
 const (
 	UserRegisterSourceUnknown           = "unknown"
 	UserRegisterSourcePassword          = "password"
@@ -32,6 +34,13 @@ const (
 	UserRegisterSourceLinuxDO           = "linuxdo"
 	UserRegisterSourceWeChat            = "wechat"
 	UserRegisterSourceCustomOAuthPrefix = "custom_oauth:"
+)
+
+const (
+	UserRegisterConflictNone     UserRegisterConflict = ""
+	UserRegisterConflictUsername UserRegisterConflict = "username"
+	UserRegisterConflictEmail    UserRegisterConflict = "email"
+	UserRegisterConflictBoth     UserRegisterConflict = "both"
 )
 
 var generateAffCodeCandidate = func() (string, error) {
@@ -333,6 +342,58 @@ func CheckUserExistOrDeleted(username string, email string) (bool, error) {
 	}
 	// exist, return true, nil
 	return true, nil
+}
+
+func CheckUserRegisterConflict(username string, email string) (UserRegisterConflict, error) {
+	username = strings.TrimSpace(username)
+	email = strings.TrimSpace(email)
+	if username == "" && email == "" {
+		return UserRegisterConflictNone, nil
+	}
+
+	query := DB.Unscoped().Model(&User{})
+	if email == "" {
+		var count int64
+		if err := query.Where("username = ?", username).Count(&count).Error; err != nil {
+			return UserRegisterConflictNone, err
+		}
+		if count > 0 {
+			return UserRegisterConflictUsername, nil
+		}
+		return UserRegisterConflictNone, nil
+	}
+
+	var rows []struct {
+		Username string
+		Email    string
+	}
+	if err := query.Select("username", "email").
+		Where("username = ? OR email = ?", username, email).
+		Find(&rows).Error; err != nil {
+		return UserRegisterConflictNone, err
+	}
+
+	usernameExists := false
+	emailExists := false
+	for _, row := range rows {
+		if row.Username == username {
+			usernameExists = true
+		}
+		if row.Email == email {
+			emailExists = true
+		}
+	}
+
+	switch {
+	case usernameExists && emailExists:
+		return UserRegisterConflictBoth, nil
+	case usernameExists:
+		return UserRegisterConflictUsername, nil
+	case emailExists:
+		return UserRegisterConflictEmail, nil
+	default:
+		return UserRegisterConflictNone, nil
+	}
 }
 
 func GetMaxUserId() int {

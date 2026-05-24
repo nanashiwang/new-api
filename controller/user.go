@@ -178,14 +178,21 @@ func Register(c *gin.Context) {
 		}
 		common.DeleteKey(user.Email, common.EmailVerificationPurpose)
 	}
-	exist, err := model.CheckUserExistOrDeleted(user.Username, user.Email)
+	conflict, err := model.CheckUserRegisterConflict(user.Username, user.Email)
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgDatabaseError)
-		common.SysLog(fmt.Sprintf("CheckUserExistOrDeleted error: %v", err))
+		common.SysLog(fmt.Sprintf("CheckUserRegisterConflict error: %v", err))
 		return
 	}
-	if exist {
-		common.ApiErrorI18n(c, i18n.MsgUserRegisterFailed)
+	switch conflict {
+	case model.UserRegisterConflictUsername:
+		common.ApiErrorI18n(c, i18n.MsgUserUsernameExists)
+		return
+	case model.UserRegisterConflictEmail:
+		common.ApiErrorI18n(c, i18n.MsgUserEmailExists)
+		return
+	case model.UserRegisterConflictBoth:
+		common.ApiErrorI18n(c, i18n.MsgUserUsernameAndEmailExists)
 		return
 	}
 	affCode := user.AffCode // this code is the inviter's code, not the user's own code
