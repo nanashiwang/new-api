@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -37,7 +37,6 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
-  const initialized = useRef(false);
   const quotaRequestGuard = useLatestRequestGuard();
   const uptimeRequestGuard = useLatestRequestGuard();
   const userQuotaRequestGuard = useLatestRequestGuard();
@@ -307,16 +306,29 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     }
   }, [userDispatch]);
 
-  const refresh = useCallback(async () => {
-    const data = await loadQuotaData();
-    await loadUptimeData();
-    await loadPerfMetricsSummary();
-    return data;
-  }, [loadQuotaData, loadUptimeData, loadPerfMetricsSummary]);
+  const refresh = useCallback(
+    async (options = {}) => {
+      const { includeUptime = uptimeEnabled, includePerfMetrics = false } =
+        options;
+      const data = await loadQuotaData();
+      const tasks = [];
+      if (includeUptime) {
+        tasks.push(loadUptimeData());
+      }
+      if (includePerfMetrics) {
+        tasks.push(loadPerfMetricsSummary());
+      }
+      if (tasks.length > 0) {
+        await Promise.allSettled(tasks);
+      }
+      return data;
+    },
+    [loadQuotaData, loadUptimeData, loadPerfMetricsSummary, uptimeEnabled],
+  );
 
   const handleSearchConfirm = useCallback(
-    async (updateChartDataCallback) => {
-      const data = await refresh();
+    async (updateChartDataCallback, options = {}) => {
+      const data = await refresh(options);
       if (data && data.length > 0 && updateChartDataCallback) {
         updateChartDataCallback(data);
       }
@@ -332,13 +344,6 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     }, 100);
     return () => clearTimeout(timer);
   }, []);
-
-  useEffect(() => {
-    if (!initialized.current) {
-      getUserData();
-      initialized.current = true;
-    }
-  }, [getUserData]);
 
   return {
     // 基础状态

@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useContext, useEffect } from 'react';
+import React, { useContext, useEffect, useRef } from 'react';
 import { getRelativeTime } from '../../helpers';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
@@ -55,7 +55,9 @@ import {
 const Dashboard = () => {
   // ========== Context ==========
   const [userState, userDispatch] = useContext(UserContext);
-  const [statusState, statusDispatch] = useContext(StatusContext);
+  const [statusState] = useContext(StatusContext);
+  const userChartLoadedRef = useRef(false);
+  const perfMetricsLoadedRef = useRef(false);
 
   // ========== 主要数据管理 ==========
   const dashboardData = useDashboardData(userState, userDispatch, statusState);
@@ -92,31 +94,57 @@ const Dashboard = () => {
       if (userData && userData.length > 0) {
         dashboardCharts.updateUserChartData(userData);
       }
+      userChartLoadedRef.current = true;
     }
   };
 
   const initChart = async () => {
-    await dashboardData.loadQuotaData().then((data) => {
+    const quotaTask = dashboardData.loadQuotaData().then((data) => {
       if (data && data.length > 0) {
         dashboardCharts.updateChartData(data);
       }
     });
-    await loadUserData();
-    await dashboardData.loadUptimeData();
-    await dashboardData.loadPerfMetricsSummary();
+
+    const optionalTasks = [quotaTask];
+    if (dashboardData.uptimeEnabled) {
+      optionalTasks.push(dashboardData.loadUptimeData());
+    }
+
+    await Promise.allSettled(optionalTasks);
   };
 
   const handleRefresh = async () => {
-    const data = await dashboardData.refresh();
+    const isUserChartTab =
+      dashboardData.activeChartTab === '5' ||
+      dashboardData.activeChartTab === '6';
+    const data = await dashboardData.refresh({
+      includePerfMetrics: dashboardData.activeChartTab === '7',
+    });
     if (data && data.length > 0) {
       dashboardCharts.updateChartData(data);
     }
-    await loadUserData();
+    if (isUserChartTab) {
+      await loadUserData();
+    }
   };
 
   const handleSearchConfirm = async () => {
-    await dashboardData.handleSearchConfirm(dashboardCharts.updateChartData);
-    await loadUserData();
+    const isUserChartTab =
+      dashboardData.activeChartTab === '5' ||
+      dashboardData.activeChartTab === '6';
+    const isPerfMetricsTab = dashboardData.activeChartTab === '7';
+    if (!isUserChartTab) {
+      userChartLoadedRef.current = false;
+    }
+    if (!isPerfMetricsTab) {
+      perfMetricsLoadedRef.current = false;
+    }
+    await dashboardData.handleSearchConfirm(dashboardCharts.updateChartData, {
+      includePerfMetrics: isPerfMetricsTab,
+    });
+    if (isUserChartTab) {
+      await loadUserData();
+    }
   };
 
   // ========== 数据准备 ==========
@@ -150,6 +178,24 @@ const Dashboard = () => {
   useEffect(() => {
     initChart();
   }, []);
+
+  useEffect(() => {
+    if (
+      dashboardData.isAdminUser &&
+      (dashboardData.activeChartTab === '5' ||
+        dashboardData.activeChartTab === '6') &&
+      !userChartLoadedRef.current
+    ) {
+      loadUserData();
+    }
+  }, [dashboardData.activeChartTab, dashboardData.isAdminUser]);
+
+  useEffect(() => {
+    if (dashboardData.activeChartTab === '7' && !perfMetricsLoadedRef.current) {
+      perfMetricsLoadedRef.current = true;
+      dashboardData.loadPerfMetricsSummary();
+    }
+  }, [dashboardData.activeChartTab, dashboardData.loadPerfMetricsSummary]);
 
   return (
     <div className='h-full'>
