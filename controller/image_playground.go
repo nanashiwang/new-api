@@ -9,6 +9,8 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/net/publicsuffix"
@@ -72,13 +74,9 @@ func createImagePlaygroundToken(userId int, now int64) (*model.Token, error) {
 	if err != nil {
 		return nil, err
 	}
-	group, err := model.GetUserGroup(userId, false)
+	group, err := resolveImagePlaygroundTokenGroup(userId)
 	if err != nil {
 		return nil, err
-	}
-	group = strings.TrimSpace(group)
-	if group == "" {
-		group = "default"
 	}
 
 	token := &model.Token{
@@ -108,6 +106,55 @@ func createImagePlaygroundToken(userId int, now int64) (*model.Token, error) {
 		return nil, err
 	}
 	return token, nil
+}
+
+func resolveImagePlaygroundTokenGroup(userId int) (string, error) {
+	userGroup, err := model.GetUserGroup(userId, false)
+	if err != nil {
+		return "", err
+	}
+	userGroup = strings.TrimSpace(userGroup)
+	if userGroup == "" {
+		userGroup = "default"
+	}
+
+	candidates := buildImagePlaygroundGroupCandidates(userGroup)
+	for _, group := range candidates {
+		if imagePlaygroundGroupSupportsModel(group, imagePlaygroundDefaultModel) {
+			return group, nil
+		}
+	}
+	return userGroup, nil
+}
+
+func buildImagePlaygroundGroupCandidates(userGroup string) []string {
+	candidates := make([]string, 0)
+	add := func(group string) {
+		group = strings.TrimSpace(group)
+		if group == "" || common.StringsContains(candidates, group) {
+			return
+		}
+		candidates = append(candidates, group)
+	}
+
+	add(userGroup)
+	usableGroups := service.GetUserUsableGroups(userGroup)
+	for _, group := range setting.GetAutoGroups() {
+		if _, ok := usableGroups[group]; ok {
+			add(group)
+		}
+	}
+	for group := range usableGroups {
+		add(group)
+	}
+	return candidates
+}
+
+func imagePlaygroundGroupSupportsModel(group string, modelName string) bool {
+	channel, err := model.GetChannel(group, modelName, 0, nil, nil, func(ch *model.Channel) bool {
+		return ch != nil && ch.Status == common.ChannelStatusEnabled
+	})
+	return err == nil && channel != nil
 }
 
 func buildImagePlaygroundOrigin(c *gin.Context) string {
