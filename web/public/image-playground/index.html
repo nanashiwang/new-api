@@ -11,6 +11,29 @@
     <link rel="apple-touch-icon" href="./pwa-icon.svg" />
     <link rel="icon" href="./pwa-icon.svg" type="image/svg+xml" />
     <title>GPT Image Playground</title>
+    <script>
+      ;(() => {
+        try {
+          const params = new URLSearchParams(window.location.search)
+          if (params.get('appMode') !== 'gallery') return
+
+          const storageKey = 'gpt-image-playground'
+          const rawState = window.localStorage.getItem(storageKey)
+          if (!rawState) return
+
+          const persisted = JSON.parse(rawState)
+          const state =
+            persisted && typeof persisted === 'object' && persisted.state && typeof persisted.state === 'object'
+              ? persisted.state
+              : persisted
+
+          if (!state || typeof state !== 'object') return
+          state.appMode = 'gallery'
+          state.agentMobileHeaderVisible = true
+          window.localStorage.setItem(storageKey, JSON.stringify(persisted))
+        } catch (_) {}
+      })()
+    </script>
     <script type="module" crossorigin src="./assets/index-DN15hh0W.js"></script>
     <link rel="stylesheet" crossorigin href="./assets/index-D7WVOkw4.css">
   </head>
