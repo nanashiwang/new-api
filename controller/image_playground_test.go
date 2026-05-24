@@ -178,6 +178,44 @@ func TestResolveImagePlaygroundTokenGroupPrefersModelEnabledGroup(t *testing.T) 
 	}
 }
 
+func TestResolveImagePlaygroundTokenGroupPrefersImageAndAgentGroup(t *testing.T) {
+	setupImagePlaygroundGroupTestDB(t)
+
+	if err := model.DB.Create(&model.User{
+		Id:       1,
+		Username: "image-user",
+		Group:    "default",
+		Status:   common.UserStatusEnabled,
+		AffCode:  "aff-image-user",
+	}).Error; err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+
+	channels := []model.Channel{
+		{Id: 10, Name: "default-image", Key: "sk-image", Group: "default", Models: imagePlaygroundDefaultModel, Status: common.ChannelStatusEnabled},
+		{Id: 11, Name: "vip-image", Key: "sk-image", Group: "vip", Models: imagePlaygroundDefaultModel + "," + imagePlaygroundAgentModel, Status: common.ChannelStatusEnabled},
+	}
+	if err := model.DB.Create(&channels).Error; err != nil {
+		t.Fatalf("seed channels: %v", err)
+	}
+	abilities := []model.Ability{
+		{Group: "default", Model: imagePlaygroundDefaultModel, ChannelId: 10, Enabled: true},
+		{Group: "vip", Model: imagePlaygroundDefaultModel, ChannelId: 11, Enabled: true},
+		{Group: "vip", Model: imagePlaygroundAgentModel, ChannelId: 11, Enabled: true},
+	}
+	if err := model.DB.Create(&abilities).Error; err != nil {
+		t.Fatalf("seed abilities: %v", err)
+	}
+
+	group, err := resolveImagePlaygroundTokenGroup(1)
+	if err != nil {
+		t.Fatalf("resolve image playground group: %v", err)
+	}
+	if group != "vip" {
+		t.Fatalf("resolveImagePlaygroundTokenGroup() = %q, want vip", group)
+	}
+}
+
 func TestResolveImagePlaygroundTokenGroupFallsBackToUserGroup(t *testing.T) {
 	setupImagePlaygroundGroupTestDB(t)
 
@@ -197,5 +235,100 @@ func TestResolveImagePlaygroundTokenGroupFallsBackToUserGroup(t *testing.T) {
 	}
 	if group != "default" {
 		t.Fatalf("resolveImagePlaygroundTokenGroup() = %q, want default", group)
+	}
+}
+
+func TestCreateImagePlaygroundTokenDoesNotLimitModels(t *testing.T) {
+	setupImagePlaygroundGroupTestDB(t)
+
+	if err := model.DB.Create(&model.User{
+		Id:       1,
+		Username: "image-user",
+		Group:    "default",
+		Status:   common.UserStatusEnabled,
+		AffCode:  "aff-image-user",
+	}).Error; err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+
+	token, err := createImagePlaygroundToken(1, 100)
+	if err != nil {
+		t.Fatalf("create image playground token: %v", err)
+	}
+	if token.ModelLimitsEnabled {
+		t.Fatal("image playground token should not enable model limits")
+	}
+	if token.ModelLimits != "" {
+		t.Fatalf("image playground token model limits = %q, want empty", token.ModelLimits)
+	}
+}
+
+func TestClearImagePlaygroundTokenModelLimits(t *testing.T) {
+	token := &model.Token{
+		ModelLimitsEnabled: true,
+		ModelLimits:        "gpt-image-2",
+	}
+
+	if !clearImagePlaygroundTokenModelLimits(token) {
+		t.Fatal("clearImagePlaygroundTokenModelLimits() should report change")
+	}
+	if token.ModelLimitsEnabled {
+		t.Fatal("model limits should be disabled")
+	}
+	if token.ModelLimits != "" {
+		t.Fatalf("model limits = %q, want empty", token.ModelLimits)
+	}
+	if clearImagePlaygroundTokenModelLimits(token) {
+		t.Fatal("second clear should not report change")
+	}
+}
+
+func TestRefreshImagePlaygroundTokenClearsLimitsAndUpdatesGroup(t *testing.T) {
+	setupImagePlaygroundGroupTestDB(t)
+
+	if err := model.DB.Create(&model.User{
+		Id:       1,
+		Username: "image-user",
+		Group:    "default",
+		Status:   common.UserStatusEnabled,
+		AffCode:  "aff-image-user",
+	}).Error; err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	if err := model.DB.Create(&model.Channel{
+		Id:     10,
+		Name:   "vip-image",
+		Key:    "sk-image",
+		Group:  "vip",
+		Models: imagePlaygroundDefaultModel + "," + imagePlaygroundAgentModel,
+		Status: common.ChannelStatusEnabled,
+	}).Error; err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+	abilities := []model.Ability{
+		{Group: "vip", Model: imagePlaygroundDefaultModel, ChannelId: 10, Enabled: true},
+		{Group: "vip", Model: imagePlaygroundAgentModel, ChannelId: 10, Enabled: true},
+	}
+	if err := model.DB.Create(&abilities).Error; err != nil {
+		t.Fatalf("seed abilities: %v", err)
+	}
+
+	token := &model.Token{
+		Group:              "default",
+		ModelLimitsEnabled: true,
+		ModelLimits:        "gpt-image-2",
+	}
+	changed, err := refreshImagePlaygroundToken(token, 1)
+	if err != nil {
+		t.Fatalf("refresh image playground token: %v", err)
+	}
+	if !changed {
+		t.Fatal("refreshImagePlaygroundToken() should report change")
+	}
+	if token.Group != "vip" {
+		t.Fatalf("token group = %q, want vip", token.Group)
+	}
+	if token.ModelLimitsEnabled || token.ModelLimits != "" {
+		t.Fatalf("model limits not cleared: enabled=%v limits=%q", token.ModelLimitsEnabled, token.ModelLimits)
 	}
 }

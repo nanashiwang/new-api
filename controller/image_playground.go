@@ -19,7 +19,7 @@ import (
 
 const (
 	imagePlaygroundDefaultModel    = "gpt-image-2"
-	imagePlaygroundModelLimits     = "gpt-image-2,gpt-image-2-2026-04-21,gpt-image-1,gpt-image-1-mini,gpt-image-1.5,chatgpt-image-latest"
+	imagePlaygroundAgentModel      = "gpt-5.5"
 	imagePlaygroundSessionDuration = 2 * time.Hour
 	imagePlaygroundRefreshWindow   = 15 * time.Minute
 )
@@ -53,6 +53,18 @@ func CreateImagePlaygroundSession(c *gin.Context) {
 		if err != nil {
 			common.ApiError(c, err)
 			return
+		}
+	} else {
+		changed, err := refreshImagePlaygroundToken(token, userId)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		if changed {
+			if err := token.Update(); err != nil {
+				common.ApiError(c, err)
+				return
+			}
 		}
 	}
 
@@ -89,8 +101,8 @@ func createImagePlaygroundToken(userId int, now int64) (*model.Token, error) {
 		AccessedTime:         now,
 		ExpiredTime:          now + int64(imagePlaygroundSessionDuration/time.Second),
 		UnlimitedQuota:       true,
-		ModelLimitsEnabled:   true,
-		ModelLimits:          imagePlaygroundModelLimits,
+		ModelLimitsEnabled:   false,
+		ModelLimits:          "",
 		Group:                group,
 		MaxConcurrency:       2,
 		WindowRequestLimit:   60,
@@ -108,6 +120,28 @@ func createImagePlaygroundToken(userId int, now int64) (*model.Token, error) {
 	return token, nil
 }
 
+func refreshImagePlaygroundToken(token *model.Token, userId int) (bool, error) {
+	changed := clearImagePlaygroundTokenModelLimits(token)
+	group, err := resolveImagePlaygroundTokenGroup(userId)
+	if err != nil {
+		return false, err
+	}
+	if token != nil && strings.TrimSpace(token.Group) != group {
+		token.Group = group
+		changed = true
+	}
+	return changed, nil
+}
+
+func clearImagePlaygroundTokenModelLimits(token *model.Token) bool {
+	if token == nil || (!token.ModelLimitsEnabled && strings.TrimSpace(token.ModelLimits) == "") {
+		return false
+	}
+	token.ModelLimitsEnabled = false
+	token.ModelLimits = ""
+	return true
+}
+
 func resolveImagePlaygroundTokenGroup(userId int) (string, error) {
 	userGroup, err := model.GetUserGroup(userId, false)
 	if err != nil {
@@ -120,13 +154,18 @@ func resolveImagePlaygroundTokenGroup(userId int) (string, error) {
 
 	candidates := buildImagePlaygroundGroupCandidates(userGroup)
 	for _, group := range candidates {
+		if imagePlaygroundGroupSupportsModel(group, imagePlaygroundDefaultModel) &&
+			imagePlaygroundGroupSupportsModel(group, imagePlaygroundAgentModel) {
+			return group, nil
+		}
+	}
+	for _, group := range candidates {
 		if imagePlaygroundGroupSupportsModel(group, imagePlaygroundDefaultModel) {
 			return group, nil
 		}
 	}
 	return userGroup, nil
 }
-
 func buildImagePlaygroundGroupCandidates(userGroup string) []string {
 	candidates := make([]string, 0)
 	add := func(group string) {
