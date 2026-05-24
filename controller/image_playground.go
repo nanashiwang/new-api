@@ -302,6 +302,7 @@ func buildImagePlaygroundLaunchURL(origin string, key string) string {
 	q.Set("apiKey", "sk-"+key)
 	q.Set("model", imagePlaygroundDefaultModel)
 	q.Set("apiMode", "images")
+	q.Set("appMode", "gallery")
 	u.RawQuery = q.Encode()
 	return u.String()
 }

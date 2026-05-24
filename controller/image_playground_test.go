@@ -3,6 +3,7 @@ package controller
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -87,6 +88,27 @@ func TestBuildImagePlaygroundOriginFallsBackToServerAddress(t *testing.T) {
 
 	if got := buildImagePlaygroundOrigin(c); got != "https://nan.meta-api.vip" {
 		t.Fatalf("buildImagePlaygroundOrigin() = %q, want %q", got, "https://nan.meta-api.vip")
+	}
+}
+
+func TestBuildImagePlaygroundLaunchURLForcesGalleryImagesMode(t *testing.T) {
+	launchURL := buildImagePlaygroundLaunchURL("https://cn.meta-api.vip", "test-key")
+	parsed, err := url.Parse(launchURL)
+	if err != nil {
+		t.Fatalf("parse launch url: %v", err)
+	}
+	if parsed.Scheme != "https" || parsed.Host != "cn.meta-api.vip" || parsed.Path != "/image-playground/" {
+		t.Fatalf("unexpected launch url: %s", launchURL)
+	}
+	query := parsed.Query()
+	if query.Get("apiMode") != "images" {
+		t.Fatalf("apiMode = %q, want images", query.Get("apiMode"))
+	}
+	if query.Get("appMode") != "gallery" {
+		t.Fatalf("appMode = %q, want gallery", query.Get("appMode"))
+	}
+	if query.Get("model") != imagePlaygroundDefaultModel {
+		t.Fatalf("model = %q, want %s", query.Get("model"), imagePlaygroundDefaultModel)
 	}
 }
 
