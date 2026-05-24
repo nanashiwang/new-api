@@ -38,7 +38,7 @@ const ImagePlayground = () => {
         { skipGlobalLoading: true },
       );
       if (res.data?.success && res.data?.data?.url) {
-        window.location.assign(res.data.data.url);
+        window.location.replace(res.data.data.url);
         return;
       }
       const message = res.data?.message || t('创建生图会话失败');
