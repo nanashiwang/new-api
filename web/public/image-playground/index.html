@@ -81,6 +81,61 @@
             }))
         }
 
+        const findProfile = (settings, profileId) => {
+          if (!settings || !Array.isArray(settings.profiles)) return null
+          return settings.profiles.find((profile) => profile && profile.id === profileId) || null
+        }
+
+        const forceGalleryImageSettings = (state, launchProfile) => {
+          if (!state || !state.settings || typeof state.settings !== 'object') return
+          if (!launchProfile || typeof launchProfile !== 'object') return
+
+          const profileId =
+            launchProfile.id || state.settings.activeProfileId || 'newapi-image-playground'
+          const forcedProfile = {
+            ...launchProfile,
+            id: profileId,
+            provider: 'openai',
+            model: 'gpt-image-2',
+            timeout:
+              typeof launchProfile.timeout === 'number' && Number.isFinite(launchProfile.timeout)
+                ? Math.max(600, launchProfile.timeout)
+                : 600,
+            apiMode: 'images',
+            codexCli: false,
+            apiProxy: false,
+            streamImages: false,
+            streamPartialImages: 0,
+            responseFormatB64Json: true,
+          }
+
+          const profiles = Array.isArray(state.settings.profiles)
+            ? state.settings.profiles.filter(isPlainObject)
+            : []
+          let found = false
+          state.settings.profiles = profiles.map((profile) => {
+            if (profile.id !== profileId) return profile
+            found = true
+            return { ...profile, ...forcedProfile }
+          })
+          if (!found) state.settings.profiles.push(forcedProfile)
+
+          state.settings.activeProfileId = profileId
+          state.settings.baseUrl = forcedProfile.baseUrl
+          state.settings.apiKey = forcedProfile.apiKey
+          state.settings.model = forcedProfile.model
+          state.settings.timeout = forcedProfile.timeout
+          state.settings.apiMode = forcedProfile.apiMode
+          state.settings.codexCli = forcedProfile.codexCli
+          state.settings.apiProxy = forcedProfile.apiProxy
+          state.settings.streamImages = forcedProfile.streamImages
+          state.settings.streamPartialImages = forcedProfile.streamPartialImages
+          state.settings.responseFormatB64Json = forcedProfile.responseFormatB64Json
+          state.reusedTaskApiProfileId = null
+          state.reusedTaskApiProfileName = null
+          state.reusedTaskApiProfileMissing = false
+        }
+
         const compactPersistedState = (persisted, level = 0) => {
           const compacted = stripLargeValue(persisted)
           const state =
@@ -170,20 +225,11 @@
             state.agentMobileHeaderVisible = true
             const launchSettings = JSON.parse(params.get('settings') || 'null')
             const launchProfile = launchSettings?.profiles?.[0]
-            if (launchProfile && state.settings && typeof state.settings === 'object') {
-              const profileId = launchProfile.id || state.settings.activeProfileId
-              state.settings.profiles = Array.isArray(state.settings.profiles)
-                ? state.settings.profiles.map((profile) =>
-                    profile && profile.id === profileId
-                      ? { ...profile, ...launchProfile, streamImages: false, responseFormatB64Json: true }
-                      : profile,
-                  )
-                : []
-              if (!state.settings.profiles.some((profile) => profile && profile.id === profileId)) {
-                state.settings.profiles.push({ ...launchProfile, streamImages: false, responseFormatB64Json: true })
-              }
-              state.settings.activeProfileId = profileId
-              state.settings.streamImages = false
+            forceGalleryImageSettings(state, launchProfile)
+          } else if (state.appMode === 'gallery') {
+            const activeProfile = findProfile(state.settings, state.settings?.activeProfileId)
+            if (activeProfile?.id === 'newapi-image-playground') {
+              forceGalleryImageSettings(state, activeProfile)
             }
           } else if (state.appMode === 'agent' && state.settings && typeof state.settings === 'object') {
             state.settings.streamImages = true
