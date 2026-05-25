@@ -172,20 +172,26 @@ const PageLayout = () => {
         style={{
           overflow: isMobile ? 'visible' : 'auto',
           display: 'flex',
-          flexDirection: 'column',
+          flexDirection: isMobile ? 'column' : 'row',
+          paddingTop: '64px',
+          flex: '1 1 auto',
+          minHeight: 0,
         }}
       >
         {showSider && (
           <Sider
             className='app-sider'
             style={{
-              position: 'fixed',
-              left: 0,
-              top: '64px',
-              zIndex: 99,
+              position: isMobile ? 'fixed' : 'sticky',
+              left: isMobile ? 0 : 'auto',
+              top: isMobile ? '64px' : 0,
+              zIndex: isMobile ? 99 : 'auto',
               border: 'none',
               paddingRight: '0',
               width: 'var(--sidebar-current-width)',
+              minWidth: 'var(--sidebar-current-width)',
+              maxWidth: 'var(--sidebar-current-width)',
+              flex: '0 0 var(--sidebar-current-width)',
             }}
           >
             <Suspense fallback={null}>
@@ -199,14 +205,10 @@ const PageLayout = () => {
         )}
         <Layout
           style={{
-            marginLeft: isMobile
-              ? '0'
-              : showSider
-                ? 'var(--sidebar-current-width)'
-                : '0',
             flex: '1 1 auto',
             display: 'flex',
             flexDirection: 'column',
+            minWidth: 0,
           }}
         >
           <Content
