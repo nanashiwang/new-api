@@ -254,6 +254,9 @@ func InitLogDB() (err error) {
 func migrateDB() error {
 	// Migrate price_amount column from float/double to decimal for existing tables
 	migrateSubscriptionPlanPriceAmount()
+	if err := prepareProfitBoardOverviewSnapshotWatermarkMigration(); err != nil {
+		return err
+	}
 
 	err := DB.AutoMigrate(
 		&Channel{},
@@ -338,6 +341,9 @@ func migrateDB() error {
 }
 
 func migrateDBFast() error {
+	if err := prepareProfitBoardOverviewSnapshotWatermarkMigration(); err != nil {
+		return err
+	}
 
 	var wg sync.WaitGroup
 
@@ -741,19 +747,20 @@ func ensureProfitBoardOverviewSnapshotWatermarkText() error {
 
 	var alterSQL string
 	if common.UsingPostgreSQL {
-		var dataType string
-		DB.Raw(`SELECT data_type FROM information_schema.columns
-			WHERE table_name = ? AND column_name = ?`, tableName, columnName).Scan(&dataType)
-		if strings.EqualFold(dataType, "text") {
+		columnType, err := getProfitBoardOverviewSnapshotWatermarkColumnType(tableName, columnName)
+		if err != nil {
+			return err
+		}
+		if strings.EqualFold(columnType, "text") {
 			return nil
 		}
 		alterSQL = fmt.Sprintf(`ALTER TABLE %s ALTER COLUMN %s TYPE text`, tableName, columnName)
 	} else if common.UsingMySQL {
-		var columnType string
-		DB.Raw(`SELECT COLUMN_TYPE FROM information_schema.columns
-			WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`,
-			tableName, columnName).Scan(&columnType)
-		if strings.EqualFold(columnType, "text") || strings.EqualFold(columnType, "mediumtext") || strings.EqualFold(columnType, "longtext") {
+		columnType, err := getProfitBoardOverviewSnapshotWatermarkColumnType(tableName, columnName)
+		if err != nil {
+			return err
+		}
+		if isProfitBoardOverviewSnapshotWatermarkTextType(columnType) {
 			return nil
 		}
 		alterSQL = fmt.Sprintf("ALTER TABLE %s MODIFY COLUMN %s TEXT", tableName, columnName)
@@ -767,6 +774,74 @@ func ensureProfitBoardOverviewSnapshotWatermarkText() error {
 	}
 	common.SysLog(fmt.Sprintf("Successfully migrated %s.%s to text", tableName, columnName))
 	return nil
+}
+
+func prepareProfitBoardOverviewSnapshotWatermarkMigration() error {
+	if !common.UsingMySQL {
+		return nil
+	}
+
+	tableName := "profit_board_overview_snapshots"
+	columnName := "dependency_watermark"
+	if !DB.Migrator().HasTable(tableName) {
+		return nil
+	}
+	if !DB.Migrator().HasColumn(&ProfitBoardOverviewSnapshot{}, columnName) {
+		return nil
+	}
+
+	columnType, err := getProfitBoardOverviewSnapshotWatermarkColumnType(tableName, columnName)
+	if err != nil {
+		return err
+	}
+	if isProfitBoardOverviewSnapshotWatermarkTextType(columnType) {
+		return nil
+	}
+
+	var indexNames []string
+	if err := DB.Raw(`
+		SELECT DISTINCT INDEX_NAME
+		FROM information_schema.STATISTICS
+		WHERE TABLE_SCHEMA = DATABASE()
+			AND TABLE_NAME = ?
+			AND COLUMN_NAME = ?
+			AND INDEX_NAME <> 'PRIMARY'`,
+		tableName, columnName).Scan(&indexNames).Error; err != nil {
+		return err
+	}
+	for _, indexName := range indexNames {
+		if err := DB.Exec(fmt.Sprintf("DROP INDEX `%s` ON `%s`", escapeMySQLIdentifier(indexName), escapeMySQLIdentifier(tableName))).Error; err != nil {
+			return err
+		}
+		common.SysLog(fmt.Sprintf("Dropped legacy index %s on %s.%s before text migration", indexName, tableName, columnName))
+	}
+	return nil
+}
+
+func getProfitBoardOverviewSnapshotWatermarkColumnType(tableName string, columnName string) (string, error) {
+	var columnType string
+	if common.UsingPostgreSQL {
+		err := DB.Raw(`SELECT data_type FROM information_schema.columns
+			WHERE table_name = ? AND column_name = ?`, tableName, columnName).Scan(&columnType).Error
+		return columnType, err
+	}
+	if common.UsingMySQL {
+		err := DB.Raw(`SELECT COLUMN_TYPE FROM information_schema.columns
+			WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`,
+			tableName, columnName).Scan(&columnType).Error
+		return columnType, err
+	}
+	return "", nil
+}
+
+func isProfitBoardOverviewSnapshotWatermarkTextType(columnType string) bool {
+	return strings.EqualFold(columnType, "text") ||
+		strings.EqualFold(columnType, "mediumtext") ||
+		strings.EqualFold(columnType, "longtext")
+}
+
+func escapeMySQLIdentifier(identifier string) string {
+	return strings.ReplaceAll(identifier, "`", "``")
 }
 
 // migrateSubscriptionPlanPriceAmount migrates price_amount column from float/double to decimal(10,6)
