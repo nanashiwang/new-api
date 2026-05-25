@@ -127,7 +127,8 @@ const Home = () => {
           });
           const { success, data } = res.data;
           if (success && data && data.trim() !== '') {
-            setNoticeContent(data.trim());
+            const { marked } = await import('marked');
+            setNoticeContent(marked.parse(data.trim()));
             setNoticeVisible(true);
           }
         } catch (error) {

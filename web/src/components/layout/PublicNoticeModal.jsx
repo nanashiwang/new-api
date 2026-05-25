@@ -61,7 +61,10 @@ const PublicNoticeModal = ({ visible, content, onClose }) => {
             <X size={18} />
           </button>
         </header>
-        <div className='public-notice-content'>{content}</div>
+        <div
+          className='public-notice-content'
+          dangerouslySetInnerHTML={{ __html: content }}
+        />
         <footer className='public-notice-footer'>
           <button type='button' className='public-notice-ghost' onClick={closeToday}>
             {t('今日关闭')}
