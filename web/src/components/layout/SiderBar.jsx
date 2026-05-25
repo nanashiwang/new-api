@@ -436,6 +436,9 @@ const SiderBar = ({ onNavigate = () => {} }) => {
       className='sidebar-container'
       style={{
         width: 'var(--sidebar-current-width)',
+        minWidth: 'var(--sidebar-current-width)',
+        maxWidth: 'var(--sidebar-current-width)',
+        overflow: 'hidden',
       }}
     >
       <SkeletonWrapper
@@ -447,6 +450,11 @@ const SiderBar = ({ onNavigate = () => {} }) => {
       >
         <Nav
           className='sidebar-nav'
+          style={{
+            width: 'var(--sidebar-current-width)',
+            minWidth: 'var(--sidebar-current-width)',
+            maxWidth: 'var(--sidebar-current-width)',
+          }}
           defaultIsCollapsed={collapsed}
           isCollapsed={collapsed}
           onCollapseChange={toggleCollapsed}
@@ -481,7 +489,11 @@ const SiderBar = ({ onNavigate = () => {} }) => {
 
             return (
               <Link
-                style={{ textDecoration: 'none' }}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  textDecoration: 'none',
+                }}
                 to={to}
                 onClick={onNavigate}
               >
