@@ -6,7 +6,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -144,4 +146,30 @@ func TestNewDoRequestErrorMapsResponseHeaderTimeoutToGatewayTimeout(t *testing.T
 	require.Equal(t, http.StatusGatewayTimeout, apiErr.StatusCode)
 	require.True(t, types.IsSkipRetryError(apiErr))
 	require.Contains(t, apiErr.Error(), "upstream response header timeout")
+}
+
+func TestShouldUseImageHTTPClientForResponsesImageGenerationTool(t *testing.T) {
+	t.Parallel()
+
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponses,
+		Request: &dto.OpenAIResponsesRequest{
+			Tools: []byte(`[{"type":"image_generation","size":"auto"}]`),
+		},
+	}
+
+	require.True(t, shouldUseImageHTTPClient(info))
+}
+
+func TestShouldUseImageHTTPClientKeepsTextResponsesOnDefaultClient(t *testing.T) {
+	t.Parallel()
+
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponses,
+		Request: &dto.OpenAIResponsesRequest{
+			Tools: []byte(`[{"type":"web_search_preview"}]`),
+		},
+	}
+
+	require.False(t, shouldUseImageHTTPClient(info))
 }

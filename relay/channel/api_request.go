@@ -12,6 +12,7 @@ import (
 	"time"
 
 	common2 "github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/constant"
@@ -510,11 +511,29 @@ func newDoRequestError(c *gin.Context, err error) *types.NewAPIError {
 	return types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
 }
 
+func shouldUseImageHTTPClient(info *common.RelayInfo) bool {
+	if info == nil {
+		return false
+	}
+	switch info.RelayMode {
+	case constant.RelayModeImagesGenerations, constant.RelayModeImagesEdits:
+		return true
+	case constant.RelayModeResponses, constant.RelayModeResponsesCompact:
+		if request, ok := info.Request.(*dto.OpenAIResponsesRequest); ok && request.HasImageGenerationTool() {
+			return true
+		}
+		if info.ResponsesUsageInfo != nil {
+			_, ok := info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolImageGeneration]
+			return ok
+		}
+	}
+	return false
+}
+
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
 	var client *http.Client
 	var err error
-	isImageRequest := info != nil &&
-		(info.RelayMode == constant.RelayModeImagesGenerations || info.RelayMode == constant.RelayModeImagesEdits)
+	isImageRequest := shouldUseImageHTTPClient(info)
 	if info.ChannelSetting.Proxy != "" {
 		client, err = service.NewProxyHttpClient(info.ChannelSetting.Proxy, isImageRequest)
 		if err != nil {

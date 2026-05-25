@@ -15,7 +15,7 @@
       ;(() => {
         try {
           const params = new URLSearchParams(window.location.search)
-          if (params.get('appMode') !== 'gallery') return
+          const isConsoleLaunch = params.get('appMode') === 'gallery'
 
           const storageKey = 'gpt-image-playground'
           const rawState = window.localStorage.getItem(storageKey)
@@ -28,24 +28,34 @@
               : persisted
 
           if (!state || typeof state !== 'object') return
-          state.appMode = 'gallery'
-          state.agentMobileHeaderVisible = true
-          const launchSettings = JSON.parse(params.get('settings') || 'null')
-          const launchProfile = launchSettings?.profiles?.[0]
-          if (launchProfile && state.settings && typeof state.settings === 'object') {
-            const profileId = launchProfile.id || state.settings.activeProfileId
-            state.settings.profiles = Array.isArray(state.settings.profiles)
-              ? state.settings.profiles.map((profile) =>
-                  profile && profile.id === profileId
-                    ? { ...profile, ...launchProfile, streamImages: false, responseFormatB64Json: true }
-                    : profile,
-                )
-              : []
-            if (!state.settings.profiles.some((profile) => profile && profile.id === profileId)) {
-              state.settings.profiles.push({ ...launchProfile, streamImages: false, responseFormatB64Json: true })
+
+          if (isConsoleLaunch) {
+            state.appMode = 'gallery'
+            state.agentMobileHeaderVisible = true
+            const launchSettings = JSON.parse(params.get('settings') || 'null')
+            const launchProfile = launchSettings?.profiles?.[0]
+            if (launchProfile && state.settings && typeof state.settings === 'object') {
+              const profileId = launchProfile.id || state.settings.activeProfileId
+              state.settings.profiles = Array.isArray(state.settings.profiles)
+                ? state.settings.profiles.map((profile) =>
+                    profile && profile.id === profileId
+                      ? { ...profile, ...launchProfile, streamImages: false, responseFormatB64Json: true }
+                      : profile,
+                  )
+                : []
+              if (!state.settings.profiles.some((profile) => profile && profile.id === profileId)) {
+                state.settings.profiles.push({ ...launchProfile, streamImages: false, responseFormatB64Json: true })
+              }
+              state.settings.activeProfileId = profileId
+              state.settings.streamImages = false
             }
-            state.settings.activeProfileId = profileId
-            state.settings.streamImages = false
+          } else if (state.appMode === 'agent' && state.settings && typeof state.settings === 'object') {
+            state.settings.streamImages = true
+            if (Array.isArray(state.settings.profiles)) {
+              state.settings.profiles = state.settings.profiles.map((profile) =>
+                profile && profile.id === state.settings.activeProfileId ? { ...profile, streamImages: true } : profile,
+              )
+            }
           }
           window.localStorage.setItem(storageKey, JSON.stringify(persisted))
         } catch (_) {}
