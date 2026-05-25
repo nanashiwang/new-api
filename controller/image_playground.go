@@ -30,6 +30,27 @@ type imagePlaygroundSessionResponse struct {
 	Model     string `json:"model"`
 }
 
+type imagePlaygroundLaunchSettings struct {
+	Profiles        []imagePlaygroundLaunchProfile `json:"profiles"`
+	ActiveProfileID string                         `json:"activeProfileId"`
+}
+
+type imagePlaygroundLaunchProfile struct {
+	ID                    string `json:"id"`
+	Name                  string `json:"name"`
+	Provider              string `json:"provider"`
+	BaseURL               string `json:"baseUrl"`
+	APIKey                string `json:"apiKey"`
+	Model                 string `json:"model"`
+	Timeout               int    `json:"timeout"`
+	APIMode               string `json:"apiMode"`
+	CodexCli              bool   `json:"codexCli"`
+	APIProxy              bool   `json:"apiProxy"`
+	StreamImages          bool   `json:"streamImages"`
+	StreamPartialImages   int    `json:"streamPartialImages"`
+	ResponseFormatB64Json bool   `json:"responseFormatB64Json"`
+}
+
 func CreateImagePlaygroundSession(c *gin.Context) {
 	userId := c.GetInt("id")
 	if userId == 0 {
@@ -337,11 +358,36 @@ func buildImagePlaygroundLaunchURL(origin string, key string) string {
 	}
 
 	q := u.Query()
-	q.Set("apiUrl", origin+"/v1")
-	q.Set("apiKey", "sk-"+key)
-	q.Set("model", imagePlaygroundDefaultModel)
-	q.Set("apiMode", "images")
 	q.Set("appMode", "gallery")
+	settings := imagePlaygroundLaunchSettings{
+		Profiles: []imagePlaygroundLaunchProfile{
+			{
+				ID:                    "newapi-image-playground",
+				Name:                  "URL 参数配置",
+				Provider:              "openai",
+				BaseURL:               origin + "/v1",
+				APIKey:                "sk-" + key,
+				Model:                 imagePlaygroundDefaultModel,
+				Timeout:               600,
+				APIMode:               "images",
+				CodexCli:              false,
+				APIProxy:              false,
+				StreamImages:          false,
+				StreamPartialImages:   0,
+				ResponseFormatB64Json: true,
+			},
+		},
+		ActiveProfileID: "newapi-image-playground",
+	}
+	if settingsJSON, err := common.Marshal(settings); err == nil {
+		q.Set("settings", string(settingsJSON))
+	} else {
+		q.Set("apiUrl", origin+"/v1")
+		q.Set("apiKey", "sk-"+key)
+		q.Set("model", imagePlaygroundDefaultModel)
+		q.Set("apiMode", "images")
+		q.Set("streamImages", "false")
+	}
 	u.RawQuery = q.Encode()
 	return u.String()
 }

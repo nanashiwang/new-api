@@ -101,14 +101,37 @@ func TestBuildImagePlaygroundLaunchURLForcesGalleryImagesMode(t *testing.T) {
 		t.Fatalf("unexpected launch url: %s", launchURL)
 	}
 	query := parsed.Query()
-	if query.Get("apiMode") != "images" {
-		t.Fatalf("apiMode = %q, want images", query.Get("apiMode"))
-	}
 	if query.Get("appMode") != "gallery" {
 		t.Fatalf("appMode = %q, want gallery", query.Get("appMode"))
 	}
-	if query.Get("model") != imagePlaygroundDefaultModel {
-		t.Fatalf("model = %q, want %s", query.Get("model"), imagePlaygroundDefaultModel)
+	var settings imagePlaygroundLaunchSettings
+	if err := common.Unmarshal([]byte(query.Get("settings")), &settings); err != nil {
+		t.Fatalf("unmarshal launch settings: %v", err)
+	}
+	if settings.ActiveProfileID != "newapi-image-playground" {
+		t.Fatalf("activeProfileId = %q, want newapi-image-playground", settings.ActiveProfileID)
+	}
+	if len(settings.Profiles) != 1 {
+		t.Fatalf("profiles length = %d, want 1", len(settings.Profiles))
+	}
+	profile := settings.Profiles[0]
+	if profile.APIMode != "images" {
+		t.Fatalf("apiMode = %q, want images", profile.APIMode)
+	}
+	if profile.Model != imagePlaygroundDefaultModel {
+		t.Fatalf("model = %q, want %s", profile.Model, imagePlaygroundDefaultModel)
+	}
+	if profile.StreamImages {
+		t.Fatal("streamImages = true, want false")
+	}
+	if !profile.ResponseFormatB64Json {
+		t.Fatal("responseFormatB64Json = false, want true")
+	}
+	if profile.BaseURL != "https://cn.meta-api.vip/v1" {
+		t.Fatalf("baseUrl = %q, want https://cn.meta-api.vip/v1", profile.BaseURL)
+	}
+	if profile.APIKey != "sk-test-key" {
+		t.Fatalf("apiKey = %q, want sk-test-key", profile.APIKey)
 	}
 }
 
