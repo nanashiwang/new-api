@@ -164,13 +164,6 @@ func GetLatestProfitBoardConfig(c *gin.Context) {
 		profitBoardApiError(c, err)
 		return
 	}
-	if config != nil {
-		go func(payload model.ProfitBoardConfigPayload) {
-			if err := model.SyncProfitBoardOverviewSnapshotForPayload(payload); err != nil {
-				common.SysError("profit board overview snapshot async sync failed: " + err.Error())
-			}
-		}(*config)
-	}
 	common.ApiSuccess(c, gin.H{
 		"signature": signature,
 		"config":    config,
@@ -235,13 +228,6 @@ func SaveProfitBoardConfig(c *gin.Context) {
 		profitBoardApiError(c, err)
 		return
 	}
-	if config != nil {
-		go func(payload model.ProfitBoardConfigPayload) {
-			if err := model.SyncProfitBoardOverviewSnapshotForPayload(payload); err != nil {
-				common.SysError("profit board overview snapshot async sync failed: " + err.Error())
-			}
-		}(*config)
-	}
 	common.ApiSuccess(c, gin.H{
 		"signature": signature,
 		"config":    config,
@@ -282,9 +268,6 @@ func SyncProfitBoardAggregate(c *gin.Context) {
 	if err := model.SyncProfitBoardAggregate(true); err != nil {
 		profitBoardApiError(c, err)
 		return
-	}
-	if err := model.SyncProfitBoardOverviewSnapshots(); err != nil {
-		common.SysError("profit board overview snapshot sync failed: " + err.Error())
 	}
 	common.ApiSuccess(c, gin.H{
 		"synced": true,

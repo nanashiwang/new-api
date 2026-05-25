@@ -461,17 +461,10 @@ func StartProfitBoardAggregateSyncTask() {
 		if !common.IsMasterNode {
 			return
 		}
-		syncSnapshots := func() {
-			if err := SyncProfitBoardOverviewSnapshots(); err != nil {
-				common.SysError("profit board overview snapshot sync failed: " + err.Error())
-			}
-		}
 		go func() {
 			common.SysLog("profit board aggregate sync task started")
 			if err := SyncProfitBoardAggregate(true); err != nil {
 				common.SysError("profit board aggregate sync failed: " + err.Error())
-			} else {
-				syncSnapshots()
 			}
 			ticker := time.NewTicker(profitBoardAggregateSyncInterval())
 			defer ticker.Stop()
@@ -480,7 +473,6 @@ func StartProfitBoardAggregateSyncTask() {
 					common.SysError("profit board aggregate sync failed: " + err.Error())
 					continue
 				}
-				syncSnapshots()
 			}
 		}()
 	})

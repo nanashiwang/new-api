@@ -42,7 +42,6 @@ import ChartAnalysisCard from './components/ChartAnalysisCard';
 import ComboManagerCard from './components/ComboManagerCard';
 import CRSDashboardCard from './components/CRSDashboardCard';
 import ExcludedAdminUsersCard from './components/ExcludedAdminUsersCard';
-import OverviewPanel from './components/OverviewPanel';
 import PricingConfigModal from './components/PricingConfigModal';
 import ProfitBoardHeader from './components/ProfitBoardHeader';
 import ResponsiveVChart from './components/ResponsiveVChart';
@@ -69,7 +68,6 @@ import {
   createPresetRanges,
   createTrendSpec,
   formatBoardExchangeRate,
-  formatBoardMetricPair,
   formatMoney,
   getUpstreamCostSourceLabel,
   normalizeBatchForState,
@@ -341,7 +339,6 @@ const ProfitBoardPage = () => {
 
   const {
     querying,
-    overviewQuerying,
     dateRange,
     setDateRange,
     granularity,
@@ -358,7 +355,6 @@ const ProfitBoardPage = () => {
     setAnalysisMode,
     viewBatchId,
     setViewBatchId,
-    overviewReport,
     report,
     reportMatchesCurrentFilters,
     activeChartSectionLoaded,
@@ -821,59 +817,6 @@ const ProfitBoardPage = () => {
   );
 
   // --- Summary data ---
-
-  const overviewSummaryCards = useMemo(
-    () =>
-      !overviewReport?.summary
-        ? []
-        : [
-            {
-              key: 'configured_site_revenue_cny',
-              title: t('本站配置收入'),
-              ...formatBoardMetricPair(
-                overviewReport.summary.configured_site_revenue_cny,
-                overviewReport.summary.configured_site_revenue_usd,
-              ),
-              icon: (
-                <CircleDollarSign
-                  size={18}
-                  className='text-emerald-600 dark:text-emerald-400'
-                />
-              ),
-              requestCount: overviewReport.summary.request_count,
-            },
-            {
-              key: 'upstream_cost_cny',
-              title: t('上游费用'),
-              ...formatBoardMetricPair(
-                overviewReport.summary.upstream_cost_cny,
-                overviewReport.summary.upstream_cost_usd,
-              ),
-              icon: (
-                <BadgeDollarSign
-                  size={18}
-                  className='text-amber-600 dark:text-amber-400'
-                />
-              ),
-            },
-            {
-              key: 'configured_profit_cny',
-              title: t('利润'),
-              ...formatBoardMetricPair(
-                overviewReport.summary.configured_profit_cny,
-                overviewReport.summary.configured_profit_usd,
-              ),
-              icon: (
-                <BarChart3
-                  size={18}
-                  className='text-sky-600 dark:text-sky-400'
-                />
-              ),
-            },
-          ],
-    [overviewReport?.summary, t],
-  );
-
   const statusSummary = useMemo(() => {
     const items = [];
     if (autoRefreshing) {
@@ -891,28 +834,12 @@ const ProfitBoardPage = () => {
         color: 'grey',
         text: t('筛选已变化，等待刷新'),
       });
-    if (overviewReport)
-      items.push({
-        key: 'overview',
-        color: 'green',
-        text: t('累计总览已更新'),
-      });
     if (activityChecking)
       items.push({ key: 'watch', color: 'cyan', text: t('低频检查中') });
     return items;
-  }, [
-    activityChecking,
-    autoRefreshing,
-    overviewReport,
-    report,
-    reportMatchesCurrentFilters,
-    t,
-  ]);
+  }, [activityChecking, autoRefreshing, report, reportMatchesCurrentFilters, t]);
 
-  const sitePriceFactorNote =
-    overviewReport?.meta?.site_price_factor_note ||
-    report?.meta?.site_price_factor_note ||
-    '';
+  const sitePriceFactorNote = report?.meta?.site_price_factor_note || '';
 
   const combinedMessages = useMemo(() => {
     const messages = [];
@@ -943,19 +870,16 @@ const ProfitBoardPage = () => {
       });
     };
 
-    pushWarningItems(overviewReport?.warning_items || []);
     pushWarningItems(report?.warning_items || []);
 
-    [...(overviewReport?.warnings || []), ...(report?.warnings || [])].forEach(
-      (warningText) => {
-        if (!warningText || structuredWarningTexts.has(warningText)) return;
-        pushMessage({
-          key: `warning-text:${warningText}`,
-          type: 'warning',
-          text: warningText,
-        });
-      },
-    );
+    (report?.warnings || []).forEach((warningText) => {
+      if (!warningText || structuredWarningTexts.has(warningText)) return;
+      pushMessage({
+        key: `warning-text:${warningText}`,
+        type: 'warning',
+        text: warningText,
+      });
+    });
 
     queryValidationErrors.forEach((warningText) => {
       pushMessage({
@@ -983,9 +907,7 @@ const ProfitBoardPage = () => {
 
     return messages;
   }, [
-    overviewReport?.warning_items,
     report?.warning_items,
-    overviewReport?.warnings,
     report?.warnings,
     invalidBatchSelectionErrors,
     queryValidationErrors,
@@ -1020,26 +942,6 @@ const ProfitBoardPage = () => {
     () => new Set((trendRows || []).map((row) => row.bucket)).size,
     [trendRows],
   );
-
-  const batchMetrics = useMemo(() => {
-    const summaries = overviewReport?.batch_summaries;
-    if (!summaries?.length) return null;
-    const map = {};
-    summaries.forEach((s) => {
-      map[s.batch_id] = {
-        revenue: formatBoardMetricPair(
-          s.configured_site_revenue_cny,
-          s.configured_site_revenue_usd,
-        ),
-        cost: formatBoardMetricPair(s.upstream_cost_cny, s.upstream_cost_usd),
-        profit: formatBoardMetricPair(
-          s.configured_profit_cny,
-          s.configured_profit_usd,
-        ),
-      };
-    });
-    return map;
-  }, [overviewReport?.batch_summaries]);
 
   const handleSaveConfig = useCallback(async () => {
     const saved = await saveConfig(saveValidationErrors);
@@ -1076,7 +978,6 @@ const ProfitBoardPage = () => {
       <div className='mt-[60px] space-y-3 px-2 pb-6'>
         <ProfitBoardHeader
           querying={querying}
-          overviewQuerying={overviewQuerying}
           runFullRefresh={runFullRefresh}
           saving={saving}
           saveConfig={handleSaveConfig}
@@ -1221,21 +1122,6 @@ const ProfitBoardPage = () => {
             itemKey='analysis'
           >
             <div className='mt-3 space-y-3'>
-              <OverviewPanel
-                overviewQuerying={overviewQuerying}
-                autoRefreshing={autoRefreshing}
-                queryReady={queryReady}
-                overviewReport={overviewReport}
-                overviewSummaryCards={overviewSummaryCards}
-                formatMoney={formatMoney}
-                status={statusState?.status}
-                timeseries={report?.timeseries}
-                onMetricClick={(metricKey) => {
-                  setAnalysisMode('single_metric');
-                  setMetricKey(metricKey);
-                }}
-                t={t}
-              />
               <ChartAnalysisCard
                 analysisMode={analysisMode}
                 setAnalysisMode={setAnalysisMode}
@@ -1305,7 +1191,6 @@ const ProfitBoardPage = () => {
                     }
                     batchValidationError={duplicateBatchError}
                     invalidSelectionWarnings={invalidBatchSelectionErrors}
-                    batchMetrics={batchMetrics}
                     isMobile={isMobile}
                     onCreateBatch={editorHook.openCreateBatchModal}
                     onEditBatch={editorHook.openEditBatchModal}

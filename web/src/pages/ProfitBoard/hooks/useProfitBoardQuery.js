@@ -107,7 +107,6 @@ export const useProfitBoardQuery = ({
   activeTab,
 }) => {
   const [querying, setQuerying] = useState(false);
-  const [overviewQuerying, setOverviewQuerying] = useState(false);
   const [dateRange, setDateRange] = useState(restoredState.dateRange);
   const [granularity, setGranularity] = useState(
     restoredState.granularity || 'day',
@@ -128,12 +127,10 @@ export const useProfitBoardQuery = ({
   const [viewBatchId, setViewBatchId] = useState(
     restoredState.viewBatchId || 'all',
   );
-  const [overviewReport, setOverviewReport] = useState(null);
   const [report, setReport] = useState(cachedBundle?.report || null);
   const [lastQueryKey, setLastQueryKey] = useState(
     cachedBundle?.queryKey || restoredState.lastQueryKey || '',
   );
-  const [lastOverviewKey, setLastOverviewKey] = useState('');
   const [autoRefreshMode, setAutoRefreshMode] = useState(
     restoredState.autoRefreshMode || false,
   );
@@ -144,11 +141,8 @@ export const useProfitBoardQuery = ({
     cachedBundle?.activityWatermark || '',
   );
   const activeQueryKeyRef = useRef('');
-  const activeOverviewKeyRef = useRef('');
   const autoRefreshTimerRef = useRef(null);
   const scheduledAutoQueryKeyRef = useRef('');
-  const scheduledAutoOverviewKeyRef = useRef('');
-  const overviewRequestIdRef = useRef(0);
   const queryRequestIdRef = useRef(0);
 
   const currentQueryKey = useMemo(
@@ -173,26 +167,9 @@ export const useProfitBoardQuery = ({
     [batchPayload, configPayload, customIntervalMinutes, dateRange, granularity],
   );
 
-  const overviewConfigKey = useMemo(
-    () =>
-      buildQueryKey({
-        batches: batchPayload,
-        shared_site: configPayload.shared_site,
-        combo_configs: configPayload.combo_configs,
-        excluded_user_ids: configPayload.excluded_user_ids,
-        upstream: configPayload.upstream,
-        site: configPayload.site,
-      }),
-    [batchPayload, configPayload],
-  );
-
   useEffect(() => {
     activeQueryKeyRef.current = currentQueryKey;
   }, [currentQueryKey]);
-
-  useEffect(() => {
-    activeOverviewKeyRef.current = overviewConfigKey;
-  }, [overviewConfigKey]);
 
   useEffect(
     () => () => {
@@ -205,8 +182,6 @@ export const useProfitBoardQuery = ({
 
   const reportMatchesCurrentFilters =
     !!report && lastQueryKey === currentQueryKey;
-  const overviewMatchesCurrentConfig =
-    !!overviewReport && lastOverviewKey === overviewConfigKey;
   const loadedReportSections = useMemo(
     () => normalizeLoadedSections(report),
     [report],
@@ -249,33 +224,6 @@ export const useProfitBoardQuery = ({
     }),
     [configPayload, customIntervalMinutes, dateRange, granularity],
   );
-
-  const runOverviewQuery = useCallback(async (options = {}) => {
-    const { expectedOverviewKey = overviewConfigKey } = options;
-    if (!queryReady || validationErrors.length > 0) return false;
-    const requestId = ++overviewRequestIdRef.current;
-    setOverviewQuerying(true);
-    try {
-      const res = await API.post('/api/profit_board/overview', configPayload);
-      if (!res.data.success) return showError(res.data.message);
-      if (
-        overviewRequestIdRef.current !== requestId ||
-        activeOverviewKeyRef.current !== expectedOverviewKey
-      ) {
-        return false;
-      }
-      setOverviewReport(res.data.data);
-      setLastOverviewKey(expectedOverviewKey);
-      return true;
-    } catch (error) {
-      showError(error);
-      return false;
-    } finally {
-      if (overviewRequestIdRef.current === requestId) {
-        setOverviewQuerying(false);
-      }
-    }
-  }, [configPayload, overviewConfigKey, queryReady, validationErrors.length]);
 
   const runQuery = useCallback(async (options = {}) => {
     const {
@@ -348,7 +296,6 @@ export const useProfitBoardQuery = ({
     async (options = {}) => {
       const {
         expectedQueryKey = currentQueryKey,
-        expectedOverviewKey = overviewConfigKey,
         showValidationError = true,
       } = options;
       if (autoRefreshTimerRef.current) {
@@ -371,19 +318,13 @@ export const useProfitBoardQuery = ({
         showValidationError: false,
         sections: getSectionsForChartTab(chartTab),
       });
-      const overviewPromise = runOverviewQuery({ expectedOverviewKey });
-      const [reportOk, overviewOk] = await Promise.all([
-        reportPromise,
-        overviewPromise,
-      ]);
-      return !!reportOk && !!overviewOk;
+      const reportOk = await reportPromise;
+      return !!reportOk;
     },
     [
       chartTab,
       currentQueryKey,
-      overviewConfigKey,
       queryReady,
-      runOverviewQuery,
       runQuery,
       syncAggregate,
       validationErrors,
@@ -439,10 +380,7 @@ export const useProfitBoardQuery = ({
 
     if (!queryReady || validationErrors.length > 0) {
       scheduledAutoQueryKeyRef.current = '';
-      scheduledAutoOverviewKeyRef.current = '';
       setAutoRefreshing(false);
-      setOverviewReport(null);
-      setLastOverviewKey('');
       setReport(null);
       setLastQueryKey('');
       setHasNewActivity(false);
@@ -452,38 +390,26 @@ export const useProfitBoardQuery = ({
 
     if (activeTab !== 'analysis') {
       scheduledAutoQueryKeyRef.current = '';
-      scheduledAutoOverviewKeyRef.current = '';
       setAutoRefreshing(false);
       return undefined;
     }
 
     const needsReport = !reportMatchesCurrentFilters;
-    const needsOverview = !overviewMatchesCurrentConfig;
-    if (!needsReport && !needsOverview) {
+    if (!needsReport) {
       setAutoRefreshing(false);
       return undefined;
     }
 
     setAutoRefreshing(true);
     scheduledAutoQueryKeyRef.current = currentQueryKey;
-    scheduledAutoOverviewKeyRef.current = overviewConfigKey;
     autoRefreshTimerRef.current = window.setTimeout(async () => {
       const expectedQueryKey = scheduledAutoQueryKeyRef.current;
-      const expectedOverviewKey = scheduledAutoOverviewKeyRef.current;
-      if (needsReport) {
-        await runQuery({
-          expectedQueryKey,
-          showValidationError: false,
-          sections: getSectionsForChartTab(chartTab),
-        });
-      }
-      if (needsOverview) {
-        await runOverviewQuery({ expectedOverviewKey });
-      }
-      if (
-        scheduledAutoQueryKeyRef.current === expectedQueryKey &&
-        scheduledAutoOverviewKeyRef.current === expectedOverviewKey
-      ) {
+      await runQuery({
+        expectedQueryKey,
+        showValidationError: false,
+        sections: getSectionsForChartTab(chartTab),
+      });
+      if (scheduledAutoQueryKeyRef.current === expectedQueryKey) {
         setAutoRefreshing(false);
       }
     }, 400);
@@ -498,11 +424,8 @@ export const useProfitBoardQuery = ({
     activeTab,
     chartTab,
     currentQueryKey,
-    overviewConfigKey,
-    overviewMatchesCurrentConfig,
     queryReady,
     reportMatchesCurrentFilters,
-    runOverviewQuery,
     runQuery,
     validationErrors.length,
   ]);
@@ -538,7 +461,6 @@ export const useProfitBoardQuery = ({
 
   return {
     querying,
-    overviewQuerying,
     dateRange,
     setDateRange,
     granularity,
@@ -555,12 +477,9 @@ export const useProfitBoardQuery = ({
     setAnalysisMode,
     viewBatchId,
     setViewBatchId,
-    overviewReport,
     report,
     lastQueryKey,
-    lastOverviewKey,
     currentQueryKey,
-    overviewConfigKey,
     reportMatchesCurrentFilters,
     loadedReportSections,
     activeChartSectionLoaded,
@@ -569,7 +488,6 @@ export const useProfitBoardQuery = ({
     hasNewActivity,
     activityChecking,
     autoRefreshing,
-    runOverviewQuery,
     runQuery,
     runFullRefresh,
     queryPayload,

@@ -40,7 +40,6 @@ const WARNING_DETAIL_DEFAULT_LIMIT = 10;
 
 const ProfitBoardHeader = ({
   querying,
-  overviewQuerying,
   runFullRefresh,
   saving,
   saveConfig,
@@ -123,7 +122,7 @@ const ProfitBoardHeader = ({
             theme='solid'
             type='primary'
             icon={<RefreshCw size={14} />}
-            loading={querying || overviewQuerying}
+            loading={querying}
             onClick={runFullRefresh}
             size='small'
           >
