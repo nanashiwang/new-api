@@ -257,6 +257,9 @@ func migrateDB() error {
 	if err := prepareProfitBoardOverviewSnapshotWatermarkMigration(); err != nil {
 		return err
 	}
+	if err := ensureProfitBoardOverviewSnapshotReportLargeText(); err != nil {
+		return err
+	}
 
 	err := DB.AutoMigrate(
 		&Channel{},
@@ -336,12 +339,18 @@ func migrateDB() error {
 		if err := ensureProfitBoardOverviewSnapshotWatermarkText(); err != nil {
 			return err
 		}
+		if err := ensureProfitBoardOverviewSnapshotReportLargeText(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
 func migrateDBFast() error {
 	if err := prepareProfitBoardOverviewSnapshotWatermarkMigration(); err != nil {
+		return err
+	}
+	if err := ensureProfitBoardOverviewSnapshotReportLargeText(); err != nil {
 		return err
 	}
 
@@ -446,6 +455,9 @@ func migrateDBFast() error {
 			return err
 		}
 		if err := ensureProfitBoardOverviewSnapshotWatermarkText(); err != nil {
+			return err
+		}
+		if err := ensureProfitBoardOverviewSnapshotReportLargeText(); err != nil {
 			return err
 		}
 	}
@@ -747,7 +759,7 @@ func ensureProfitBoardOverviewSnapshotWatermarkText() error {
 
 	var alterSQL string
 	if common.UsingPostgreSQL {
-		columnType, err := getProfitBoardOverviewSnapshotWatermarkColumnType(tableName, columnName)
+		columnType, err := getProfitBoardOverviewSnapshotColumnType(tableName, columnName)
 		if err != nil {
 			return err
 		}
@@ -756,7 +768,7 @@ func ensureProfitBoardOverviewSnapshotWatermarkText() error {
 		}
 		alterSQL = fmt.Sprintf(`ALTER TABLE %s ALTER COLUMN %s TYPE text`, tableName, columnName)
 	} else if common.UsingMySQL {
-		columnType, err := getProfitBoardOverviewSnapshotWatermarkColumnType(tableName, columnName)
+		columnType, err := getProfitBoardOverviewSnapshotColumnType(tableName, columnName)
 		if err != nil {
 			return err
 		}
@@ -776,6 +788,48 @@ func ensureProfitBoardOverviewSnapshotWatermarkText() error {
 	return nil
 }
 
+func ensureProfitBoardOverviewSnapshotReportLargeText() error {
+	if common.UsingSQLite {
+		return nil
+	}
+
+	tableName := "profit_board_overview_snapshots"
+	columnName := "report"
+	if !DB.Migrator().HasTable(tableName) {
+		return nil
+	}
+	if !DB.Migrator().HasColumn(&ProfitBoardOverviewSnapshot{}, columnName) {
+		return nil
+	}
+
+	columnType, err := getProfitBoardOverviewSnapshotColumnType(tableName, columnName)
+	if err != nil {
+		return err
+	}
+
+	var alterSQL string
+	if common.UsingPostgreSQL {
+		if strings.EqualFold(columnType, "text") {
+			return nil
+		}
+		alterSQL = fmt.Sprintf(`ALTER TABLE %s ALTER COLUMN %s TYPE text`, tableName, columnName)
+	} else if common.UsingMySQL {
+		if isProfitBoardOverviewSnapshotLargeTextType(columnType) {
+			return nil
+		}
+		alterSQL = fmt.Sprintf("ALTER TABLE %s MODIFY COLUMN %s MEDIUMTEXT", tableName, columnName)
+	}
+
+	if alterSQL == "" {
+		return nil
+	}
+	if err := DB.Exec(alterSQL).Error; err != nil {
+		return err
+	}
+	common.SysLog(fmt.Sprintf("Successfully migrated %s.%s to large text", tableName, columnName))
+	return nil
+}
+
 func prepareProfitBoardOverviewSnapshotWatermarkMigration() error {
 	if !common.UsingMySQL {
 		return nil
@@ -790,7 +844,7 @@ func prepareProfitBoardOverviewSnapshotWatermarkMigration() error {
 		return nil
 	}
 
-	columnType, err := getProfitBoardOverviewSnapshotWatermarkColumnType(tableName, columnName)
+	columnType, err := getProfitBoardOverviewSnapshotColumnType(tableName, columnName)
 	if err != nil {
 		return err
 	}
@@ -818,7 +872,7 @@ func prepareProfitBoardOverviewSnapshotWatermarkMigration() error {
 	return nil
 }
 
-func getProfitBoardOverviewSnapshotWatermarkColumnType(tableName string, columnName string) (string, error) {
+func getProfitBoardOverviewSnapshotColumnType(tableName string, columnName string) (string, error) {
 	var columnType string
 	if common.UsingPostgreSQL {
 		err := DB.Raw(`SELECT data_type FROM information_schema.columns
@@ -837,6 +891,11 @@ func getProfitBoardOverviewSnapshotWatermarkColumnType(tableName string, columnN
 func isProfitBoardOverviewSnapshotWatermarkTextType(columnType string) bool {
 	return strings.EqualFold(columnType, "text") ||
 		strings.EqualFold(columnType, "mediumtext") ||
+		strings.EqualFold(columnType, "longtext")
+}
+
+func isProfitBoardOverviewSnapshotLargeTextType(columnType string) bool {
+	return strings.EqualFold(columnType, "mediumtext") ||
 		strings.EqualFold(columnType, "longtext")
 }
 

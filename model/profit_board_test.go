@@ -3302,6 +3302,32 @@ func TestProfitBoardOverviewSnapshotStoresLongDependencyWatermark(t *testing.T) 
 	}
 }
 
+func TestProfitBoardOverviewSnapshotStoresLargeReport(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	report := &ProfitBoardReport{
+		Warnings: []string{strings.Repeat("missing-site-pricing;", 5000)},
+	}
+	report.Meta.GeneratedAt = common.GetTimestamp()
+	meta := &profitBoardOverviewSnapshotMeta{
+		Signature:           "channel:1",
+		ConfigHash:          "large-report-config",
+		DependencyWatermark: "aggregate:1",
+	}
+
+	if err := saveProfitBoardOverviewSnapshotWithMeta(meta, report); err != nil {
+		t.Fatalf("save snapshot with large report: %v", err)
+	}
+
+	var snapshot ProfitBoardOverviewSnapshot
+	if err := db.First(&snapshot, "config_hash = ?", meta.ConfigHash).Error; err != nil {
+		t.Fatalf("load snapshot: %v", err)
+	}
+	if len(snapshot.Report) <= 65535 {
+		t.Fatalf("expected report larger than MySQL TEXT limit, got %d bytes", len(snapshot.Report))
+	}
+}
+
 func TestProfitBoardOverviewSnapshotInvalidatesOnWalletAccountConfigChange(t *testing.T) {
 	db := setupProfitBoardTestDB(t)
 

@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/schema"
 )
 
 const (
@@ -19,15 +20,28 @@ const (
 )
 
 type ProfitBoardOverviewSnapshot struct {
-	Id                  int    `json:"id"`
-	SelectionSignature  string `json:"selection_signature" gorm:"type:varchar(255);index:idx_profit_board_overview_snapshot_signature_updated,priority:1"`
-	ConfigHash          string `json:"config_hash" gorm:"type:varchar(64);uniqueIndex;not null"`
-	DependencyWatermark string `json:"dependency_watermark" gorm:"type:text"`
-	Status              string `json:"status" gorm:"type:varchar(16);index"`
-	ErrorMessage        string `json:"error_message,omitempty" gorm:"type:text"`
-	Report              string `json:"report,omitempty" gorm:"type:text"`
-	GeneratedAt         int64  `json:"generated_at" gorm:"bigint;index"`
-	UpdatedAt           int64  `json:"updated_at" gorm:"bigint;index:idx_profit_board_overview_snapshot_signature_updated,priority:2"`
+	Id                  int                       `json:"id"`
+	SelectionSignature  string                    `json:"selection_signature" gorm:"type:varchar(255);index:idx_profit_board_overview_snapshot_signature_updated,priority:1"`
+	ConfigHash          string                    `json:"config_hash" gorm:"type:varchar(64);uniqueIndex;not null"`
+	DependencyWatermark string                    `json:"dependency_watermark" gorm:"type:text"`
+	Status              string                    `json:"status" gorm:"type:varchar(16);index"`
+	ErrorMessage        string                    `json:"error_message,omitempty" gorm:"type:text"`
+	Report              ProfitBoardSnapshotReport `json:"report,omitempty"`
+	GeneratedAt         int64                     `json:"generated_at" gorm:"bigint;index"`
+	UpdatedAt           int64                     `json:"updated_at" gorm:"bigint;index:idx_profit_board_overview_snapshot_signature_updated,priority:2"`
+}
+
+type ProfitBoardSnapshotReport string
+
+func (ProfitBoardSnapshotReport) GormDataType() string {
+	return "text"
+}
+
+func (ProfitBoardSnapshotReport) GormDBDataType(db *gorm.DB, _ *schema.Field) string {
+	if db != nil && db.Dialector.Name() == "mysql" {
+		return "mediumtext"
+	}
+	return "text"
 }
 
 type profitBoardOverviewSnapshotMeta struct {
@@ -211,7 +225,7 @@ func GetProfitBoardOverviewSnapshot(payload ProfitBoardConfigPayload) (*ProfitBo
 		return nil, false, nil
 	}
 	report := &ProfitBoardReport{}
-	if err = common.UnmarshalJsonStr(snapshot.Report, report); err != nil {
+	if err = common.UnmarshalJsonStr(string(snapshot.Report), report); err != nil {
 		return nil, false, err
 	}
 	return report, true, nil
@@ -234,7 +248,7 @@ func saveProfitBoardOverviewSnapshotWithMeta(meta *profitBoardOverviewSnapshotMe
 			ConfigHash:          meta.ConfigHash,
 			DependencyWatermark: meta.DependencyWatermark,
 			Status:              profitBoardOverviewSnapshotStatusReady,
-			Report:              string(reportBytes),
+			Report:              ProfitBoardSnapshotReport(string(reportBytes)),
 			GeneratedAt:         report.Meta.GeneratedAt,
 			UpdatedAt:           now,
 		}).Error
