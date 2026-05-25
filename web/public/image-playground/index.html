@@ -13,15 +13,151 @@
     <title>GPT Image Playground</title>
     <script>
       ;(() => {
+        const storageKey = 'gpt-image-playground'
+        const maxStoredChars = 2500000
+        const maxTextChars = 20000
+        const maxConversations = 6
+        const maxRounds = 20
+        const maxMessages = 40
+        const largePayloadKeys = new Set([
+          'rawResponsePayload',
+          'responseOutput',
+          'outputItems',
+          'streamPreviews',
+          'streamPreviewSlots',
+        ])
+
+        const isPlainObject = (value) =>
+          value && typeof value === 'object' && !Array.isArray(value)
+
+        const stripLargeValue = (value, key = '', depth = 0) => {
+          if (value == null) return value
+          if (typeof value === 'string') {
+            if (
+              key === 'dataUrl' ||
+              key === 'maskDataUrl' ||
+              key === 'thumbnailDataUrl' ||
+              key === 'b64_json' ||
+              key === 'base64' ||
+              value.startsWith('data:image/')
+            ) {
+              return ''
+            }
+            return value.length > maxTextChars ? `${value.slice(0, maxTextChars)}...` : value
+          }
+          if (typeof value !== 'object') return value
+          if (depth > 8) return undefined
+          if (Array.isArray(value)) {
+            return value.map((item) => stripLargeValue(item, key, depth + 1)).filter((item) => item !== undefined)
+          }
+          const next = {}
+          Object.entries(value).forEach(([childKey, childValue]) => {
+            if (largePayloadKeys.has(childKey)) return
+            const stripped = stripLargeValue(childValue, childKey, depth + 1)
+            if (stripped !== undefined) next[childKey] = stripped
+          })
+          return next
+        }
+
+        const trimAgentConversations = (conversations, activeId, limit = maxConversations) => {
+          if (!Array.isArray(conversations)) return []
+          return conversations
+            .map((conversation) => stripLargeValue(conversation))
+            .filter(isPlainObject)
+            .sort((left, right) => {
+              if (left.id === activeId) return -1
+              if (right.id === activeId) return 1
+              return (right.updatedAt || right.createdAt || 0) - (left.updatedAt || left.createdAt || 0)
+            })
+            .slice(0, limit)
+            .map((conversation) => ({
+              ...conversation,
+              rounds: Array.isArray(conversation.rounds)
+                ? conversation.rounds.slice(-maxRounds).map((round) => stripLargeValue(round)).filter(isPlainObject)
+                : [],
+              messages: Array.isArray(conversation.messages)
+                ? conversation.messages.slice(-maxMessages).map((message) => stripLargeValue(message)).filter(isPlainObject)
+                : [],
+            }))
+        }
+
+        const compactPersistedState = (persisted, level = 0) => {
+          const compacted = stripLargeValue(persisted)
+          const state =
+            compacted && typeof compacted === 'object' && compacted.state && typeof compacted.state === 'object'
+              ? compacted.state
+              : compacted
+          if (!state || typeof state !== 'object') return compacted
+
+          const conversationLimit = level >= 2 ? 1 : level >= 1 ? 3 : maxConversations
+          state.agentConversations = trimAgentConversations(
+            state.agentConversations,
+            state.activeAgentConversationId,
+            conversationLimit,
+          )
+          state.agentInputDrafts = stripLargeValue(state.agentInputDrafts || {})
+          state.galleryInputDraft = stripLargeValue(state.galleryInputDraft || null)
+          state.inputImages = Array.isArray(state.inputImages)
+            ? state.inputImages.map((image) => stripLargeValue(image)).filter(isPlainObject)
+            : []
+          state.maskDraft = null
+          state.tasks = []
+          state.streamPreviews = {}
+          state.streamPreviewSlots = {}
+          if (level >= 3) {
+            state.agentConversations = []
+            state.activeAgentConversationId = null
+            state.agentInputDrafts = {}
+            state.galleryInputDraft = null
+          }
+          return compacted
+        }
+
+        const compactStoredString = (value) => {
+          try {
+            let parsed = JSON.parse(value)
+            for (let level = 0; level <= 3; level += 1) {
+              parsed = compactPersistedState(parsed, level)
+              const serialized = JSON.stringify(parsed)
+              if (serialized.length <= maxStoredChars || level === 3) return serialized
+            }
+          } catch (_) {}
+          return value
+        }
+
+        if (!window.__nanImagePlaygroundStoragePatched) {
+          const nativeSetItem = Storage.prototype.setItem
+          Storage.prototype.setItem = function (key, value) {
+            if (key !== storageKey || typeof value !== 'string') {
+              return nativeSetItem.call(this, key, value)
+            }
+            const nextValue = value.length > maxStoredChars ? compactStoredString(value) : value
+            try {
+              return nativeSetItem.call(this, key, nextValue)
+            } catch (error) {
+              try {
+                return nativeSetItem.call(this, key, compactStoredString(value))
+              } catch (_) {
+                try {
+                  this.removeItem(key)
+                  return nativeSetItem.call(this, key, compactStoredString(value))
+                } catch (_) {
+                  throw error
+                }
+              }
+            }
+          }
+          window.__nanImagePlaygroundStoragePatched = true
+        }
+
         try {
           const params = new URLSearchParams(window.location.search)
           const isConsoleLaunch = params.get('appMode') === 'gallery'
 
-          const storageKey = 'gpt-image-playground'
           const rawState = window.localStorage.getItem(storageKey)
           if (!rawState) return
 
-          const persisted = JSON.parse(rawState)
+          const persisted = compactPersistedState(JSON.parse(rawState))
           const state =
             persisted && typeof persisted === 'object' && persisted.state && typeof persisted.state === 'object'
               ? persisted.state
