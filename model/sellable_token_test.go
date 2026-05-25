@@ -3,14 +3,43 @@ package model
 import (
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestUpdateSellableTokenProduct_PersistsZeroValues(t *testing.T) {
-	require.NoError(t, DB.AutoMigrate(&SellableTokenProduct{}))
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+
+	originDB := DB
+	originLogDB := LOG_DB
+	originRedisEnabled := common.RedisEnabled
+	originUsingSQLite := common.UsingSQLite
+	originUsingMySQL := common.UsingMySQL
+	originUsingPostgreSQL := common.UsingPostgreSQL
+	DB = db
+	LOG_DB = db
+	common.RedisEnabled = false
+	common.UsingSQLite = true
+	common.UsingMySQL = false
+	common.UsingPostgreSQL = false
+	initCol()
 	t.Cleanup(func() {
-		DB.Exec("DELETE FROM sellable_token_products")
+		DB = originDB
+		LOG_DB = originLogDB
+		common.RedisEnabled = originRedisEnabled
+		common.UsingSQLite = originUsingSQLite
+		common.UsingMySQL = originUsingMySQL
+		common.UsingPostgreSQL = originUsingPostgreSQL
+		initCol()
 	})
+
+	require.NoError(t, db.AutoMigrate(&SellableTokenProduct{}))
 
 	product := &SellableTokenProduct{
 		Name:                 "runtime-pack",

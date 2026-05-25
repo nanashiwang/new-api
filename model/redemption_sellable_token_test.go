@@ -2,8 +2,6 @@ package model
 
 import (
 	"errors"
-	"fmt"
-	"sync"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -12,37 +10,9 @@ import (
 	"gorm.io/gorm"
 )
 
-var (
-	redemptionSellableTokenMigrateOnce sync.Once
-	redemptionSellableTokenMigrateErr  error
-)
-
 func setupRedemptionSellableTokenTest(t *testing.T) {
 	t.Helper()
 	setupInviteCommissionSubscriptionTest(t)
-	redemptionSellableTokenMigrateOnce.Do(func() {
-		createTableIfNotExists := func(name string, table any) bool {
-			if DB.Migrator().HasTable(table) {
-				return true
-			}
-			if err := DB.Migrator().CreateTable(table); err != nil {
-				redemptionSellableTokenMigrateErr = fmt.Errorf("create table %s failed: %w", name, err)
-				return false
-			}
-			return true
-		}
-
-		if !createTableIfNotExists("redemptions", &Redemption{}) {
-			return
-		}
-		if !createTableIfNotExists("sellable_token_products", &SellableTokenProduct{}) {
-			return
-		}
-		if !createTableIfNotExists("sellable_token_issuances", &SellableTokenIssuance{}) {
-			return
-		}
-	})
-	require.NoError(t, redemptionSellableTokenMigrateErr)
 	require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&SellableTokenIssuance{}).Error)
 	require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&SellableTokenProduct{}).Error)
 	require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&Redemption{}).Error)

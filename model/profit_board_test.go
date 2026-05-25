@@ -3277,6 +3277,31 @@ func TestProfitBoardOverviewSnapshotHitAndInvalidatesOnAggregateWatermark(t *tes
 	}
 }
 
+func TestProfitBoardOverviewSnapshotStoresLongDependencyWatermark(t *testing.T) {
+	db := setupProfitBoardTestDB(t)
+
+	longWatermark := strings.Repeat("remote-batch-config-watermark;", 20)
+	report := &ProfitBoardReport{}
+	report.Meta.GeneratedAt = common.GetTimestamp()
+	meta := &profitBoardOverviewSnapshotMeta{
+		Signature:           "channel:1",
+		ConfigHash:          "long-watermark-config",
+		DependencyWatermark: longWatermark,
+	}
+
+	if err := saveProfitBoardOverviewSnapshotWithMeta(meta, report); err != nil {
+		t.Fatalf("save snapshot with long watermark: %v", err)
+	}
+
+	var snapshot ProfitBoardOverviewSnapshot
+	if err := db.First(&snapshot, "config_hash = ?", meta.ConfigHash).Error; err != nil {
+		t.Fatalf("load snapshot: %v", err)
+	}
+	if snapshot.DependencyWatermark != longWatermark {
+		t.Fatalf("dependency watermark was not preserved")
+	}
+}
+
 func TestProfitBoardOverviewSnapshotInvalidatesOnWalletAccountConfigChange(t *testing.T) {
 	db := setupProfitBoardTestDB(t)
 

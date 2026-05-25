@@ -22,7 +22,7 @@ type ProfitBoardOverviewSnapshot struct {
 	Id                  int    `json:"id"`
 	SelectionSignature  string `json:"selection_signature" gorm:"type:varchar(255);index:idx_profit_board_overview_snapshot_signature_updated,priority:1"`
 	ConfigHash          string `json:"config_hash" gorm:"type:varchar(64);uniqueIndex;not null"`
-	DependencyWatermark string `json:"dependency_watermark" gorm:"type:varchar(255);index"`
+	DependencyWatermark string `json:"dependency_watermark" gorm:"type:text"`
 	Status              string `json:"status" gorm:"type:varchar(16);index"`
 	ErrorMessage        string `json:"error_message,omitempty" gorm:"type:text"`
 	Report              string `json:"report,omitempty" gorm:"type:text"`

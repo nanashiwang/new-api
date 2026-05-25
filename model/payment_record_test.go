@@ -15,13 +15,32 @@ func setupPaymentRecordTestDB(t *testing.T) {
 
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
 
+	originDB := DB
+	originLogDB := LOG_DB
+	originRedisEnabled := common.RedisEnabled
+	originUsingSQLite := common.UsingSQLite
+	originUsingMySQL := common.UsingMySQL
+	originUsingPostgreSQL := common.UsingPostgreSQL
 	DB = db
 	LOG_DB = db
 	common.RedisEnabled = false
 	common.UsingSQLite = true
 	common.UsingMySQL = false
 	common.UsingPostgreSQL = false
+	initCol()
+	t.Cleanup(func() {
+		DB = originDB
+		LOG_DB = originLogDB
+		common.RedisEnabled = originRedisEnabled
+		common.UsingSQLite = originUsingSQLite
+		common.UsingMySQL = originUsingMySQL
+		common.UsingPostgreSQL = originUsingPostgreSQL
+		initCol()
+	})
 
 	require.NoError(t, db.AutoMigrate(
 		&User{},
@@ -136,10 +155,11 @@ func TestGetUserPaymentRecordsByParams_MergesAndSortsSources(t *testing.T) {
 	setupPaymentRecordTestDB(t)
 
 	user := createPaymentRecordTestUser(t, "alice")
-	createPaymentRecordTopUp(t, user.Id, "T-001", 100, common.TopUpStatusSuccess)
-	createPaymentRecordSellablePurchase(t, user.Id, "Alpha", 250, SellableTokenIssuanceStatusIssued)
-	createPaymentRecordSellablePurchase(t, user.Id, "Beta", 200, SellableTokenIssuanceStatusPending)
-	createPaymentRecordTopUp(t, user.Id, "T-002", 300, common.TopUpStatusPending)
+	base := topUpUserQueryCutoff() + 100
+	createPaymentRecordTopUp(t, user.Id, "T-001", base+100, common.TopUpStatusSuccess)
+	createPaymentRecordSellablePurchase(t, user.Id, "Alpha", base+250, SellableTokenIssuanceStatusIssued)
+	createPaymentRecordSellablePurchase(t, user.Id, "Beta", base+200, SellableTokenIssuanceStatusPending)
+	createPaymentRecordTopUp(t, user.Id, "T-002", base+300, common.TopUpStatusPending)
 
 	records, total, err := GetUserPaymentRecordsByParams(user.Id, PaymentRecordSearchParams{}, &common.PageInfo{Page: 1, PageSize: 4})
 	require.NoError(t, err)
@@ -173,9 +193,10 @@ func TestGetUserPaymentRecordsByParams_UsesPersistedSellableTokenTradeNoForNewOr
 		PriceQuota: 200,
 	}
 	require.NoError(t, DB.Create(order).Error)
+	createTime := topUpUserQueryCutoff() + 250
 	require.NoError(t, DB.Model(&SellableTokenOrder{}).Where("id = ?", order.Id).Updates(map[string]any{
-		"create_time":   250,
-		"complete_time": 250,
+		"create_time":   createTime,
+		"complete_time": createTime,
 	}).Error)
 	issuance := &SellableTokenIssuance{
 		UserId:     user.Id,

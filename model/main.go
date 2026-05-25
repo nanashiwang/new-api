@@ -330,6 +330,9 @@ func migrateDB() error {
 		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
 			return err
 		}
+		if err := ensureProfitBoardOverviewSnapshotWatermarkText(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -434,6 +437,9 @@ func migrateDBFast() error {
 		}
 	} else {
 		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
+			return err
+		}
+		if err := ensureProfitBoardOverviewSnapshotWatermarkText(); err != nil {
 			return err
 		}
 	}
@@ -716,6 +722,50 @@ func ensureProfitBoardUpstreamAccountColumnsSQLite() error {
 			return err
 		}
 	}
+	return nil
+}
+
+func ensureProfitBoardOverviewSnapshotWatermarkText() error {
+	if common.UsingSQLite {
+		return nil
+	}
+
+	tableName := "profit_board_overview_snapshots"
+	columnName := "dependency_watermark"
+	if !DB.Migrator().HasTable(tableName) {
+		return nil
+	}
+	if !DB.Migrator().HasColumn(&ProfitBoardOverviewSnapshot{}, columnName) {
+		return nil
+	}
+
+	var alterSQL string
+	if common.UsingPostgreSQL {
+		var dataType string
+		DB.Raw(`SELECT data_type FROM information_schema.columns
+			WHERE table_name = ? AND column_name = ?`, tableName, columnName).Scan(&dataType)
+		if strings.EqualFold(dataType, "text") {
+			return nil
+		}
+		alterSQL = fmt.Sprintf(`ALTER TABLE %s ALTER COLUMN %s TYPE text`, tableName, columnName)
+	} else if common.UsingMySQL {
+		var columnType string
+		DB.Raw(`SELECT COLUMN_TYPE FROM information_schema.columns
+			WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`,
+			tableName, columnName).Scan(&columnType)
+		if strings.EqualFold(columnType, "text") || strings.EqualFold(columnType, "mediumtext") || strings.EqualFold(columnType, "longtext") {
+			return nil
+		}
+		alterSQL = fmt.Sprintf("ALTER TABLE %s MODIFY COLUMN %s TEXT", tableName, columnName)
+	}
+
+	if alterSQL == "" {
+		return nil
+	}
+	if err := DB.Exec(alterSQL).Error; err != nil {
+		return err
+	}
+	common.SysLog(fmt.Sprintf("Successfully migrated %s.%s to text", tableName, columnName))
 	return nil
 }
 

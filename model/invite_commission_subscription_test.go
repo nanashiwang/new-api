@@ -5,69 +5,68 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 )
 
-var (
-	inviteCommissionSubscriptionMigrateOnce sync.Once
-	inviteCommissionSubscriptionMigrateErr  error
-)
-
 func setupInviteCommissionSubscriptionTest(t *testing.T) {
 	t.Helper()
-	inviteCommissionSubscriptionMigrateOnce.Do(func() {
-		migrateIfNotExists := func(name string, model any) bool {
-			if DB.Migrator().HasTable(model) {
-				return true
-			}
-			if err := DB.AutoMigrate(model); err != nil {
-				inviteCommissionSubscriptionMigrateErr = fmt.Errorf("migrate %s failed: %w", name, err)
-				return false
-			}
-			return true
-		}
 
-		if !migrateIfNotExists("users", &User{}) {
-			return
-		}
-		if !migrateIfNotExists("invite_commission_ledgers", &InviteCommissionLedger{}) {
-			return
-		}
-		if !migrateIfNotExists("invite_commission_daily_cap_states", &InviteCommissionDailyCapState{}) {
-			return
-		}
-		if !migrateIfNotExists("subscription_plans", &SubscriptionPlan{}) {
-			return
-		}
-		if !migrateIfNotExists("subscription_orders", &SubscriptionOrder{}) {
-			return
-		}
-		if !migrateIfNotExists("subscription_issuances", &SubscriptionIssuance{}) {
-			return
-		}
-		if !migrateIfNotExists("user_subscriptions", &UserSubscription{}) {
-			return
-		}
-		if !migrateIfNotExists("benefit_change_records", &BenefitChangeRecord{}) {
-			return
-		}
-		if !migrateIfNotExists("benefit_rollback_operations", &BenefitRollbackOperation{}) {
-			return
-		}
-		if !migrateIfNotExists("top_ups", &TopUp{}) {
-			return
-		}
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+
+	originDB := DB
+	originLogDB := LOG_DB
+	originRedisEnabled := common.RedisEnabled
+	originUsingSQLite := common.UsingSQLite
+	originUsingMySQL := common.UsingMySQL
+	originUsingPostgreSQL := common.UsingPostgreSQL
+	DB = db
+	LOG_DB = db
+	common.RedisEnabled = false
+	common.UsingSQLite = true
+	common.UsingMySQL = false
+	common.UsingPostgreSQL = false
+	initCol()
+	t.Cleanup(func() {
+		DB = originDB
+		LOG_DB = originLogDB
+		common.RedisEnabled = originRedisEnabled
+		common.UsingSQLite = originUsingSQLite
+		common.UsingMySQL = originUsingMySQL
+		common.UsingPostgreSQL = originUsingPostgreSQL
+		initCol()
 	})
-	require.NoError(t, inviteCommissionSubscriptionMigrateErr)
+
+	require.NoError(t, db.AutoMigrate(
+		&User{},
+		&InviteCommissionLedger{},
+		&InviteCommissionDailyCapState{},
+		&SubscriptionPlan{},
+		&SubscriptionOrder{},
+		&SubscriptionIssuance{},
+		&UserSubscription{},
+		&BenefitChangeRecord{},
+		&BenefitRollbackOperation{},
+		&TopUp{},
+		&Log{},
+		&Redemption{},
+		&SellableTokenProduct{},
+		&SellableTokenOrder{},
+		&SellableTokenIssuance{},
+		&Token{},
+	))
 
 	clear := func(model any) {
 		require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(model).Error)
