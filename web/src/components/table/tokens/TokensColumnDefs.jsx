@@ -20,7 +20,9 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import {
   Button,
+  Dropdown,
   Space,
+  SplitButtonGroup,
   Tag,
   AvatarGroup,
   Avatar,
@@ -36,12 +38,14 @@ import {
   renderGroup,
   renderQuota,
   getModelCategories,
+  showError,
 } from '../../../helpers';
 import {
   formatConcurrencyLabel,
   formatWindowLimitShort,
 } from '../../../helpers/render';
 import {
+  IconTreeTriangleDown,
   IconCopy,
   IconEyeOpened,
   IconEyeClosed,
@@ -295,9 +299,20 @@ const renderRuntimeLimits = (record, t) => {
     <div style={{ padding: '4px 0', minWidth: 160 }}>
       {hasConcurrency && (
         <div style={{ marginBottom: hasWindow ? 10 : 0 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', marginBottom: 4 }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              fontSize: '0.82rem',
+              marginBottom: 4,
+            }}
+          >
             <span>{t('当前并发')}</span>
-            <strong>{rs ? `${currentConc}/${maxConcurrency}` : formatConcurrencyLabel(maxConcurrency, t)}</strong>
+            <strong>
+              {rs
+                ? `${currentConc}/${maxConcurrency}`
+                : formatConcurrencyLabel(maxConcurrency, t)}
+            </strong>
           </div>
           {rs && (
             <Progress
@@ -312,9 +327,20 @@ const renderRuntimeLimits = (record, t) => {
       )}
       {hasWindow && (
         <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', marginBottom: 4 }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              fontSize: '0.82rem',
+              marginBottom: 4,
+            }}
+          >
             <span>{t('窗口请求')}</span>
-            <strong>{rs ? `${windowUsed}/${windowRequestLimit}` : formatWindowLimitShort(windowSeconds, windowRequestLimit, t)}</strong>
+            <strong>
+              {rs
+                ? `${windowUsed}/${windowRequestLimit}`
+                : formatWindowLimitShort(windowSeconds, windowRequestLimit, t)}
+            </strong>
           </div>
           {rs && (
             <Progress
@@ -377,13 +403,16 @@ const renderQuotaUsage = (text, record, t) => {
           <>
             <Paragraph
               copyable={{
-                content: packageRemain === null ? '-' : renderQuota(packageRemain),
+                content:
+                  packageRemain === null ? '-' : renderQuota(packageRemain),
               }}
             >
               {t('本周期剩余')}:{' '}
               {packageRemain === null ? '-' : renderQuota(packageRemain)}
             </Paragraph>
-            <Paragraph>{t('下次重置')}: {packageNextResetText}</Paragraph>
+            <Paragraph>
+              {t('下次重置')}: {packageNextResetText}
+            </Paragraph>
           </>
         )}
       </div>
@@ -412,13 +441,16 @@ const renderQuotaUsage = (text, record, t) => {
         <>
           <Paragraph
             copyable={{
-              content: packageRemain === null ? '-' : renderQuota(packageRemain),
+              content:
+                packageRemain === null ? '-' : renderQuota(packageRemain),
             }}
           >
             {t('本周期剩余')}:{' '}
             {packageRemain === null ? '-' : renderQuota(packageRemain)}
           </Paragraph>
-          <Paragraph>{t('下次重置')}: {packageNextResetText}</Paragraph>
+          <Paragraph>
+            {t('下次重置')}: {packageNextResetText}
+          </Paragraph>
         </>
       )}
     </div>
@@ -498,7 +530,9 @@ const renderPackageCycleBalance = (text, record, t) => {
       <Typography.Paragraph copyable={{ content: renderQuota(packageLimit) }}>
         {t('周期额度')}: {renderQuota(packageLimit)}
       </Typography.Paragraph>
-      <Typography.Paragraph>{t('下次重置')}: {packageNextResetText}</Typography.Paragraph>
+      <Typography.Paragraph>
+        {t('下次重置')}: {packageNextResetText}
+      </Typography.Paragraph>
     </div>
   );
 
@@ -518,7 +552,10 @@ const renderPackageCycleBalance = (text, record, t) => {
           </div>
         </Tag>
       </Popover>
-      <Tooltip content={`${t('下次重置')}: ${packageNextResetText}`} position='top'>
+      <Tooltip
+        content={`${t('下次重置')}: ${packageNextResetText}`}
+        position='top'
+      >
         <Tag color='grey' shape='circle' size='small'>
           {t('重置')}: {packageNextResetCompact}
         </Tag>
@@ -569,6 +606,7 @@ const renderTokenName = (text, record, t) => {
 const renderOperations = (
   text,
   record,
+  onOpenLink,
   openTestModal,
   setEditingToken,
   setShowEdit,
@@ -576,8 +614,58 @@ const renderOperations = (
   refresh,
   t,
 ) => {
+  let chatsArray = [];
+  try {
+    const raw = localStorage.getItem('chats');
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      for (let i = 0; i < parsed.length; i++) {
+        const item = parsed[i];
+        if (!item || typeof item !== 'object') continue;
+        const name = Object.keys(item)[0];
+        if (!name) continue;
+        chatsArray.push({
+          node: 'item',
+          key: i,
+          name,
+          value: item[name],
+          onClick: () => onOpenLink(name, item[name], record),
+        });
+      }
+    }
+  } catch (_) {
+    showError(t('聊天链接配置错误，请联系管理员'));
+  }
+
   return (
     <Space wrap>
+      <SplitButtonGroup
+        className='overflow-hidden'
+        aria-label={t('项目操作按钮组')}
+      >
+        <Button
+          size='small'
+          type='tertiary'
+          onClick={() => {
+            if (chatsArray.length === 0) {
+              showError(t('请联系管理员配置聊天链接'));
+            } else {
+              const first = chatsArray[0];
+              onOpenLink(first.name, first.value, record);
+            }
+          }}
+        >
+          {t('聊天')}
+        </Button>
+        <Dropdown trigger='click' position='bottomRight' menu={chatsArray}>
+          <Button
+            type='tertiary'
+            icon={<IconTreeTriangleDown />}
+            size='small'
+          />
+        </Dropdown>
+      </SplitButtonGroup>
+
       <Button
         size='small'
         type='tertiary'
@@ -631,7 +719,9 @@ const renderOperations = (
               onOk: async () => {
                 Modal.confirm({
                   title: t('二次确认'),
-                  content: t('此操作不可逆，删除后令牌将永久失效且无法恢复。确定要继续吗？'),
+                  content: t(
+                    '此操作不可逆，删除后令牌将永久失效且无法恢复。确定要继续吗？',
+                  ),
                   okType: 'danger',
                   okText: t('确认删除'),
                   onOk: async () => {
@@ -668,6 +758,7 @@ export const getTokensColumns = ({
   toggleTokenKeyVisibility,
   copyTokenKey,
   manageToken,
+  onOpenLink,
   openTestModal,
   setEditingToken,
   setShowEdit,
@@ -768,6 +859,7 @@ export const getTokensColumns = ({
         renderOperations(
           text,
           record,
+          onOpenLink,
           openTestModal,
           setEditingToken,
           setShowEdit,
