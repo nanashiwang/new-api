@@ -39,6 +39,13 @@ const PublicNoticeModal = lazy(
 );
 
 const isRemoteHomePage = (content) => content.startsWith('https://');
+const getCachedHomePageContent = () => {
+  try {
+    return localStorage.getItem('home_page_content') || '';
+  } catch (error) {
+    return '';
+  }
+};
 const providerBadges = [
   'OpenAI',
   'Claude',
@@ -55,7 +62,12 @@ const Home = () => {
   const { t, language, isChinese } = usePublicTranslation();
   const [statusState] = useContext(StatusContext);
   const actualTheme = useActualTheme();
-  const [homePageContent, setHomePageContent] = useState('');
+  const [homePageContent, setHomePageContent] = useState(
+    getCachedHomePageContent,
+  );
+  const [homePageResolved, setHomePageResolved] = useState(
+    () => getCachedHomePageContent() !== '',
+  );
   const [noticeContent, setNoticeContent] = useState('');
   const [noticeVisible, setNoticeVisible] = useState(false);
   const isMobile = useIsMobile();
@@ -69,7 +81,7 @@ const Home = () => {
   const currentEndpoint = endpointItems[endpointIndex]?.value || '';
 
   const displayHomePageContent = async () => {
-    const cachedContent = localStorage.getItem('home_page_content') || '';
+    const cachedContent = getCachedHomePageContent();
     if (cachedContent) {
       setHomePageContent(cachedContent);
     }
@@ -108,6 +120,8 @@ const Home = () => {
     } catch (error) {
       if (cachedContent) return;
       console.error('加载首页内容失败:', error);
+    } finally {
+      setHomePageResolved(true);
     }
   };
 
@@ -151,6 +165,15 @@ const Home = () => {
     }, 3000);
     return () => clearInterval(timer);
   }, [endpointItems.length]);
+
+  if (!homePageResolved) {
+    return (
+      <div
+        className='w-full min-h-[calc(100vh-64px)] bg-[var(--semi-color-bg-0,#fff)]'
+        aria-busy='true'
+      />
+    );
+  }
 
   return (
     <div className='w-full overflow-x-hidden'>
