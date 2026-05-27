@@ -10,6 +10,7 @@ import {
 import {
   ECOMMERCE_GROUPS,
   ECOMMERCE_PLATFORMS,
+  INDUSTRY_PRESETS,
   PRODUCT_ASSET_BUCKETS,
   SIZE_PRESETS,
   STYLE_PRESETS,
@@ -17,8 +18,10 @@ import {
   getSizePreset,
   getStylePreset,
   getSuiteTemplate,
+  isDefaultEcommerceBrief,
 } from '../lib/ecommerce'
 import { CopyIcon, DownloadIcon, EditIcon, PhotoIcon, PlusIcon, RefreshIcon, TrashIcon } from './icons'
+import SaveTemplateModal from './SaveTemplateModal'
 
 function parseTags(value: string) {
   return value.split(/[，,、\n]/).map((item) => item.trim()).filter(Boolean)
@@ -327,6 +330,13 @@ export default function EcommerceStudio() {
   const setDetailTaskId = useStore((s) => s.setDetailTaskId)
   const showToast = useStore((s) => s.showToast)
   const capabilities = useStore((s) => s.ecommerceCapabilities)
+  const userTemplates = useStore((s) => s.userSuiteTemplates)
+  const applyIndustryPreset = useStore((s) => s.applyIndustryPreset)
+  const saveCurrentSuiteAsTemplate = useStore((s) => s.saveCurrentSuiteAsTemplate)
+  const applyUserTemplate = useStore((s) => s.applyUserTemplate)
+  const deleteUserTemplate = useStore((s) => s.deleteUserTemplate)
+  const renameUserTemplate = useStore((s) => s.renameUserTemplate)
+  const [saveTemplateModalOpen, setSaveTemplateModalOpen] = useState(false)
   const suite = suites.find((item) => item.id === activeSuiteId)
 
   useEffect(() => {
@@ -353,6 +363,58 @@ export default function EcommerceStudio() {
   const template = getSuiteTemplate(brief.suiteTemplateId)
   const sizePreset = getSizePreset(brief.sizePreset)
   const isGenerating = generationQueue.length > 0
+
+  const sortedUserTemplates = useMemo(
+    () => [...userTemplates].sort((a, b) => b.updatedAt - a.updatedAt),
+    [userTemplates],
+  )
+
+  const briefIsDefault = isDefaultEcommerceBrief(brief)
+
+  // 确认覆盖：当前 brief 已有非默认内容时弹窗二次确认，避免误覆盖用户填写。
+  // 接受一个 reason 文案区分"行业起步包"和"用户模板"两种触发源。
+  const confirmOverwriteIfNeeded = (reason: string): boolean => {
+    if (briefIsDefault) return true
+    return window.confirm(`${reason}将完全覆盖当前 brief（不影响已上传素材）。继续？`)
+  }
+
+  const handleSelectIndustryPreset = (presetId: string) => {
+    if (!presetId) return
+    if (!confirmOverwriteIfNeeded('选择行业起步包')) return
+    if (!applyIndustryPreset(presetId)) {
+      showToast('未找到该行业起步包', 'error')
+    }
+  }
+
+  const handleApplyUserTemplate = (templateId: string, templateName: string) => {
+    if (!confirmOverwriteIfNeeded(`套用模板「${templateName}」`)) return
+    if (!applyUserTemplate(templateId)) {
+      showToast('模板已不存在', 'error')
+    }
+  }
+
+  const handleSaveTemplate = (name: string) => {
+    saveCurrentSuiteAsTemplate(name)
+    setSaveTemplateModalOpen(false)
+  }
+
+  const handleRenameUserTemplate = (templateId: string, currentName: string) => {
+    const next = window.prompt('重命名模板', currentName)
+    if (next === null) return
+    const trimmed = next.trim()
+    if (!trimmed) {
+      showToast('模板名称不能为空', 'error')
+      return
+    }
+    renameUserTemplate(templateId, trimmed)
+  }
+
+  const handleDeleteUserTemplate = (templateId: string, name: string) => {
+    if (!window.confirm(`确定删除模板「${name}」？`)) return
+    deleteUserTemplate(templateId)
+  }
+
+  const defaultTemplateName = `${brief.productName.trim() || '未命名套图'} · ${new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })}`
 
   const uploadAssets = async (kind: ProductAssetKind, files: FileList | null) => {
     if (!files?.length) return
@@ -462,6 +524,85 @@ export default function EcommerceStudio() {
         </section>
 
         <aside className="space-y-3">
+          <section className="rounded-2xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-gray-950 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="font-bold text-gray-950 dark:text-white">快速起步</h3>
+              <span className="text-xs text-gray-400">一键填充配置</span>
+            </div>
+            <div className="mt-3 space-y-3">
+              <div>
+                <FieldLabel>行业起步包</FieldLabel>
+                <SelectInput
+                  value=""
+                  onChange={(event) => {
+                    handleSelectIndustryPreset(event.target.value)
+                    event.target.value = ''
+                  }}
+                >
+                  <option value="">选择一个行业…</option>
+                  {INDUSTRY_PRESETS.map((preset) => (
+                    <option key={preset.id} value={preset.id}>{preset.name}</option>
+                  ))}
+                </SelectInput>
+                <p className="mt-1 text-xs text-gray-500">选中后会完全覆盖当前 brief，但不会动已上传的素材。</p>
+              </div>
+              <div>
+                <div className="flex items-center justify-between">
+                  <FieldLabel>我的模板（{sortedUserTemplates.length}）</FieldLabel>
+                  <button
+                    type="button"
+                    onClick={() => setSaveTemplateModalOpen(true)}
+                    className="text-xs font-medium text-gray-500 hover:text-gray-900 dark:hover:text-white"
+                  >
+                    保存当前为模板
+                  </button>
+                </div>
+                {sortedUserTemplates.length === 0 ? (
+                  <p className="mt-2 text-xs text-gray-400">还没有保存的模板。配置好 brief 与套图骨架后，点上方按钮保存。</p>
+                ) : (
+                  <ul className="mt-2 space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                    {sortedUserTemplates.map((tpl) => (
+                      <li
+                        key={tpl.id}
+                        className="group flex items-center justify-between gap-2 rounded-xl border border-gray-200 dark:border-white/[0.08] px-2.5 py-1.5"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => handleApplyUserTemplate(tpl.id, tpl.name)}
+                          className="flex-1 min-w-0 text-left text-xs text-gray-700 dark:text-gray-200 hover:text-gray-950 dark:hover:text-white"
+                          title={`套用模板：${tpl.name}`}
+                        >
+                          <span className="truncate block">{tpl.name}</span>
+                          <span className="block text-[10px] text-gray-400 mt-0.5">
+                            {new Date(tpl.updatedAt).toLocaleString('zh-CN', { hour12: false })} · 骨架 {tpl.plan.length} 项
+                          </span>
+                        </button>
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            type="button"
+                            onClick={() => handleRenameUserTemplate(tpl.id, tpl.name)}
+                            className="rounded-md p-1 text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                            title="重命名"
+                          >
+                            <EditIcon className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteUserTemplate(tpl.id, tpl.name)}
+                            className="rounded-md p-1 text-gray-400 hover:text-red-500"
+                            title="删除"
+                          >
+                            <TrashIcon className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          </section>
+
           <section className="rounded-2xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-gray-950 p-4">
             <div className="flex items-center justify-between gap-3">
               <h3 className="font-bold text-gray-950 dark:text-white">套图配置</h3>
@@ -575,11 +716,23 @@ export default function EcommerceStudio() {
             </div>
             <div className="mt-2 grid grid-cols-2 gap-2">
               <button type="button" disabled className="rounded-xl border border-gray-200 dark:border-white/[0.08] px-3 py-2 text-xs text-gray-400 disabled:cursor-not-allowed" title="即将支持">全部下载 ZIP</button>
-              <button type="button" disabled className="rounded-xl border border-gray-200 dark:border-white/[0.08] px-3 py-2 text-xs text-gray-400 disabled:cursor-not-allowed" title="即将支持">保存为模板</button>
+              <button
+                type="button"
+                onClick={() => setSaveTemplateModalOpen(true)}
+                className="rounded-xl border border-gray-200 dark:border-white/[0.08] px-3 py-2 text-xs text-gray-600 dark:text-gray-300 hover:border-gray-900 hover:text-gray-900 dark:hover:border-white dark:hover:text-white"
+              >
+                保存为模板
+              </button>
             </div>
           </section>
         </aside>
       </div>
+      <SaveTemplateModal
+        open={saveTemplateModalOpen}
+        defaultName={defaultTemplateName}
+        onCancel={() => setSaveTemplateModalOpen(false)}
+        onConfirm={handleSaveTemplate}
+      />
     </main>
   )
 }

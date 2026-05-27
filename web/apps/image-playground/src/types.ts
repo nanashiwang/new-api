@@ -272,6 +272,27 @@ export interface EcommerceSuite {
   updatedAt: number
 }
 
+// IndustryPreset 行业起步包：一键覆盖填充 brief 字段，帮助新用户从空白页快速跑出第一组图。
+// 内置 5 个行业（美妆/服装/数码/食品/家居），定义在 src/lib/ecommerce.ts 的 INDUSTRY_PRESETS。
+export interface IndustryPreset {
+  id: string
+  name: string
+  description: string
+  brief: EcommerceBrief
+}
+
+// SavedSuiteTemplate 用户保存的电商套图模板。
+// 仅持久化 brief 与 plan 骨架（剥离 outputTaskIds/status/error/count/enabled），不含 assets，避免 localStorage 膨胀。
+// 套用时把当前 active suite 的 brief 覆盖 + plan 完全替换（assets 保留不动）。
+export interface SavedSuiteTemplate {
+  id: string
+  name: string
+  createdAt: number
+  updatedAt: number
+  brief: EcommerceBrief
+  plan: Array<Pick<SuitePlanItem, 'id' | 'group' | 'title' | 'purpose' | 'ratio' | 'prompt' | 'promptPurpose' | 'finalPromptDraft'>>
+}
+
 export interface EcommerceCapabilities {
   defaultImageModel: string
   defaultPlanModel: string

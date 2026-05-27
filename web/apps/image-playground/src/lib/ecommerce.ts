@@ -4,9 +4,11 @@ import type {
   EcommerceBrief,
   EcommerceCapabilities,
   EcommerceSuite,
+  IndustryPreset,
   ProductAsset,
   ProductAssetKind,
   ResponsesApiResponse,
+  SavedSuiteTemplate,
   SuitePlanGroup,
   SuitePlanItem,
 } from '../types'
@@ -91,6 +93,153 @@ export function createDefaultEcommerceBrief(): EcommerceBrief {
       promotion: 3,
       sku: 2,
     },
+  }
+}
+
+// INDUSTRY_PRESETS 行业起步包：用户在 brief 面板顶端选中行业后，整套 brief 被完全覆盖。
+// 仅作为新手入门的合理起点，所有字段（包括卖点）都鼓励用户立即按真实商品改写。
+// 风格/套图/尺寸 id 均引用现有 STYLE_PRESETS / SUITE_TEMPLATES / SIZE_PRESETS。
+export const INDUSTRY_PRESETS: IndustryPreset[] = [
+  {
+    id: 'beauty',
+    name: '美妆个护',
+    description: '小红书风格 + 基础套图，主图 1:1，强调质感与生活方式',
+    brief: {
+      ...createDefaultEcommerceBrief(),
+      productName: '示例：玻尿酸口红',
+      category: '美妆个护',
+      sellingPoints: ['持色12小时', '水润不拔干', '日杂干净显色'],
+      targetAudience: '20-35 岁注重妆效的女性',
+      targetPlatforms: ['淘宝/天猫', '小红书'],
+      stylePresetId: 'xiaohongshu-life',
+      suiteTemplateId: 'basic-suite',
+      sizePreset: 'main-1-1',
+      extraPrompt: '突出唇部特写质感，画面干净通透，避免过度浓妆感',
+    },
+  },
+  {
+    id: 'apparel',
+    name: '服装鞋帽',
+    description: '白底主图 + 平台主图套装，详情 3:4 适配电商详情页',
+    brief: {
+      ...createDefaultEcommerceBrief(),
+      productName: '示例：纯棉宽松T恤',
+      category: '服装鞋帽',
+      sellingPoints: ['莫代尔棉舒适亲肤', '垂感好不撞色', '显瘦剪裁'],
+      targetAudience: '18-35 岁追求舒适基础款的年轻人',
+      targetPlatforms: ['淘宝/天猫', '京东'],
+      stylePresetId: 'minimal-white',
+      suiteTemplateId: 'marketplace-main',
+      sizePreset: 'detail-3-4',
+      extraPrompt: '展示面料垂感与上身效果，避免过度修图改变版型',
+    },
+  },
+  {
+    id: 'digital',
+    name: '数码 3C',
+    description: '高级科技感 + 详情长图，突出参数与质感',
+    brief: {
+      ...createDefaultEcommerceBrief(),
+      productName: '示例：无线降噪耳机',
+      category: '数码 3C',
+      sellingPoints: ['主动降噪', '30 小时续航', '蓝牙 5.3 低延迟'],
+      targetAudience: '通勤白领、商务人士、影音爱好者',
+      targetPlatforms: ['京东', '淘宝/天猫'],
+      stylePresetId: 'tech-premium',
+      suiteTemplateId: 'detail-long-page',
+      sizePreset: 'detail-3-4',
+      extraPrompt: '冷色调金属质感，强调参数和卖点信息层级',
+    },
+  },
+  {
+    id: 'food',
+    name: '食品生鲜',
+    description: '极简白底 + 促销套图，社媒 4:5 适合种草',
+    brief: {
+      ...createDefaultEcommerceBrief(),
+      productName: '示例：手工原味曲奇',
+      category: '食品生鲜',
+      sellingPoints: ['当日烘焙', '真材实料', '不含防腐剂'],
+      targetAudience: '注重健康饮食的家庭、办公室零食爱好者',
+      targetPlatforms: ['淘宝/天猫', '小红书'],
+      stylePresetId: 'minimal-white',
+      suiteTemplateId: 'promotion-suite',
+      sizePreset: 'social-4-5',
+      extraPrompt: '突出食物质感和新鲜感，避免出现非真实成分',
+      negativePrompt: '不要夸张医疗/养生功效承诺，不要出现竞品 Logo',
+    },
+  },
+  {
+    id: 'home',
+    name: '家居生活',
+    description: '极简白底 + 基础套图，主图 1:1 通用',
+    brief: {
+      ...createDefaultEcommerceBrief(),
+      productName: '示例：北欧实木餐椅',
+      category: '家居生活',
+      sellingPoints: ['实木骨架稳固', '人体工学曲线', '易清洁面料'],
+      targetAudience: '注重生活品质的家庭、独居青年',
+      targetPlatforms: ['淘宝/天猫', '京东'],
+      stylePresetId: 'minimal-white',
+      suiteTemplateId: 'basic-suite',
+      sizePreset: 'main-1-1',
+      extraPrompt: '展示尺寸感和真实场景使用效果，避免改变结构',
+    },
+  },
+]
+
+export function getIndustryPreset(id: string): IndustryPreset | undefined {
+  return INDUSTRY_PRESETS.find((preset) => preset.id === id)
+}
+
+// 判断 brief 是否仍处于"未填写过"状态。用于决定切换行业起步包/套用模板前是否需要二次确认。
+export function isDefaultEcommerceBrief(brief: EcommerceBrief): boolean {
+  const def = createDefaultEcommerceBrief()
+  if (brief.productName.trim() !== '') return false
+  if (brief.category.trim() !== '') return false
+  if (brief.sellingPoints.length > 0) return false
+  if (brief.targetAudience.trim() !== '') return false
+  if (brief.extraPrompt.trim() !== '') return false
+  if ((brief.negativePrompt ?? '').trim() !== '') return false
+  if (brief.stylePresetId !== def.stylePresetId) return false
+  if (brief.suiteTemplateId !== def.suiteTemplateId) return false
+  if (brief.sizePreset !== def.sizePreset) return false
+  if (brief.targetPlatforms.length !== def.targetPlatforms.length) return false
+  if (brief.targetPlatforms.some((p, i) => p !== def.targetPlatforms[i])) return false
+  return true
+}
+
+// cloneSuitePlanItemSkeleton 把已生成的 plan item 剥成模板骨架：
+// 去掉 outputTaskIds/status/error/count/enabled，仅保留结构/提示词，避免把生成结果与运行状态写进模板。
+export function cloneSuitePlanItemSkeleton(item: SuitePlanItem): SavedSuiteTemplate['plan'][number] {
+  return {
+    id: item.id,
+    group: item.group,
+    title: item.title,
+    purpose: item.purpose,
+    ratio: item.ratio,
+    prompt: item.prompt,
+    promptPurpose: item.promptPurpose,
+    finalPromptDraft: item.finalPromptDraft,
+  }
+}
+
+// hydrateSuitePlanItemFromSkeleton 套用模板时把骨架还原为完整 SuitePlanItem，状态重置为草稿、不带任何生成结果。
+export function hydrateSuitePlanItemFromSkeleton(skeleton: SavedSuiteTemplate['plan'][number]): SuitePlanItem {
+  return {
+    id: skeleton.id,
+    group: skeleton.group,
+    title: skeleton.title,
+    purpose: skeleton.purpose,
+    ratio: skeleton.ratio,
+    prompt: skeleton.prompt,
+    promptPurpose: skeleton.promptPurpose,
+    finalPromptDraft: skeleton.finalPromptDraft,
+    count: 1,
+    enabled: true,
+    status: 'draft',
+    outputTaskIds: [],
+    error: null,
   }
 }
 

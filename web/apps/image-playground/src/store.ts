@@ -12,6 +12,7 @@ import type {
   EcommerceCapabilities,
   EcommercePlanStatus,
   EcommerceSuite,
+  SavedSuiteTemplate,
   TaskParams,
   InputImage,
   MaskDraft,
@@ -61,12 +62,15 @@ import {
   DEFAULT_ECOMMERCE_CAPABILITIES,
   buildEcommerceItemPrompt,
   callEcommercePlanApi,
+  cloneSuitePlanItemSkeleton,
   createEcommerceSuite,
   createProductAsset,
   createSuiteSkeleton,
   fallbackEcommercePlan,
   getBucketLimit,
+  getIndustryPreset,
   getSizePreset,
+  hydrateSuitePlanItemFromSkeleton,
   selectEcommerceInputImageIds,
 } from './lib/ecommerce'
 import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate'
@@ -691,6 +695,41 @@ function normalizeEcommerceSuites(value: unknown): EcommerceSuite[] {
   return value.map(normalizeEcommerceSuite).filter((suite): suite is EcommerceSuite => Boolean(suite))
 }
 
+function normalizeSavedSuiteTemplatePlanItem(value: unknown): SavedSuiteTemplate['plan'][number] | null {
+  if (!isRecord(value) || typeof value.id !== 'string') return null
+  return {
+    id: value.id,
+    group: normalizeSuitePlanGroup(value.group),
+    title: typeof value.title === 'string' ? value.title : '',
+    purpose: typeof value.purpose === 'string' ? value.purpose : '',
+    ratio: typeof value.ratio === 'string' ? value.ratio : '1:1',
+    prompt: typeof value.prompt === 'string' ? value.prompt : '',
+    promptPurpose: typeof value.promptPurpose === 'string' ? value.promptPurpose : '',
+    finalPromptDraft: typeof value.finalPromptDraft === 'string' ? value.finalPromptDraft : '',
+  }
+}
+
+function normalizeSavedSuiteTemplate(value: unknown): SavedSuiteTemplate | null {
+  if (!isRecord(value) || typeof value.id !== 'string') return null
+  const name = typeof value.name === 'string' && value.name.trim() ? value.name.trim() : '未命名模板'
+  const plan = Array.isArray(value.plan)
+    ? value.plan.map(normalizeSavedSuiteTemplatePlanItem).filter((item): item is SavedSuiteTemplate['plan'][number] => Boolean(item))
+    : []
+  return {
+    id: value.id,
+    name,
+    createdAt: typeof value.createdAt === 'number' ? value.createdAt : Date.now(),
+    updatedAt: typeof value.updatedAt === 'number' ? value.updatedAt : Date.now(),
+    brief: normalizeEcommerceBrief(value.brief),
+    plan,
+  }
+}
+
+function normalizeUserSuiteTemplates(value: unknown): SavedSuiteTemplate[] {
+  if (!Array.isArray(value)) return []
+  return value.map(normalizeSavedSuiteTemplate).filter((tpl): tpl is SavedSuiteTemplate => Boolean(tpl))
+}
+
 function normalizeEcommerceCapabilities(value: unknown): EcommerceCapabilities {
   const record = isRecord(value) ? value : {}
   const supportsEcommerce = record.supportsEcommerce !== false
@@ -756,6 +795,7 @@ export function getPersistedState(state: AppState) {
     selectedEcommercePlanItemId: state.selectedEcommercePlanItemId,
     ecommercePlanDraftStatus: state.ecommercePlanDraftStatus === 'planning' ? 'idle' : state.ecommercePlanDraftStatus,
     ecommerceCapabilities: state.ecommerceCapabilities,
+    userSuiteTemplates: state.userSuiteTemplates,
     supportPromptDismissed: state.supportPromptDismissed,
     supportPromptOpen: state.supportPromptOpen,
     supportPromptSkippedForImportedData: state.supportPromptSkippedForImportedData,
@@ -834,6 +874,7 @@ function mergePersistedState(persistedState: unknown, currentState: AppState): A
     selectedEcommercePlanItemId: typeof persisted.selectedEcommercePlanItemId === 'string' ? persisted.selectedEcommercePlanItemId : null,
     ecommercePlanDraftStatus: persisted.ecommercePlanDraftStatus === 'ready' || persisted.ecommercePlanDraftStatus === 'error' ? persisted.ecommercePlanDraftStatus : 'idle',
     ecommerceCapabilities: normalizeEcommerceCapabilities(persisted.ecommerceCapabilities),
+    userSuiteTemplates: normalizeUserSuiteTemplates(persisted.userSuiteTemplates),
     supportPromptDismissed: Boolean(persisted.supportPromptDismissed),
     supportPromptOpen: Boolean(persisted.supportPromptOpen),
     supportPromptSkippedForImportedData: Boolean(persisted.supportPromptSkippedForImportedData),
@@ -913,6 +954,7 @@ interface AppState {
   ecommercePlanDraftStatus: EcommercePlanStatus
   ecommerceCapabilities: EcommerceCapabilities
   generationQueue: string[]
+  userSuiteTemplates: SavedSuiteTemplate[]
   setEcommerceCapabilities: (capabilities: Partial<EcommerceCapabilities>) => void
   createEcommerceSuite: () => string
   setActiveEcommerceSuiteId: (id: string | null) => void
@@ -925,6 +967,11 @@ interface AppState {
   generateEcommerceSuite: () => Promise<void>
   retryEcommercePlanItem: (itemId: string) => Promise<void>
   addEcommerceStyleReference: (imageId: string, name?: string) => void
+  applyIndustryPreset: (presetId: string) => boolean
+  saveCurrentSuiteAsTemplate: (name: string) => SavedSuiteTemplate | null
+  applyUserTemplate: (templateId: string) => boolean
+  deleteUserTemplate: (templateId: string) => void
+  renameUserTemplate: (templateId: string, name: string) => void
 
   // 任务列表
   tasks: TaskRecord[]
@@ -1704,6 +1751,87 @@ export const useStore = create<AppState>()(
           ],
         }
       })),
+
+      userSuiteTemplates: [],
+      // applyIndustryPreset 按行业起步包一次性覆盖当前 active suite 的 brief（assets/plan 不动）。
+      // 返回 false 表示 presetId 不存在；caller 负责在调用前做"是否清空当前 brief"的二次确认。
+      applyIndustryPreset: (presetId) => {
+        const preset = getIndustryPreset(presetId)
+        if (!preset) return false
+        const state = useStore.getState()
+        const { suites, suite } = ensureActiveEcommerceSuite(state)
+        const next = suites.map((item) => item.id === suite.id
+          ? { ...suite, brief: { ...preset.brief }, name: `${preset.brief.productName}套图`, updatedAt: Date.now() }
+          : item)
+        useStore.setState({
+          ecommerceSuites: next,
+          activeEcommerceSuiteId: suite.id,
+          selectedEcommercePlanItemId: null,
+          ecommercePlanDraftStatus: 'idle',
+        })
+        return true
+      },
+      // saveCurrentSuiteAsTemplate 把当前 active suite 的 brief + plan 骨架（无 assets/outputTaskIds）存进模板库，按 updatedAt 倒序。
+      // 返回新建的模板对象供 caller 高亮；当前没有 active suite 时返回 null。
+      saveCurrentSuiteAsTemplate: (name) => {
+        const state = useStore.getState()
+        const suite = state.ecommerceSuites.find((item) => item.id === state.activeEcommerceSuiteId)
+        if (!suite) {
+          state.showToast('请先选择一个套图', 'error')
+          return null
+        }
+        const trimmed = name.trim() || `${suite.brief.productName || '未命名套图'} ${new Date().toLocaleString('zh-CN', { hour12: false })}`
+        const template: SavedSuiteTemplate = {
+          id: genId(),
+          name: trimmed,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          brief: { ...suite.brief, counts: { ...suite.brief.counts }, sellingPoints: [...suite.brief.sellingPoints], targetPlatforms: [...suite.brief.targetPlatforms] },
+          plan: suite.plan.map(cloneSuitePlanItemSkeleton),
+        }
+        useStore.setState((latest) => ({ userSuiteTemplates: [template, ...latest.userSuiteTemplates] }))
+        state.showToast('模板已保存', 'success')
+        return template
+      },
+      // applyUserTemplate 套用用户模板：替换 brief + 用骨架重建 plan（状态重置为 draft）。assets 完全保留。
+      // 返回 false 表示模板不存在；caller 负责调用前的二次确认。
+      applyUserTemplate: (templateId) => {
+        const state = useStore.getState()
+        const template = state.userSuiteTemplates.find((tpl) => tpl.id === templateId)
+        if (!template) return false
+        const { suites, suite } = ensureActiveEcommerceSuite(state)
+        const next = suites.map((item) => item.id === suite.id
+          ? {
+              ...suite,
+              brief: { ...template.brief, counts: { ...template.brief.counts }, sellingPoints: [...template.brief.sellingPoints], targetPlatforms: [...template.brief.targetPlatforms] },
+              plan: template.plan.map(hydrateSuitePlanItemFromSkeleton),
+              name: `${template.brief.productName || template.name}套图`,
+              updatedAt: Date.now(),
+            }
+          : item)
+        useStore.setState({
+          ecommerceSuites: next,
+          activeEcommerceSuiteId: suite.id,
+          selectedEcommercePlanItemId: template.plan[0]?.id ?? null,
+          ecommercePlanDraftStatus: template.plan.length > 0 ? 'ready' : 'idle',
+        })
+        state.showToast(`已套用模板「${template.name}」`, 'success')
+        return true
+      },
+      deleteUserTemplate: (templateId) => {
+        useStore.setState((state) => ({
+          userSuiteTemplates: state.userSuiteTemplates.filter((tpl) => tpl.id !== templateId),
+        }))
+      },
+      renameUserTemplate: (templateId, name) => {
+        const trimmed = name.trim()
+        if (!trimmed) return
+        useStore.setState((state) => ({
+          userSuiteTemplates: state.userSuiteTemplates.map((tpl) => tpl.id === templateId
+            ? { ...tpl, name: trimmed, updatedAt: Date.now() }
+            : tpl),
+        }))
+      },
 
       // Tasks
       tasks: [],
