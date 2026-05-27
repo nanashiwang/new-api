@@ -31,8 +31,12 @@ type imagePlaygroundSessionResponse struct {
 }
 
 type imagePlaygroundLaunchSettings struct {
-	Profiles        []imagePlaygroundLaunchProfile `json:"profiles"`
-	ActiveProfileID string                         `json:"activeProfileId"`
+	Profiles                []imagePlaygroundLaunchProfile `json:"profiles"`
+	ActiveProfileID         string                         `json:"activeProfileId"`
+	DefaultImageModel       string                         `json:"defaultImageModel"`
+	DefaultPlanModel        string                         `json:"defaultPlanModel"`
+	SupportsEcommerce       bool                           `json:"supportsEcommerce"`
+	EcommerceDisabledReason string                         `json:"ecommerceDisabledReason,omitempty"`
 }
 
 type imagePlaygroundLaunchProfile struct {
@@ -96,7 +100,7 @@ func CreateImagePlaygroundSession(c *gin.Context) {
 	}
 
 	common.ApiSuccess(c, imagePlaygroundSessionResponse{
-		URL:       buildImagePlaygroundLaunchURL(origin, token.Key),
+		URL:       buildImagePlaygroundLaunchURL(origin, token.Key, imagePlaygroundTokenSupportsEcommerce(token)),
 		ExpiresAt: token.ExpiredTime,
 		Model:     imagePlaygroundDefaultModel,
 	})
@@ -161,6 +165,18 @@ func clearImagePlaygroundTokenModelLimits(token *model.Token) bool {
 	token.ModelLimitsEnabled = false
 	token.ModelLimits = ""
 	return true
+}
+
+func imagePlaygroundTokenSupportsEcommerce(token *model.Token) bool {
+	if token == nil {
+		return false
+	}
+	group := strings.TrimSpace(token.Group)
+	if group == "" {
+		return false
+	}
+	return imagePlaygroundGroupSupportsModel(group, imagePlaygroundDefaultModel) &&
+		imagePlaygroundGroupSupportsModel(group, imagePlaygroundAgentModel)
 }
 
 func resolveImagePlaygroundTokenGroup(userId int) (string, error) {
@@ -347,7 +363,7 @@ func firstHeaderValue(value string) string {
 	return strings.TrimSpace(parts[0])
 }
 
-func buildImagePlaygroundLaunchURL(origin string, key string) string {
+func buildImagePlaygroundLaunchURL(origin string, key string, supportsEcommerce bool) string {
 	u := url.URL{
 		Scheme: "http",
 		Host:   "localhost",
@@ -377,7 +393,13 @@ func buildImagePlaygroundLaunchURL(origin string, key string) string {
 				ResponseFormatB64Json: true,
 			},
 		},
-		ActiveProfileID: "newapi-image-playground",
+		ActiveProfileID:   "newapi-image-playground",
+		DefaultImageModel: imagePlaygroundDefaultModel,
+		DefaultPlanModel:  imagePlaygroundAgentModel,
+		SupportsEcommerce: supportsEcommerce,
+	}
+	if !supportsEcommerce {
+		settings.EcommerceDisabledReason = "当前令牌分组未同时支持 gpt-image-2 与 gpt-5.5，电商套图模式已禁用。"
 	}
 	if settingsJSON, err := common.Marshal(settings); err == nil {
 		q.Set("settings", string(settingsJSON))

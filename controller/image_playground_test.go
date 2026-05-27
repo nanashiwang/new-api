@@ -92,7 +92,7 @@ func TestBuildImagePlaygroundOriginFallsBackToServerAddress(t *testing.T) {
 }
 
 func TestBuildImagePlaygroundLaunchURLForcesGalleryImagesMode(t *testing.T) {
-	launchURL := buildImagePlaygroundLaunchURL("https://cn.meta-api.vip", "test-key")
+	launchURL := buildImagePlaygroundLaunchURL("https://cn.meta-api.vip", "test-key", true)
 	parsed, err := url.Parse(launchURL)
 	if err != nil {
 		t.Fatalf("parse launch url: %v", err)
@@ -110,6 +110,15 @@ func TestBuildImagePlaygroundLaunchURLForcesGalleryImagesMode(t *testing.T) {
 	}
 	if settings.ActiveProfileID != "newapi-image-playground" {
 		t.Fatalf("activeProfileId = %q, want newapi-image-playground", settings.ActiveProfileID)
+	}
+	if settings.DefaultImageModel != imagePlaygroundDefaultModel {
+		t.Fatalf("defaultImageModel = %q, want %s", settings.DefaultImageModel, imagePlaygroundDefaultModel)
+	}
+	if settings.DefaultPlanModel != imagePlaygroundAgentModel {
+		t.Fatalf("defaultPlanModel = %q, want %s", settings.DefaultPlanModel, imagePlaygroundAgentModel)
+	}
+	if !settings.SupportsEcommerce {
+		t.Fatal("supportsEcommerce = false, want true")
 	}
 	if len(settings.Profiles) != 1 {
 		t.Fatalf("profiles length = %d, want 1", len(settings.Profiles))
