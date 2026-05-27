@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"net/url"
 	"strings"
@@ -67,6 +68,7 @@ func CreateImagePlaygroundSession(c *gin.Context) {
 		common.SysLog("failed to delete expired image playground tokens: " + err.Error())
 	}
 
+	var supportsEcommerce bool
 	minExpiredTime := now + int64(imagePlaygroundRefreshWindow/time.Second)
 	token, err := model.GetReusableImagePlaygroundToken(userId, minExpiredTime)
 	if err != nil {
@@ -74,23 +76,26 @@ func CreateImagePlaygroundSession(c *gin.Context) {
 			common.ApiError(c, err)
 			return
 		}
-		token, err = createImagePlaygroundToken(userId, now)
+		token, supportsEcommerce, err = createImagePlaygroundToken(userId, now)
 		if err != nil {
 			common.ApiError(c, err)
 			return
 		}
 	} else {
-		changed, err := refreshImagePlaygroundToken(token, userId)
-		if err != nil {
-			common.ApiError(c, err)
-			return
-		}
+		changed, refreshed, refreshErr := refreshImagePlaygroundToken(token, userId)
+		// 即便 refreshErr 非空，clearImagePlaygroundTokenModelLimits 可能已经把 ModelLimits 改掉，
+		// 这里仍把可持久化的内存改动写回，避免 in-memory/DB 状态长时间漂移。
 		if changed {
-			if err := token.Update(); err != nil {
-				common.ApiError(c, err)
+			if updateErr := token.Update(); updateErr != nil {
+				common.ApiError(c, updateErr)
 				return
 			}
 		}
+		if refreshErr != nil {
+			common.ApiError(c, refreshErr)
+			return
+		}
+		supportsEcommerce = refreshed
 	}
 
 	origin := buildImagePlaygroundOrigin(c)
@@ -100,20 +105,20 @@ func CreateImagePlaygroundSession(c *gin.Context) {
 	}
 
 	common.ApiSuccess(c, imagePlaygroundSessionResponse{
-		URL:       buildImagePlaygroundLaunchURL(origin, token.Key, imagePlaygroundTokenSupportsEcommerce(token)),
+		URL:       buildImagePlaygroundLaunchURL(origin, token.Key, supportsEcommerce),
 		ExpiresAt: token.ExpiredTime,
 		Model:     imagePlaygroundDefaultModel,
 	})
 }
 
-func createImagePlaygroundToken(userId int, now int64) (*model.Token, error) {
+func createImagePlaygroundToken(userId int, now int64) (*model.Token, bool, error) {
 	key, err := common.GenerateKey()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	group, err := resolveImagePlaygroundTokenGroup(userId)
+	group, supportsEcommerce, err := resolveImagePlaygroundTokenGroup(userId)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	token := &model.Token{
@@ -137,25 +142,32 @@ func createImagePlaygroundToken(userId int, now int64) (*model.Token, error) {
 		PackageNextResetTime: 0,
 	}
 	if err := model.ValidateTokenRuntimeLimitConfig(token); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if err := token.Insert(); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return token, nil
+	return token, supportsEcommerce, nil
 }
 
-func refreshImagePlaygroundToken(token *model.Token, userId int) (bool, error) {
+// refreshImagePlaygroundToken 刷新已存在的 image-playground token：清空遗留的模型限制并将
+// 分组重定向到最适合 image-playground 的 group。
+// 返回值：
+//   - changed: token 内存状态是否已被修改（caller 应据此决定是否回写 DB；即便随后返回 err，
+//     已经发生的内存变更也应一并持久化以避免内存/DB 漂移）。
+//   - supportsEcommerce: 选定的 group 是否同时支持 image + agent 两个模型，用于决定 UI 是否启用电商模式。
+//   - err: 解析 group 时的错误，nil 表示成功。
+func refreshImagePlaygroundToken(token *model.Token, userId int) (bool, bool, error) {
 	changed := clearImagePlaygroundTokenModelLimits(token)
-	group, err := resolveImagePlaygroundTokenGroup(userId)
+	group, supportsEcommerce, err := resolveImagePlaygroundTokenGroup(userId)
 	if err != nil {
-		return false, err
+		return changed, false, err
 	}
 	if token != nil && strings.TrimSpace(token.Group) != group {
 		token.Group = group
 		changed = true
 	}
-	return changed, nil
+	return changed, supportsEcommerce, nil
 }
 
 func clearImagePlaygroundTokenModelLimits(token *model.Token) bool {
@@ -167,22 +179,18 @@ func clearImagePlaygroundTokenModelLimits(token *model.Token) bool {
 	return true
 }
 
-func imagePlaygroundTokenSupportsEcommerce(token *model.Token) bool {
-	if token == nil {
-		return false
-	}
-	group := strings.TrimSpace(token.Group)
-	if group == "" {
-		return false
-	}
-	return imagePlaygroundGroupSupportsModel(group, imagePlaygroundDefaultModel) &&
-		imagePlaygroundGroupSupportsModel(group, imagePlaygroundAgentModel)
-}
-
-func resolveImagePlaygroundTokenGroup(userId int) (string, error) {
+// resolveImagePlaygroundTokenGroup 选出最适合当前用户的 image-playground 分组并报告其能力。
+// 选择顺序：
+//  1. 同时支持 image + agent 模型（电商套图所需）；
+//  2. 仅支持 image 模型；
+//  3. 兜底返回用户当前分组（可能不支持任何 image 模型，由 caller 处理失败场景）。
+//
+// 第二个返回值表示返回的 group 是否同时支持两个模型；caller 可直接用作 supportsEcommerce 标志，
+// 无需再次进行 ability 查询，避免每次会话生成都重复 N 次 DB/缓存调用。
+func resolveImagePlaygroundTokenGroup(userId int) (string, bool, error) {
 	userGroup, err := model.GetUserGroup(userId, false)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	userGroup = strings.TrimSpace(userGroup)
 	if userGroup == "" {
@@ -190,18 +198,39 @@ func resolveImagePlaygroundTokenGroup(userId int) (string, error) {
 	}
 
 	candidates := buildImagePlaygroundGroupCandidates(userGroup)
+
+	// 每个 candidate 对两个模型仅查询一次，避免分支间重复触发 model.GetChannel。
+	type supportInfo struct {
+		group string
+		image bool
+		agent bool
+	}
+	infos := make([]supportInfo, 0, len(candidates))
 	for _, group := range candidates {
-		if imagePlaygroundGroupSupportsModel(group, imagePlaygroundDefaultModel) &&
-			imagePlaygroundGroupSupportsModel(group, imagePlaygroundAgentModel) {
-			return group, nil
+		imageSupported, imageErr := imagePlaygroundGroupSupportsModel(group, imagePlaygroundDefaultModel)
+		if imageErr != nil {
+			common.SysError(fmt.Sprintf("image-playground supports check failed: group=%s model=%s err=%v",
+				group, imagePlaygroundDefaultModel, imageErr))
+		}
+		agentSupported, agentErr := imagePlaygroundGroupSupportsModel(group, imagePlaygroundAgentModel)
+		if agentErr != nil {
+			common.SysError(fmt.Sprintf("image-playground supports check failed: group=%s model=%s err=%v",
+				group, imagePlaygroundAgentModel, agentErr))
+		}
+		infos = append(infos, supportInfo{group: group, image: imageSupported, agent: agentSupported})
+	}
+
+	for _, info := range infos {
+		if info.image && info.agent {
+			return info.group, true, nil
 		}
 	}
-	for _, group := range candidates {
-		if imagePlaygroundGroupSupportsModel(group, imagePlaygroundDefaultModel) {
-			return group, nil
+	for _, info := range infos {
+		if info.image {
+			return info.group, false, nil
 		}
 	}
-	return userGroup, nil
+	return userGroup, false, nil
 }
 func buildImagePlaygroundGroupCandidates(userGroup string) []string {
 	candidates := make([]string, 0)
@@ -226,11 +255,17 @@ func buildImagePlaygroundGroupCandidates(userGroup string) []string {
 	return candidates
 }
 
-func imagePlaygroundGroupSupportsModel(group string, modelName string) bool {
+func imagePlaygroundGroupSupportsModel(group string, modelName string) (bool, error) {
 	channel, err := model.GetChannel(group, modelName, 0, nil, nil, func(ch *model.Channel) bool {
 		return ch != nil && ch.Status == common.ChannelStatusEnabled
 	})
-	return err == nil && channel != nil
+	if err != nil {
+		// 区分"通道不存在"（model.GetChannel 返回 nil,nil）与"查询失败"：
+		// 前者属于正常的"不支持"语义，后者由 caller 决定是否记录/降级，避免把瞬时
+		// 数据库错误误判为永久"不支持"并写脏 token.Group。
+		return false, err
+	}
+	return channel != nil, nil
 }
 
 func buildImagePlaygroundOrigin(c *gin.Context) string {
@@ -421,7 +456,10 @@ func buildImagePlaygroundLaunchURL(origin string, key string, supportsEcommerce 
 		SupportsEcommerce: supportsEcommerce,
 	}
 	if !supportsEcommerce {
-		settings.EcommerceDisabledReason = "当前令牌分组未同时支持 gpt-image-2 与 gpt-5.5，电商套图模式已禁用。"
+		settings.EcommerceDisabledReason = fmt.Sprintf(
+			"当前令牌分组未同时支持 %s 与 %s，电商套图模式已禁用。",
+			imagePlaygroundDefaultModel, imagePlaygroundAgentModel,
+		)
 	}
 	if settingsJSON, err := common.Marshal(settings); err == nil {
 		q.Set("settings", string(settingsJSON))

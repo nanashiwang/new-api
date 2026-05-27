@@ -201,12 +201,15 @@ func TestResolveImagePlaygroundTokenGroupPrefersModelEnabledGroup(t *testing.T) 
 		t.Fatalf("seed ability: %v", err)
 	}
 
-	group, err := resolveImagePlaygroundTokenGroup(1)
+	group, supportsEcommerce, err := resolveImagePlaygroundTokenGroup(1)
 	if err != nil {
 		t.Fatalf("resolve image playground group: %v", err)
 	}
 	if group != "vip" {
 		t.Fatalf("resolveImagePlaygroundTokenGroup() = %q, want vip", group)
+	}
+	if supportsEcommerce {
+		t.Fatal("supportsEcommerce = true, want false (only image model enabled)")
 	}
 }
 
@@ -239,12 +242,15 @@ func TestResolveImagePlaygroundTokenGroupPrefersImageAndAgentGroup(t *testing.T)
 		t.Fatalf("seed abilities: %v", err)
 	}
 
-	group, err := resolveImagePlaygroundTokenGroup(1)
+	group, supportsEcommerce, err := resolveImagePlaygroundTokenGroup(1)
 	if err != nil {
 		t.Fatalf("resolve image playground group: %v", err)
 	}
 	if group != "vip" {
 		t.Fatalf("resolveImagePlaygroundTokenGroup() = %q, want vip", group)
+	}
+	if !supportsEcommerce {
+		t.Fatal("supportsEcommerce = false, want true (vip supports both models)")
 	}
 }
 
@@ -261,12 +267,15 @@ func TestResolveImagePlaygroundTokenGroupFallsBackToUserGroup(t *testing.T) {
 		t.Fatalf("seed user: %v", err)
 	}
 
-	group, err := resolveImagePlaygroundTokenGroup(1)
+	group, supportsEcommerce, err := resolveImagePlaygroundTokenGroup(1)
 	if err != nil {
 		t.Fatalf("resolve image playground group: %v", err)
 	}
 	if group != "default" {
 		t.Fatalf("resolveImagePlaygroundTokenGroup() = %q, want default", group)
+	}
+	if supportsEcommerce {
+		t.Fatal("supportsEcommerce = true, want false (no channel enabled)")
 	}
 }
 
@@ -283,7 +292,7 @@ func TestCreateImagePlaygroundTokenDoesNotLimitModels(t *testing.T) {
 		t.Fatalf("seed user: %v", err)
 	}
 
-	token, err := createImagePlaygroundToken(1, 100)
+	token, supportsEcommerce, err := createImagePlaygroundToken(1, 100)
 	if err != nil {
 		t.Fatalf("create image playground token: %v", err)
 	}
@@ -292,6 +301,9 @@ func TestCreateImagePlaygroundTokenDoesNotLimitModels(t *testing.T) {
 	}
 	if token.ModelLimits != "" {
 		t.Fatalf("image playground token model limits = %q, want empty", token.ModelLimits)
+	}
+	if supportsEcommerce {
+		t.Fatal("supportsEcommerce = true, want false (no channel enabled in test fixture)")
 	}
 }
 
@@ -350,12 +362,15 @@ func TestRefreshImagePlaygroundTokenClearsLimitsAndUpdatesGroup(t *testing.T) {
 		ModelLimitsEnabled: true,
 		ModelLimits:        "gpt-image-2",
 	}
-	changed, err := refreshImagePlaygroundToken(token, 1)
+	changed, supportsEcommerce, err := refreshImagePlaygroundToken(token, 1)
 	if err != nil {
 		t.Fatalf("refresh image playground token: %v", err)
 	}
 	if !changed {
 		t.Fatal("refreshImagePlaygroundToken() should report change")
+	}
+	if !supportsEcommerce {
+		t.Fatal("supportsEcommerce = false, want true (vip supports both models)")
 	}
 	if token.Group != "vip" {
 		t.Fatalf("token group = %q, want vip", token.Group)
