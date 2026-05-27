@@ -6,6 +6,12 @@ on:
       - main
   workflow_dispatch:
 
+# 强制 JavaScript actions 使用 Node.js 24，提前规避 2026-06-02 之后
+# GitHub 弃用 Node.js 20 的告警与运行风险（涉及 actions/checkout@v4、
+# docker/setup-buildx-action@v3、docker/login-action@v3、docker/build-push-action@v6 等）。
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   docker:
     runs-on: ubuntu-latest
