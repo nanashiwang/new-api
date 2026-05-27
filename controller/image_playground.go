@@ -22,6 +22,9 @@ const (
 	imagePlaygroundAgentModel      = "gpt-5.5"
 	imagePlaygroundSessionDuration = 2 * time.Hour
 	imagePlaygroundRefreshWindow   = 15 * time.Minute
+	// 强制覆盖 image-playground 启动 URL 与 BaseURL 使用的 origin，便于绕开 Cloudflare 等带有较短超时的前置 CDN。
+	// 例如：IMAGE_PLAYGROUND_PREFERRED_ORIGIN=https://cn.example.com
+	imagePlaygroundPreferredOriginEnv = "IMAGE_PLAYGROUND_PREFERRED_ORIGIN"
 )
 
 type imagePlaygroundSessionResponse struct {
@@ -234,6 +237,10 @@ func imagePlaygroundGroupSupportsModel(group string, modelName string) bool {
 }
 
 func buildImagePlaygroundOrigin(c *gin.Context) string {
+	// 最高优先级：由运维通过环境变量强制指定 origin（如绕开 Cloudflare 100s 超时的灰云域名）。
+	if origin := preferredImagePlaygroundOrigin(); origin != "" {
+		return origin
+	}
 	if origin := buildImagePlaygroundBrowserOrigin(c); origin != "" {
 		return origin
 	}
@@ -244,6 +251,23 @@ func buildImagePlaygroundOrigin(c *gin.Context) string {
 		return strings.TrimRight(serverAddress, "/")
 	}
 	return ""
+}
+
+// preferredImagePlaygroundOrigin 读取并校验环境变量中的优先 origin。
+// 仅接受 http/https 协议，返回标准化后的 "scheme://host"，无效或未配置时返回空串。
+func preferredImagePlaygroundOrigin() string {
+	raw := strings.TrimSpace(common.GetEnvOrDefaultString(imagePlaygroundPreferredOriginEnv, ""))
+	if raw == "" {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" {
+		return ""
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return ""
+	}
+	return parsed.Scheme + "://" + parsed.Host
 }
 
 func buildImagePlaygroundBrowserOrigin(c *gin.Context) string {
