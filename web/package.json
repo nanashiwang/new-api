@@ -44,7 +44,8 @@
   "scripts": {
     "dev": "vite",
     "build:image-playground": "cd apps/image-playground && bun install && bun run build",
-    "build": "bun run build:image-playground && vite build",
+    "build": "bun run build:image-playground && vite build && bun run prerender",
+    "prerender": "node scripts/prerender.mjs",
     "lint": "prettier . --check",
     "lint:fix": "prettier . --write",
     "eslint": "bunx eslint \"**/*.{js,jsx}\" --cache",
@@ -86,6 +87,7 @@
     "i18next-cli": "^1.10.3",
     "postcss": "^8.5.3",
     "prettier": "^3.0.0",
+    "puppeteer-core": "^23.0.0",
     "tailwindcss": "^3",
     "typescript": "4.4.2",
     "vite": "^5.2.0"

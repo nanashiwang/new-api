@@ -1,5 +1,14 @@
 FROM oven/bun:latest AS builder
 
+# 预渲染（SEO 阶段 2）需要在 build 后跑 puppeteer-core 控制真浏览器抓取页面 HTML，
+# 这里在 builder 阶段装系统 chromium + 中文字体（避免预渲染 HTML 出现方框乱码）。
+# 仅影响 builder 镜像，最终 runtime 镜像（debian:bookworm-slim）不变。
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends chromium fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/*
+ENV PUPPETEER_SKIP_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+
 WORKDIR /build
 COPY web/package.json .
 COPY web/bun.lock .

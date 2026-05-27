@@ -193,6 +193,9 @@ func main() {
 	InjectUmamiAnalytics()
 	InjectGoogleAnalytics()
 
+	// 加载 SEO 阶段 2 预渲染产物（来自 web/scripts/prerender.mjs 输出），未生成时自动旁路。
+	service.LoadPrerendered(buildFS)
+
 	// 设置路由
 	router.SetRouter(server, buildFS, indexPage)
 	var port = os.Getenv("PORT")

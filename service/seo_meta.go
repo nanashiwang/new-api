@@ -2,7 +2,11 @@ package service
 
 import (
 	"bytes"
+	"embed"
 	"strings"
+	"sync"
+
+	"github.com/QuantumNous/new-api/common"
 )
 
 // seo_meta.go 负责给 SPA 的 indexPage 按当前请求路径注入差异化的 SEO meta（title/description/canonical/og）。
@@ -103,11 +107,61 @@ func RenderIndexWithMeta(template []byte, path string) []byte {
 	return out
 }
 
-// GetPrerenderedHTML 阶段 1 永远返回 nil（无预渲染产物）。
-// 阶段 2 上线 vite-prerender-plugin 后，由 LoadPrerendered 在启动时从 embed.FS 加载产物到内存 map，
-// 此函数改为查 map 返回静态 HTML，从而旁路掉模板替换链路。
+var (
+	prerenderedMap     = map[string][]byte{}
+	prerenderedMapLock sync.RWMutex
+)
+
+// LoadPrerendered 从 embed.FS 加载 SEO 阶段 2 的预渲染产物到内存 map。
+// 由 main.go 启动时调用一次。读取路径与 web/scripts/prerender.mjs 输出位置约定一致。
+// 任何一个文件不存在都不视为错误（旁路为模板替换链路），但会记录日志便于排查。
+func LoadPrerendered(buildFS embed.FS) {
+	// (URL path, embed.FS 相对路径) 对，需与 prerender.mjs 中 ROUTES 保持同步。
+	// 同一份 HTML 注册两个 path key（带/不带尾斜杠），便于 router 任意一种写法都命中。
+	entries := []struct {
+		paths    []string
+		embedKey string
+	}{
+		{[]string{"/login", "/login/"}, "web/dist/login/index.html"},
+		{[]string{"/register", "/register/"}, "web/dist/register/index.html"},
+		{[]string{"/pricing", "/pricing/"}, "web/dist/pricing/index.html"},
+		{[]string{"/about", "/about/"}, "web/dist/about/index.html"},
+	}
+	loaded := map[string][]byte{}
+	for _, e := range entries {
+		data, err := buildFS.ReadFile(e.embedKey)
+		if err != nil {
+			common.SysLog("prerendered html not found, falling back to template injection: " + e.embedKey)
+			continue
+		}
+		for _, p := range e.paths {
+			loaded[p] = data
+		}
+	}
+	prerenderedMapLock.Lock()
+	prerenderedMap = loaded
+	prerenderedMapLock.Unlock()
+	common.SysLog("loaded prerendered SEO pages: " + intToStr(len(loaded)))
+}
+
+func intToStr(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	buf := make([]byte, 0, 8)
+	for n > 0 {
+		buf = append([]byte{byte('0' + n%10)}, buf...)
+		n /= 10
+	}
+	return string(buf)
+}
+
+// GetPrerenderedHTML 命中时返回预渲染产物（阶段 2），未命中或未加载时返回 nil
+// （router 自动降级到 RenderIndexWithMeta 模板替换链路）。
 func GetPrerenderedHTML(path string) []byte {
-	return nil
+	prerenderedMapLock.RLock()
+	defer prerenderedMapLock.RUnlock()
+	return prerenderedMap[path]
 }
 
 // replaceTitle 替换首个 <title>...</title>。

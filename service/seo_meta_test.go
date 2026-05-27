@@ -78,8 +78,12 @@ func TestRenderIndexWithMetaEscapesHTMLSpecialChars(t *testing.T) {
 	}
 }
 
-func TestGetPrerenderedHTMLReturnsNilStage1(t *testing.T) {
+func TestGetPrerenderedHTMLEmptyByDefault(t *testing.T) {
+	// 测试环境未调 LoadPrerendered，应返回 nil。
 	if got := GetPrerenderedHTML("/"); got != nil {
-		t.Fatalf("stage 1 should always return nil, got %d bytes", len(got))
+		t.Fatalf("default should return nil, got %d bytes", len(got))
+	}
+	if got := GetPrerenderedHTML("/login"); got != nil {
+		t.Fatalf("default should return nil for /login, got %d bytes", len(got))
 	}
 }
