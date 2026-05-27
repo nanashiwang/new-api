@@ -22,9 +22,6 @@ const (
 	imagePlaygroundAgentModel      = "gpt-5.5"
 	imagePlaygroundSessionDuration = 2 * time.Hour
 	imagePlaygroundRefreshWindow   = 15 * time.Minute
-	// 强制覆盖 image-playground 启动 URL 与 BaseURL 使用的 origin，便于绕开 Cloudflare 等带有较短超时的前置 CDN。
-	// 例如：IMAGE_PLAYGROUND_PREFERRED_ORIGIN=https://cn.example.com
-	imagePlaygroundPreferredOriginEnv = "IMAGE_PLAYGROUND_PREFERRED_ORIGIN"
 )
 
 type imagePlaygroundSessionResponse struct {
@@ -253,10 +250,11 @@ func buildImagePlaygroundOrigin(c *gin.Context) string {
 	return ""
 }
 
-// preferredImagePlaygroundOrigin 读取并校验环境变量中的优先 origin。
+// preferredImagePlaygroundOrigin 读取并校验 performance_setting 中配置的优先 origin。
 // 仅接受 http/https 协议，返回标准化后的 "scheme://host"，无效或未配置时返回空串。
+// 配置入口：管理后台 Setting → Performance → 中转网关超时 → 「image-playground 首选 origin」。
 func preferredImagePlaygroundOrigin() string {
-	raw := strings.TrimSpace(common.GetEnvOrDefaultString(imagePlaygroundPreferredOriginEnv, ""))
+	raw := strings.TrimSpace(common.ImagePlaygroundPreferredOrigin)
 	if raw == "" {
 		return ""
 	}

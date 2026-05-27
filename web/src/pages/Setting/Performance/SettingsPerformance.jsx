@@ -69,6 +69,9 @@ export default function SettingsPerformance(props) {
     'performance_setting.monitor_cpu_threshold': 90,
     'performance_setting.monitor_memory_threshold': 90,
     'performance_setting.monitor_disk_threshold': 90,
+    'performance_setting.relay_response_header_timeout_sec': 60,
+    'performance_setting.relay_image_response_header_timeout_sec': 300,
+    'performance_setting.image_playground_preferred_origin': '',
   });
   const refForm = useRef();
   const [inputsRow, setInputsRow] = useState(inputs);
@@ -339,6 +342,56 @@ export default function SettingsPerformance(props) {
                     'performance_setting.monitor_disk_threshold',
                   )}
                   disabled={!inputs['performance_setting.monitor_enabled']}
+                />
+              </Col>
+            </Row>
+          </Form.Section>
+
+          <Form.Section text={t('中转网关超时')}>
+            <Banner
+              type='info'
+              description={t(
+                '控制中转 HTTP 客户端等待上游响应头的超时，以及 image-playground 启动 URL 与 BaseURL 的优先 origin。修改后立即对新请求生效。多张图生成耗时较长时可适当调大图像超时；首选 origin 用于绕开 Cloudflare 等带短超时的前置 CDN（例如填写灰云/DNS-Only 域名）。',
+              )}
+              style={{ marginBottom: 16 }}
+            />
+            <Row gutter={16}>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  field={'performance_setting.relay_response_header_timeout_sec'}
+                  label={t('默认响应头超时 (秒)')}
+                  extraText={t('普通中转请求等待上游响应头的最大秒数')}
+                  min={1}
+                  max={3600}
+                  onChange={handleFieldChange(
+                    'performance_setting.relay_response_header_timeout_sec',
+                  )}
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  field={
+                    'performance_setting.relay_image_response_header_timeout_sec'
+                  }
+                  label={t('图像响应头超时 (秒)')}
+                  extraText={t('生图/多模态请求等待上游响应头的最大秒数')}
+                  min={1}
+                  max={3600}
+                  onChange={handleFieldChange(
+                    'performance_setting.relay_image_response_header_timeout_sec',
+                  )}
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Input
+                  field={'performance_setting.image_playground_preferred_origin'}
+                  label={t('image-playground 首选 origin')}
+                  extraText={t('例如 https://cn.example.com，留空则按访问域名推断')}
+                  placeholder={t('https://cn.example.com')}
+                  showClear
+                  onChange={handleFieldChange(
+                    'performance_setting.image_playground_preferred_origin',
+                  )}
                 />
               </Col>
             </Row>

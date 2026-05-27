@@ -297,6 +297,9 @@ func InitResources() error {
 	// Initialize model settings
 	ratio_setting.InitRatioSettings()
 
+	// 注册 relay HTTP 客户端重建钩子，使 performance_setting 中的超时变更能即时生效
+	// （避免 model/setting → service 反向依赖；syncToCommon 通过该 hook 触发重建）
+	common.ReloadRelayHTTPClients = service.InitHttpClient
 	service.InitHttpClient()
 
 	service.InitTokenEncoders()

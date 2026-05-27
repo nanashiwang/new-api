@@ -1,6 +1,8 @@
 package performance_setting
 
 import (
+	"strings"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/config"
 )
@@ -24,6 +26,13 @@ type PerformanceSetting struct {
 	MonitorMemoryThreshold int `json:"monitor_memory_threshold"`
 	// MonitorDiskThreshold 磁盘使用率阈值（%）
 	MonitorDiskThreshold int `json:"monitor_disk_threshold"`
+
+	// RelayResponseHeaderTimeoutSec 普通 relay HTTP 客户端等待上游响应头的超时（秒）
+	RelayResponseHeaderTimeoutSec int `json:"relay_response_header_timeout_sec"`
+	// RelayImageResponseHeaderTimeoutSec image relay HTTP 客户端等待上游响应头的超时（秒），生图多张耗时较长时应调大
+	RelayImageResponseHeaderTimeoutSec int `json:"relay_image_response_header_timeout_sec"`
+	// ImagePlaygroundPreferredOrigin 用于覆盖 image-playground 启动 URL 与 BaseURL 的 origin，便于绕开 Cloudflare 等带短超时的前置 CDN
+	ImagePlaygroundPreferredOrigin string `json:"image_playground_preferred_origin"`
 }
 
 // 默认配置
@@ -37,6 +46,10 @@ var performanceSetting = PerformanceSetting{
 	MonitorCPUThreshold:    90,
 	MonitorMemoryThreshold: 90,
 	MonitorDiskThreshold:   90,
+
+	RelayResponseHeaderTimeoutSec:      60,
+	RelayImageResponseHeaderTimeoutSec: 300,
+	ImagePlaygroundPreferredOrigin:     "",
 }
 
 func init() {
@@ -61,6 +74,17 @@ func syncToCommon() {
 		MemoryThreshold: performanceSetting.MonitorMemoryThreshold,
 		DiskThreshold:   performanceSetting.MonitorDiskThreshold,
 	})
+
+	// 中转网关超时与 image-playground 首选 origin
+	common.RelayResponseHeaderTimeout = performanceSetting.RelayResponseHeaderTimeoutSec
+	common.RelayImageResponseHeaderTimeout = performanceSetting.RelayImageResponseHeaderTimeoutSec
+	common.ImagePlaygroundPreferredOrigin = strings.TrimSpace(performanceSetting.ImagePlaygroundPreferredOrigin)
+
+	// 通过 hook 触发 service 包重建 relay HTTP 客户端，使新超时立即对新请求生效（旧请求继续使用旧 client）。
+	// 启动期 service 尚未注册时 hook 为 nil，由 service.InitHttpClient 自行完成首次初始化。
+	if common.ReloadRelayHTTPClients != nil {
+		common.ReloadRelayHTTPClients()
+	}
 }
 
 // GetPerformanceSetting 获取性能设置

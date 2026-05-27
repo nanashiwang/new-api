@@ -160,6 +160,16 @@ var RelayResponseHeaderTimeout int // unit is second
 
 var RelayImageResponseHeaderTimeout int // unit is second
 
+// ImagePlaygroundPreferredOrigin 用于覆盖 image-playground 启动 URL 与 BaseURL 的 origin
+// （为空表示按请求 Origin/Referer/Host/ServerAddress 推断，详见 controller.image_playground）。
+// 由 performance_setting 同步写入，可通过管理后台 UI 修改。
+var ImagePlaygroundPreferredOrigin string
+
+// ReloadRelayHTTPClients 是 service 包提供的 relay HTTP 客户端重建钩子，
+// 由 main.go 在启动时注册（避免 model/setting 包反向依赖 service 包）。
+// 当 RelayResponseHeaderTimeout / RelayImageResponseHeaderTimeout 变更后调用即可热生效。
+var ReloadRelayHTTPClients func()
+
 var RelayMaxIdleConns int
 var RelayMaxIdleConnsPerHost int
 
