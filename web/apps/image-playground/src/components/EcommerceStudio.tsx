@@ -20,8 +20,9 @@ import {
   getSuiteTemplate,
   isDefaultEcommerceBrief,
 } from '../lib/ecommerce'
-import { CopyIcon, DownloadIcon, EditIcon, PhotoIcon, PlusIcon, RefreshIcon, TrashIcon } from './icons'
+import { CopyIcon, DownloadIcon, EditIcon, HelpCircleIcon, PhotoIcon, PlusIcon, RefreshIcon, TrashIcon } from './icons'
 import SaveTemplateModal from './SaveTemplateModal'
+import BucketGuideModal from './BucketGuideModal'
 
 function parseTags(value: string) {
   return value.split(/[，,、\n]/).map((item) => item.trim()).filter(Boolean)
@@ -122,11 +123,13 @@ function BucketCard({
   assets,
   onUpload,
   onRemove,
+  onShowGuide,
 }: {
   kind: ProductAssetKind
   assets: ProductAsset[]
   onUpload: (kind: ProductAssetKind, files: FileList | null) => void
   onRemove: (assetId: string) => void
+  onShowGuide: (kind: ProductAssetKind) => void
 }) {
   const bucket = PRODUCT_ASSET_BUCKETS.find((item) => item.kind === kind)!
   const inputRef = useRef<HTMLInputElement>(null)
@@ -141,15 +144,26 @@ function BucketCard({
           </div>
           <div className="text-xs text-gray-500 mt-1">{bucket.hint}</div>
         </div>
-        <button
-          type="button"
-          onClick={() => inputRef.current?.click()}
-          disabled={reachedLimit}
-          className="shrink-0 inline-flex items-center gap-1 rounded-lg bg-gray-900 text-white dark:bg-white dark:text-gray-950 px-2 py-1 text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          <PlusIcon className="w-3.5 h-3.5" />
-          上传
-        </button>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => onShowGuide(kind)}
+            title="查看拍摄 / 选图指引"
+            className="inline-flex items-center gap-1 rounded-lg border border-gray-200 dark:border-white/[0.08] px-2 py-1 text-xs font-medium text-gray-500 hover:text-gray-900 dark:hover:text-white"
+          >
+            <HelpCircleIcon className="w-3.5 h-3.5" />
+            指引
+          </button>
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            disabled={reachedLimit}
+            className="inline-flex items-center gap-1 rounded-lg bg-gray-900 text-white dark:bg-white dark:text-gray-950 px-2 py-1 text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <PlusIcon className="w-3.5 h-3.5" />
+            上传
+          </button>
+        </div>
       </div>
       <input
         ref={inputRef}
@@ -337,6 +351,7 @@ export default function EcommerceStudio() {
   const deleteUserTemplate = useStore((s) => s.deleteUserTemplate)
   const renameUserTemplate = useStore((s) => s.renameUserTemplate)
   const [saveTemplateModalOpen, setSaveTemplateModalOpen] = useState(false)
+  const [guideKind, setGuideKind] = useState<ProductAssetKind | null>(null)
   const suite = suites.find((item) => item.id === activeSuiteId)
 
   useEffect(() => {
@@ -472,6 +487,7 @@ export default function EcommerceStudio() {
               assets={suite.assets.filter((asset) => asset.kind === bucket.kind)}
               onUpload={uploadAssets}
               onRemove={removeAsset}
+              onShowGuide={setGuideKind}
             />
           ))}
           <section className="space-y-2 rounded-2xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-gray-950 p-3">
@@ -733,6 +749,7 @@ export default function EcommerceStudio() {
         onCancel={() => setSaveTemplateModalOpen(false)}
         onConfirm={handleSaveTemplate}
       />
+      <BucketGuideModal kind={guideKind} onClose={() => setGuideKind(null)} />
     </main>
   )
 }
