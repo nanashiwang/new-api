@@ -1,22 +1,83 @@
 <!doctype html>
-<html lang="zh">
+<html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
     <link rel="icon" href="/logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#ffffff" />
+
+    <!-- 基础 SEO -->
+    <title>New API · AI 多渠道聚合中转网关 | OpenAI / Claude / Gemini 一站式代理</title>
     <meta
       name="description"
-      content="OpenAI 接口聚合管理，支持多种渠道包括 Azure，可用于二次分发管理 key，仅单可执行文件，已打包好 Docker 镜像，一键部署，开箱即用"
+      content="New API 是一个开源的 AI 大模型聚合中转网关，统一对接 OpenAI、Claude、Gemini、DeepSeek、Qwen、Azure、Midjourney 等 30+ 渠道，提供多账户调度、计费统计、限流配额、Web 管理台。支持 Docker 一键部署，开箱即用。"
+    />
+    <meta
+      name="keywords"
+      content="AI API 中转, OpenAI 代理, Claude API 代理, Gemini API, gpt-image-2, new-api 部署, AI 网关, LLM 聚合, AI 大模型中转, Codex 中转, AI API 计费"
     />
     <meta name="generator" content="new-api" />
-    <title>New API</title>
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+    <link rel="canonical" href="https://cn.meta-api.vip/" />
+
+    <!-- Open Graph (微信、Slack、Facebook 等分享卡片) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="New API" />
+    <meta property="og:title" content="New API · AI 多渠道聚合中转网关" />
+    <meta
+      property="og:description"
+      content="开源 AI 大模型聚合中转网关，统一对接 OpenAI / Claude / Gemini 等 30+ 渠道，含多账户调度、计费、Web 管理台。Docker 一键部署。"
+    />
+    <meta property="og:url" content="https://cn.meta-api.vip/" />
+    <meta property="og:image" content="https://cn.meta-api.vip/logo.png" />
+    <meta property="og:locale" content="zh_CN" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="New API · AI 多渠道聚合中转网关" />
+    <meta
+      name="twitter:description"
+      content="开源 AI 大模型聚合中转网关，统一对接 OpenAI / Claude / Gemini 等 30+ 渠道。"
+    />
+    <meta name="twitter:image" content="https://cn.meta-api.vip/logo.png" />
+
+    <!-- JSON-LD 结构化数据：WebSite + 站内搜索 -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "New API",
+        "alternateName": "AI 多渠道聚合中转网关",
+        "url": "https://cn.meta-api.vip/",
+        "description": "开源 AI 大模型聚合中转网关，统一对接 OpenAI / Claude / Gemini 等 30+ 渠道。",
+        "inLanguage": "zh-CN"
+      }
+    </script>
+
     <!--umami-->
     <!--Google Analytics-->
   </head>
 
   <body>
-    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <!-- noscript 兜底内容：搜索引擎与无 JS 环境可读到核心信息 -->
+    <noscript>
+      <h1>New API · AI 多渠道聚合中转网关</h1>
+      <p>
+        统一的大模型接口网关，对接 OpenAI、Claude、Gemini、DeepSeek、Qwen、Azure、
+        Midjourney、Codex 等 30+ AI 渠道。提供多账户智能调度、计费统计、限流配额、
+        OAuth/Passkey 登录、API Key 管理、用量分析、Webhook 通知和现代化 Web 管理台。
+      </p>
+      <h2>核心特性</h2>
+      <ul>
+        <li>多渠道聚合：一套 API Key 调用 30+ 大模型供应商</li>
+        <li>多账户智能调度与故障转移，支持粘性会话</li>
+        <li>细粒度权限：API Key 级模型黑名单、客户端限制、用量配额</li>
+        <li>计费统计：实时 Token 用量、成本计算、按用户/渠道/模型多维度分析</li>
+        <li>Docker 一键部署，支持 MySQL / PostgreSQL / SQLite + Redis</li>
+        <li>开箱即用的 image-playground 在线图像生成 / 编辑工作台</li>
+      </ul>
+      <p>本站需要启用 JavaScript 才能进入控制台，请打开浏览器 JavaScript 后刷新。</p>
+    </noscript>
     <div id="root"></div>
     <script type="module" src="/src/index.jsx"></script>
   </body>
