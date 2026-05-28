@@ -63,8 +63,8 @@ import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
 import { useTranslation } from 'react-i18next';
 import { SiDiscord } from 'react-icons/si';
+import Turnstile from 'react-turnstile';
 
-const Turnstile = lazy(() => import('react-turnstile'));
 const TelegramLoginButton = lazy(() => import('react-telegram-login/src'));
 const OAuthProviderIcon = lazy(() => import('../common/OAuthProviderIcon'));
 
@@ -146,6 +146,8 @@ const RegisterForm = () => {
   );
 
   const [showEmailVerification, setShowEmailVerification] = useState(false);
+  const shouldCheckTurnstileForRegister =
+    turnstileEnabled && !showEmailVerification;
 
   useEffect(() => {
     setShowEmailVerification(!!status?.email_verification);
@@ -240,7 +242,7 @@ const RegisterForm = () => {
       return;
     }
     if (username && password) {
-      if (turnstileEnabled && turnstileToken === '') {
+      if (shouldCheckTurnstileForRegister && turnstileToken === '') {
         showInfo('请稍后几秒重试，Turnstile 正在检查用户环境！');
         return;
       }
@@ -250,8 +252,11 @@ const RegisterForm = () => {
           affCode = localStorage.getItem('aff');
         }
         inputs.aff_code = affCode;
+        const turnstileQuery = shouldCheckTurnstileForRegister
+          ? `?turnstile=${encodeURIComponent(turnstileToken)}`
+          : '';
         const res = await API.post(
-          `/api/user/register?turnstile=${encodeURIComponent(turnstileToken)}`,
+          `/api/user/register${turnstileQuery}`,
           inputs,
         );
         const { success, message } = res.data;
@@ -265,7 +270,7 @@ const RegisterForm = () => {
       } catch (error) {
         showError('注册失败，请重试');
       } finally {
-        if (turnstileEnabled) {
+        if (shouldCheckTurnstileForRegister) {
           resetTurnstileToken();
         }
         setRegisterLoading(false);
@@ -813,31 +818,27 @@ const RegisterForm = () => {
         style={{ top: '50%', left: '-120px' }}
       />
       <div className='w-full max-w-sm mt-[60px]'>
-        {showEmailRegister ||
-        !hasOAuthRegisterOptions
+        {turnstileEnabled && (
+          <div className='flex justify-center mb-4'>
+            <Turnstile
+              sitekey={turnstileSiteKey}
+              onLoad={(_, boundTurnstile) => {
+                turnstileWidgetRef.current = boundTurnstile;
+              }}
+              onVerify={(token, boundTurnstile) => {
+                turnstileWidgetRef.current = boundTurnstile;
+                setTurnstileToken(token);
+              }}
+              onExpire={() => setTurnstileToken('')}
+              onError={() => setTurnstileToken('')}
+              onTimeout={() => setTurnstileToken('')}
+            />
+          </div>
+        )}
+        {showEmailRegister || !hasOAuthRegisterOptions
           ? renderEmailRegisterForm()
           : renderOAuthOptions()}
         {renderWeChatLoginModal()}
-
-        {turnstileEnabled && (
-          <div className='flex justify-center mt-6'>
-            <Suspense fallback={null}>
-              <Turnstile
-                sitekey={turnstileSiteKey}
-                onLoad={(_, boundTurnstile) => {
-                  turnstileWidgetRef.current = boundTurnstile;
-                }}
-                onVerify={(token, boundTurnstile) => {
-                  turnstileWidgetRef.current = boundTurnstile;
-                  setTurnstileToken(token);
-                }}
-                onExpire={() => setTurnstileToken('')}
-                onError={() => setTurnstileToken('')}
-                onTimeout={() => setTurnstileToken('')}
-              />
-            </Suspense>
-          </div>
-        )}
       </div>
     </div>
   );

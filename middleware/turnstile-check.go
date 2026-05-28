@@ -62,3 +62,14 @@ func TurnstileCheck() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+func RegisterTurnstileCheck() gin.HandlerFunc {
+	turnstileCheck := TurnstileCheck()
+	return func(c *gin.Context) {
+		if common.EmailVerificationEnabled {
+			c.Next()
+			return
+		}
+		turnstileCheck(c)
+	}
+}

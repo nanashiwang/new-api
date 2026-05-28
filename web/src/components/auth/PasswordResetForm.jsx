@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { lazy, Suspense, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { API } from '../../helpers/apiCore';
 import { getLogo, getSystemName } from '../../helpers/storage';
 import { showError, showInfo, showSuccess } from '../../helpers/toast';
@@ -25,9 +25,9 @@ import { Button, Card, Form, Typography } from '@douyinfe/semi-ui';
 import { IconMail } from '@douyinfe/semi-icons';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import Turnstile from 'react-turnstile';
 
 const { Text, Title } = Typography;
-const Turnstile = lazy(() => import('react-turnstile'));
 
 const PasswordResetForm = () => {
   const { t } = useTranslation();
@@ -137,6 +137,17 @@ const PasswordResetForm = () => {
                     prefix={<IconMail />}
                   />
 
+                  {turnstileEnabled && (
+                    <div className='flex justify-center pt-2'>
+                      <Turnstile
+                        sitekey={turnstileSiteKey}
+                        onVerify={(token) => {
+                          setTurnstileToken(token);
+                        }}
+                      />
+                    </div>
+                  )}
+
                   <div className='space-y-2 pt-2'>
                     <Button
                       theme='solid'
@@ -167,19 +178,6 @@ const PasswordResetForm = () => {
                 </div>
               </div>
             </Card>
-
-            {turnstileEnabled && (
-              <div className='flex justify-center mt-6'>
-                <Suspense fallback={null}>
-                  <Turnstile
-                    sitekey={turnstileSiteKey}
-                    onVerify={(token) => {
-                      setTurnstileToken(token);
-                    }}
-                  />
-                </Suspense>
-              </div>
-            )}
           </div>
         </div>
       </div>

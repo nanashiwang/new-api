@@ -70,8 +70,8 @@ import LinuxDoIcon from '../common/logo/LinuxDoIcon';
 import TwoFAVerification from './TwoFAVerification';
 import { useTranslation } from 'react-i18next';
 import { SiDiscord } from 'react-icons/si';
+import Turnstile from 'react-turnstile';
 
-const Turnstile = lazy(() => import('react-turnstile'));
 const TelegramLoginButton = lazy(() => import('react-telegram-login'));
 const OAuthProviderIcon = lazy(() => import('../common/OAuthProviderIcon'));
 
@@ -976,24 +976,21 @@ const LoginForm = () => {
         style={{ top: '50%', left: '-120px' }}
       />
       <div className='w-full max-w-sm mt-[60px]'>
+        {turnstileEnabled && (
+          <div className='flex justify-center mb-4'>
+            <Turnstile
+              sitekey={turnstileSiteKey}
+              onVerify={(token) => {
+                setTurnstileToken(token);
+              }}
+            />
+          </div>
+        )}
         {showEmailLogin || !hasOAuthLoginOptions
           ? renderEmailLoginForm()
           : renderOAuthOptions()}
         {renderWeChatLoginModal()}
         {render2FAModal()}
-
-        {turnstileEnabled && (
-          <div className='flex justify-center mt-6'>
-            <Suspense fallback={null}>
-              <Turnstile
-                sitekey={turnstileSiteKey}
-                onVerify={(token) => {
-                  setTurnstileToken(token);
-                }}
-              />
-            </Suspense>
-          </div>
-        )}
       </div>
     </div>
   );
