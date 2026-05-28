@@ -66,6 +66,73 @@ func TestInitChannelCache_UsesAbilitiesAsSourceOfTruth(t *testing.T) {
 	}
 }
 
+func TestUpdateChannelStatusEvictsAutoDisabledMultiKeyCache(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+
+	originDB := DB
+	originLogDB := LOG_DB
+	originMemoryCacheEnabled := common.MemoryCacheEnabled
+	originGroupMap := group2model2channels
+	originChannels := channelsIDM
+	DB = db
+	LOG_DB = db
+	common.MemoryCacheEnabled = true
+	group2model2channels = map[string]map[string][]int{
+		"default": {
+			"gpt-5.4": {1},
+		},
+	}
+	channelsIDM = map[int]*Channel{
+		1: {
+			Id:     1,
+			Name:   "multi-key",
+			Key:    "key-a\nkey-b",
+			Group:  "default",
+			Models: "gpt-5.4",
+			Status: common.ChannelStatusEnabled,
+			ChannelInfo: ChannelInfo{
+				IsMultiKey:   true,
+				MultiKeySize: 2,
+			},
+		},
+	}
+	t.Cleanup(func() {
+		DB = originDB
+		LOG_DB = originLogDB
+		common.MemoryCacheEnabled = originMemoryCacheEnabled
+		group2model2channels = originGroupMap
+		channelsIDM = originChannels
+	})
+
+	if err := db.AutoMigrate(&Channel{}, &Ability{}); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+	channel := *channelsIDM[1]
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+
+	if !UpdateChannelStatus(1, "key-a", common.ChannelStatusAutoDisabled, "bad key") {
+		t.Fatal("expected first key status update to succeed")
+	}
+	if channelsIDM[1].Status != common.ChannelStatusEnabled {
+		t.Fatalf("expected channel to stay enabled while one key remains enabled, got %d", channelsIDM[1].Status)
+	}
+
+	if !UpdateChannelStatus(1, "key-b", common.ChannelStatusAutoDisabled, "bad key") {
+		t.Fatal("expected second key status update to succeed")
+	}
+	if channelsIDM[1].Status != common.ChannelStatusAutoDisabled {
+		t.Fatalf("expected cached channel auto-disabled, got %d", channelsIDM[1].Status)
+	}
+	if got := group2model2channels["default"]["gpt-5.4"]; len(got) != 0 {
+		t.Fatalf("expected auto-disabled channel evicted from routing cache, got %v", got)
+	}
+}
+
 func TestGetRandomSatisfiedChannelFallsBackWhenTotalWeightIsNonPositive(t *testing.T) {
 	originMemoryCacheEnabled := common.MemoryCacheEnabled
 	originGroupMap := group2model2channels

@@ -69,6 +69,7 @@ const SystemSetting = () => {
     SMTPAccount: '',
     SMTPFrom: '',
     SMTPToken: '',
+    SMTPForceAuthLogin: '',
     WorkerUrl: '',
     WorkerValidKey: '',
     WorkerAllowHttpImageRequestEnabled: '',
@@ -182,6 +183,7 @@ const SystemSetting = () => {
           case 'EmailDomainRestrictionEnabled':
           case 'EmailAliasRestrictionEnabled':
           case 'SMTPSSLEnabled':
+          case 'SMTPForceAuthLogin':
           case 'LinuxDOOAuthEnabled':
           case 'discord.enabled':
           case 'oidc.enabled':
@@ -1334,6 +1336,17 @@ const SystemSetting = () => {
                         }
                       >
                         {t('启用SMTP SSL')}
+                      </Form.Checkbox>
+                    </Col>
+                    <Col xs={24} sm={24} md={8} lg={8} xl={8}>
+                      <Form.Checkbox
+                        field='SMTPForceAuthLogin'
+                        noLabel
+                        onChange={(e) =>
+                          handleCheckboxChange('SMTPForceAuthLogin', e)
+                        }
+                      >
+                        {t('强制使用 AUTH LOGIN 认证')}
                       </Form.Checkbox>
                     </Col>
                   </Row>

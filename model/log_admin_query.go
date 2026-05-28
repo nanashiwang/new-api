@@ -54,12 +54,27 @@ func sanitizeContainsLikePattern(input string) (string, error) {
 	return buildContainsLikePattern(trimmed), nil
 }
 
-func applyAdminLogFilters(tx *gorm.DB, filters AdminLogQueryFilters, fuzzyUsername bool) *gorm.DB {
+func applyExplicitLogTextFilter(tx *gorm.DB, column string, value string) (*gorm.DB, error) {
+	if value == "" {
+		return tx, nil
+	}
+	if strings.Contains(value, "%") {
+		pattern, err := sanitizeLikePattern(value)
+		if err != nil {
+			return nil, err
+		}
+		return tx.Where(column+" LIKE ? ESCAPE '!'", pattern), nil
+	}
+	return tx.Where(column+" = ?", value), nil
+}
+
+func applyAdminLogFilters(tx *gorm.DB, filters AdminLogQueryFilters, fuzzyUsername bool) (*gorm.DB, error) {
 	if filters.LogType != LogTypeUnknown {
 		tx = tx.Where("logs.type = ?", filters.LogType)
 	}
-	if filters.ModelName != "" {
-		tx = tx.Where("logs.model_name like ?", filters.ModelName)
+	var err error
+	if tx, err = applyExplicitLogTextFilter(tx, "logs.model_name", filters.ModelName); err != nil {
+		return nil, err
 	}
 	if filters.Username != "" {
 		if fuzzyUsername {
@@ -86,7 +101,7 @@ func applyAdminLogFilters(tx *gorm.DB, filters AdminLogQueryFilters, fuzzyUserna
 	if filters.Group != "" {
 		tx = tx.Where("logs."+logGroupCol+" = ?", filters.Group)
 	}
-	return tx
+	return tx, nil
 }
 
 func normalizeRankingOrder(order string) string {
@@ -117,7 +132,10 @@ func GetTopUsers(filters AdminLogQueryFilters, limit int, quotaOrder string, req
 	requestOrder = normalizeRankingOrder(requestOrder)
 
 	baseQuery := LOG_DB.Table("logs")
-	baseQuery = applyAdminLogFilters(baseQuery, filters, true)
+	baseQuery, err := applyAdminLogFilters(baseQuery, filters, true)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	groupCol := qualifiedLogGroupCol()
 	selectClause := "logs.user_id, logs.username, " + groupCol + " as user_group, " +

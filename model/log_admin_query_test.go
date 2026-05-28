@@ -64,6 +64,47 @@ func TestGetAllLogs_FuzzyUsernameSearch(t *testing.T) {
 	}
 }
 
+func TestGetAllLogs_ModelNameEscapesLikeWildcardsByDefault(t *testing.T) {
+	db := setupLogQueryTestDB(t)
+	logs := []Log{
+		{UserId: 1, Username: "alice", Type: LogTypeConsume, ModelName: "gpt_4o", Quota: 100, Group: "default", CreatedAt: 100},
+		{UserId: 2, Username: "bob", Type: LogTypeConsume, ModelName: "gptx4o", Quota: 100, Group: "default", CreatedAt: 101},
+	}
+	if err := db.Create(&logs).Error; err != nil {
+		t.Fatalf("seed logs: %v", err)
+	}
+
+	got, total, err := GetAllLogs(LogTypeConsume, 0, 0, "gpt_4o", "", "", 0, 20, 0, "", "")
+	if err != nil {
+		t.Fatalf("GetAllLogs: %v", err)
+	}
+	if total != 1 || len(got) != 1 {
+		t.Fatalf("expected one exact model match, got total=%d len=%d", total, len(got))
+	}
+	if got[0].ModelName != "gpt_4o" {
+		t.Fatalf("expected gpt_4o, got %s", got[0].ModelName)
+	}
+}
+
+func TestGetAllLogs_ModelNameAllowsExplicitPercentWildcard(t *testing.T) {
+	db := setupLogQueryTestDB(t)
+	logs := []Log{
+		{UserId: 1, Username: "alice", Type: LogTypeConsume, ModelName: "gpt-4o", Quota: 100, Group: "default", CreatedAt: 100},
+		{UserId: 2, Username: "bob", Type: LogTypeConsume, ModelName: "gpt-4o-mini", Quota: 100, Group: "default", CreatedAt: 101},
+	}
+	if err := db.Create(&logs).Error; err != nil {
+		t.Fatalf("seed logs: %v", err)
+	}
+
+	got, total, err := GetAllLogs(LogTypeConsume, 0, 0, "gpt-4o%", "", "", 0, 20, 0, "", "")
+	if err != nil {
+		t.Fatalf("GetAllLogs: %v", err)
+	}
+	if total != 2 || len(got) != 2 {
+		t.Fatalf("expected two wildcard model matches, got total=%d len=%d", total, len(got))
+	}
+}
+
 func TestSumUsedQuota_FuzzyUsernameSearch(t *testing.T) {
 	db := setupLogQueryTestDB(t)
 	seedLogQueryFixtures(t, db)
