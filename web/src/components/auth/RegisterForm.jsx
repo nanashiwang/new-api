@@ -112,6 +112,7 @@ const RegisterForm = () => {
   const [githubButtonState, setGithubButtonState] = useState('idle');
   const [githubButtonDisabled, setGithubButtonDisabled] = useState(false);
   const githubTimeoutRef = useRef(null);
+  const turnstileWidgetRef = useRef(null);
   const githubButtonText = t(githubButtonTextKeyByState[githubButtonState]);
 
   const logo = getLogo();
@@ -179,6 +180,11 @@ const RegisterForm = () => {
     };
   }, []);
 
+  const resetTurnstileToken = () => {
+    setTurnstileToken('');
+    turnstileWidgetRef.current?.reset?.();
+  };
+
   const onWeChatLoginClicked = () => {
     setWechatLoading(true);
     setShowWeChatLoginModal(true);
@@ -245,7 +251,7 @@ const RegisterForm = () => {
         }
         inputs.aff_code = affCode;
         const res = await API.post(
-          `/api/user/register?turnstile=${turnstileToken}`,
+          `/api/user/register?turnstile=${encodeURIComponent(turnstileToken)}`,
           inputs,
         );
         const { success, message } = res.data;
@@ -259,6 +265,9 @@ const RegisterForm = () => {
       } catch (error) {
         showError('注册失败，请重试');
       } finally {
+        if (turnstileEnabled) {
+          resetTurnstileToken();
+        }
         setRegisterLoading(false);
       }
     }
@@ -273,7 +282,7 @@ const RegisterForm = () => {
     setVerificationCodeLoading(true);
     try {
       const res = await API.get(
-        `/api/verification?email=${encodeURIComponent(inputs.email)}&turnstile=${turnstileToken}`,
+        `/api/verification?email=${encodeURIComponent(inputs.email)}&turnstile=${encodeURIComponent(turnstileToken)}`,
       );
       const { success, message } = res.data;
       if (success) {
@@ -285,6 +294,9 @@ const RegisterForm = () => {
     } catch (error) {
       showError('发送验证码失败，请重试');
     } finally {
+      if (turnstileEnabled) {
+        resetTurnstileToken();
+      }
       setVerificationCodeLoading(false);
     }
   };
@@ -812,9 +824,16 @@ const RegisterForm = () => {
             <Suspense fallback={null}>
               <Turnstile
                 sitekey={turnstileSiteKey}
-                onVerify={(token) => {
+                onLoad={(_, boundTurnstile) => {
+                  turnstileWidgetRef.current = boundTurnstile;
+                }}
+                onVerify={(token, boundTurnstile) => {
+                  turnstileWidgetRef.current = boundTurnstile;
                   setTurnstileToken(token);
                 }}
+                onExpire={() => setTurnstileToken('')}
+                onError={() => setTurnstileToken('')}
+                onTimeout={() => setTurnstileToken('')}
               />
             </Suspense>
           </div>
