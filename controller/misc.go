@@ -292,6 +292,7 @@ func SendEmailVerification(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	common.SysLog(fmt.Sprintf("verification email accepted by SMTP: %s", common.MaskEmail(email)))
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",

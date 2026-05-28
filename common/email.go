@@ -1,9 +1,12 @@
 package common
 
 import (
+	"bytes"
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
+	"mime/quotedprintable"
+	"net/mail"
 	"net/smtp"
 	"slices"
 	"strings"
@@ -31,13 +34,24 @@ func SendEmail(subject string, receiver string, content string) error {
 		return fmt.Errorf("SMTP 服务器未配置")
 	}
 	encodedSubject := fmt.Sprintf("=?UTF-8?B?%s?=", base64.StdEncoding.EncodeToString([]byte(subject)))
-	mail := []byte(fmt.Sprintf("To: %s\r\n"+
-		"From: %s <%s>\r\n"+
+	from := mail.Address{Name: SystemName, Address: SMTPFrom}
+	var encodedContent bytes.Buffer
+	quotedPrintableWriter := quotedprintable.NewWriter(&encodedContent)
+	if _, err := quotedPrintableWriter.Write([]byte(content)); err != nil {
+		return err
+	}
+	if err := quotedPrintableWriter.Close(); err != nil {
+		return err
+	}
+	message := []byte(fmt.Sprintf("To: %s\r\n"+
+		"From: %s\r\n"+
 		"Subject: %s\r\n"+
 		"Date: %s\r\n"+
 		"Message-ID: %s\r\n"+ // 添加 Message-ID 头
-		"Content-Type: text/html; charset=UTF-8\r\n\r\n%s\r\n",
-		receiver, SystemName, SMTPFrom, encodedSubject, time.Now().Format(time.RFC1123Z), id, content))
+		"MIME-Version: 1.0\r\n"+
+		"Content-Type: text/html; charset=UTF-8\r\n"+
+		"Content-Transfer-Encoding: quoted-printable\r\n\r\n%s\r\n",
+		receiver, from.String(), encodedSubject, time.Now().Format(time.RFC1123Z), id, encodedContent.String()))
 	auth := smtp.PlainAuth("", SMTPAccount, SMTPToken, SMTPServer)
 	addr := fmt.Sprintf("%s:%d", SMTPServer, SMTPPort)
 	to := strings.Split(receiver, ";")
@@ -72,7 +86,7 @@ func SendEmail(subject string, receiver string, content string) error {
 		if err != nil {
 			return err
 		}
-		_, err = w.Write(mail)
+		_, err = w.Write(message)
 		if err != nil {
 			return err
 		}
@@ -82,9 +96,9 @@ func SendEmail(subject string, receiver string, content string) error {
 		}
 	} else if isOutlookServer(SMTPAccount) || slices.Contains(EmailLoginAuthServerList, SMTPServer) {
 		auth = LoginAuth(SMTPAccount, SMTPToken)
-		err = smtp.SendMail(addr, auth, SMTPFrom, to, mail)
+		err = smtp.SendMail(addr, auth, SMTPFrom, to, message)
 	} else {
-		err = smtp.SendMail(addr, auth, SMTPFrom, to, mail)
+		err = smtp.SendMail(addr, auth, SMTPFrom, to, message)
 	}
 	if err != nil {
 		SysError(fmt.Sprintf("failed to send email to %s: %v", receiver, err))
