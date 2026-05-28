@@ -28,7 +28,7 @@ type GeneralSetting struct {
 var generalSetting = GeneralSetting{
 	DocsLink:                   "https://docs.newapi.pro",
 	PingIntervalEnabled:        false,
-	PingIntervalSeconds:        60,
+	PingIntervalSeconds:        15,
 	QuotaDisplayType:           QuotaDisplayTypeUSD,
 	CustomCurrencySymbol:       "¤",
 	CustomCurrencyExchangeRate: 1.0,

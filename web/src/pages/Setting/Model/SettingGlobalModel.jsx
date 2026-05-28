@@ -79,7 +79,7 @@ const defaultGlobalSettingInputs = {
   'global.chat_completions_to_responses_policy': '{}',
   'global.image_generation_tool_call_permission': 0,
   'general_setting.ping_interval_enabled': false,
-  'general_setting.ping_interval_seconds': 60,
+  'general_setting.ping_interval_seconds': 15,
 };
 
 export default function SettingGlobalModel(props) {
@@ -398,7 +398,7 @@ export default function SettingGlobalModel(props) {
                   <Banner
                     type='warning'
                     description={t(
-                      '警告：启用保活后，如果已经写入保活数据后渠道出错，系统无法重试，如果必须开启，推荐设置尽可能大的Ping间隔',
+                      '警告：启用保活后，如果已经写入保活数据后渠道出错，系统无法重试。建议设置 10-15 秒，避免代理空闲断流；后端会自动限制过大的 Ping 间隔。',
                     )}
                   />
                 </Col>
@@ -428,7 +428,9 @@ export default function SettingGlobalModel(props) {
                       })
                     }
                     min={1}
+                    max={15}
                     disabled={!inputs['general_setting.ping_interval_enabled']}
+                    extraText={t('建议 10-15 秒，超过 15 秒会按 15 秒生效')}
                   />
                 </Col>
               </Row>

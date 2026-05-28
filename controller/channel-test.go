@@ -75,6 +75,23 @@ func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointTyp
 	return normalized
 }
 
+func resolveChannelTestUserID(c *gin.Context) (int, error) {
+	if c != nil {
+		if userID := c.GetInt("id"); userID > 0 {
+			return userID, nil
+		}
+	}
+
+	var rootUser model.User
+	if err := model.DB.Select("id").Where("role = ?", common.RoleRootUser).First(&rootUser).Error; err != nil {
+		return 0, fmt.Errorf("failed to resolve channel test user: %w", err)
+	}
+	if rootUser.Id == 0 {
+		return 0, errors.New("failed to resolve channel test user")
+	}
+	return rootUser.Id, nil
+}
+
 func shouldUseAnthropicMessagesPath(channel *model.Channel, modelName string) bool {
 	if !strings.Contains(strings.ToLower(modelName), "claude") || channel == nil {
 		return false
@@ -552,7 +569,7 @@ func executeChannelStyleTest(
 	return
 }
 
-func testChannel(channel *model.Channel, testModel string, endpointType string, streamOverride *bool, forcedKeyIndex *int) testResult {
+func testChannel(channel *model.Channel, testUserID int, testModel string, endpointType string, streamOverride *bool, forcedKeyIndex *int) testResult {
 	tik := time.Now()
 	var unsupportedTestChannelTypes = []int{
 		constant.ChannelTypeMidjourney,
@@ -596,7 +613,7 @@ func testChannel(channel *model.Channel, testModel string, endpointType string, 
 		Header: make(http.Header),
 	}
 
-	cache, err := model.GetUserCache(1)
+	cache, err := model.GetUserCache(testUserID)
 	if err != nil {
 		return testResult{
 			localErr:    err,
@@ -604,6 +621,7 @@ func testChannel(channel *model.Channel, testModel string, endpointType string, 
 		}
 	}
 	cache.WriteContext(c)
+	c.Set("id", testUserID)
 
 	//c.Request.Header.Set("Authorization", "Bearer "+channel.Key)
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -612,7 +630,7 @@ func testChannel(channel *model.Channel, testModel string, endpointType string, 
 	}
 	c.Set("channel", channel.Type)
 	c.Set("base_url", channel.GetBaseURL())
-	group, _ := model.GetUserGroup(1, false)
+	group, _ := model.GetUserGroup(testUserID, false)
 	c.Set("group", group)
 
 	var newAPIError *types.NewAPIError
@@ -651,7 +669,7 @@ func testChannel(channel *model.Channel, testModel string, endpointType string, 
 	milliseconds := tok.Sub(tik).Milliseconds()
 	consumedTime := float64(milliseconds) / 1000.0
 	other := buildTestLogOther(c, info, priceData, usage, tieredResult)
-	model.RecordConsumeLog(c, 1, model.RecordConsumeLogParams{
+	model.RecordConsumeLog(c, testUserID, model.RecordConsumeLogParams{
 		ChannelId:        channel.Id,
 		PromptTokens:     usage.PromptTokens,
 		CompletionTokens: usage.CompletionTokens,
@@ -1047,8 +1065,13 @@ func TestChannel(c *gin.Context) {
 		isStream, _ := strconv.ParseBool(streamValue)
 		streamOverride = common.GetPointer(isStream)
 	}
+	testUserID, err := resolveChannelTestUserID(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	tik := time.Now()
-	result := testChannel(channel, testModel, endpointType, streamOverride, nil)
+	result := testChannel(channel, testUserID, testModel, endpointType, streamOverride, nil)
 	if result.localErr != nil {
 		c.JSON(http.StatusOK, buildChannelTestFailureResponse(result, 0.0))
 		return
@@ -1073,6 +1096,10 @@ var testAllChannelsLock sync.Mutex
 var testAllChannelsRunning bool = false
 
 func testAllChannels(notify bool) error {
+	testUserID, err := resolveChannelTestUserID(nil)
+	if err != nil {
+		return err
+	}
 
 	testAllChannelsLock.Lock()
 	if testAllChannelsRunning {
@@ -1111,7 +1138,7 @@ func testAllChannels(notify bool) error {
 			if shouldUseStreamForAutomaticChannelTest(channel) {
 				streamOverride = common.GetPointer(true)
 			}
-			result := testChannel(channel, "", "", streamOverride, nil)
+			result := testChannel(channel, testUserID, "", "", streamOverride, nil)
 			tok := time.Now()
 			milliseconds := tok.Sub(tik).Milliseconds()
 
@@ -1177,7 +1204,12 @@ func resolvePendingDisableFailureReason(result testResult) string {
 }
 
 func confirmSingleChannelPendingDisable(channel *model.Channel) {
-	result := testChannel(channel, "", "", nil, nil)
+	testUserID, err := resolveChannelTestUserID(nil)
+	if err != nil {
+		common.SysError("resolve pending disable test user failed: " + err.Error())
+		return
+	}
+	result := testChannel(channel, testUserID, "", "", nil, nil)
 	if result.newAPIError == nil && result.localErr == nil {
 		if err := model.ClearChannelPreDisable(channel.Id, ""); err != nil {
 			common.SysError(fmt.Sprintf("clear pending disable failed after success: channel=%d err=%v", channel.Id, err))
@@ -1193,7 +1225,12 @@ func confirmMultiKeyPendingDisable(channel *model.Channel, keyIndex int) {
 		_ = model.ClearChannelPreDisable(channel.Id, "")
 		return
 	}
-	result := testChannel(channel, "", "", nil, common.GetPointer(keyIndex))
+	testUserID, err := resolveChannelTestUserID(nil)
+	if err != nil {
+		common.SysError("resolve pending key disable test user failed: " + err.Error())
+		return
+	}
+	result := testChannel(channel, testUserID, "", "", nil, common.GetPointer(keyIndex))
 	if result.newAPIError == nil && result.localErr == nil {
 		if err := model.ClearChannelPreDisable(channel.Id, key); err != nil {
 			common.SysError(fmt.Sprintf("clear pending key disable failed after success: channel=%d key_index=%d err=%v", channel.Id, keyIndex, err))

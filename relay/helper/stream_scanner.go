@@ -26,6 +26,7 @@ const (
 	InitialScannerBufferSize    = 64 << 10 // 64KB (64*1024)
 	DefaultMaxScannerBufferSize = 64 << 20 // 64MB (64*1024*1024) default SSE buffer size
 	DefaultPingInterval         = 10 * time.Second
+	MaxPingInterval             = 15 * time.Second
 )
 
 func getScannerBufferSize() int {
@@ -33,6 +34,27 @@ func getScannerBufferSize() int {
 		return constant.StreamScannerMaxBufferMB << 20
 	}
 	return DefaultMaxScannerBufferSize
+}
+
+func NormalizeStreamPingInterval(interval time.Duration) time.Duration {
+	if interval <= 0 {
+		return DefaultPingInterval
+	}
+	if interval > MaxPingInterval {
+		return MaxPingInterval
+	}
+	return interval
+}
+
+func GetStreamPingConfig(info *relaycommon.RelayInfo) (bool, time.Duration) {
+	if info != nil && info.DisablePing {
+		return false, 0
+	}
+	generalSettings := operation_setting.GetGeneralSetting()
+	if generalSettings == nil || !generalSettings.PingIntervalEnabled {
+		return false, 0
+	}
+	return true, NormalizeStreamPingInterval(time.Duration(generalSettings.PingIntervalSeconds) * time.Second)
 }
 
 func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, dataHandler func(data string) bool) {
@@ -62,12 +84,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		wg         sync.WaitGroup // 用于等待所有 goroutine 退出
 	)
 
-	generalSettings := operation_setting.GetGeneralSetting()
-	pingEnabled := generalSettings.PingIntervalEnabled && !info.DisablePing
-	pingInterval := time.Duration(generalSettings.PingIntervalSeconds) * time.Second
-	if pingInterval <= 0 {
-		pingInterval = DefaultPingInterval
-	}
+	pingEnabled, pingInterval := GetStreamPingConfig(info)
 
 	if pingEnabled {
 		pingTicker = time.NewTicker(pingInterval)

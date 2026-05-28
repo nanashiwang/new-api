@@ -331,6 +331,40 @@ func TestStreamScannerHandler_SlowUpstreamFastHandler(t *testing.T) {
 
 // ---------- Ping tests ----------
 
+func TestGetStreamPingConfigCapsLongInterval(t *testing.T) {
+	setting := operation_setting.GetGeneralSetting()
+	oldEnabled := setting.PingIntervalEnabled
+	oldSeconds := setting.PingIntervalSeconds
+	setting.PingIntervalEnabled = true
+	setting.PingIntervalSeconds = 1200
+	t.Cleanup(func() {
+		setting.PingIntervalEnabled = oldEnabled
+		setting.PingIntervalSeconds = oldSeconds
+	})
+
+	enabled, interval := GetStreamPingConfig(&relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}})
+
+	assert.True(t, enabled)
+	assert.Equal(t, MaxPingInterval, interval)
+}
+
+func TestGetStreamPingConfigUsesDefaultForInvalidInterval(t *testing.T) {
+	setting := operation_setting.GetGeneralSetting()
+	oldEnabled := setting.PingIntervalEnabled
+	oldSeconds := setting.PingIntervalSeconds
+	setting.PingIntervalEnabled = true
+	setting.PingIntervalSeconds = 0
+	t.Cleanup(func() {
+		setting.PingIntervalEnabled = oldEnabled
+		setting.PingIntervalSeconds = oldSeconds
+	})
+
+	enabled, interval := GetStreamPingConfig(&relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}})
+
+	assert.True(t, enabled)
+	assert.Equal(t, DefaultPingInterval, interval)
+}
+
 func TestStreamScannerHandler_PingSentDuringSlowUpstream(t *testing.T) {
 	t.Parallel()
 
