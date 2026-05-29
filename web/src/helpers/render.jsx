@@ -3343,6 +3343,16 @@ export function rehypeSplitWordsIntoSpans(options = {}) {
 }
 
 export function getPaymentCurrencySymbol() {
+  const statusStr = localStorage.getItem('status');
+  try {
+    if (statusStr) {
+      const status = JSON.parse(statusStr);
+      const symbol = status?.payment_currency_symbol;
+      if (typeof symbol === 'string' && symbol.trim()) {
+        return symbol.trim();
+      }
+    }
+  } catch (e) {}
   return getCurrencyConfig().symbol;
 }
 
