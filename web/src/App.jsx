@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { lazy, Suspense, useContext, useMemo } from 'react';
+import React, { lazy, Suspense, useContext, useEffect, useMemo } from 'react';
 import { Route, Routes, useLocation, useParams } from 'react-router-dom';
 import Loading from './components/common/ui/Loading';
 import { AuthRedirect, PrivateRoute, AdminRoute } from './helpers/auth';
@@ -70,9 +70,43 @@ function DynamicOAuth2Callback() {
   return <OAuth2Callback type={provider} />;
 }
 
+function safeDecodePathname(pathname) {
+  try {
+    return decodeURIComponent(pathname);
+  } catch (error) {
+    return pathname;
+  }
+}
+
+function getCanonicalPathFromFullwidthQuestion(locationLike) {
+  const decodedPathname = safeDecodePathname(locationLike.pathname || '');
+  const markerIndex = decodedPathname.indexOf('？');
+  if (markerIndex < 0) {
+    return '';
+  }
+
+  const basePath = decodedPathname.slice(0, markerIndex).replace(/\/+$/, '');
+  const embeddedQuery = decodedPathname
+    .slice(markerIndex + 1)
+    .replace(/^[?&]+/, '');
+  const params = new URLSearchParams(embeddedQuery);
+  new URLSearchParams(locationLike.search || '').forEach((value, key) => {
+    params.append(key, value);
+  });
+  const search = params.toString();
+  return `${basePath || '/'}${search ? `?${search}` : ''}${locationLike.hash || ''}`;
+}
+
 function App() {
   const location = useLocation();
   const [statusState] = useContext(StatusContext);
+
+  useEffect(() => {
+    const canonicalPath = getCanonicalPathFromFullwidthQuestion(window.location);
+    if (canonicalPath) {
+      window.location.replace(canonicalPath);
+    }
+  }, []);
 
   // 获取模型广场权限配置
   const pricingRequireAuth = useMemo(() => {

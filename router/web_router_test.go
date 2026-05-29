@@ -33,3 +33,53 @@ func TestImagePlaygroundIndexRoutesDoNotRedirect(t *testing.T) {
 		}
 	}
 }
+
+func TestRedirectMalformedFullwidthQuery(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name     string
+		target   string
+		location string
+	}{
+		{
+			name:     "register invite link",
+			target:   "/register/%EF%BC%9Faff=Xr62",
+			location: "/register?aff=Xr62",
+		},
+		{
+			name:     "merge existing query",
+			target:   "/register/%EF%BC%9Faff=Xr62&source=invite?lang=zh",
+			location: "/register?aff=Xr62&source=invite&lang=zh",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, tt.target, nil)
+
+			if !redirectMalformedFullwidthQuery(c) {
+				t.Fatal("expected malformed query redirect")
+			}
+			if w.Code != http.StatusFound {
+				t.Fatalf("expected status 302, got %d", w.Code)
+			}
+			if location := w.Header().Get("Location"); location != tt.location {
+				t.Fatalf("expected location %q, got %q", tt.location, location)
+			}
+		})
+	}
+}
+
+func TestRedirectMalformedFullwidthQueryIgnoresNormalPath(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/register?aff=Xr62", nil)
+
+	if redirectMalformedFullwidthQuery(c) {
+		t.Fatal("expected normal query path to be ignored")
+	}
+}

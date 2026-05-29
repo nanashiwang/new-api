@@ -24,6 +24,9 @@ func SetWebRouter(router *gin.Engine, buildFS embed.FS, indexPage []byte) {
 	router.Use(static.Serve("/", common.EmbedFolder(buildFS, "web/dist")))
 	router.NoRoute(func(c *gin.Context) {
 		c.Set(middleware.RouteTagKey, "web")
+		if redirectMalformedFullwidthQuery(c) {
+			return
+		}
 		if strings.HasPrefix(c.Request.RequestURI, "/v1") || strings.HasPrefix(c.Request.RequestURI, "/api") || strings.HasPrefix(c.Request.RequestURI, "/assets") {
 			controller.RelayNotFound(c)
 			return
@@ -56,4 +59,37 @@ func registerImagePlaygroundIndexRoutes(router *gin.Engine, indexPage []byte) {
 	}
 	router.GET("/image-playground", serve)
 	router.GET("/image-playground/", serve)
+}
+
+func redirectMalformedFullwidthQuery(c *gin.Context) bool {
+	if c == nil || c.Request == nil || c.Request.URL == nil {
+		return false
+	}
+
+	path := c.Request.URL.Path
+	index := strings.Index(path, "？")
+	if index < 0 {
+		return false
+	}
+
+	basePath := strings.TrimRight(path[:index], "/")
+	if basePath == "" {
+		basePath = "/"
+	}
+	embeddedQuery := strings.TrimLeft(path[index+len("？"):], "?&")
+	rawQuery := c.Request.URL.RawQuery
+	if embeddedQuery != "" {
+		if rawQuery != "" {
+			rawQuery = embeddedQuery + "&" + rawQuery
+		} else {
+			rawQuery = embeddedQuery
+		}
+	}
+
+	target := basePath
+	if rawQuery != "" {
+		target += "?" + rawQuery
+	}
+	c.Redirect(http.StatusFound, target)
+	return true
 }
