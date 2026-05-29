@@ -800,8 +800,7 @@ const TopUp = () => {
         showError(res.data?.message || t('提交提现失败'));
       }
     } catch (e) {
-      const msg =
-        e?.response?.data?.message || e?.message || t('提交提现失败');
+      const msg = e?.response?.data?.message || e?.message || t('提交提现失败');
       showError(msg);
     } finally {
       setWithdrawalSubmitting(false);
@@ -1050,6 +1049,7 @@ const TopUp = () => {
             statusLoading={statusLoading}
             topupInfo={topupInfo}
             onOpenHistory={() => openHistoryTab('records')}
+            onOpenInvoices={() => openHistoryTab('invoices')}
             subscriptionLoading={subscriptionLoading}
             subscriptionPlans={subscriptionPlans}
             billingPreference={billingPreference}

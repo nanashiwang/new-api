@@ -1,0 +1,142 @@
+package model
+
+import (
+	"testing"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/stretchr/testify/require"
+)
+
+func setupInvoiceTestDB(t *testing.T) {
+	t.Helper()
+	setupPaymentRecordTestDB(t)
+	require.NoError(t, DB.AutoMigrate(&InvoiceRequest{}, &InvoiceRequestItem{}))
+}
+
+func createInvoiceTestSubscriptionTopUp(t *testing.T, userID int, tradeNo string, createTime int64) *TopUp {
+	t.Helper()
+	topup := &TopUp{
+		UserId:        userID,
+		Amount:        0,
+		Money:         88.8,
+		TradeNo:       tradeNo,
+		PaymentMethod: "stripe",
+		CreateTime:    createTime,
+		CompleteTime:  createTime + 10,
+		Status:        common.TopUpStatusSuccess,
+	}
+	require.NoError(t, topup.Insert())
+	return topup
+}
+
+func createInvoiceRequestInput(orderType string, orderID int) CreateInvoiceRequestInput {
+	return CreateInvoiceRequestInput{
+		TitleType: InvoiceTitleTypeCompany,
+		Title:     "测试公司",
+		TaxNumber: "TAX123456",
+		Email:     "invoice@example.com",
+		Phone:     "13800138000",
+		Orders: []InvoiceOrderRef{{
+			OrderType: orderType,
+			Id:        orderID,
+		}},
+	}
+}
+
+func TestGetEligibleInvoiceOrders_FiltersSuccessfulUnoccupiedOrders(t *testing.T) {
+	setupInvoiceTestDB(t)
+
+	user := createPaymentRecordTestUser(t, "alice")
+	successTopup := createPaymentRecordTopUp(t, user.Id, "T-INV-001", 100, common.TopUpStatusSuccess)
+	createPaymentRecordTopUp(t, user.Id, "T-INV-002", 200, common.TopUpStatusPending)
+	createPaymentRecordTopUp(t, user.Id, "T-INV-003", 300, common.TopUpStatusExpired)
+	subscriptionTopup := createInvoiceTestSubscriptionTopUp(t, user.Id, "sub-inv-001", 400)
+
+	records, total, err := GetEligibleInvoiceOrders(user.Id, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(2), total)
+	require.Len(t, records, 2)
+	require.Equal(t, subscriptionTopup.Id, records[0].Id)
+	require.Equal(t, PaymentOrderTypeSubscription, records[0].OrderType)
+	require.Equal(t, successTopup.Id, records[1].Id)
+	require.Equal(t, PaymentRecordTypeTopUp, records[1].OrderType)
+}
+
+func TestCreateInvoiceRequest_OccupiesOrderAndRejectedReleasesIt(t *testing.T) {
+	setupInvoiceTestDB(t)
+
+	user := createPaymentRecordTestUser(t, "alice")
+	topup := createPaymentRecordTopUp(t, user.Id, "T-INV-004", 100, common.TopUpStatusSuccess)
+
+	request, err := CreateInvoiceRequest(user.Id, createInvoiceRequestInput(PaymentRecordTypeTopUp, topup.Id))
+	require.NoError(t, err)
+	require.Equal(t, InvoiceStatusPending, request.Status)
+	require.Len(t, request.Items, 1)
+
+	records, total, err := GetEligibleInvoiceOrders(user.Id, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(0), total)
+	require.Empty(t, records)
+
+	rejected, err := RejectInvoiceRequest(request.Id, user.Id, "资料不完整")
+	require.NoError(t, err)
+	require.Equal(t, InvoiceStatusRejected, rejected.Status)
+
+	records, total, err = GetEligibleInvoiceOrders(user.Id, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, records, 1)
+	require.Equal(t, topup.Id, records[0].Id)
+}
+
+func TestCreateInvoiceRequest_RejectsOtherUsersOrder(t *testing.T) {
+	setupInvoiceTestDB(t)
+
+	alice := createPaymentRecordTestUser(t, "alice")
+	bob := createPaymentRecordTestUser(t, "bob")
+	bobTopup := createPaymentRecordTopUp(t, bob.Id, "T-INV-005", 100, common.TopUpStatusSuccess)
+
+	_, err := CreateInvoiceRequest(alice.Id, createInvoiceRequestInput(PaymentRecordTypeTopUp, bobTopup.Id))
+	require.Error(t, err)
+}
+
+func TestApproveInvoiceRequest_KeepsOrderOccupiedAndPreventsSecondReview(t *testing.T) {
+	setupInvoiceTestDB(t)
+
+	user := createPaymentRecordTestUser(t, "alice")
+	topup := createPaymentRecordTopUp(t, user.Id, "T-INV-006", 100, common.TopUpStatusSuccess)
+	request, err := CreateInvoiceRequest(user.Id, createInvoiceRequestInput(PaymentRecordTypeTopUp, topup.Id))
+	require.NoError(t, err)
+
+	approved, err := ApproveInvoiceRequest(request.Id, user.Id, InvoiceReviewInput{InvoiceNo: "FP-001", InvoiceUrl: "https://example.com/invoice.pdf"})
+	require.NoError(t, err)
+	require.Equal(t, InvoiceStatusInvoiced, approved.Status)
+	require.Equal(t, "FP-001", approved.InvoiceNo)
+
+	records, total, err := GetEligibleInvoiceOrders(user.Id, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(0), total)
+	require.Empty(t, records)
+
+	_, err = RejectInvoiceRequest(request.Id, user.Id, "重复审核")
+	require.ErrorIs(t, err, ErrInvoiceRequestAlreadyReviewed)
+}
+
+func TestInvoiceSellableTokenPurchaseCanBeRequested(t *testing.T) {
+	setupInvoiceTestDB(t)
+
+	user := createPaymentRecordTestUser(t, "alice")
+	order := createPaymentRecordSellablePurchase(t, user.Id, "钱包包月", 100, SellableTokenIssuanceStatusIssued)
+
+	records, total, err := GetEligibleInvoiceOrders(user.Id, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, records, 1)
+	require.Equal(t, PaymentRecordTypeSellableTokenPurchase, records[0].OrderType)
+
+	request, err := CreateInvoiceRequest(user.Id, createInvoiceRequestInput(PaymentRecordTypeSellableTokenPurchase, order.Id))
+	require.NoError(t, err)
+	require.Equal(t, int64(200), request.TotalQuota)
+	require.Len(t, request.Items, 1)
+	require.Equal(t, "钱包包月", request.Items[0].ProductName)
+}

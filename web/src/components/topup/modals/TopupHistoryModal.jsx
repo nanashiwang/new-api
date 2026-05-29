@@ -32,6 +32,7 @@ import {
   Table,
   Tabs,
   Tag,
+  TextArea,
   Toast,
   Typography,
 } from '@douyinfe/semi-ui';
@@ -161,6 +162,33 @@ const WITHDRAWAL_STATUS_OPTIONS = [
   { label: '已驳回', value: 'rejected' },
 ];
 
+const INVOICE_STATUS_CONFIG = {
+  pending: { color: 'orange', label: '申请中' },
+  invoiced: { color: 'green', label: '已开票' },
+  rejected: { color: 'red', label: '已驳回' },
+};
+
+const INVOICE_STATUS_OPTIONS = [
+  { label: '全部状态', value: '' },
+  { label: '待审核', value: 'pending' },
+  { label: '已开票', value: 'invoiced' },
+  { label: '已驳回', value: 'rejected' },
+];
+
+const EMPTY_INVOICE_FILTERS = {
+  username: '',
+  status: '',
+};
+
+const EMPTY_INVOICE_FORM = {
+  titleType: 'company',
+  title: '',
+  taxNumber: '',
+  email: '',
+  phone: '',
+  remark: '',
+};
+
 const RISK_RECORD_TYPE_OPTIONS = [
   { label: '全部订单类型', value: '' },
   { label: '充值订单', value: 'topup' },
@@ -209,6 +237,27 @@ function formatMoney(value, currency = 'CNY') {
 
 function formatAmountCents(cents) {
   return `¥${(Number(cents || 0) / 100).toFixed(2)}`;
+}
+
+function getInvoiceOrderKey(record) {
+  if (!record?.id) {
+    return '';
+  }
+  return `${resolveOrderType(record)}-${record.id}`;
+}
+
+function getInvoiceItemKey(item) {
+  if (!item?.order_id) {
+    return '';
+  }
+  return `${item.order_type}-${item.order_id}`;
+}
+
+function pickInvoiceStatus(current, next) {
+  const priority = { invoiced: 3, pending: 2, rejected: 1 };
+  if (!current) return next || '';
+  if (!next) return current;
+  return (priority[next] || 0) > (priority[current] || 0) ? next : current;
 }
 
 function maskAlipayAccount(account) {
@@ -333,6 +382,34 @@ const TopupHistoryModal = ({
   });
   const [reviewRemark, setReviewRemark] = useState('');
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
+
+  const [invoiceLoading, setInvoiceLoading] = useState(false);
+  const [invoices, setInvoices] = useState([]);
+  const [invoiceTotal, setInvoiceTotal] = useState(0);
+  const [invoicePage, setInvoicePage] = useState(1);
+  const [invoicePageSize, setInvoicePageSize] = useState(10);
+  const [invoiceFilters, setInvoiceFilters] = useState(EMPTY_INVOICE_FILTERS);
+  const [invoiceAppliedFilters, setInvoiceAppliedFilters] = useState(
+    EMPTY_INVOICE_FILTERS,
+  );
+  const [invoiceStatusMap, setInvoiceStatusMap] = useState({});
+  const [invoiceApplyVisible, setInvoiceApplyVisible] = useState(false);
+  const [eligibleInvoiceOrders, setEligibleInvoiceOrders] = useState([]);
+  const [eligibleInvoiceLoading, setEligibleInvoiceLoading] = useState(false);
+  const [selectedInvoiceOrderKeys, setSelectedInvoiceOrderKeys] = useState([]);
+  const [invoiceForm, setInvoiceForm] = useState(EMPTY_INVOICE_FORM);
+  const [invoiceSubmitting, setInvoiceSubmitting] = useState(false);
+  const [invoiceReviewState, setInvoiceReviewState] = useState({
+    visible: false,
+    action: null,
+    record: null,
+  });
+  const [invoiceReviewForm, setInvoiceReviewForm] = useState({
+    invoiceNo: '',
+    invoiceUrl: '',
+    adminRemark: '',
+  });
+  const [invoiceReviewSubmitting, setInvoiceReviewSubmitting] = useState(false);
 
   const isMobile = useIsMobile();
   const userIsAdmin = useMemo(() => isAdmin(), []);
@@ -464,6 +541,94 @@ const TopupHistoryModal = ({
     }
   };
 
+  const loadInvoices = async (
+    currentPage,
+    currentPageSize,
+    currentFilters,
+    viewMode = 'self',
+  ) => {
+    setInvoiceLoading(true);
+    try {
+      const isAdminView = viewMode === 'admin' && userIsAdmin;
+      const base = isAdminView
+        ? '/api/user/invoices'
+        : '/api/user/invoices/self';
+      const searchParams = new URLSearchParams({
+        p: String(currentPage),
+        page_size: String(currentPageSize),
+      });
+      if (currentFilters.status) {
+        searchParams.set('status', currentFilters.status);
+      }
+      if (isAdminView && currentFilters.username) {
+        searchParams.set('username', currentFilters.username.trim());
+      }
+
+      const res = await API.get(`${base}?${searchParams.toString()}`);
+      const { success, message, data } = res.data || {};
+      if (!success) {
+        Toast.error({ content: t(message || '加载发票申请失败') });
+        return;
+      }
+      setInvoices(data?.items || []);
+      setInvoiceTotal(data?.total || 0);
+    } catch (error) {
+      Toast.error({ content: t('加载发票申请失败') });
+    } finally {
+      setInvoiceLoading(false);
+    }
+  };
+
+  const loadInvoiceStatusMap = async () => {
+    try {
+      const base = userIsAdmin
+        ? '/api/user/invoices'
+        : '/api/user/invoices/self';
+      const res = await API.get(`${base}?p=1&page_size=100`);
+      const { success, data } = res.data || {};
+      if (!success) {
+        return;
+      }
+      const nextMap = {};
+      (data?.items || []).forEach((request) => {
+        (request?.items || []).forEach((item) => {
+          const key = getInvoiceItemKey(item);
+          if (!key) return;
+          nextMap[key] = pickInvoiceStatus(nextMap[key], request.status);
+        });
+      });
+      setInvoiceStatusMap(nextMap);
+    } catch (error) {
+      // 状态展示失败不阻塞支付记录。
+    }
+  };
+
+  const loadEligibleInvoiceOrders = async (prefillRecord = null) => {
+    setEligibleInvoiceLoading(true);
+    try {
+      const res = await API.get(
+        '/api/user/invoices/eligible-orders?p=1&page_size=100',
+      );
+      const { success, message, data } = res.data || {};
+      if (!success) {
+        Toast.error({ content: t(message || '加载可开票订单失败') });
+        return;
+      }
+      const items = data?.items || [];
+      setEligibleInvoiceOrders(items);
+      if (prefillRecord) {
+        const key = getInvoiceOrderKey(prefillRecord);
+        setSelectedInvoiceOrderKeys(
+          items.some((item) => getInvoiceOrderKey(item) === key) ? [key] : [],
+        );
+      }
+    } catch (error) {
+      Toast.error({ content: t('加载可开票订单失败') });
+    } finally {
+      setEligibleInvoiceLoading(false);
+    }
+  };
+
   const loadDashboard = async (
     dateRange = dashboardDateRange,
     limit = dashboardRankLimit,
@@ -538,6 +703,17 @@ const TopupHistoryModal = ({
     );
   };
 
+  const refreshInvoices = async () => {
+    const mode = activeTab === 'invoices' && userIsAdmin ? 'admin' : 'self';
+    await loadInvoices(
+      invoicePage,
+      invoicePageSize,
+      invoiceAppliedFilters,
+      mode,
+    );
+    await loadInvoiceStatusMap();
+  };
+
   useEffect(() => {
     if (visible && initialTab) {
       const safeTab =
@@ -554,6 +730,7 @@ const TopupHistoryModal = ({
     }
     if (activeTab === 'records') {
       loadTopups(page, pageSize, appliedFilters);
+      loadInvoiceStatusMap();
     }
   }, [visible, activeTab, page, pageSize, appliedFilters, userIsAdmin]);
 
@@ -602,6 +779,21 @@ const TopupHistoryModal = ({
     withdrawalPage,
     withdrawalPageSize,
     withdrawalAppliedFilters,
+    userIsAdmin,
+  ]);
+
+  useEffect(() => {
+    if (!visible || activeTab !== 'invoices') {
+      return;
+    }
+    const mode = userIsAdmin ? 'admin' : 'self';
+    loadInvoices(invoicePage, invoicePageSize, invoiceAppliedFilters, mode);
+  }, [
+    visible,
+    activeTab,
+    invoicePage,
+    invoicePageSize,
+    invoiceAppliedFilters,
     userIsAdmin,
   ]);
 
@@ -671,6 +863,27 @@ const TopupHistoryModal = ({
     setWithdrawalAppliedFilters(EMPTY_WITHDRAWAL_FILTERS);
   };
 
+  const handleInvoiceFilterChange = (key, value) => {
+    setInvoiceFilters((prev) => ({
+      ...prev,
+      [key]: value || '',
+    }));
+  };
+
+  const applyInvoiceFilters = (nextFilters = invoiceFilters) => {
+    setInvoicePage(1);
+    setInvoiceAppliedFilters({
+      ...nextFilters,
+      username: nextFilters.username.trim(),
+    });
+  };
+
+  const resetInvoiceFilters = () => {
+    setInvoicePage(1);
+    setInvoiceFilters(EMPTY_INVOICE_FILTERS);
+    setInvoiceAppliedFilters(EMPTY_INVOICE_FILTERS);
+  };
+
   const activeFilterTags = useMemo(() => {
     const tags = [];
     if (appliedFilters.username) {
@@ -720,6 +933,12 @@ const TopupHistoryModal = ({
       const nextFilters = { ...withdrawalFilters, username };
       setWithdrawalFilters(nextFilters);
       applyWithdrawalFilters(nextFilters);
+      return;
+    }
+    if (activeTab === 'invoices') {
+      const nextFilters = { ...invoiceFilters, username };
+      setInvoiceFilters(nextFilters);
+      applyInvoiceFilters(nextFilters);
       return;
     }
     const nextFilters = { ...filters, username };
@@ -883,10 +1102,155 @@ const TopupHistoryModal = ({
     if (!record || !action) return;
     setReviewSubmitting(true);
     try {
-      const ok = await handleReviewWithdrawal(record, action, reviewRemark.trim());
+      const ok = await handleReviewWithdrawal(
+        record,
+        action,
+        reviewRemark.trim(),
+      );
       if (ok) closeReviewModal();
     } finally {
       setReviewSubmitting(false);
+    }
+  };
+
+  const openInvoiceApplyModal = async (record = null) => {
+    setInvoiceForm(EMPTY_INVOICE_FORM);
+    setSelectedInvoiceOrderKeys(record ? [getInvoiceOrderKey(record)] : []);
+    setInvoiceApplyVisible(true);
+    await loadEligibleInvoiceOrders(record);
+  };
+
+  const closeInvoiceApplyModal = () => {
+    setInvoiceApplyVisible(false);
+    setSelectedInvoiceOrderKeys([]);
+    setEligibleInvoiceOrders([]);
+    setInvoiceForm(EMPTY_INVOICE_FORM);
+  };
+
+  const handleInvoiceFormChange = (key, value) => {
+    setInvoiceForm((prev) => ({
+      ...prev,
+      [key]: value,
+    }));
+  };
+
+  const selectedInvoiceOrders = useMemo(() => {
+    const selected = new Set(selectedInvoiceOrderKeys);
+    return eligibleInvoiceOrders.filter((item) =>
+      selected.has(getInvoiceOrderKey(item)),
+    );
+  }, [eligibleInvoiceOrders, selectedInvoiceOrderKeys]);
+
+  const selectedInvoiceSummary = useMemo(() => {
+    return selectedInvoiceOrders.reduce(
+      (summary, item) => ({
+        money: summary.money + Number(item?.money || 0),
+        quota: summary.quota + Number(item?.amount || 0),
+      }),
+      { money: 0, quota: 0 },
+    );
+  }, [selectedInvoiceOrders]);
+
+  const submitInvoiceRequest = async () => {
+    const form = {
+      titleType: invoiceForm.titleType,
+      title: invoiceForm.title.trim(),
+      taxNumber: invoiceForm.taxNumber.trim(),
+      email: invoiceForm.email.trim(),
+      phone: invoiceForm.phone.trim(),
+      remark: invoiceForm.remark.trim(),
+    };
+    if (selectedInvoiceOrders.length === 0) {
+      Toast.error({ content: t('请选择需要开票的订单') });
+      return;
+    }
+    if (!form.title) {
+      Toast.error({ content: t('发票抬头不能为空') });
+      return;
+    }
+    if (form.titleType === 'company' && !form.taxNumber) {
+      Toast.error({ content: t('企业抬头需要填写税号') });
+      return;
+    }
+    if (!form.email) {
+      Toast.error({ content: t('接收邮箱不能为空') });
+      return;
+    }
+
+    setInvoiceSubmitting(true);
+    try {
+      const res = await API.post('/api/user/invoices', {
+        title_type: form.titleType,
+        title: form.title,
+        tax_number: form.taxNumber,
+        email: form.email,
+        phone: form.phone,
+        remark: form.remark,
+        orders: selectedInvoiceOrders.map((item) => ({
+          order_type: resolveOrderType(item),
+          id: item.id,
+        })),
+      });
+      const { success, message } = res.data || {};
+      if (!success) {
+        Toast.error({ content: t(message || '提交发票申请失败') });
+        return;
+      }
+      Toast.success({ content: t('发票申请已提交') });
+      closeInvoiceApplyModal();
+      await Promise.all([refreshInvoices(), refreshRecords()]);
+    } catch (error) {
+      Toast.error({ content: t('提交发票申请失败') });
+    } finally {
+      setInvoiceSubmitting(false);
+    }
+  };
+
+  const openInvoiceReviewModal = (record, action) => {
+    setInvoiceReviewState({ visible: true, action, record });
+    setInvoiceReviewForm({
+      invoiceNo: record?.invoice_no || '',
+      invoiceUrl: record?.invoice_url || '',
+      adminRemark: '',
+    });
+  };
+
+  const closeInvoiceReviewModal = () => {
+    setInvoiceReviewState({ visible: false, action: null, record: null });
+    setInvoiceReviewForm({ invoiceNo: '', invoiceUrl: '', adminRemark: '' });
+  };
+
+  const submitInvoiceReview = async () => {
+    const { record, action } = invoiceReviewState;
+    const id = Number(record?.id || 0);
+    if (!id || !action) return;
+    setInvoiceReviewSubmitting(true);
+    try {
+      const payload =
+        action === 'approve'
+          ? {
+              invoice_no: invoiceReviewForm.invoiceNo.trim(),
+              invoice_url: invoiceReviewForm.invoiceUrl.trim(),
+              admin_remark: invoiceReviewForm.adminRemark.trim(),
+            }
+          : {
+              admin_remark: invoiceReviewForm.adminRemark.trim(),
+            };
+      const res = await API.post(`/api/user/invoices/${id}/${action}`, payload);
+      const { success, message } = res.data || {};
+      if (!success) {
+        Toast.error({ content: t(message || '审核发票失败') });
+        return;
+      }
+      Toast.success({
+        content: t(action === 'approve' ? '发票已通过' : '发票已驳回'),
+      });
+      closeInvoiceReviewModal();
+      await refreshInvoices();
+    } catch (error) {
+      Toast.error({ content: t('审核发票失败') });
+    } finally {
+      setInvoiceReviewSubmitting(false);
     }
   };
 
@@ -936,6 +1300,54 @@ const TopupHistoryModal = ({
       <Tag color={config.color} shape='circle' size='small'>
         {t(config.label)}
       </Tag>
+    );
+  };
+
+  const renderInvoiceStatusTag = (status) => {
+    const config = INVOICE_STATUS_CONFIG[status] || {
+      color: 'grey',
+      label: status || '-',
+    };
+    return (
+      <Tag color={config.color} shape='circle' size='small'>
+        {t(config.label)}
+      </Tag>
+    );
+  };
+
+  const renderInvoiceRecordStatus = (record) => {
+    if (record?.status !== 'success') {
+      return <Text type='tertiary'>-</Text>;
+    }
+    const status = invoiceStatusMap[getInvoiceOrderKey(record)];
+    if (!status) {
+      if (userIsAdmin) {
+        return <Text type='tertiary'>-</Text>;
+      }
+      return (
+        <Button
+          size='small'
+          type='primary'
+          theme='outline'
+          onClick={() => openInvoiceApplyModal(record)}
+        >
+          {t('申请发票')}
+        </Button>
+      );
+    }
+    return (
+      <Space wrap>
+        {renderInvoiceStatusTag(status)}
+        {!userIsAdmin && status === 'rejected' ? (
+          <Button
+            size='small'
+            theme='outline'
+            onClick={() => openInvoiceApplyModal(record)}
+          >
+            {t('重新申请')}
+          </Button>
+        ) : null}
+      </Space>
     );
   };
 
@@ -1116,6 +1528,12 @@ const TopupHistoryModal = ({
         render: renderStatusBadge,
       },
       {
+        title: t('发票'),
+        key: 'invoice',
+        width: 130,
+        render: (_, record) => renderInvoiceRecordStatus(record),
+      },
+      {
         title: t('创建时间'),
         dataIndex: 'create_time',
         key: 'create_time',
@@ -1205,7 +1623,7 @@ const TopupHistoryModal = ({
     }
 
     return columns;
-  }, [userIsAdmin, filters, riskFilters]);
+  }, [userIsAdmin, filters, riskFilters, invoiceStatusMap]);
 
   const dashboardData = useMemo(
     () => normalizeDashboardStats(dashboardStats),
@@ -1601,6 +2019,227 @@ const TopupHistoryModal = ({
     t,
   ]);
 
+  const invoiceOrderColumns = useMemo(
+    () => [
+      {
+        title: t('订单号'),
+        dataIndex: 'trade_no',
+        key: 'trade_no',
+        width: 220,
+        render: (_, record) => renderRecordNo(record),
+      },
+      {
+        title: t('类型 / 商品'),
+        key: 'record_type',
+        render: (_, record) => renderRecordType(record),
+      },
+      {
+        title: t('支付金额'),
+        key: 'money',
+        width: 140,
+        render: (_, record) =>
+          isSellableTokenPurchase(record) ? (
+            <Text type='danger'>{renderQuota(record?.amount || 0)}</Text>
+          ) : (
+            <Text type='danger'>{formatMoney(record?.money)}</Text>
+          ),
+      },
+      {
+        title: t('支付时间'),
+        dataIndex: 'complete_time',
+        key: 'complete_time',
+        width: 160,
+        render: (value) => (value ? timestamp2string(value) : '-'),
+      },
+    ],
+    [t],
+  );
+
+  const invoiceColumns = useMemo(() => {
+    const isReviewMode = userIsAdmin && activeTab === 'invoices';
+    const columns = [
+      {
+        title: t('状态'),
+        dataIndex: 'status',
+        key: 'status',
+        width: 100,
+        render: renderInvoiceStatusTag,
+      },
+    ];
+
+    if (isReviewMode) {
+      columns.push({
+        title: t('用户'),
+        key: 'username',
+        width: 180,
+        render: (_, record) => {
+          if (!record?.username) {
+            return <Text type='tertiary'>-</Text>;
+          }
+          return (
+            <Space spacing={8} align='center'>
+              <Avatar size='extra-small' color={stringToColor(record.username)}>
+                {record.username.slice(0, 1).toUpperCase()}
+              </Avatar>
+              <div className='flex flex-col leading-5'>
+                <Text type='tertiary' size='small'>
+                  ID: {record.user_id}
+                </Text>
+                <Text
+                  link
+                  size='small'
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => filterByUsername(record.username)}
+                >
+                  {record.username}
+                </Text>
+                {record.display_name ? (
+                  <Text type='tertiary'>{record.display_name}</Text>
+                ) : null}
+              </div>
+            </Space>
+          );
+        },
+      });
+    }
+
+    columns.push(
+      {
+        title: t('发票抬头'),
+        key: 'title',
+        width: 220,
+        render: (_, record) => (
+          <div className='flex flex-col gap-1'>
+            <Space wrap>
+              <Tag shape='circle' size='small' color='blue'>
+                {t(record?.title_type === 'company' ? '企业' : '个人')}
+              </Tag>
+              <Text strong>{record?.title || '-'}</Text>
+            </Space>
+            {record?.tax_number ? (
+              <Text type='tertiary' size='small' copyable>
+                {record.tax_number}
+              </Text>
+            ) : null}
+          </div>
+        ),
+      },
+      {
+        title: t('申请金额'),
+        key: 'total',
+        width: 140,
+        render: (_, record) => (
+          <div className='flex flex-col gap-1'>
+            <Text type='danger'>{formatMoney(record?.total_money)}</Text>
+            {Number(record?.total_quota || 0) > 0 ? (
+              <Text type='tertiary' size='small'>
+                {renderQuota(record.total_quota)}
+              </Text>
+            ) : null}
+          </div>
+        ),
+      },
+      {
+        title: t('订单'),
+        key: 'items',
+        width: 260,
+        render: (_, record) => (
+          <div className='flex flex-col gap-1'>
+            <Text type='tertiary' size='small'>
+              {(record?.items || []).length} {t('笔订单')}
+            </Text>
+            {(record?.items || []).slice(0, 2).map((item) => (
+              <Text key={item.id} copyable ellipsis style={{ maxWidth: 220 }}>
+                {item.trade_no || `${item.order_type}-${item.order_id}`}
+              </Text>
+            ))}
+          </div>
+        ),
+      },
+      {
+        title: t('接收方式'),
+        key: 'contact',
+        width: 180,
+        render: (_, record) => (
+          <div className='flex flex-col gap-1'>
+            <Text copyable>{record?.email || '-'}</Text>
+            {record?.phone ? (
+              <Text type='tertiary' size='small'>
+                {record.phone}
+              </Text>
+            ) : null}
+          </div>
+        ),
+      },
+      {
+        title: t('发票信息'),
+        key: 'invoice_info',
+        width: 220,
+        render: (_, record) => (
+          <div className='flex flex-col gap-1'>
+            {record?.invoice_no ? (
+              <Text copyable>{record.invoice_no}</Text>
+            ) : (
+              <Text type='tertiary'>-</Text>
+            )}
+            {record?.invoice_url ? (
+              <a href={record.invoice_url} target='_blank' rel='noreferrer'>
+                {t('查看发票')}
+              </a>
+            ) : null}
+          </div>
+        ),
+      },
+      {
+        title: t('提交时间'),
+        dataIndex: 'created_at',
+        key: 'created_at',
+        width: 150,
+        render: (value) => (value ? timestamp2string(value) : '-'),
+      },
+      {
+        title: t('备注'),
+        key: 'remark',
+        render: (_, record) => record?.admin_remark || record?.remark || '-',
+      },
+    );
+
+    if (isReviewMode) {
+      columns.push({
+        title: t('操作'),
+        key: 'action',
+        width: 150,
+        render: (_, record) => {
+          if (record?.status !== 'pending') {
+            return <Text type='tertiary'>-</Text>;
+          }
+          return (
+            <Space wrap>
+              <Button
+                size='small'
+                type='primary'
+                theme='outline'
+                onClick={() => openInvoiceReviewModal(record, 'approve')}
+              >
+                {t('通过')}
+              </Button>
+              <Button
+                size='small'
+                type='danger'
+                theme='outline'
+                onClick={() => openInvoiceReviewModal(record, 'reject')}
+              >
+                {t('驳回')}
+              </Button>
+            </Space>
+          );
+        },
+      });
+    }
+
+    return columns;
+  }, [userIsAdmin, activeTab, t]);
+
   const renderRecordFilterPanel = () => (
     <div className='mb-3'>
       <div className='flex items-center gap-2'>
@@ -1887,6 +2526,68 @@ const TopupHistoryModal = ({
     </div>
   );
 
+  const renderInvoiceFilterPanel = () => (
+    <div className='mb-3 flex flex-wrap items-end gap-3'>
+      {userIsAdmin ? (
+        <div style={{ minWidth: 180, flex: 1 }}>
+          <div
+            className='text-xs mb-1'
+            style={{ color: 'var(--semi-color-text-2)' }}
+          >
+            ID/用户名
+          </div>
+          <Input
+            placeholder={t('ID/用户名')}
+            value={invoiceFilters.username}
+            onChange={(value) => handleInvoiceFilterChange('username', value)}
+            onEnterPress={() => applyInvoiceFilters()}
+            showClear
+            size='small'
+          />
+        </div>
+      ) : null}
+      <div style={{ minWidth: 140, flex: 1 }}>
+        <div
+          className='text-xs mb-1'
+          style={{ color: 'var(--semi-color-text-2)' }}
+        >
+          {t('状态')}
+        </div>
+        <Select
+          value={invoiceFilters.status}
+          optionList={INVOICE_STATUS_OPTIONS.map((item) => ({
+            ...item,
+            label: t(item.label),
+          }))}
+          onChange={(value) => handleInvoiceFilterChange('status', value)}
+          size='small'
+          style={{ width: '100%' }}
+        />
+      </div>
+      <Space>
+        <Button type='primary' onClick={() => applyInvoiceFilters()}>
+          {t('搜索')}
+        </Button>
+        <Button
+          theme='borderless'
+          type='tertiary'
+          onClick={resetInvoiceFilters}
+        >
+          {t('重置')}
+        </Button>
+        {!userIsAdmin ? (
+          <Button
+            type='primary'
+            theme='outline'
+            onClick={() => openInvoiceApplyModal()}
+          >
+            {t('申请发票')}
+          </Button>
+        ) : null}
+      </Space>
+    </div>
+  );
+
   const renderRecordsTable = () => (
     <>
       {renderRecordFilterPanel()}
@@ -2138,6 +2839,33 @@ const TopupHistoryModal = ({
     </>
   );
 
+  const renderInvoiceTable = () => (
+    <>
+      {renderInvoiceFilterPanel()}
+      <Table
+        columns={invoiceColumns}
+        dataSource={invoices}
+        loading={invoiceLoading}
+        rowKey={(record) => String(record?.id || 0)}
+        size='small'
+        pagination={{
+          currentPage: invoicePage,
+          pageSize: invoicePageSize,
+          total: invoiceTotal,
+          showSizeChanger: true,
+          pageSizeOpts: [10, 20, 50, 100],
+          onPageChange: (currentPage) => setInvoicePage(currentPage),
+          onPageSizeChange: (currentPageSize) => {
+            setInvoicePageSize(currentPageSize);
+            setInvoicePage(1);
+          },
+        }}
+        scroll={{ x: '100%' }}
+        empty={buildTableEmpty(t, '暂无发票申请')}
+      />
+    </>
+  );
+
   return (
     <>
       <Modal
@@ -2152,6 +2880,9 @@ const TopupHistoryModal = ({
           <Tabs type='card' activeKey={activeTab} onChange={setActiveTab}>
             <Tabs.TabPane tab={t('支付记录')} itemKey='records'>
               {renderRecordsTable()}
+            </Tabs.TabPane>
+            <Tabs.TabPane tab={t('发票')} itemKey='invoices'>
+              {renderInvoiceTable()}
             </Tabs.TabPane>
             <Tabs.TabPane tab={t('提现订单')} itemKey='my-withdrawals'>
               {renderWithdrawalTable()}
@@ -2171,6 +2902,9 @@ const TopupHistoryModal = ({
             <Tabs.TabPane tab={t('支付记录')} itemKey='records'>
               {renderRecordsTable()}
             </Tabs.TabPane>
+            <Tabs.TabPane tab={t('发票')} itemKey='invoices'>
+              {renderInvoiceTable()}
+            </Tabs.TabPane>
             <Tabs.TabPane tab={t('提现订单')} itemKey='my-withdrawals'>
               {renderWithdrawalTable()}
             </Tabs.TabPane>
@@ -2186,6 +2920,197 @@ const TopupHistoryModal = ({
         onResolved={handleRiskCaseResolved}
         t={t}
       />
+
+      <Modal
+        title={t('申请发票')}
+        visible={invoiceApplyVisible}
+        onOk={submitInvoiceRequest}
+        onCancel={closeInvoiceApplyModal}
+        confirmLoading={invoiceSubmitting}
+        maskClosable={false}
+        size={isMobile ? 'full-width' : 'large'}
+        style={isMobile ? undefined : { width: '1000px', maxWidth: '95vw' }}
+      >
+        <div className='space-y-4'>
+          <div
+            className='grid gap-3'
+            style={{
+              gridTemplateColumns: isMobile
+                ? '1fr'
+                : 'repeat(2, minmax(0, 1fr))',
+            }}
+          >
+            <div>
+              <div className='text-xs mb-1'>{t('抬头类型')}</div>
+              <Select
+                value={invoiceForm.titleType}
+                optionList={[
+                  { label: t('企业'), value: 'company' },
+                  { label: t('个人'), value: 'personal' },
+                ]}
+                onChange={(value) =>
+                  handleInvoiceFormChange('titleType', value)
+                }
+                style={{ width: '100%' }}
+              />
+            </div>
+            <div>
+              <div className='text-xs mb-1'>{t('发票抬头')}</div>
+              <Input
+                value={invoiceForm.title}
+                onChange={(value) => handleInvoiceFormChange('title', value)}
+                placeholder={t('请输入发票抬头')}
+                maxLength={128}
+                showClear
+              />
+            </div>
+            <div>
+              <div className='text-xs mb-1'>{t('税号')}</div>
+              <Input
+                value={invoiceForm.taxNumber}
+                onChange={(value) =>
+                  handleInvoiceFormChange('taxNumber', value)
+                }
+                placeholder={t('企业抬头必填')}
+                maxLength={64}
+                showClear
+              />
+            </div>
+            <div>
+              <div className='text-xs mb-1'>{t('接收邮箱')}</div>
+              <Input
+                value={invoiceForm.email}
+                onChange={(value) => handleInvoiceFormChange('email', value)}
+                placeholder={t('用于接收电子发票')}
+                maxLength={128}
+                showClear
+              />
+            </div>
+            <div>
+              <div className='text-xs mb-1'>{t('手机号')}</div>
+              <Input
+                value={invoiceForm.phone}
+                onChange={(value) => handleInvoiceFormChange('phone', value)}
+                placeholder={t('可选')}
+                maxLength={32}
+                showClear
+              />
+            </div>
+            <div>
+              <div className='text-xs mb-1'>{t('备注')}</div>
+              <Input
+                value={invoiceForm.remark}
+                onChange={(value) => handleInvoiceFormChange('remark', value)}
+                placeholder={t('可选')}
+                maxLength={1000}
+                showClear
+              />
+            </div>
+          </div>
+
+          <Card
+            bordered={false}
+            bodyStyle={{ padding: 12 }}
+            style={{
+              background: 'var(--semi-color-fill-0)',
+              border: '1px solid var(--semi-color-border)',
+            }}
+          >
+            <Space wrap>
+              <Text strong>
+                {t('已选')} {selectedInvoiceOrders.length} {t('笔订单')}
+              </Text>
+              <Text type='danger'>
+                {t('金额')} {formatMoney(selectedInvoiceSummary.money)}
+              </Text>
+              {selectedInvoiceSummary.quota > 0 ? (
+                <Text type='tertiary'>
+                  {t('额度')} {renderQuota(selectedInvoiceSummary.quota)}
+                </Text>
+              ) : null}
+            </Space>
+          </Card>
+
+          <Table
+            columns={invoiceOrderColumns}
+            dataSource={eligibleInvoiceOrders}
+            loading={eligibleInvoiceLoading}
+            rowKey={(record) => getInvoiceOrderKey(record)}
+            size='small'
+            pagination={false}
+            scroll={{ x: '100%' }}
+            rowSelection={{
+              selectedRowKeys: selectedInvoiceOrderKeys,
+              onChange: (keys) => setSelectedInvoiceOrderKeys(keys),
+            }}
+            empty={buildTableEmpty(t, '暂无可开票订单')}
+          />
+        </div>
+      </Modal>
+
+      <Modal
+        title={t(
+          invoiceReviewState.action === 'approve'
+            ? '通过发票申请'
+            : '驳回发票申请',
+        )}
+        visible={invoiceReviewState.visible}
+        onOk={submitInvoiceReview}
+        onCancel={closeInvoiceReviewModal}
+        confirmLoading={invoiceReviewSubmitting}
+        maskClosable={false}
+        okButtonProps={
+          invoiceReviewState.action === 'reject'
+            ? { type: 'danger' }
+            : undefined
+        }
+      >
+        <div className='space-y-3'>
+          {invoiceReviewState.action === 'approve' ? (
+            <>
+              <Input
+                placeholder={t('发票号或发票代码')}
+                value={invoiceReviewForm.invoiceNo}
+                onChange={(value) =>
+                  setInvoiceReviewForm((prev) => ({
+                    ...prev,
+                    invoiceNo: value,
+                  }))
+                }
+                maxLength={128}
+                showClear
+              />
+              <Input
+                placeholder={t('发票链接')}
+                value={invoiceReviewForm.invoiceUrl}
+                onChange={(value) =>
+                  setInvoiceReviewForm((prev) => ({
+                    ...prev,
+                    invoiceUrl: value,
+                  }))
+                }
+                showClear
+              />
+            </>
+          ) : null}
+          <TextArea
+            placeholder={t(
+              invoiceReviewState.action === 'approve'
+                ? '审核备注，可选'
+                : '驳回原因，必填',
+            )}
+            value={invoiceReviewForm.adminRemark}
+            onChange={(value) =>
+              setInvoiceReviewForm((prev) => ({
+                ...prev,
+                adminRemark: value,
+              }))
+            }
+            maxCount={1000}
+            autosize
+          />
+        </div>
+      </Modal>
 
       <Modal
         title={t(

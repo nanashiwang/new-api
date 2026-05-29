@@ -79,6 +79,7 @@ const RechargeCard = ({
   statusLoading,
   topupInfo,
   onOpenHistory,
+  onOpenInvoices,
   subscriptionLoading = false,
   subscriptionPlans = [],
   billingPreference,
@@ -231,7 +232,10 @@ const RechargeCard = ({
           <div className='py-8 flex justify-center'>
             <Spin size='large' />
           </div>
-        ) : enableOnlineTopUp || enableStripeTopUp || enableCreemTopUp || enableWaffoTopUp ? (
+        ) : enableOnlineTopUp ||
+          enableStripeTopUp ||
+          enableCreemTopUp ||
+          enableWaffoTopUp ? (
           <Form
             getFormApi={(api) => (onlineFormApiRef.current = api)}
             initValues={{ topUpCount: topUpCount }}
@@ -243,7 +247,11 @@ const RechargeCard = ({
                     <Form.InputNumber
                       field='topUpCount'
                       label={t('充值数量')}
-                      disabled={!enableOnlineTopUp && !enableStripeTopUp && !enableWaffoTopUp}
+                      disabled={
+                        !enableOnlineTopUp &&
+                        !enableStripeTopUp &&
+                        !enableWaffoTopUp
+                      }
                       placeholder={
                         t('充值数量，最低 ') + renderQuotaWithAmount(minTopUp)
                       }
@@ -324,7 +332,9 @@ const RechargeCard = ({
                                   key={payMethod.type}
                                   theme={isSelected ? 'solid' : 'outline'}
                                   type={isSelected ? 'primary' : 'tertiary'}
-                                  onClick={() => selectPayMethod(payMethod.type)}
+                                  onClick={() =>
+                                    selectPayMethod(payMethod.type)
+                                  }
                                   disabled={disabled}
                                   aria-pressed={isSelected}
                                   icon={
@@ -578,13 +588,22 @@ const RechargeCard = ({
             <div className='text-xs'>{t('多种充值方式，安全便捷')}</div>
           </div>
         </div>
-        <Button
-          icon={<Receipt size={16} />}
-          theme='solid'
-          onClick={onOpenHistory}
-        >
-          {t('账单')}
-        </Button>
+        <Space>
+          <Button
+            icon={<Receipt size={16} />}
+            theme='outline'
+            onClick={onOpenInvoices}
+          >
+            {t('申请发票')}
+          </Button>
+          <Button
+            icon={<Receipt size={16} />}
+            theme='solid'
+            onClick={onOpenHistory}
+          >
+            {t('账单')}
+          </Button>
+        </Space>
       </div>
 
       {shouldShowTabs ? (
