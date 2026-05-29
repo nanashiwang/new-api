@@ -43,6 +43,74 @@ const PREVIEW_HOST = process.env.PRERENDER_PREVIEW_HOST || '127.0.0.1'
 const CHROMIUM_PATH = process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium'
 const PAGE_READY_TIMEOUT_MS = Number(process.env.PRERENDER_TIMEOUT_MS || 20000)
 const SKIP = process.env.PRERENDER_SKIP === '1'
+const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8' }
+
+const mockStatus = {
+  setup: true,
+  system_name: 'New API',
+  logo: '/logo.png',
+  footer_html: '',
+  quota_per_unit: 500000,
+  display_in_currency: false,
+  quota_display_type: 'USD',
+  enable_drawing: false,
+  enable_task: false,
+  enable_data_export: false,
+  data_export_default_time: 'hour',
+  default_collapse_sidebar: false,
+  mj_notify_enabled: false,
+  docs_link: 'https://docs.newapi.pro',
+  demo_site_enabled: false,
+  self_use_mode_enabled: false,
+  email_verification: true,
+  turnstile_check: false,
+  turnstile_site_key: '',
+  user_agreement_enabled: true,
+  privacy_policy_enabled: true,
+  github_oauth: false,
+  discord_oauth: false,
+  oidc_enabled: false,
+  wechat_login: false,
+  linuxdo_oauth: false,
+  telegram_oauth: false,
+  custom_oauth_providers: [],
+  announcements: [],
+  announcements_enabled: false,
+  HeaderNavModules: JSON.stringify({
+    home: true,
+    console: true,
+    pricing: { enabled: true, requireAuth: false },
+    docs: false,
+    about: false,
+    usage: false,
+  }),
+  SidebarModulesAdmin: JSON.stringify({
+    chat: { enabled: true, playground: true, imagePlayground: true, chat: true },
+    console: { enabled: true, detail: true, token: true, log: true },
+    personal: { enabled: true, topup: true, personal: true },
+    admin: { enabled: true, channel: true, models: true, setting: true },
+  }),
+}
+
+const apiMocks = new Map([
+  ['/api/status', { success: true, message: '', data: mockStatus }],
+  ['/api/user/self', { success: false, message: '', data: null }],
+  ['/api/about', { success: true, message: '', data: '' }],
+  [
+    '/api/pricing',
+    {
+      success: true,
+      message: '',
+      data: [],
+      vendors: [],
+      group_ratio: {},
+      usable_group: [],
+      supported_endpoint: {},
+      auto_groups: [],
+    },
+  ],
+  ['/api/subscription/plans', { success: true, message: '', data: [] }],
+])
 
 if (SKIP) {
   console.log('[prerender] PRERENDER_SKIP=1, skipping. (后端 RenderIndexWithMeta 会兜底处理)')
@@ -99,6 +167,25 @@ async function startPreviewServer() {
 async function prerenderRoute(browser, route) {
   const page = await browser.newPage()
   try {
+    await page.setRequestInterception(true)
+    page.on('request', (request) => {
+      const requestUrl = new URL(request.url())
+      const mock = apiMocks.get(requestUrl.pathname)
+      if (requestUrl.origin === `http://${PREVIEW_HOST}:${PREVIEW_PORT}` && mock) {
+        request.respond({
+          status: 200,
+          headers: JSON_HEADERS,
+          body: JSON.stringify(mock),
+        })
+        return
+      }
+      if (requestUrl.hostname === 'challenges.cloudflare.com') {
+        request.abort()
+        return
+      }
+      request.continue()
+    })
+
     const url = `http://${PREVIEW_HOST}:${PREVIEW_PORT}${route}`
     console.log(`[prerender] ${url}`)
     await page.goto(url, { waitUntil: 'networkidle0', timeout: PAGE_READY_TIMEOUT_MS })
@@ -108,6 +195,9 @@ async function prerenderRoute(browser, route) {
       { timeout: PAGE_READY_TIMEOUT_MS },
     ).catch(() => {
       console.warn(`[prerender] #root 未渲染节点，仍写出当前 HTML：${route}`)
+    })
+    await page.evaluate(() => {
+      document.querySelectorAll('.semi-toast-wrapper').forEach((node) => node.remove())
     })
     const html = await page.content()
     const outDir = resolve(DIST_DIR, route.replace(/^\//, ''))
