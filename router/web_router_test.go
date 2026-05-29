@@ -34,6 +34,32 @@ func TestImagePlaygroundIndexRoutesDoNotRedirect(t *testing.T) {
 	}
 }
 
+func TestPrerenderedIndexRoutesDoNotRedirect(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	registerPrerenderedIndexRoutes(r, []byte("<html>index</html>"))
+
+	for _, path := range []string{
+		"/register?aff=R3bk",
+		"/register/?aff=R3bk",
+		"/login?next=/console",
+		"/pricing",
+		"/about",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: expected status 200, got %d", path, w.Code)
+		}
+		if location := w.Header().Get("Location"); location != "" {
+			t.Fatalf("%s: expected no redirect location, got %q", path, location)
+		}
+	}
+}
+
 func TestRedirectMalformedFullwidthQuery(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

@@ -21,6 +21,7 @@ func SetWebRouter(router *gin.Engine, buildFS embed.FS, indexPage []byte) {
 	if imagePlaygroundIndex, err := buildFS.ReadFile("web/dist/image-playground/index.html"); err == nil {
 		registerImagePlaygroundIndexRoutes(router, imagePlaygroundIndex)
 	}
+	registerPrerenderedIndexRoutes(router, indexPage)
 	router.Use(static.Serve("/", common.EmbedFolder(buildFS, "web/dist")))
 	router.NoRoute(func(c *gin.Context) {
 		c.Set(middleware.RouteTagKey, "web")
@@ -31,17 +32,32 @@ func SetWebRouter(router *gin.Engine, buildFS embed.FS, indexPage []byte) {
 			controller.RelayNotFound(c)
 			return
 		}
-		// 优先用预渲染产物（含完整 React HTML，爬虫不跑 JS 也能看到内容），
-		// 没有则用 indexPage 兜底。两者都再过一次 RenderIndexWithMeta 按 path 注入
-		// 差异化 title/description/canonical/og/twitter，确保 SEO 元数据与路径一致。
-		template := service.GetPrerenderedHTML(c.Request.URL.Path)
-		if template == nil {
-			template = indexPage
-		}
-		html := service.RenderIndexWithMeta(template, c.Request.URL.Path)
-		c.Header("Cache-Control", "no-cache")
-		c.Data(http.StatusOK, "text/html; charset=utf-8", html)
+		serveWebIndex(c, indexPage)
 	})
+}
+
+func registerPrerenderedIndexRoutes(router *gin.Engine, indexPage []byte) {
+	serve := func(c *gin.Context) {
+		c.Set(middleware.RouteTagKey, "web")
+		serveWebIndex(c, indexPage)
+	}
+	for _, path := range []string{"/login", "/login/", "/register", "/register/", "/pricing", "/pricing/", "/about", "/about/"} {
+		router.GET(path, serve)
+		router.HEAD(path, serve)
+	}
+}
+
+func serveWebIndex(c *gin.Context, indexPage []byte) {
+	// 优先用预渲染产物（含完整 React HTML，爬虫不跑 JS 也能看到内容），
+	// 没有则用 indexPage 兜底。两者都再过一次 RenderIndexWithMeta 按 path 注入
+	// 差异化 title/description/canonical/og/twitter，确保 SEO 元数据与路径一致。
+	template := service.GetPrerenderedHTML(c.Request.URL.Path)
+	if template == nil {
+		template = indexPage
+	}
+	html := service.RenderIndexWithMeta(template, c.Request.URL.Path)
+	c.Header("Cache-Control", "no-cache")
+	c.Data(http.StatusOK, "text/html; charset=utf-8", html)
 }
 
 func registerImagePlaygroundIndexRoutes(router *gin.Engine, indexPage []byte) {
