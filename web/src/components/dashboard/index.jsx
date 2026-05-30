@@ -70,8 +70,6 @@ const Dashboard = () => {
     dashboardData.setConsumeQuota,
     dashboardData.setTimes,
     dashboardData.setConsumeTokens,
-    dashboardData.setPieData,
-    dashboardData.setLineData,
     dashboardData.setModelColors,
     dashboardData.t,
   );
@@ -261,8 +259,6 @@ const Dashboard = () => {
             activeChartTab={dashboardData.activeChartTab}
             setActiveChartTab={dashboardData.setActiveChartTab}
             spec_line={dashboardCharts.spec_line}
-            spec_model_line={dashboardCharts.spec_model_line}
-            spec_pie={dashboardCharts.spec_pie}
             spec_rank_bar={dashboardCharts.spec_rank_bar}
             spec_user_rank={dashboardCharts.spec_user_rank}
             perfMetricsSummary={dashboardData.perfMetricsSummary}

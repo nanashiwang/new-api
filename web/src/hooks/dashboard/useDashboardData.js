@@ -66,8 +66,6 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const [consumeQuota, setConsumeQuota] = useState(0);
   const [consumeTokens, setConsumeTokens] = useState(0);
   const [times, setTimes] = useState(0);
-  const [pieData, setPieData] = useState([{ type: 'null', value: '0' }]);
-  const [lineData, setLineData] = useState([]);
   const [modelColors, setModelColors] = useState({});
   const [perfMetricsSummary, setPerfMetricsSummary] = useState([]);
   const [perfMetricsLoading, setPerfMetricsLoading] = useState(false);
@@ -415,10 +413,6 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     setConsumeTokens,
     times,
     setTimes,
-    pieData,
-    setPieData,
-    lineData,
-    setLineData,
     modelColors,
     setModelColors,
     perfMetricsSummary,

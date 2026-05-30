@@ -54,69 +54,10 @@ export const useDashboardCharts = (
   setConsumeQuota,
   setTimes,
   setConsumeTokens,
-  setPieData,
-  setLineData,
   setModelColors,
   t,
 ) => {
   // ========== 图表规格状态 ==========
-  const [spec_pie, setSpecPie] = useState({
-    type: 'pie',
-    data: [
-      {
-        id: 'id0',
-        values: [{ type: 'null', value: '0' }],
-      },
-    ],
-    outerRadius: 0.8,
-    innerRadius: 0.5,
-    padAngle: 0.6,
-    valueField: 'value',
-    categoryField: 'type',
-    pie: {
-      style: {
-        cornerRadius: 10,
-      },
-      state: {
-        hover: {
-          outerRadius: 0.85,
-          stroke: '#000',
-          lineWidth: 1,
-        },
-        selected: {
-          outerRadius: 0.85,
-          stroke: '#000',
-          lineWidth: 1,
-        },
-      },
-    },
-    title: {
-      visible: true,
-      text: t('模型调用次数占比'),
-      subtext: `${t('总计')}：${renderNumber(0)}`,
-    },
-    legends: {
-      visible: true,
-      orient: 'left',
-    },
-    label: {
-      visible: true,
-    },
-    tooltip: {
-      mark: {
-        content: [
-          {
-            key: (datum) => datum['type'],
-            value: (datum) => renderNumber(datum['value']),
-          },
-        ],
-      },
-    },
-    color: {
-      specified: modelColorMap,
-    },
-  });
-
   const [spec_line, setSpecLine] = useState({
     type: 'bar',
     data: [
@@ -184,41 +125,6 @@ export const useDashboardCharts = (
           });
           return array;
         },
-      },
-    },
-    color: {
-      specified: modelColorMap,
-    },
-  });
-
-  const [spec_model_line, setSpecModelLine] = useState({
-    type: 'line',
-    data: [
-      {
-        id: 'lineData',
-        values: [],
-      },
-    ],
-    xField: 'Time',
-    yField: 'Count',
-    seriesField: 'Model',
-    legends: {
-      visible: true,
-      selectMode: 'single',
-    },
-    title: {
-      visible: true,
-      text: t('调用趋势'),
-      subtext: '',
-    },
-    tooltip: {
-      mark: {
-        content: [
-          {
-            key: (datum) => datum['Model'],
-            value: (datum) => renderNumber(datum['Count']),
-          },
-        ],
       },
     },
     color: {
@@ -369,13 +275,6 @@ export const useDashboardCharts = (
         updateMapValue(modelTotals, value.model, value.count);
       }
 
-      const newPieData = Array.from(modelTotals)
-        .map(([model, count]) => ({
-          type: model,
-          value: count,
-        }))
-        .sort((a, b) => b.value - a.value);
-
       const chartTimePoints = generateChartTimePoints(
         aggregatedData,
         data,
@@ -407,36 +306,12 @@ export const useDashboardCharts = (
       newLineData.sort((a, b) => a.Time.localeCompare(b.Time));
 
       updateChartSpec(
-        setSpecPie,
-        newPieData,
-        `${t('总计')}：${renderNumber(totalTimes)}`,
-        newModelColors,
-        'id0',
-      );
-
-      updateChartSpec(
         setSpecLine,
         newLineData,
         `${t('总计')}：${renderQuota(totalQuota, 2)}`,
         newModelColors,
         'barData',
       );
-
-      // ===== 模型调用次数折线图 =====
-      let modelLineData = [];
-      chartTimePoints.forEach((time) => {
-        const timeData = Array.from(uniqueModels).map((model) => {
-          const key = `${time}-${model}`;
-          const aggregated = aggregatedData.get(key);
-          return {
-            Time: time,
-            Model: model,
-            Count: aggregated?.count || 0,
-          };
-        });
-        modelLineData.push(...timeData);
-      });
-      modelLineData.sort((a, b) => a.Time.localeCompare(b.Time));
 
       // ===== 模型调用次数排行柱状图 =====
       const rankData = Array.from(modelTotals)
@@ -447,14 +322,6 @@ export const useDashboardCharts = (
         .sort((a, b) => b.Count - a.Count);
 
       updateChartSpec(
-        setSpecModelLine,
-        modelLineData,
-        `${t('总计')}：${renderNumber(totalTimes)}`,
-        newModelColors,
-        'lineData',
-      );
-
-      updateChartSpec(
         setSpecRankBar,
         rankData,
         `${t('总计')}：${renderNumber(totalTimes)}`,
@@ -462,8 +329,6 @@ export const useDashboardCharts = (
         'rankData',
       );
 
-      setPieData(newPieData);
-      setLineData(newLineData);
       setConsumeQuota(totalQuota);
       setTimes(totalTimes);
       setConsumeTokens(totalTokens);
@@ -473,8 +338,6 @@ export const useDashboardCharts = (
       setTrendData,
       generateModelColors,
       setModelColors,
-      setPieData,
-      setLineData,
       setConsumeQuota,
       setTimes,
       setConsumeTokens,
@@ -538,9 +401,7 @@ export const useDashboardCharts = (
   }, []);
 
   return {
-    spec_pie,
     spec_line,
-    spec_model_line,
     spec_rank_bar,
     spec_user_rank,
     updateChartData,

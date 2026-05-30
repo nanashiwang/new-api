@@ -52,8 +52,6 @@ const ChartsPanel = ({
   activeChartTab,
   setActiveChartTab,
   spec_line,
-  spec_model_line,
-  spec_pie,
   spec_rank_bar,
   spec_user_rank,
   perfMetricsSummary,
@@ -252,8 +250,6 @@ const ChartsPanel = ({
             onChange={setActiveChartTab}
           >
             <TabPane tab={<span>{t('消耗分布')}</span>} itemKey='1' />
-            <TabPane tab={<span>{t('调用趋势')}</span>} itemKey='2' />
-            <TabPane tab={<span>{t('调用次数分布')}</span>} itemKey='3' />
             <TabPane tab={<span>{t('调用次数排行')}</span>} itemKey='4' />
             {isAdminUser && (
               <TabPane tab={<span>{t('用户消耗排行')}</span>} itemKey='5' />
@@ -271,12 +267,6 @@ const ChartsPanel = ({
         <Suspense fallback={<ChartFallback t={t} />}>
           {activeChartTab === '1' && (
             <VChart spec={spec_line} option={CHART_CONFIG} />
-          )}
-          {activeChartTab === '2' && (
-            <VChart spec={spec_model_line} option={CHART_CONFIG} />
-          )}
-          {activeChartTab === '3' && (
-            <VChart spec={spec_pie} option={CHART_CONFIG} />
           )}
           {activeChartTab === '4' && (
             <VChart spec={spec_rank_bar} option={CHART_CONFIG} />
