@@ -39,6 +39,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const uptimeRequestGuard = useLatestRequestGuard();
   const userQuotaRequestGuard = useLatestRequestGuard();
   const perfMetricsRequestGuard = useLatestRequestGuard();
+  const modelChannelStatsRequestGuard = useLatestRequestGuard();
 
   // ========== 基础状态 ==========
   const [loading, setLoading] = useState(false);
@@ -70,6 +71,9 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const [modelColors, setModelColors] = useState({});
   const [perfMetricsSummary, setPerfMetricsSummary] = useState([]);
   const [perfMetricsLoading, setPerfMetricsLoading] = useState(false);
+  const [modelChannelStats, setModelChannelStats] = useState(null);
+  const [modelChannelStatsLoading, setModelChannelStatsLoading] =
+    useState(false);
 
   // ========== 图表状态 ==========
   const [activeChartTab, setActiveChartTab] = useState('1');
@@ -293,6 +297,47 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     }
   }, [inputs.start_timestamp, inputs.end_timestamp, perfMetricsRequestGuard]);
 
+  const loadModelChannelTagStats = useCallback(async () => {
+    if (!isAdminUser) return null;
+    const requestId = modelChannelStatsRequestGuard.createRequestId();
+    setModelChannelStatsLoading(true);
+    try {
+      const start = Date.parse(inputs.start_timestamp) / 1000;
+      const end = Date.parse(inputs.end_timestamp) / 1000;
+      const res = await API.get('/api/data/model-channel-tags', {
+        params: {
+          start_timestamp: start,
+          end_timestamp: end,
+          username: inputs.username,
+          limit: 12,
+        },
+      });
+      if (!modelChannelStatsRequestGuard.isLatestRequest(requestId)) {
+        return null;
+      }
+      const { success, message, data } = res.data;
+      if (success) {
+        setModelChannelStats(data || null);
+        return data || null;
+      }
+      showError(message);
+      return null;
+    } catch (err) {
+      console.error(err);
+      return null;
+    } finally {
+      if (modelChannelStatsRequestGuard.isLatestRequest(requestId)) {
+        setModelChannelStatsLoading(false);
+      }
+    }
+  }, [
+    inputs.start_timestamp,
+    inputs.end_timestamp,
+    inputs.username,
+    isAdminUser,
+    modelChannelStatsRequestGuard,
+  ]);
+
   const getUserData = useCallback(async () => {
     let res = await API.get(`/api/user/self`);
     const { success, message, data } = res.data;
@@ -316,12 +361,21 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
       if (includePerfMetrics) {
         tasks.push(loadPerfMetricsSummary());
       }
+      if (options.includeModelChannelStats) {
+        tasks.push(loadModelChannelTagStats());
+      }
       if (tasks.length > 0) {
         await Promise.allSettled(tasks);
       }
       return data;
     },
-    [loadQuotaData, loadUptimeData, loadPerfMetricsSummary, uptimeEnabled],
+    [
+      loadQuotaData,
+      loadUptimeData,
+      loadPerfMetricsSummary,
+      loadModelChannelTagStats,
+      uptimeEnabled,
+    ],
   );
 
   const handleSearchConfirm = useCallback(
@@ -369,6 +423,8 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     setModelColors,
     perfMetricsSummary,
     perfMetricsLoading,
+    modelChannelStats,
+    modelChannelStatsLoading,
 
     // 图表状态
     activeChartTab,
@@ -404,6 +460,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     loadUserQuotaData,
     loadUptimeData,
     loadPerfMetricsSummary,
+    loadModelChannelTagStats,
     getUserData,
     refresh,
     handleSearchConfirm,

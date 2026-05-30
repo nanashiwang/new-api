@@ -42,6 +42,24 @@ func GetQuotaDatesByUser(c *gin.Context) {
 	})
 }
 
+func GetModelChannelTagStats(c *gin.Context) {
+	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
+	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "12"))
+	username := c.Query("username")
+
+	stats, err := model.GetDashboardModelChannelTagStats(startTimestamp, endTimestamp, username, limit)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    stats,
+	})
+}
+
 func GetUserQuotaDates(c *gin.Context) {
 	userId := c.GetInt("id")
 	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)

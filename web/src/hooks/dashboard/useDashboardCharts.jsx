@@ -33,7 +33,6 @@ import {
   updateChartSpec,
   updateMapValue,
   initializeMaps,
-  processUserData,
 } from '../../helpers/dashboard';
 
 const USER_COLORS = [
@@ -316,43 +315,6 @@ export const useDashboardCharts = (
     color: { type: 'ordinal', range: USER_COLORS },
   });
 
-  const [spec_user_trend, setSpecUserTrend] = useState({
-    type: 'area',
-    data: [{ id: 'userTrendData', values: [] }],
-    xField: 'Time',
-    yField: 'rawQuota',
-    seriesField: 'User',
-    stack: false,
-    legends: { visible: true, selectMode: 'single' },
-    title: {
-      visible: true,
-      text: t('用户消耗趋势'),
-      subtext: '',
-    },
-    axes: [
-      {
-        orient: 'left',
-        label: {
-          formatMethod: (value) => renderQuota(value, 2),
-        },
-      },
-    ],
-    area: { style: { fillOpacity: 0.15 } },
-    line: { style: { lineWidth: 2 } },
-    point: { visible: false },
-    tooltip: {
-      mark: {
-        content: [
-          {
-            key: (datum) => datum['User'],
-            value: (datum) => renderQuota(datum['rawQuota'] || 0, 4),
-          },
-        ],
-      },
-    },
-    color: { type: 'ordinal', range: USER_COLORS },
-  });
-
   // ========== 数据处理函数 ==========
   const generateModelColors = useCallback((uniqueModels, modelColors) => {
     const newModelColors = {};
@@ -522,11 +484,18 @@ export const useDashboardCharts = (
 
   const updateUserChartData = useCallback(
     (data) => {
-      const { rankingData, trendData: userTrend } = processUserData(
-        data,
-        dataExportDefaultTime,
-        10,
-      );
+      const userQuotaTotal = new Map();
+      data.forEach((item) => {
+        const previousQuota = userQuotaTotal.get(item.username) || 0;
+        userQuotaTotal.set(item.username, previousQuota + item.quota);
+      });
+      const rankingData = Array.from(userQuotaTotal.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(([username, quota]) => ({
+          User: username,
+          Quota: quota,
+        }));
 
       const userRankValues = rankingData
         .map((item) => ({
@@ -549,24 +518,8 @@ export const useDashboardCharts = (
           subtext: `${t('总计')}：${renderQuota(totalUserQuota, 2)}`,
         },
       }));
-
-      const userTrendValues = userTrend.map((item) => ({
-        Time: item.Time,
-        User: item.User,
-        rawQuota: item.Quota,
-        Usage: item.Quota ? getQuotaWithUnit(item.Quota, 4) : 0,
-      }));
-
-      setSpecUserTrend((prev) => ({
-        ...prev,
-        data: [{ id: 'userTrendData', values: userTrendValues }],
-        title: {
-          ...prev.title,
-          subtext: `${t('总计')}：${renderQuota(totalUserQuota, 2)}`,
-        },
-      }));
     },
-    [dataExportDefaultTime, t],
+    [t],
   );
 
   // ========== 初始化图表主题 ==========
@@ -590,7 +543,6 @@ export const useDashboardCharts = (
     spec_model_line,
     spec_rank_bar,
     spec_user_rank,
-    spec_user_trend,
     updateChartData,
     updateUserChartData,
     generateModelColors,

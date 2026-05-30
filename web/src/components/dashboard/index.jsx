@@ -58,6 +58,7 @@ const Dashboard = () => {
   const [statusState] = useContext(StatusContext);
   const userChartLoadedRef = useRef(false);
   const perfMetricsLoadedRef = useRef(false);
+  const modelChannelStatsLoadedRef = useRef(false);
 
   // ========== 主要数据管理 ==========
   const dashboardData = useDashboardData(userState, userDispatch, statusState);
@@ -98,6 +99,13 @@ const Dashboard = () => {
     }
   };
 
+  const loadModelChannelTagStats = async () => {
+    if (dashboardData.isAdminUser) {
+      await dashboardData.loadModelChannelTagStats();
+      modelChannelStatsLoadedRef.current = true;
+    }
+  };
+
   const initChart = async () => {
     const quotaTask = dashboardData.loadQuotaData().then((data) => {
       if (data && data.length > 0) {
@@ -114,11 +122,11 @@ const Dashboard = () => {
   };
 
   const handleRefresh = async () => {
-    const isUserChartTab =
-      dashboardData.activeChartTab === '5' ||
-      dashboardData.activeChartTab === '6';
+    const isUserChartTab = dashboardData.activeChartTab === '5';
+    const isModelChannelStatsTab = dashboardData.activeChartTab === '6';
     const data = await dashboardData.refresh({
       includePerfMetrics: dashboardData.activeChartTab === '7',
+      includeModelChannelStats: isModelChannelStatsTab,
     });
     if (data && data.length > 0) {
       dashboardCharts.updateChartData(data);
@@ -129,21 +137,27 @@ const Dashboard = () => {
   };
 
   const handleSearchConfirm = async () => {
-    const isUserChartTab =
-      dashboardData.activeChartTab === '5' ||
-      dashboardData.activeChartTab === '6';
+    const isUserChartTab = dashboardData.activeChartTab === '5';
+    const isModelChannelStatsTab = dashboardData.activeChartTab === '6';
     const isPerfMetricsTab = dashboardData.activeChartTab === '7';
     if (!isUserChartTab) {
       userChartLoadedRef.current = false;
+    }
+    if (!isModelChannelStatsTab) {
+      modelChannelStatsLoadedRef.current = false;
     }
     if (!isPerfMetricsTab) {
       perfMetricsLoadedRef.current = false;
     }
     await dashboardData.handleSearchConfirm(dashboardCharts.updateChartData, {
       includePerfMetrics: isPerfMetricsTab,
+      includeModelChannelStats: isModelChannelStatsTab,
     });
     if (isUserChartTab) {
       await loadUserData();
+    }
+    if (isModelChannelStatsTab) {
+      modelChannelStatsLoadedRef.current = true;
     }
   };
 
@@ -182,11 +196,20 @@ const Dashboard = () => {
   useEffect(() => {
     if (
       dashboardData.isAdminUser &&
-      (dashboardData.activeChartTab === '5' ||
-        dashboardData.activeChartTab === '6') &&
+      dashboardData.activeChartTab === '5' &&
       !userChartLoadedRef.current
     ) {
       loadUserData();
+    }
+  }, [dashboardData.activeChartTab, dashboardData.isAdminUser]);
+
+  useEffect(() => {
+    if (
+      dashboardData.isAdminUser &&
+      dashboardData.activeChartTab === '6' &&
+      !modelChannelStatsLoadedRef.current
+    ) {
+      loadModelChannelTagStats();
     }
   }, [dashboardData.activeChartTab, dashboardData.isAdminUser]);
 
@@ -242,9 +265,10 @@ const Dashboard = () => {
             spec_pie={dashboardCharts.spec_pie}
             spec_rank_bar={dashboardCharts.spec_rank_bar}
             spec_user_rank={dashboardCharts.spec_user_rank}
-            spec_user_trend={dashboardCharts.spec_user_trend}
             perfMetricsSummary={dashboardData.perfMetricsSummary}
             perfMetricsLoading={dashboardData.perfMetricsLoading}
+            modelChannelStats={dashboardData.modelChannelStats}
+            modelChannelStatsLoading={dashboardData.modelChannelStatsLoading}
             isAdminUser={dashboardData.isAdminUser}
             CARD_PROPS={CARD_PROPS}
             CHART_CONFIG={CHART_CONFIG}

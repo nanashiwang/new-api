@@ -17,9 +17,22 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { Suspense, lazy } from 'react';
-import { Card, Tabs, TabPane, Table } from '@douyinfe/semi-ui';
+import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
+import {
+  Card,
+  Tabs,
+  TabPane,
+  Table,
+  Spin,
+  Empty,
+  Tag,
+} from '@douyinfe/semi-ui';
 import { PieChart } from 'lucide-react';
+import {
+  modelToColor,
+  renderNumber,
+  renderQuota,
+} from '../../helpers/dashboardFormat';
 
 const VChart = lazy(() =>
   import('@visactor/react-vchart').then((module) => ({
@@ -33,6 +46,8 @@ const ChartFallback = ({ t }) => (
   </div>
 );
 
+const formatPercent = (value) => `${(Number(value || 0) * 100).toFixed(1)}%`;
+
 const ChartsPanel = ({
   activeChartTab,
   setActiveChartTab,
@@ -41,9 +56,10 @@ const ChartsPanel = ({
   spec_pie,
   spec_rank_bar,
   spec_user_rank,
-  spec_user_trend,
   perfMetricsSummary,
   perfMetricsLoading,
+  modelChannelStats,
+  modelChannelStatsLoading,
   isAdminUser,
   CARD_PROPS,
   CHART_CONFIG,
@@ -51,6 +67,131 @@ const ChartsPanel = ({
   hasApiInfoPanel,
   t,
 }) => {
+  const [selectedModel, setSelectedModel] = useState('');
+
+  const modelSpendRows = useMemo(
+    () => (modelChannelStats?.models || []).filter((item) => item.quota > 0),
+    [modelChannelStats],
+  );
+  const channelTagRows = useMemo(
+    () =>
+      (modelChannelStats?.channel_tags || [])
+        .filter((item) => item.model_name === selectedModel && item.quota > 0)
+        .sort((a, b) => b.quota - a.quota),
+    [modelChannelStats, selectedModel],
+  );
+
+  useEffect(() => {
+    if (activeChartTab !== '6' || modelSpendRows.length === 0) {
+      return;
+    }
+    if (!modelSpendRows.some((item) => item.model_name === selectedModel)) {
+      setSelectedModel(modelSpendRows[0].model_name);
+    }
+  }, [activeChartTab, modelSpendRows, selectedModel]);
+
+  const modelShareSpec = useMemo(() => {
+    const values = modelSpendRows.map((item) => ({
+      type: item.model_name,
+      value: item.quota,
+      request_count: item.request_count,
+      share: item.share,
+    }));
+    const colors = {};
+    modelSpendRows.forEach((item) => {
+      colors[item.model_name] = modelToColor(item.model_name);
+    });
+    return {
+      type: 'pie',
+      data: [{ id: 'modelSpendShare', values }],
+      outerRadius: 0.78,
+      innerRadius: 0.52,
+      padAngle: 0.8,
+      valueField: 'value',
+      categoryField: 'type',
+      legends: { visible: true, orient: 'left' },
+      label: {
+        visible: true,
+        formatMethod: (_, datum) => formatPercent(datum?.share),
+      },
+      title: {
+        visible: true,
+        text: t('各模型消耗金额占比'),
+        subtext: `${t('总计')}：${renderQuota(modelChannelStats?.total_quota || 0, 2)}`,
+      },
+      tooltip: {
+        mark: {
+          content: [
+            {
+              key: (datum) => datum.type,
+              value: (datum) => renderQuota(datum.value || 0, 4),
+            },
+            { key: t('占比'), value: (datum) => formatPercent(datum.share) },
+            {
+              key: t('请求数'),
+              value: (datum) => renderNumber(datum.request_count || 0),
+            },
+          ],
+        },
+      },
+      color: { specified: colors },
+    };
+  }, [modelChannelStats?.total_quota, modelSpendRows, t]);
+
+  const channelTagShareSpec = useMemo(() => {
+    const tagColors = [
+      '#1664FF',
+      '#3CC780',
+      '#FF8A00',
+      '#7442D4',
+      '#1AC6FF',
+      '#FFC400',
+      '#009488',
+      '#FF7DDA',
+    ];
+    const values = channelTagRows.map((item) => ({
+      type: item.tag,
+      value: item.quota,
+      request_count: item.request_count,
+      share: item.share,
+    }));
+    return {
+      type: 'pie',
+      data: [{ id: 'channelTagShare', values }],
+      outerRadius: 0.78,
+      innerRadius: 0.52,
+      padAngle: 0.8,
+      valueField: 'value',
+      categoryField: 'type',
+      legends: { visible: true, orient: 'left' },
+      label: {
+        visible: true,
+        formatMethod: (_, datum) => formatPercent(datum?.share),
+      },
+      title: {
+        visible: true,
+        text: t('渠道标签占比'),
+        subtext: selectedModel || t('请选择模型'),
+      },
+      tooltip: {
+        mark: {
+          content: [
+            {
+              key: (datum) => datum.type,
+              value: (datum) => renderQuota(datum.value || 0, 4),
+            },
+            { key: t('占比'), value: (datum) => formatPercent(datum.share) },
+            {
+              key: t('请求数'),
+              value: (datum) => renderNumber(datum.request_count || 0),
+            },
+          ],
+        },
+      },
+      color: { type: 'ordinal', range: tagColors },
+    };
+  }, [channelTagRows, selectedModel, t]);
+
   const perfMetricColumns = [
     {
       title: t('模型'),
@@ -117,7 +258,7 @@ const ChartsPanel = ({
               <TabPane tab={<span>{t('用户消耗排行')}</span>} itemKey='5' />
             )}
             {isAdminUser && (
-              <TabPane tab={<span>{t('用户消耗趋势')}</span>} itemKey='6' />
+              <TabPane tab={<span>{t('模型金额占比')}</span>} itemKey='6' />
             )}
             <TabPane tab={<span>{t('性能表现')}</span>} itemKey='7' />
           </Tabs>
@@ -143,7 +284,110 @@ const ChartsPanel = ({
             <VChart spec={spec_user_rank} option={CHART_CONFIG} />
           )}
           {activeChartTab === '6' && isAdminUser && (
-            <VChart spec={spec_user_trend} option={CHART_CONFIG} />
+            <Spin spinning={modelChannelStatsLoading}>
+              {modelSpendRows.length > 0 ? (
+                <div className='h-full overflow-auto'>
+                  <div className='mb-2 flex flex-wrap gap-2'>
+                    <Tag color='blue' shape='circle'>
+                      {t('模型数量')} {modelSpendRows.length}
+                    </Tag>
+                    <Tag color='green' shape='circle'>
+                      {t('总请求')}{' '}
+                      {renderNumber(modelChannelStats?.total_request || 0)}
+                    </Tag>
+                  </div>
+                  <div className='grid grid-cols-1 xl:grid-cols-2 gap-3'>
+                    <div className='h-52 rounded-xl border border-gray-100 bg-white p-2'>
+                      <VChart spec={modelShareSpec} option={CHART_CONFIG} />
+                    </div>
+                    <div className='h-52 rounded-xl border border-gray-100 bg-white p-2'>
+                      <VChart
+                        spec={channelTagShareSpec}
+                        option={CHART_CONFIG}
+                      />
+                    </div>
+                  </div>
+                  <div className='mt-3 grid grid-cols-1 xl:grid-cols-2 gap-3'>
+                    <div className='rounded-xl border border-gray-100 bg-gray-50 p-3'>
+                      <div className='mb-2 text-sm font-semibold text-gray-700'>
+                        {t('模型消耗排行')}
+                      </div>
+                      <div className='space-y-2'>
+                        {modelSpendRows.map((item, index) => (
+                          <button
+                            key={item.model_name}
+                            type='button'
+                            onClick={() => setSelectedModel(item.model_name)}
+                            className={`w-full rounded-lg p-2 text-left transition-colors ${
+                              selectedModel === item.model_name
+                                ? 'bg-blue-50 ring-1 ring-blue-200'
+                                : 'bg-white hover:bg-gray-100'
+                            }`}
+                          >
+                            <div className='flex items-center justify-between gap-3'>
+                              <span className='truncate text-sm font-medium'>
+                                {index + 1}. {item.model_name}
+                              </span>
+                              <span className='text-sm font-semibold text-gray-900'>
+                                {renderQuota(item.quota, 2)}
+                              </span>
+                            </div>
+                            <div className='mt-2 h-1.5 rounded-full bg-gray-200'>
+                              <div
+                                className='h-1.5 rounded-full bg-blue-500'
+                                style={{ width: formatPercent(item.share) }}
+                              />
+                            </div>
+                            <div className='mt-1 text-xs text-gray-500'>
+                              {formatPercent(item.share)} · {t('请求数')}{' '}
+                              {renderNumber(item.request_count || 0)}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className='rounded-xl border border-gray-100 bg-gray-50 p-3'>
+                      <div className='mb-2 text-sm font-semibold text-gray-700'>
+                        {selectedModel
+                          ? `${selectedModel} · ${t('渠道标签占比')}`
+                          : t('渠道标签占比')}
+                      </div>
+                      <div className='space-y-2'>
+                        {channelTagRows.map((item) => (
+                          <div
+                            key={`${item.model_name}-${item.tag}`}
+                            className='rounded-lg bg-white p-2'
+                          >
+                            <div className='flex items-center justify-between gap-3'>
+                              <span className='truncate text-sm font-medium'>
+                                {item.tag}
+                              </span>
+                              <span className='text-sm font-semibold text-gray-900'>
+                                {renderQuota(item.quota, 2)}
+                              </span>
+                            </div>
+                            <div className='mt-2 h-1.5 rounded-full bg-gray-200'>
+                              <div
+                                className='h-1.5 rounded-full bg-emerald-500'
+                                style={{ width: formatPercent(item.share) }}
+                              />
+                            </div>
+                            <div className='mt-1 text-xs text-gray-500'>
+                              {formatPercent(item.share)} · {t('请求数')}{' '}
+                              {renderNumber(item.request_count || 0)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className='h-full flex items-center justify-center'>
+                  <Empty title={t('暂无模型消耗数据')} />
+                </div>
+              )}
+            </Spin>
           )}
         </Suspense>
         {activeChartTab === '7' && (
