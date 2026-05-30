@@ -234,6 +234,7 @@ const ChartsPanel = ({
       ...item,
       rank: index + 1,
     }));
+  const isModelChannelTab = activeChartTab === '6' && isAdminUser;
 
   return (
     <Card
@@ -266,7 +267,7 @@ const ChartsPanel = ({
       }
       bodyStyle={{ padding: 0 }}
     >
-      <div className='h-96 p-2'>
+      <div className={isModelChannelTab ? 'p-2' : 'h-96 p-2'}>
         <Suspense fallback={<ChartFallback t={t} />}>
           {activeChartTab === '1' && (
             <VChart spec={spec_line} option={CHART_CONFIG} />
@@ -283,11 +284,11 @@ const ChartsPanel = ({
           {activeChartTab === '5' && isAdminUser && (
             <VChart spec={spec_user_rank} option={CHART_CONFIG} />
           )}
-          {activeChartTab === '6' && isAdminUser && (
+          {isModelChannelTab && (
             <Spin spinning={modelChannelStatsLoading}>
               {modelSpendRows.length > 0 ? (
-                <div className='h-full overflow-auto'>
-                  <div className='mb-2 flex flex-wrap gap-2'>
+                <div className='space-y-3'>
+                  <div className='flex flex-wrap gap-2'>
                     <Tag color='blue' shape='circle'>
                       {t('模型数量')} {modelSpendRows.length}
                     </Tag>
@@ -297,17 +298,17 @@ const ChartsPanel = ({
                     </Tag>
                   </div>
                   <div className='grid grid-cols-1 xl:grid-cols-2 gap-3'>
-                    <div className='h-52 rounded-xl border border-gray-100 bg-white p-2'>
+                    <div className='h-64 rounded-xl border border-gray-100 bg-white p-2'>
                       <VChart spec={modelShareSpec} option={CHART_CONFIG} />
                     </div>
-                    <div className='h-52 rounded-xl border border-gray-100 bg-white p-2'>
+                    <div className='h-64 rounded-xl border border-gray-100 bg-white p-2'>
                       <VChart
                         spec={channelTagShareSpec}
                         option={CHART_CONFIG}
                       />
                     </div>
                   </div>
-                  <div className='mt-3 grid grid-cols-1 xl:grid-cols-2 gap-3'>
+                  <div className='grid grid-cols-1 xl:grid-cols-2 gap-3'>
                     <div className='rounded-xl border border-gray-100 bg-gray-50 p-3'>
                       <div className='mb-2 text-sm font-semibold text-gray-700'>
                         {t('模型消耗排行')}
@@ -383,7 +384,7 @@ const ChartsPanel = ({
                   </div>
                 </div>
               ) : (
-                <div className='h-full flex items-center justify-center'>
+                <div className='min-h-96 flex items-center justify-center'>
                   <Empty title={t('暂无模型消耗数据')} />
                 </div>
               )}
