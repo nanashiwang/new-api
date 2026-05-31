@@ -74,6 +74,21 @@ func GetUserInvoiceRequests(c *gin.Context) {
 	common.ApiSuccess(c, pageInfo)
 }
 
+func GetUserInvoiceRequestDetail(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+
+	request, err := model.GetUserInvoiceRequestDetail(c.GetInt("id"), id)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, request)
+}
+
 func GetAllInvoiceRequests(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	params := model.InvoiceRequestSearchParams{
@@ -88,6 +103,21 @@ func GetAllInvoiceRequests(c *gin.Context) {
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(requests)
 	common.ApiSuccess(c, pageInfo)
+}
+
+func GetInvoiceRequestDetail(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+
+	request, err := model.GetInvoiceRequestDetail(id)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, request)
 }
 
 func ApproveInvoiceRequest(c *gin.Context) {

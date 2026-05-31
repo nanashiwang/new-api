@@ -140,3 +140,43 @@ func TestInvoiceSellableTokenPurchaseCanBeRequested(t *testing.T) {
 	require.Len(t, request.Items, 1)
 	require.Equal(t, "钱包包月", request.Items[0].ProductName)
 }
+
+func TestGetUserInvoiceRequestDetail_EnforcesOwnerAndLoadsItems(t *testing.T) {
+	setupInvoiceTestDB(t)
+
+	alice := createPaymentRecordTestUser(t, "alice")
+	bob := createPaymentRecordTestUser(t, "bob")
+	topup := createPaymentRecordTopUp(t, alice.Id, "T-INV-007", 100, common.TopUpStatusSuccess)
+	request, err := CreateInvoiceRequest(alice.Id, createInvoiceRequestInput(PaymentRecordTypeTopUp, topup.Id))
+	require.NoError(t, err)
+
+	detail, err := GetUserInvoiceRequestDetail(alice.Id, request.Id)
+	require.NoError(t, err)
+	require.Equal(t, request.Id, detail.Id)
+	require.Equal(t, "alice", detail.Username)
+	require.Len(t, detail.Items, 1)
+	require.Equal(t, "T-INV-007", detail.Items[0].TradeNo)
+
+	_, err = GetUserInvoiceRequestDetail(bob.Id, request.Id)
+	require.ErrorIs(t, err, ErrInvoiceRequestNotFound)
+}
+
+func TestGetInvoiceRequestDetail_IncludesReviewerInfo(t *testing.T) {
+	setupInvoiceTestDB(t)
+
+	alice := createPaymentRecordTestUser(t, "alice")
+	reviewer := createPaymentRecordTestUser(t, "admin")
+	topup := createPaymentRecordTopUp(t, alice.Id, "T-INV-008", 100, common.TopUpStatusSuccess)
+	request, err := CreateInvoiceRequest(alice.Id, createInvoiceRequestInput(PaymentRecordTypeTopUp, topup.Id))
+	require.NoError(t, err)
+	_, err = ApproveInvoiceRequest(request.Id, reviewer.Id, InvoiceReviewInput{InvoiceNo: "FP-008"})
+	require.NoError(t, err)
+
+	detail, err := GetInvoiceRequestDetail(request.Id)
+	require.NoError(t, err)
+	require.Equal(t, "alice", detail.Username)
+	require.Equal(t, reviewer.Id, detail.ReviewerUserId)
+	require.Equal(t, "admin", detail.ReviewerUsername)
+	require.Equal(t, "FP-008", detail.InvoiceNo)
+	require.Len(t, detail.Items, 1)
+}

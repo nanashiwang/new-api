@@ -43,9 +43,11 @@ type InvoiceRequest struct {
 	CreatedAt      int64   `json:"created_at" gorm:"index"`
 	ReviewedAt     int64   `json:"reviewed_at" gorm:"index;not null;default:0"`
 
-	Username    string               `json:"username,omitempty" gorm:"column:username;->"`
-	DisplayName string               `json:"display_name,omitempty" gorm:"column:display_name;->"`
-	Items       []InvoiceRequestItem `json:"items" gorm:"foreignKey:InvoiceRequestId"`
+	Username            string               `json:"username,omitempty" gorm:"column:username;->"`
+	DisplayName         string               `json:"display_name,omitempty" gorm:"column:display_name;->"`
+	ReviewerUsername    string               `json:"reviewer_username,omitempty" gorm:"column:reviewer_username;->"`
+	ReviewerDisplayName string               `json:"reviewer_display_name,omitempty" gorm:"column:reviewer_display_name;->"`
+	Items               []InvoiceRequestItem `json:"items" gorm:"foreignKey:InvoiceRequestId"`
 }
 
 type InvoiceRequestItem struct {
@@ -224,6 +226,44 @@ func GetAllInvoiceRequestsByParams(params InvoiceRequestSearchParams, pageInfo *
 		return nil, 0, err
 	}
 	return requests, total, nil
+}
+
+func GetUserInvoiceRequestDetail(userID int, id int) (*InvoiceRequest, error) {
+	if userID <= 0 || id <= 0 {
+		return nil, ErrInvoiceRequestNotFound
+	}
+
+	var request InvoiceRequest
+	err := invoiceRequestDetailWithUser(DB).
+		Preload("Items").
+		Where("invoice_requests.id = ? AND invoice_requests.user_id = ?", id, userID).
+		First(&request).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrInvoiceRequestNotFound
+		}
+		return nil, err
+	}
+	return &request, nil
+}
+
+func GetInvoiceRequestDetail(id int) (*InvoiceRequest, error) {
+	if id <= 0 {
+		return nil, ErrInvoiceRequestNotFound
+	}
+
+	var request InvoiceRequest
+	err := invoiceRequestDetailWithUser(DB).
+		Preload("Items").
+		Where("invoice_requests.id = ?", id).
+		First(&request).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrInvoiceRequestNotFound
+		}
+		return nil, err
+	}
+	return &request, nil
 }
 
 func ApproveInvoiceRequest(id int, reviewerUserID int, input InvoiceReviewInput) (*InvoiceRequest, error) {
@@ -505,6 +545,13 @@ func invoiceRequestListWithUser(tx *gorm.DB) *gorm.DB {
 	return tx.Model(&InvoiceRequest{}).
 		Select("invoice_requests.*, users.username AS username, users.display_name AS display_name").
 		Joins("LEFT JOIN users ON users.id = invoice_requests.user_id")
+}
+
+func invoiceRequestDetailWithUser(tx *gorm.DB) *gorm.DB {
+	return tx.Model(&InvoiceRequest{}).
+		Select("invoice_requests.*, users.username AS username, users.display_name AS display_name, reviewers.username AS reviewer_username, reviewers.display_name AS reviewer_display_name").
+		Joins("LEFT JOIN users ON users.id = invoice_requests.user_id").
+		Joins("LEFT JOIN users AS reviewers ON reviewers.id = invoice_requests.reviewer_user_id")
 }
 
 func applyInvoiceRequestSearch(query *gorm.DB, params InvoiceRequestSearchParams, includeUsername bool) *gorm.DB {

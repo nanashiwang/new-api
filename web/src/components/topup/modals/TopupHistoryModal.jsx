@@ -253,6 +253,181 @@ function getInvoiceItemKey(item) {
   return `${item.order_type}-${item.order_id}`;
 }
 
+function getInvoiceOrderTypeLabel(orderType) {
+  return RECORD_TYPE_MAP[orderType] || orderType || '-';
+}
+
+function getInvoiceStatusLabel(status) {
+  return INVOICE_STATUS_CONFIG[status]?.label || status || '-';
+}
+
+function getInvoicePaymentLabel(paymentMethod) {
+  return PAYMENT_METHOD_MAP[paymentMethod] || paymentMethod || '-';
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function displayValue(value) {
+  return value === undefined || value === null || value === '' ? '-' : value;
+}
+
+function formatInvoiceTime(value) {
+  return value ? timestamp2string(value) : '-';
+}
+
+function formatInvoiceCode(item) {
+  return (
+    item?.trade_no || `${item?.order_type || '-'}-${item?.order_id || '-'}`
+  );
+}
+
+function formatInvoiceUser(invoice) {
+  if (invoice?.username) {
+    const displayName =
+      invoice.display_name && invoice.display_name !== invoice.username
+        ? ` / ${invoice.display_name}`
+        : '';
+    return `${invoice.username}${displayName}（ID: ${invoice.user_id || '-'}）`;
+  }
+  return invoice?.user_id ? `ID: ${invoice.user_id}` : '-';
+}
+
+function formatInvoiceReviewer(invoice) {
+  if (invoice?.reviewer_username) {
+    const displayName =
+      invoice.reviewer_display_name &&
+      invoice.reviewer_display_name !== invoice.reviewer_username
+        ? ` / ${invoice.reviewer_display_name}`
+        : '';
+    return `${invoice.reviewer_username}${displayName}（ID: ${invoice.reviewer_user_id || '-'}）`;
+  }
+  return invoice?.reviewer_user_id ? `ID: ${invoice.reviewer_user_id}` : '-';
+}
+
+function buildInvoicePrintHtml(invoice) {
+  const items = invoice?.items || [];
+  const cell = (value) => escapeHtml(displayValue(value));
+  const infoSection = (title, rows) => `
+    <section>
+      <h2>${cell(title)}</h2>
+      <div class="info-grid">
+        ${rows
+          .map(
+            ([label, value]) => `
+              <div class="info-item">
+                <div class="label">${cell(label)}</div>
+                <div class="value">${cell(value)}</div>
+              </div>
+            `,
+          )
+          .join('')}
+      </div>
+    </section>
+  `;
+  const orderRows =
+    items.length > 0
+      ? items
+          .map(
+            (item, index) => `
+              <tr>
+                <td>${index + 1}</td>
+                <td>${cell(getInvoiceOrderTypeLabel(item?.order_type))}</td>
+                <td>${cell(item?.order_id)}</td>
+                <td>${cell(formatInvoiceCode(item))}</td>
+                <td>${cell(item?.product_name)}</td>
+                <td>${cell(getInvoicePaymentLabel(item?.payment_method))}</td>
+                <td>${cell(formatMoney(item?.money))}</td>
+                <td>${cell(Number(item?.amount || 0) > 0 ? renderQuota(item.amount) : '-')}</td>
+                <td>${cell(formatInvoiceTime(item?.complete_time || item?.create_time))}</td>
+              </tr>
+            `,
+          )
+          .join('')
+      : '<tr><td colspan="9" class="empty">暂无订单明细</td></tr>';
+
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>发票申请单 #${cell(invoice?.id)}</title>
+  <style>
+    body { margin: 0; padding: 28px; color: #111827; font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    h1 { margin: 0 0 6px; font-size: 24px; }
+    h2 { margin: 24px 0 10px; font-size: 16px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; }
+    .muted { color: #6b7280; }
+    .info-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .info-item { border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 10px; min-height: 42px; }
+    .label { color: #6b7280; font-size: 12px; }
+    .value { margin-top: 2px; word-break: break-all; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { border: 1px solid #e5e7eb; padding: 7px 8px; text-align: left; vertical-align: top; word-break: break-all; }
+    th { background: #f9fafb; }
+    .empty { text-align: center; color: #6b7280; }
+    @media print { body { padding: 0; } .no-print { display: none; } }
+  </style>
+</head>
+<body>
+  <h1>发票申请单 #${cell(invoice?.id)}</h1>
+  <div class="muted">打印时间：${cell(timestamp2string(Math.floor(Date.now() / 1000)))}</div>
+  ${infoSection('申请信息', [
+    ['申请编号', `#${invoice?.id || '-'}`],
+    ['状态', getInvoiceStatusLabel(invoice?.status)],
+    ['申请时间', formatInvoiceTime(invoice?.created_at)],
+    ['申请用户', formatInvoiceUser(invoice)],
+    ['订单数量', `${items.length} 笔`],
+    ['合计支付金额', formatMoney(invoice?.total_money)],
+    [
+      '合计额度',
+      Number(invoice?.total_quota || 0) > 0
+        ? renderQuota(invoice.total_quota)
+        : '-',
+    ],
+  ])}
+  ${infoSection('发票抬头与接收信息', [
+    ['抬头类型', invoice?.title_type === 'company' ? '企业' : '个人'],
+    ['抬头名称', invoice?.title],
+    ['税号', invoice?.tax_number],
+    ['接收邮箱', invoice?.email],
+    ['手机号', invoice?.phone],
+    ['用户备注', invoice?.remark],
+  ])}
+  <section>
+    <h2>订单明细</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>订单类型</th>
+          <th>平台订单ID</th>
+          <th>订单编码/交易号</th>
+          <th>商品/套餐</th>
+          <th>支付渠道</th>
+          <th>支付金额</th>
+          <th>额度</th>
+          <th>支付时间</th>
+        </tr>
+      </thead>
+      <tbody>${orderRows}</tbody>
+    </table>
+  </section>
+  ${infoSection('审核与开票信息', [
+    ['审核人', formatInvoiceReviewer(invoice)],
+    ['审核时间', formatInvoiceTime(invoice?.reviewed_at)],
+    ['发票号/代码', invoice?.invoice_no],
+    ['发票链接', invoice?.invoice_url],
+    ['管理员备注/驳回原因', invoice?.admin_remark],
+  ])}
+</body>
+</html>`;
+}
+
 function pickInvoiceStatus(current, next) {
   const priority = { invoiced: 3, pending: 2, rejected: 1 };
   if (!current) return next || '';
@@ -410,6 +585,9 @@ const TopupHistoryModal = ({
     adminRemark: '',
   });
   const [invoiceReviewSubmitting, setInvoiceReviewSubmitting] = useState(false);
+  const [invoiceDetailVisible, setInvoiceDetailVisible] = useState(false);
+  const [invoiceDetailLoading, setInvoiceDetailLoading] = useState(false);
+  const [invoiceDetail, setInvoiceDetail] = useState(null);
 
   const isMobile = useIsMobile();
   const userIsAdmin = useMemo(() => isAdmin(), []);
@@ -1191,13 +1369,17 @@ const TopupHistoryModal = ({
           id: item.id,
         })),
       });
-      const { success, message } = res.data || {};
+      const { success, message, data } = res.data || {};
       if (!success) {
         Toast.error({ content: t(message || '提交发票申请失败') });
         return;
       }
       Toast.success({ content: t('发票申请已提交') });
       closeInvoiceApplyModal();
+      if (data?.id) {
+        setInvoiceDetail(data);
+        setInvoiceDetailVisible(true);
+      }
       await Promise.all([refreshInvoices(), refreshRecords()]);
     } catch (error) {
       Toast.error({ content: t('提交发票申请失败') });
@@ -1252,6 +1434,57 @@ const TopupHistoryModal = ({
     } finally {
       setInvoiceReviewSubmitting(false);
     }
+  };
+
+  const openInvoiceDetail = async (record) => {
+    const id = Number(record?.id || 0);
+    if (!id) {
+      return;
+    }
+
+    setInvoiceDetail(record || null);
+    setInvoiceDetailVisible(true);
+    setInvoiceDetailLoading(true);
+    try {
+      const endpoint = userIsAdmin
+        ? `/api/user/invoices/${id}`
+        : `/api/user/invoices/self/${id}`;
+      const res = await API.get(endpoint);
+      const { success, message, data } = res.data || {};
+      if (!success) {
+        Toast.error({ content: t(message || '加载发票详情失败') });
+        return;
+      }
+      setInvoiceDetail(data || record || null);
+    } catch (error) {
+      Toast.error({ content: t('加载发票详情失败') });
+    } finally {
+      setInvoiceDetailLoading(false);
+    }
+  };
+
+  const closeInvoiceDetail = () => {
+    setInvoiceDetailVisible(false);
+    setInvoiceDetail(null);
+  };
+
+  const printInvoiceDetail = () => {
+    if (!invoiceDetail) {
+      return;
+    }
+    const printWindow = window.open('', '_blank', 'width=960,height=720');
+    if (!printWindow) {
+      Toast.error({ content: t('浏览器阻止了打印窗口') });
+      return;
+    }
+    printWindow.opener = null;
+    printWindow.document.open();
+    printWindow.document.write(buildInvoicePrintHtml(invoiceDetail));
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => {
+      printWindow.print();
+    }, 200);
   };
 
   const renderStatusBadge = (status) => {
@@ -2055,6 +2288,79 @@ const TopupHistoryModal = ({
     [t],
   );
 
+  const invoiceDetailItemColumns = useMemo(
+    () => [
+      {
+        title: t('订单类型'),
+        dataIndex: 'order_type',
+        key: 'order_type',
+        width: 110,
+        render: (value) => (
+          <Tag shape='circle' size='small' color='blue'>
+            {t(getInvoiceOrderTypeLabel(value))}
+          </Tag>
+        ),
+      },
+      {
+        title: t('平台订单ID'),
+        dataIndex: 'order_id',
+        key: 'order_id',
+        width: 100,
+      },
+      {
+        title: t('订单编码/交易号'),
+        key: 'trade_no',
+        width: 220,
+        render: (_, item) => (
+          <Text copyable ellipsis style={{ maxWidth: 190 }}>
+            {formatInvoiceCode(item)}
+          </Text>
+        ),
+      },
+      {
+        title: t('商品/套餐'),
+        dataIndex: 'product_name',
+        key: 'product_name',
+        width: 160,
+        render: (value) => value || <Text type='tertiary'>-</Text>,
+      },
+      {
+        title: t('支付渠道'),
+        dataIndex: 'payment_method',
+        key: 'payment_method',
+        width: 120,
+        render: renderPaymentMethod,
+      },
+      {
+        title: t('支付金额'),
+        dataIndex: 'money',
+        key: 'money',
+        width: 120,
+        render: (value) => <Text type='danger'>{formatMoney(value)}</Text>,
+      },
+      {
+        title: t('额度'),
+        dataIndex: 'amount',
+        key: 'amount',
+        width: 120,
+        render: (value) =>
+          Number(value || 0) > 0 ? (
+            <Text>{renderQuota(value)}</Text>
+          ) : (
+            <Text type='tertiary'>-</Text>
+          ),
+      },
+      {
+        title: t('支付时间'),
+        key: 'complete_time',
+        width: 160,
+        render: (_, item) =>
+          formatInvoiceTime(item?.complete_time || item?.create_time),
+      },
+    ],
+    [t],
+  );
+
   const invoiceColumns = useMemo(() => {
     const isReviewMode = userIsAdmin && activeTab === 'invoices';
     const columns = [
@@ -2204,17 +2510,21 @@ const TopupHistoryModal = ({
       },
     );
 
-    if (isReviewMode) {
-      columns.push({
-        title: t('操作'),
-        key: 'action',
-        width: 150,
-        render: (_, record) => {
-          if (record?.status !== 'pending') {
-            return <Text type='tertiary'>-</Text>;
-          }
-          return (
-            <Space wrap>
+    columns.push({
+      title: t('操作'),
+      key: 'action',
+      width: isReviewMode ? 230 : 110,
+      render: (_, record) => (
+        <Space wrap>
+          <Button
+            size='small'
+            theme='outline'
+            onClick={() => openInvoiceDetail(record)}
+          >
+            {t('详情/打印')}
+          </Button>
+          {isReviewMode && record?.status === 'pending' ? (
+            <>
               <Button
                 size='small'
                 type='primary'
@@ -2231,11 +2541,11 @@ const TopupHistoryModal = ({
               >
                 {t('驳回')}
               </Button>
-            </Space>
-          );
-        },
-      });
-    }
+            </>
+          ) : null}
+        </Space>
+      ),
+    });
 
     return columns;
   }, [userIsAdmin, activeTab, t]);
@@ -2839,6 +3149,150 @@ const TopupHistoryModal = ({
     </>
   );
 
+  const renderInvoiceDetailValue = (label, content, copyable = false) => {
+    const empty = content === undefined || content === null || content === '';
+    return (
+      <div
+        className='rounded-lg p-3'
+        style={{
+          background: 'var(--semi-color-fill-0)',
+          border: '1px solid var(--semi-color-border)',
+        }}
+      >
+        <Text type='tertiary' size='small'>
+          {t(label)}
+        </Text>
+        <div className='mt-1 break-all'>
+          {React.isValidElement(content) ? (
+            content
+          ) : (
+            <Text copyable={copyable && !empty}>{displayValue(content)}</Text>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderInvoiceDetailModalContent = () => {
+    const detail = invoiceDetail;
+    if (!detail && !invoiceDetailLoading) {
+      return buildTableEmpty(t, '暂无发票详情');
+    }
+
+    const items = detail?.items || [];
+    const infoGridStyle = {
+      gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(0, 1fr))',
+    };
+
+    return (
+      <div className='space-y-4'>
+        <Card
+          title={t('申请信息')}
+          bordered={false}
+          bodyStyle={{ padding: 12 }}
+          style={{ border: '1px solid var(--semi-color-border)' }}
+        >
+          <div className='grid gap-3' style={infoGridStyle}>
+            {renderInvoiceDetailValue(
+              '申请编号',
+              `#${detail?.id || '-'}`,
+              true,
+            )}
+            {renderInvoiceDetailValue(
+              '状态',
+              renderInvoiceStatusTag(detail?.status),
+            )}
+            {renderInvoiceDetailValue(
+              '申请时间',
+              formatInvoiceTime(detail?.created_at),
+            )}
+            {renderInvoiceDetailValue(
+              '申请用户',
+              formatInvoiceUser(detail),
+              true,
+            )}
+            {renderInvoiceDetailValue(
+              '订单数量',
+              `${items.length} ${t('笔订单')}`,
+            )}
+            {renderInvoiceDetailValue(
+              '合计支付金额',
+              <Text type='danger'>{formatMoney(detail?.total_money)}</Text>,
+            )}
+            {renderInvoiceDetailValue(
+              '合计额度',
+              Number(detail?.total_quota || 0) > 0
+                ? renderQuota(detail.total_quota)
+                : '-',
+            )}
+          </div>
+        </Card>
+
+        <Card
+          title={t('发票抬头与接收信息')}
+          bordered={false}
+          bodyStyle={{ padding: 12 }}
+          style={{ border: '1px solid var(--semi-color-border)' }}
+        >
+          <div className='grid gap-3' style={infoGridStyle}>
+            {renderInvoiceDetailValue(
+              '抬头类型',
+              t(detail?.title_type === 'company' ? '企业' : '个人'),
+            )}
+            {renderInvoiceDetailValue('抬头名称', detail?.title, true)}
+            {renderInvoiceDetailValue('税号', detail?.tax_number, true)}
+            {renderInvoiceDetailValue('接收邮箱', detail?.email, true)}
+            {renderInvoiceDetailValue('手机号', detail?.phone, true)}
+            {renderInvoiceDetailValue('用户备注', detail?.remark)}
+          </div>
+        </Card>
+
+        <Card
+          title={t('订单明细')}
+          bordered={false}
+          bodyStyle={{ padding: 0 }}
+          style={{ border: '1px solid var(--semi-color-border)' }}
+        >
+          <Table
+            columns={invoiceDetailItemColumns}
+            dataSource={items}
+            loading={invoiceDetailLoading}
+            rowKey={(item) => String(item?.id || getInvoiceItemKey(item))}
+            size='small'
+            pagination={false}
+            scroll={{ x: '100%' }}
+            empty={buildTableEmpty(t, '暂无订单明细')}
+          />
+        </Card>
+
+        <Card
+          title={t('审核与开票信息')}
+          bordered={false}
+          bodyStyle={{ padding: 12 }}
+          style={{ border: '1px solid var(--semi-color-border)' }}
+        >
+          <div className='grid gap-3' style={infoGridStyle}>
+            {renderInvoiceDetailValue(
+              '审核人',
+              formatInvoiceReviewer(detail),
+              true,
+            )}
+            {renderInvoiceDetailValue(
+              '审核时间',
+              formatInvoiceTime(detail?.reviewed_at),
+            )}
+            {renderInvoiceDetailValue('发票号/代码', detail?.invoice_no, true)}
+            {renderInvoiceDetailValue('发票链接', detail?.invoice_url, true)}
+            {renderInvoiceDetailValue(
+              '管理员备注/驳回原因',
+              detail?.admin_remark,
+            )}
+          </div>
+        </Card>
+      </div>
+    );
+  };
+
   const renderInvoiceTable = () => (
     <>
       {renderInvoiceFilterPanel()}
@@ -2920,6 +3374,29 @@ const TopupHistoryModal = ({
         onResolved={handleRiskCaseResolved}
         t={t}
       />
+
+      <Modal
+        title={t('发票申请详情')}
+        visible={invoiceDetailVisible}
+        onCancel={closeInvoiceDetail}
+        footer={
+          <Space>
+            <Button onClick={closeInvoiceDetail}>{t('关闭')}</Button>
+            <Button
+              type='primary'
+              loading={invoiceDetailLoading}
+              disabled={!invoiceDetail}
+              onClick={printInvoiceDetail}
+            >
+              {t('打印')}
+            </Button>
+          </Space>
+        }
+        size={isMobile ? 'full-width' : 'large'}
+        style={isMobile ? undefined : { width: '1100px', maxWidth: '95vw' }}
+      >
+        {renderInvoiceDetailModalContent()}
+      </Modal>
 
       <Modal
         title={t('申请发票')}
