@@ -22,6 +22,7 @@ import {
   Badge,
   Button,
   Card,
+  Checkbox,
   Collapsible,
   DatePicker,
   Empty,
@@ -166,6 +167,12 @@ const INVOICE_STATUS_CONFIG = {
   pending: { color: 'orange', label: '申请中' },
   invoiced: { color: 'green', label: '已开票' },
   rejected: { color: 'red', label: '已驳回' },
+};
+
+const INVOICE_SEND_STATUS_CONFIG = {
+  pending: { color: 'orange', label: '待发送' },
+  sent: { color: 'green', label: '已发送' },
+  failed: { color: 'red', label: '发送失败' },
 };
 
 const INVOICE_STATUS_OPTIONS = [
@@ -662,8 +669,11 @@ const TopupHistoryModal = ({
   const [invoiceReviewForm, setInvoiceReviewForm] = useState({
     invoiceNo: '',
     invoiceUrl: '',
+    invoiceSentTo: '',
+    sendEmail: true,
     adminRemark: '',
   });
+  const [invoiceReviewFile, setInvoiceReviewFile] = useState(null);
   const [invoiceReviewSubmitting, setInvoiceReviewSubmitting] = useState(false);
   const [invoiceDetailVisible, setInvoiceDetailVisible] = useState(false);
   const [invoiceDetailLoading, setInvoiceDetailLoading] = useState(false);
@@ -1473,46 +1483,108 @@ const TopupHistoryModal = ({
     setInvoiceReviewForm({
       invoiceNo: record?.invoice_no || '',
       invoiceUrl: record?.invoice_url || '',
+      invoiceSentTo: record?.invoice_sent_to || record?.email || '',
+      sendEmail: true,
       adminRemark: '',
     });
+    setInvoiceReviewFile(null);
   };
 
   const closeInvoiceReviewModal = () => {
     setInvoiceReviewState({ visible: false, action: null, record: null });
-    setInvoiceReviewForm({ invoiceNo: '', invoiceUrl: '', adminRemark: '' });
+    setInvoiceReviewForm({
+      invoiceNo: '',
+      invoiceUrl: '',
+      invoiceSentTo: '',
+      sendEmail: true,
+      adminRemark: '',
+    });
+    setInvoiceReviewFile(null);
   };
 
   const submitInvoiceReview = async () => {
     const { record, action } = invoiceReviewState;
     const id = Number(record?.id || 0);
     if (!id || !action) return;
+    if (action === 'approve' && !invoiceReviewFile) {
+      Toast.error({ content: t('请上传发票 PDF') });
+      return;
+    }
+    if (
+      action === 'approve' &&
+      invoiceReviewForm.sendEmail &&
+      !invoiceReviewForm.invoiceSentTo.trim()
+    ) {
+      Toast.error({ content: t('发票接收邮箱不能为空') });
+      return;
+    }
     setInvoiceReviewSubmitting(true);
     try {
-      const payload =
-        action === 'approve'
-          ? {
-              invoice_no: invoiceReviewForm.invoiceNo.trim(),
-              invoice_url: invoiceReviewForm.invoiceUrl.trim(),
-              admin_remark: invoiceReviewForm.adminRemark.trim(),
-            }
-          : {
-              admin_remark: invoiceReviewForm.adminRemark.trim(),
-            };
+      let payload;
+      if (action === 'approve') {
+        payload = new FormData();
+        payload.append('invoice_no', invoiceReviewForm.invoiceNo.trim());
+        payload.append('invoice_url', invoiceReviewForm.invoiceUrl.trim());
+        payload.append(
+          'invoice_sent_to',
+          invoiceReviewForm.invoiceSentTo.trim(),
+        );
+        payload.append('send_email', String(invoiceReviewForm.sendEmail));
+        payload.append('admin_remark', invoiceReviewForm.adminRemark.trim());
+        payload.append('invoice_file', invoiceReviewFile);
+      } else {
+        payload = {
+          admin_remark: invoiceReviewForm.adminRemark.trim(),
+        };
+      }
       const res = await API.post(`/api/user/invoices/${id}/${action}`, payload);
-      const { success, message } = res.data || {};
+      const { success, message, data } = res.data || {};
       if (!success) {
         Toast.error({ content: t(message || '审核发票失败') });
         return;
       }
-      Toast.success({
-        content: t(action === 'approve' ? '发票已通过' : '发票已驳回'),
-      });
+      if (
+        action === 'approve' &&
+        data?.invoice_send_status === 'failed' &&
+        data?.invoice_send_error
+      ) {
+        Toast.warning({
+          content: t(`发票已通过，但邮件发送失败：${data.invoice_send_error}`),
+        });
+      } else {
+        Toast.success({
+          content: t(action === 'approve' ? '发票已通过' : '发票已驳回'),
+        });
+      }
       closeInvoiceReviewModal();
       await refreshInvoices();
     } catch (error) {
       Toast.error({ content: t('审核发票失败') });
     } finally {
       setInvoiceReviewSubmitting(false);
+    }
+  };
+
+  const resendInvoiceEmail = async (record) => {
+    const id = Number(record?.id || 0);
+    if (!id) return;
+    try {
+      const res = await API.post(`/api/user/invoices/${id}/resend-email`);
+      const { success, message, data } = res.data || {};
+      if (!success) {
+        Toast.error({ content: t(message || '重发邮件失败') });
+        return;
+      }
+      if (data?.invoice_send_status === 'failed') {
+        Toast.warning({
+          content: t(`邮件发送失败：${data?.invoice_send_error || '-'}`),
+        });
+      } else {
+        Toast.success({ content: t('邮件已发送') });
+      }
+      await refreshInvoices();
+    } catch (error) {
+      Toast.error({ content: t('重发邮件失败') });
     }
   };
 
@@ -1635,6 +1707,28 @@ const TopupHistoryModal = ({
         {t(config.label)}
       </Tag>
     );
+  };
+
+  const renderInvoiceSendStatusTag = (status) => {
+    const config = INVOICE_SEND_STATUS_CONFIG[status] || {
+      color: 'grey',
+      label: status || '-',
+    };
+    return (
+      <Tag color={config.color} shape='circle' size='small'>
+        {t(config.label)}
+      </Tag>
+    );
+  };
+
+  const getInvoiceFileUrl = (record) => {
+    const id = Number(record?.id || 0);
+    if (!id || !record?.invoice_file_name) {
+      return '';
+    }
+    return userIsAdmin
+      ? `/api/user/invoices/${id}/file`
+      : `/api/user/invoices/self/${id}/file`;
   };
 
   const renderInvoiceRecordStatus = (record) => {
@@ -2569,21 +2663,52 @@ const TopupHistoryModal = ({
       {
         title: t('发票信息'),
         key: 'invoice_info',
-        width: 220,
-        render: (_, record) => (
-          <div className='flex flex-col gap-1'>
-            {record?.invoice_no ? (
-              <Text copyable>{record.invoice_no}</Text>
-            ) : (
-              <Text type='tertiary'>-</Text>
-            )}
-            {record?.invoice_url ? (
-              <a href={record.invoice_url} target='_blank' rel='noreferrer'>
-                {t('查看发票')}
-              </a>
-            ) : null}
-          </div>
-        ),
+        width: 240,
+        render: (_, record) => {
+          const fileUrl = getInvoiceFileUrl(record);
+          return (
+            <div className='flex flex-col gap-1'>
+              {record?.invoice_no ? (
+                <Text copyable>{record.invoice_no}</Text>
+              ) : (
+                <Text type='tertiary'>-</Text>
+              )}
+              <Space wrap spacing={4}>
+                {fileUrl ? (
+                  <a href={fileUrl} target='_blank' rel='noreferrer'>
+                    {t('查看 PDF')}
+                  </a>
+                ) : null}
+                {record?.invoice_url ? (
+                  <a href={record.invoice_url} target='_blank' rel='noreferrer'>
+                    {t('查看链接')}
+                  </a>
+                ) : null}
+              </Space>
+              {record?.invoice_send_status ? (
+                <Space wrap spacing={4}>
+                  {renderInvoiceSendStatusTag(record.invoice_send_status)}
+                  {record?.invoice_sent_to ? (
+                    <Text type='tertiary' size='small' copyable>
+                      {record.invoice_sent_to}
+                    </Text>
+                  ) : null}
+                </Space>
+              ) : null}
+              {record?.invoice_send_status === 'failed' &&
+              record?.invoice_send_error ? (
+                <Text
+                  type='danger'
+                  size='small'
+                  ellipsis={{ showTooltip: true }}
+                  style={{ maxWidth: 200 }}
+                >
+                  {record.invoice_send_error}
+                </Text>
+              ) : null}
+            </div>
+          );
+        },
       },
       {
         title: t('提交时间'),
@@ -2631,6 +2756,19 @@ const TopupHistoryModal = ({
                 {t('驳回')}
               </Button>
             </>
+          ) : null}
+          {isReviewMode &&
+          record?.status === 'invoiced' &&
+          record?.invoice_file_name &&
+          record?.invoice_send_status !== 'sent' ? (
+            <Button
+              size='small'
+              type='warning'
+              theme='outline'
+              onClick={() => resendInvoiceEmail(record)}
+            >
+              {t('重发邮件')}
+            </Button>
           ) : null}
         </Space>
       ),
@@ -3373,6 +3511,36 @@ const TopupHistoryModal = ({
             {renderInvoiceDetailValue('发票号/代码', detail?.invoice_no, true)}
             {renderInvoiceDetailValue('发票链接', detail?.invoice_url, true)}
             {renderInvoiceDetailValue(
+              '发票 PDF',
+              getInvoiceFileUrl(detail) ? (
+                <a
+                  href={getInvoiceFileUrl(detail)}
+                  target='_blank'
+                  rel='noreferrer'
+                >
+                  {detail?.invoice_file_name || t('查看 PDF')}
+                </a>
+              ) : (
+                '-'
+              ),
+            )}
+            {renderInvoiceDetailValue(
+              '邮件状态',
+              detail?.invoice_send_status
+                ? renderInvoiceSendStatusTag(detail.invoice_send_status)
+                : '-',
+            )}
+            {renderInvoiceDetailValue(
+              '发送邮箱',
+              detail?.invoice_sent_to,
+              true,
+            )}
+            {renderInvoiceDetailValue(
+              '发送时间',
+              formatInvoiceTime(detail?.invoice_sent_at),
+            )}
+            {renderInvoiceDetailValue('发送错误', detail?.invoice_send_error)}
+            {renderInvoiceDetailValue(
               '管理员备注/驳回原因',
               detail?.admin_remark,
             )}
@@ -3657,6 +3825,56 @@ const TopupHistoryModal = ({
                 }
                 showClear
               />
+              <Input
+                placeholder={t('接收邮箱')}
+                value={invoiceReviewForm.invoiceSentTo}
+                onChange={(value) =>
+                  setInvoiceReviewForm((prev) => ({
+                    ...prev,
+                    invoiceSentTo: value,
+                  }))
+                }
+                maxLength={128}
+                showClear
+              />
+              <div
+                className='rounded-lg p-3'
+                style={{
+                  background: 'var(--semi-color-fill-0)',
+                  border: '1px solid var(--semi-color-border)',
+                }}
+              >
+                <div className='text-xs mb-2'>{t('发票 PDF')}</div>
+                <input
+                  type='file'
+                  accept='application/pdf,.pdf'
+                  onChange={(event) =>
+                    setInvoiceReviewFile(event.target.files?.[0] || null)
+                  }
+                />
+                <div className='mt-2'>
+                  {invoiceReviewFile ? (
+                    <Text size='small' copyable>
+                      {invoiceReviewFile.name}
+                    </Text>
+                  ) : (
+                    <Text type='tertiary' size='small'>
+                      {t('请选择需要发送给用户的发票 PDF，最大 10MB')}
+                    </Text>
+                  )}
+                </div>
+              </div>
+              <Checkbox
+                checked={invoiceReviewForm.sendEmail}
+                onChange={(event) =>
+                  setInvoiceReviewForm((prev) => ({
+                    ...prev,
+                    sendEmail: event.target.checked,
+                  }))
+                }
+              >
+                {t('通过后自动发送到用户邮箱')}
+              </Checkbox>
             </>
           ) : null}
           <TextArea

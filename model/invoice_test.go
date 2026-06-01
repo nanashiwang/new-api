@@ -108,10 +108,20 @@ func TestApproveInvoiceRequest_KeepsOrderOccupiedAndPreventsSecondReview(t *test
 	request, err := CreateInvoiceRequest(user.Id, createInvoiceRequestInput(PaymentRecordTypeTopUp, topup.Id))
 	require.NoError(t, err)
 
-	approved, err := ApproveInvoiceRequest(request.Id, user.Id, InvoiceReviewInput{InvoiceNo: "FP-001", InvoiceUrl: "https://example.com/invoice.pdf"})
+	approved, err := ApproveInvoiceRequest(request.Id, user.Id, InvoiceReviewInput{
+		InvoiceNo:         "FP-001",
+		InvoiceUrl:        "https://example.com/invoice.pdf",
+		InvoiceFileName:   "invoice.pdf",
+		InvoiceFilePath:   "/tmp/invoice.pdf",
+		InvoiceSentTo:     "invoice@example.com",
+		InvoiceSendStatus: InvoiceSendStatusPending,
+	})
 	require.NoError(t, err)
 	require.Equal(t, InvoiceStatusInvoiced, approved.Status)
 	require.Equal(t, "FP-001", approved.InvoiceNo)
+	require.Equal(t, "invoice.pdf", approved.InvoiceFileName)
+	require.Equal(t, "invoice@example.com", approved.InvoiceSentTo)
+	require.Equal(t, InvoiceSendStatusPending, approved.InvoiceSendStatus)
 
 	records, total, err := GetEligibleInvoiceOrders(user.Id, &common.PageInfo{Page: 1, PageSize: 10})
 	require.NoError(t, err)
@@ -179,4 +189,34 @@ func TestGetInvoiceRequestDetail_IncludesReviewerInfo(t *testing.T) {
 	require.Equal(t, "admin", detail.ReviewerUsername)
 	require.Equal(t, "FP-008", detail.InvoiceNo)
 	require.Len(t, detail.Items, 1)
+}
+
+func TestUpdateInvoiceSendStatus(t *testing.T) {
+	setupInvoiceTestDB(t)
+
+	alice := createPaymentRecordTestUser(t, "alice")
+	reviewer := createPaymentRecordTestUser(t, "admin")
+	topup := createPaymentRecordTopUp(t, alice.Id, "T-INV-009", 100, common.TopUpStatusSuccess)
+	request, err := CreateInvoiceRequest(alice.Id, createInvoiceRequestInput(PaymentRecordTypeTopUp, topup.Id))
+	require.NoError(t, err)
+	_, err = ApproveInvoiceRequest(request.Id, reviewer.Id, InvoiceReviewInput{
+		InvoiceNo:         "FP-009",
+		InvoiceFileName:   "invoice.pdf",
+		InvoiceFilePath:   "/tmp/invoice.pdf",
+		InvoiceSentTo:     "invoice@example.com",
+		InvoiceSendStatus: InvoiceSendStatusPending,
+	})
+	require.NoError(t, err)
+
+	failed, err := UpdateInvoiceSendStatus(request.Id, InvoiceSendStatusFailed, "smtp failed")
+	require.NoError(t, err)
+	require.Equal(t, InvoiceSendStatusFailed, failed.InvoiceSendStatus)
+	require.Equal(t, "smtp failed", failed.InvoiceSendError)
+	require.Equal(t, int64(0), failed.InvoiceSentAt)
+
+	sent, err := UpdateInvoiceSendStatus(request.Id, InvoiceSendStatusSent, "")
+	require.NoError(t, err)
+	require.Equal(t, InvoiceSendStatusSent, sent.InvoiceSendStatus)
+	require.Empty(t, sent.InvoiceSendError)
+	require.Greater(t, sent.InvoiceSentAt, int64(0))
 }

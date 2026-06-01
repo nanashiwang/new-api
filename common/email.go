@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
+	"mime"
 	"mime/quotedprintable"
 	"net/mail"
 	"net/smtp"
@@ -36,26 +37,88 @@ func getSMTPAuth() smtp.Auth {
 	return smtp.PlainAuth("", SMTPAccount, SMTPToken, SMTPServer)
 }
 
+type EmailAttachment struct {
+	Filename    string
+	ContentType string
+	Data        []byte
+}
+
 func SendEmail(subject string, receiver string, content string) error {
+	message, err := buildEmailMessage(subject, receiver, content, nil)
+	if err != nil {
+		return err
+	}
+	return sendSMTPMessage(receiver, message)
+}
+
+func SendEmailWithAttachments(subject string, receiver string, content string, attachments []EmailAttachment) error {
+	message, err := buildEmailMessage(subject, receiver, content, attachments)
+	if err != nil {
+		return err
+	}
+	return sendSMTPMessage(receiver, message)
+}
+
+func buildEmailMessage(subject string, receiver string, content string, attachments []EmailAttachment) ([]byte, error) {
 	if SMTPFrom == "" { // for compatibility
 		SMTPFrom = SMTPAccount
 	}
 	id, err2 := generateMessageID()
 	if err2 != nil {
-		return err2
+		return nil, err2
 	}
 	if SMTPServer == "" && SMTPAccount == "" {
-		return fmt.Errorf("SMTP 服务器未配置")
+		return nil, fmt.Errorf("SMTP 服务器未配置")
 	}
 	encodedSubject := fmt.Sprintf("=?UTF-8?B?%s?=", base64.StdEncoding.EncodeToString([]byte(subject)))
 	from := mail.Address{Name: SystemName, Address: SMTPFrom}
 	var encodedContent bytes.Buffer
 	quotedPrintableWriter := quotedprintable.NewWriter(&encodedContent)
 	if _, err := quotedPrintableWriter.Write([]byte(content)); err != nil {
-		return err
+		return nil, err
 	}
 	if err := quotedPrintableWriter.Close(); err != nil {
-		return err
+		return nil, err
+	}
+	if len(attachments) > 0 {
+		boundary := fmt.Sprintf("mixed_%s", GetRandomString(12))
+		var message bytes.Buffer
+		message.WriteString(fmt.Sprintf("To: %s\r\n"+
+			"From: %s\r\n"+
+			"Subject: %s\r\n"+
+			"Date: %s\r\n"+
+			"Message-ID: %s\r\n"+
+			"MIME-Version: 1.0\r\n"+
+			"Content-Type: multipart/mixed; boundary=%q\r\n\r\n",
+			receiver, from.String(), encodedSubject, time.Now().Format(time.RFC1123Z), id, boundary))
+		message.WriteString(fmt.Sprintf("--%s\r\n", boundary))
+		message.WriteString("Content-Type: text/html; charset=UTF-8\r\n")
+		message.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
+		message.WriteString(encodedContent.String())
+		message.WriteString("\r\n")
+		for _, attachment := range attachments {
+			filename := strings.TrimSpace(attachment.Filename)
+			if filename == "" {
+				filename = "attachment"
+			}
+			contentType := strings.TrimSpace(attachment.ContentType)
+			if contentType == "" {
+				contentType = "application/octet-stream"
+			}
+			contentTypeHeader := mime.FormatMediaType(contentType, map[string]string{"name": filename})
+			if contentTypeHeader == "" {
+				contentTypeHeader = contentType
+			}
+			disposition := mime.FormatMediaType("attachment", map[string]string{"filename": filename})
+			message.WriteString(fmt.Sprintf("--%s\r\n", boundary))
+			message.WriteString(fmt.Sprintf("Content-Type: %s\r\n", contentTypeHeader))
+			message.WriteString("Content-Transfer-Encoding: base64\r\n")
+			message.WriteString(fmt.Sprintf("Content-Disposition: %s\r\n\r\n", disposition))
+			message.WriteString(wrapBase64(base64.StdEncoding.EncodeToString(attachment.Data)))
+			message.WriteString("\r\n")
+		}
+		message.WriteString(fmt.Sprintf("--%s--\r\n", boundary))
+		return message.Bytes(), nil
 	}
 	message := []byte(fmt.Sprintf("To: %s\r\n"+
 		"From: %s\r\n"+
@@ -66,6 +129,25 @@ func SendEmail(subject string, receiver string, content string) error {
 		"Content-Type: text/html; charset=UTF-8\r\n"+
 		"Content-Transfer-Encoding: quoted-printable\r\n\r\n%s\r\n",
 		receiver, from.String(), encodedSubject, time.Now().Format(time.RFC1123Z), id, encodedContent.String()))
+	return message, nil
+}
+
+func wrapBase64(data string) string {
+	if len(data) == 0 {
+		return ""
+	}
+	var builder strings.Builder
+	for len(data) > 76 {
+		builder.WriteString(data[:76])
+		builder.WriteString("\r\n")
+		data = data[76:]
+	}
+	builder.WriteString(data)
+	builder.WriteString("\r\n")
+	return builder.String()
+}
+
+func sendSMTPMessage(receiver string, message []byte) error {
 	auth := getSMTPAuth()
 	addr := fmt.Sprintf("%s:%d", SMTPServer, SMTPPort)
 	to := strings.Split(receiver, ";")

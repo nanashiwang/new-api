@@ -14,6 +14,10 @@ const (
 	InvoiceStatusInvoiced = "invoiced"
 	InvoiceStatusRejected = "rejected"
 
+	InvoiceSendStatusPending = "pending"
+	InvoiceSendStatusSent    = "sent"
+	InvoiceSendStatusFailed  = "failed"
+
 	InvoiceTitleTypePersonal = "personal"
 	InvoiceTitleTypeCompany  = "company"
 )
@@ -25,23 +29,29 @@ var (
 )
 
 type InvoiceRequest struct {
-	Id             int     `json:"id"`
-	UserId         int     `json:"user_id" gorm:"index;not null"`
-	TitleType      string  `json:"title_type" gorm:"type:varchar(16);not null;default:'personal'"`
-	Title          string  `json:"title" gorm:"type:varchar(128);not null;default:''"`
-	TaxNumber      string  `json:"tax_number" gorm:"type:varchar(64);not null;default:''"`
-	Email          string  `json:"email" gorm:"type:varchar(128);not null;default:''"`
-	Phone          string  `json:"phone" gorm:"type:varchar(32);not null;default:''"`
-	Remark         string  `json:"remark" gorm:"type:text"`
-	Status         string  `json:"status" gorm:"type:varchar(16);index;not null;default:'pending'"`
-	TotalMoney     float64 `json:"total_money" gorm:"type:decimal(20,6);not null;default:0"`
-	TotalQuota     int64   `json:"total_quota" gorm:"type:bigint;not null;default:0"`
-	InvoiceNo      string  `json:"invoice_no" gorm:"type:varchar(128);not null;default:''"`
-	InvoiceUrl     string  `json:"invoice_url" gorm:"type:text"`
-	AdminRemark    string  `json:"admin_remark" gorm:"type:text"`
-	ReviewerUserId int     `json:"reviewer_user_id" gorm:"index;not null;default:0"`
-	CreatedAt      int64   `json:"created_at" gorm:"index"`
-	ReviewedAt     int64   `json:"reviewed_at" gorm:"index;not null;default:0"`
+	Id                int     `json:"id"`
+	UserId            int     `json:"user_id" gorm:"index;not null"`
+	TitleType         string  `json:"title_type" gorm:"type:varchar(16);not null;default:'personal'"`
+	Title             string  `json:"title" gorm:"type:varchar(128);not null;default:''"`
+	TaxNumber         string  `json:"tax_number" gorm:"type:varchar(64);not null;default:''"`
+	Email             string  `json:"email" gorm:"type:varchar(128);not null;default:''"`
+	Phone             string  `json:"phone" gorm:"type:varchar(32);not null;default:''"`
+	Remark            string  `json:"remark" gorm:"type:text"`
+	Status            string  `json:"status" gorm:"type:varchar(16);index;not null;default:'pending'"`
+	TotalMoney        float64 `json:"total_money" gorm:"type:decimal(20,6);not null;default:0"`
+	TotalQuota        int64   `json:"total_quota" gorm:"type:bigint;not null;default:0"`
+	InvoiceNo         string  `json:"invoice_no" gorm:"type:varchar(128);not null;default:''"`
+	InvoiceUrl        string  `json:"invoice_url" gorm:"type:text"`
+	InvoiceFileName   string  `json:"invoice_file_name" gorm:"type:varchar(255);not null;default:''"`
+	InvoiceFilePath   string  `json:"-" gorm:"type:text"`
+	InvoiceSentTo     string  `json:"invoice_sent_to" gorm:"type:varchar(128);not null;default:''"`
+	InvoiceSentAt     int64   `json:"invoice_sent_at" gorm:"index;not null;default:0"`
+	InvoiceSendStatus string  `json:"invoice_send_status" gorm:"type:varchar(16);index;not null;default:''"`
+	InvoiceSendError  string  `json:"invoice_send_error" gorm:"type:text"`
+	AdminRemark       string  `json:"admin_remark" gorm:"type:text"`
+	ReviewerUserId    int     `json:"reviewer_user_id" gorm:"index;not null;default:0"`
+	CreatedAt         int64   `json:"created_at" gorm:"index"`
+	ReviewedAt        int64   `json:"reviewed_at" gorm:"index;not null;default:0"`
 
 	Username            string               `json:"username,omitempty" gorm:"column:username;->"`
 	DisplayName         string               `json:"display_name,omitempty" gorm:"column:display_name;->"`
@@ -86,9 +96,13 @@ type InvoiceRequestSearchParams struct {
 }
 
 type InvoiceReviewInput struct {
-	InvoiceNo   string
-	InvoiceUrl  string
-	AdminRemark string
+	InvoiceNo         string
+	InvoiceUrl        string
+	InvoiceFileName   string
+	InvoiceFilePath   string
+	InvoiceSentTo     string
+	InvoiceSendStatus string
+	AdminRemark       string
 }
 
 func GetEligibleInvoiceOrders(userID int, pageInfo *common.PageInfo) ([]*PaymentRecord, int64, error) {
@@ -269,9 +283,13 @@ func GetInvoiceRequestDetail(id int) (*InvoiceRequest, error) {
 func ApproveInvoiceRequest(id int, reviewerUserID int, input InvoiceReviewInput) (*InvoiceRequest, error) {
 	input.InvoiceNo = strings.TrimSpace(input.InvoiceNo)
 	input.InvoiceUrl = strings.TrimSpace(input.InvoiceUrl)
+	input.InvoiceFileName = strings.TrimSpace(input.InvoiceFileName)
+	input.InvoiceFilePath = strings.TrimSpace(input.InvoiceFilePath)
+	input.InvoiceSentTo = strings.TrimSpace(input.InvoiceSentTo)
+	input.InvoiceSendStatus = strings.TrimSpace(input.InvoiceSendStatus)
 	input.AdminRemark = strings.TrimSpace(input.AdminRemark)
-	if input.InvoiceNo == "" && input.InvoiceUrl == "" {
-		return nil, errors.New("发票号或发票链接不能为空")
+	if input.InvoiceNo == "" && input.InvoiceUrl == "" && input.InvoiceFilePath == "" {
+		return nil, errors.New("发票号、发票链接或发票 PDF 不能为空")
 	}
 	return reviewInvoiceRequest(id, reviewerUserID, InvoiceStatusInvoiced, input)
 }
@@ -574,6 +592,15 @@ func reviewInvoiceRequest(id int, reviewerUserID int, targetStatus string, input
 	if len([]rune(input.InvoiceNo)) > 128 {
 		return nil, errors.New("发票号不能超过 128 个字符")
 	}
+	if len([]rune(input.InvoiceFileName)) > 255 {
+		return nil, errors.New("发票文件名不能超过 255 个字符")
+	}
+	if len([]rune(input.InvoiceSentTo)) > 128 {
+		return nil, errors.New("发票接收邮箱不能超过 128 个字符")
+	}
+	if input.InvoiceSendStatus != "" && !isValidInvoiceSendStatus(input.InvoiceSendStatus) {
+		return nil, errors.New("邮件发送状态不合法")
+	}
 	if len([]rune(input.AdminRemark)) > 1000 {
 		return nil, errors.New("审核备注不能超过 1000 个字符")
 	}
@@ -602,6 +629,11 @@ func reviewInvoiceRequest(id int, reviewerUserID int, targetStatus string, input
 		if targetStatus == InvoiceStatusInvoiced {
 			updates["invoice_no"] = input.InvoiceNo
 			updates["invoice_url"] = input.InvoiceUrl
+			updates["invoice_file_name"] = input.InvoiceFileName
+			updates["invoice_file_path"] = input.InvoiceFilePath
+			updates["invoice_sent_to"] = input.InvoiceSentTo
+			updates["invoice_send_status"] = input.InvoiceSendStatus
+			updates["invoice_send_error"] = ""
 		}
 		result := tx.Model(&InvoiceRequest{}).Where("id = ? AND status = ?", id, InvoiceStatusPending).Updates(updates)
 		if result.Error != nil {
@@ -617,6 +649,11 @@ func reviewInvoiceRequest(id int, reviewerUserID int, targetStatus string, input
 		if targetStatus == InvoiceStatusInvoiced {
 			request.InvoiceNo = input.InvoiceNo
 			request.InvoiceUrl = input.InvoiceUrl
+			request.InvoiceFileName = input.InvoiceFileName
+			request.InvoiceFilePath = input.InvoiceFilePath
+			request.InvoiceSentTo = input.InvoiceSentTo
+			request.InvoiceSendStatus = input.InvoiceSendStatus
+			request.InvoiceSendError = ""
 		}
 		return nil
 	})
@@ -624,4 +661,46 @@ func reviewInvoiceRequest(id int, reviewerUserID int, targetStatus string, input
 		return nil, err
 	}
 	return &request, nil
+}
+
+func UpdateInvoiceSendStatus(id int, status string, errorMessage string) (*InvoiceRequest, error) {
+	status = strings.TrimSpace(status)
+	errorMessage = strings.TrimSpace(errorMessage)
+	if id <= 0 {
+		return nil, ErrInvoiceRequestNotFound
+	}
+	if !isValidInvoiceSendStatus(status) {
+		return nil, errors.New("邮件发送状态不合法")
+	}
+	if len([]rune(errorMessage)) > 1000 {
+		errorMessage = string([]rune(errorMessage)[:1000])
+	}
+	updates := map[string]interface{}{
+		"invoice_send_status": status,
+		"invoice_send_error":  errorMessage,
+	}
+	if status == InvoiceSendStatusSent {
+		updates["invoice_sent_at"] = common.GetTimestamp()
+	} else {
+		updates["invoice_sent_at"] = int64(0)
+	}
+	result := DB.Model(&InvoiceRequest{}).
+		Where("id = ? AND status = ?", id, InvoiceStatusInvoiced).
+		Updates(updates)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, ErrInvoiceRequestNotFound
+	}
+	return GetInvoiceRequestDetail(id)
+}
+
+func isValidInvoiceSendStatus(status string) bool {
+	switch status {
+	case InvoiceSendStatusPending, InvoiceSendStatusSent, InvoiceSendStatusFailed:
+		return true
+	default:
+		return false
+	}
 }
