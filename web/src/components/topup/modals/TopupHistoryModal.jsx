@@ -257,10 +257,6 @@ function getInvoiceOrderTypeLabel(orderType) {
   return RECORD_TYPE_MAP[orderType] || orderType || '-';
 }
 
-function getInvoiceStatusLabel(status) {
-  return INVOICE_STATUS_CONFIG[status]?.label || status || '-';
-}
-
 function getInvoicePaymentLabel(paymentMethod) {
   return PAYMENT_METHOD_MAP[paymentMethod] || paymentMethod || '-';
 }
@@ -311,123 +307,207 @@ function formatInvoiceReviewer(invoice) {
   return invoice?.reviewer_user_id ? `ID: ${invoice.reviewer_user_id}` : '-';
 }
 
-function buildInvoicePrintHtml(invoice) {
+function formatInvoicePrintDate(timestamp) {
+  const date = timestamp ? new Date(timestamp * 1000) : new Date();
+  if (Number.isNaN(date.getTime())) {
+    return '-';
+  }
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+}
+
+function formatInvoicePrintMoney(value) {
+  const amount = Number(value || 0);
+  if (!Number.isFinite(amount)) {
+    return '-';
+  }
+  return `¥${amount.toLocaleString('zh-CN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function formatInvoicePaymentAmount(item) {
+  if (Number(item?.money || 0) > 0) {
+    return formatInvoicePrintMoney(item.money);
+  }
+  if (Number(item?.amount || 0) > 0) {
+    return renderQuota(item.amount);
+  }
+  return formatInvoicePrintMoney(0);
+}
+
+function buildInvoicePrintSummary(invoice) {
   const items = invoice?.items || [];
+  const summary = {
+    count: items.length,
+    money: Number(invoice?.total_money || 0),
+    quota: Number(invoice?.total_quota || 0),
+    startTime: 0,
+    endTime: 0,
+    byType: {},
+  };
+
+  items.forEach((item) => {
+    const type = item?.order_type || 'unknown';
+    const bucket = summary.byType[type] || { count: 0, money: 0, quota: 0 };
+    bucket.count += 1;
+    bucket.money += Number(item?.money || 0);
+    bucket.quota += Number(item?.amount || 0);
+    summary.byType[type] = bucket;
+
+    const time = Number(item?.complete_time || item?.create_time || 0);
+    if (time > 0) {
+      summary.startTime = summary.startTime
+        ? Math.min(summary.startTime, time)
+        : time;
+      summary.endTime = Math.max(summary.endTime, time);
+    }
+  });
+
+  return summary;
+}
+
+function formatInvoiceTypeSummary(summary) {
+  return Object.entries(summary.byType)
+    .filter(([, stats]) => stats.count > 0)
+    .map(([type, stats]) => {
+      const parts = [`${getInvoiceOrderTypeLabel(type)} ${stats.count} 笔`];
+      if (Number(stats.money || 0) > 0) {
+        parts.push(`金额合计 ${formatInvoicePrintMoney(stats.money)}`);
+      }
+      if (Number(stats.quota || 0) > 0) {
+        parts.push(`额度合计 ${renderQuota(stats.quota)}`);
+      }
+      return parts.join('，');
+    })
+    .join('；');
+}
+
+function buildInvoicePrintHtml(invoice, stampUrl = '') {
+  const items = invoice?.items || [];
+  const summary = buildInvoicePrintSummary(invoice);
   const cell = (value) => escapeHtml(displayValue(value));
-  const infoSection = (title, rows) => `
-    <section>
-      <h2>${cell(title)}</h2>
-      <div class="info-grid">
-        ${rows
-          .map(
-            ([label, value]) => `
-              <div class="info-item">
-                <div class="label">${cell(label)}</div>
-                <div class="value">${cell(value)}</div>
-              </div>
-            `,
-          )
-          .join('')}
-      </div>
-    </section>
-  `;
+  const totalParts = [];
+  if (summary.money > 0) {
+    totalParts.push(
+      `支付金额合计人民币 ${formatInvoicePrintMoney(summary.money)}`,
+    );
+  }
+  if (summary.quota > 0) {
+    totalParts.push(`额度合计 ${renderQuota(summary.quota)}`);
+  }
+  if (totalParts.length === 0) {
+    totalParts.push(`支付金额合计人民币 ${formatInvoicePrintMoney(0)}`);
+  }
+  const typeSummary = formatInvoiceTypeSummary(summary);
+  const timeRange = summary.startTime
+    ? `${formatInvoiceTime(summary.startTime)} 至 ${formatInvoiceTime(summary.endTime)}`
+    : '-';
   const orderRows =
     items.length > 0
       ? items
           .map(
             (item, index) => `
               <tr>
-                <td>${index + 1}</td>
-                <td>${cell(getInvoiceOrderTypeLabel(item?.order_type))}</td>
-                <td>${cell(item?.order_id)}</td>
+                <td class="center">${index + 1}</td>
+                <td class="center">${cell(getInvoiceOrderTypeLabel(item?.order_type))}</td>
+                <td class="center">${cell(item?.order_id)}</td>
                 <td>${cell(formatInvoiceCode(item))}</td>
-                <td>${cell(item?.product_name)}</td>
-                <td>${cell(getInvoicePaymentLabel(item?.payment_method))}</td>
-                <td>${cell(formatMoney(item?.money))}</td>
-                <td>${cell(Number(item?.amount || 0) > 0 ? renderQuota(item.amount) : '-')}</td>
-                <td>${cell(formatInvoiceTime(item?.complete_time || item?.create_time))}</td>
+                <td class="center">${cell(item?.product_name)}</td>
+                <td class="center">${cell(getInvoicePaymentLabel(item?.payment_method))}</td>
+                <td class="money">${cell(formatInvoicePaymentAmount(item))}</td>
+                <td class="center">${cell(formatInvoiceTime(item?.complete_time || item?.create_time))}</td>
               </tr>
             `,
           )
           .join('')
-      : '<tr><td colspan="9" class="empty">暂无订单明细</td></tr>';
+      : '<tr><td colspan="8" class="empty">暂无订单明细</td></tr>';
+  const invoiceTitle = invoice?.title || '-';
+  const invoiceContact = [invoice?.email, invoice?.phone]
+    .filter(Boolean)
+    .join(' / ');
 
   return `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>发票申请单 #${cell(invoice?.id)}</title>
+  <title>曜算平台发票申请明细证明 #${cell(invoice?.id)}</title>
   <style>
-    body { margin: 0; padding: 28px; color: #111827; font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    h1 { margin: 0 0 6px; font-size: 24px; }
-    h2 { margin: 24px 0 10px; font-size: 16px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; }
-    .muted { color: #6b7280; }
-    .info-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-    .info-item { border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 10px; min-height: 42px; }
-    .label { color: #6b7280; font-size: 12px; }
-    .value { margin-top: 2px; word-break: break-all; }
-    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-    th, td { border: 1px solid #e5e7eb; padding: 7px 8px; text-align: left; vertical-align: top; word-break: break-all; }
-    th { background: #f9fafb; }
-    .empty { text-align: center; color: #6b7280; }
-    @media print { body { padding: 0; } .no-print { display: none; } }
+    @page { size: A4 landscape; margin: 14mm; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #243244; background: #fff; font: 14px/1.55 "Songti SC", "SimSun", "Noto Serif CJK SC", serif; }
+    .certificate { position: relative; min-height: 176mm; padding: 4mm 2mm 0; }
+    h1 { margin: 0; text-align: center; font: 700 25px/1.25 "PingFang SC", "Microsoft YaHei", sans-serif; letter-spacing: 1px; color: #23364a; }
+    .title-line { height: 2px; margin: 14px 0 8px; background: #2d5f86; }
+    .intro { margin: 0 26px 16px; text-indent: 2em; font-size: 14px; }
+    h2 { margin: 0 0 8px; font: 700 16px/1.2 "PingFang SC", "Microsoft YaHei", sans-serif; color: #1f3447; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; margin-left: 20px; width: calc(100% - 40px); }
+    th { background: #22364b; color: #fff; font-weight: 700; }
+    th, td { border: 1px solid #cfd8e3; padding: 5px 7px; vertical-align: middle; word-break: break-all; }
+    tbody tr:nth-child(even) { background: #f7f9fb; }
+    .center { text-align: center; }
+    .money { text-align: right; white-space: nowrap; }
+    .summary { margin: 16px 20px 10px; padding: 9px 12px; border: 1px solid #b9c7d7; background: #f7f9fc; font-size: 14px; }
+    .summary div { margin: 2px 0; }
+    .notes { margin: 10px 20px 0; }
+    .notes p { margin: 5px 0; text-indent: 2em; }
+    .sign { position: absolute; right: 88px; bottom: 22px; min-width: 250px; min-height: 104px; font-size: 14px; }
+    .sign p { margin: 8px 0; }
+    .seal-image { position: absolute; width: 118px; height: 118px; right: 44px; bottom: -5px; object-fit: contain; opacity: 0.94; }
+    .empty { padding: 18px; text-align: center; color: #697586; }
+    @media screen { body { padding: 18px; background: #eef2f7; } .certificate { max-width: 1120px; margin: 0 auto; padding: 28px 32px; background: #fff; box-shadow: 0 10px 34px rgba(15, 23, 42, 0.12); } }
   </style>
 </head>
 <body>
-  <h1>发票申请单 #${cell(invoice?.id)}</h1>
-  <div class="muted">打印时间：${cell(timestamp2string(Math.floor(Date.now() / 1000)))}</div>
-  ${infoSection('申请信息', [
-    ['申请编号', `#${invoice?.id || '-'}`],
-    ['状态', getInvoiceStatusLabel(invoice?.status)],
-    ['申请时间', formatInvoiceTime(invoice?.created_at)],
-    ['申请用户', formatInvoiceUser(invoice)],
-    ['订单数量', `${items.length} 笔`],
-    ['合计支付金额', formatMoney(invoice?.total_money)],
-    [
-      '合计额度',
-      Number(invoice?.total_quota || 0) > 0
-        ? renderQuota(invoice.total_quota)
-        : '-',
-    ],
-  ])}
-  ${infoSection('发票抬头与接收信息', [
-    ['抬头类型', invoice?.title_type === 'company' ? '企业' : '个人'],
-    ['抬头名称', invoice?.title],
-    ['税号', invoice?.tax_number],
-    ['接收邮箱', invoice?.email],
-    ['手机号', invoice?.phone],
-    ['用户备注', invoice?.remark],
-  ])}
-  <section>
-    <h2>订单明细</h2>
+  <main class="certificate">
+    <h1>曜算平台发票申请明细证明</h1>
+    <div class="title-line"></div>
+    <p class="intro">兹证明：用户 ${cell(formatInvoiceUser(invoice))} 于曜算平台提交发票申请。根据该用户申请时所选择的订单范围，平台系统记录的开票订单明细如下：</p>
+
+    <h2>交易明细表</h2>
     <table>
       <thead>
         <tr>
-          <th>#</th>
-          <th>订单类型</th>
-          <th>平台订单ID</th>
+          <th style="width: 44px;">序号</th>
+          <th style="width: 90px;">订单类型</th>
+          <th style="width: 96px;">平台订单 ID</th>
           <th>订单编码/交易号</th>
-          <th>商品/套餐</th>
-          <th>支付渠道</th>
-          <th>支付金额</th>
-          <th>额度</th>
-          <th>支付时间</th>
+          <th style="width: 110px;">商品/套餐</th>
+          <th style="width: 96px;">支付渠道</th>
+          <th style="width: 120px;">支付金额</th>
+          <th style="width: 160px;">支付时间</th>
         </tr>
       </thead>
       <tbody>${orderRows}</tbody>
     </table>
-  </section>
-  ${infoSection('审核与开票信息', [
-    ['审核人', formatInvoiceReviewer(invoice)],
-    ['审核时间', formatInvoiceTime(invoice?.reviewed_at)],
-    ['发票号/代码', invoice?.invoice_no],
-    ['发票链接', invoice?.invoice_url],
-    ['管理员备注/驳回原因', invoice?.admin_remark],
-  ])}
+
+    <section class="summary">
+      <div>合计：共 ${summary.count} 笔交易，${cell(totalParts.join('，'))}。</div>
+      <div>其中：${cell(typeSummary || '-')}。</div>
+      <div>交易时间范围：${cell(timeRange)}。</div>
+      <div>发票抬头：${cell(invoiceTitle)}；税号：${cell(invoice?.tax_number)}；接收方式：${cell(invoiceContact || '-')}。</div>
+    </section>
+
+    <section class="notes">
+      <h2>说明</h2>
+      <p>本《曜算平台发票申请明细证明》仅用于证明用户在其发票申请范围内，于曜算平台产生的相关支付订单记录。</p>
+      <p>本证明所列订单明细依据用户申请时选择的订单及平台系统记录生成，具体筛选条件以用户申请页面选择内容为准。</p>
+      <p>本证明仅限用于证明用户在曜算平台的相关交易记录，不作为其他权利义务认定依据。</p>
+      <p>本证明不得擅自修改、涂改、拆分或用于与申请目的不一致的其他用途。</p>
+      <p>本证明中所列时间均为北京时间（UTC+08:00）。</p>
+      <p>本证明经上海曜算智能科技有限公司加盖公章后生效。</p>
+    </section>
+
+    <section class="sign">
+      <p>上海曜算智能科技有限公司</p>
+      <p>盖章：</p>
+      <p>出具日期：${cell(formatInvoicePrintDate(Math.floor(Date.now() / 1000)))}</p>
+      ${stampUrl ? `<img class="seal-image" src="${cell(stampUrl)}" alt="公司公章" />` : ''}
+    </section>
+  </main>
 </body>
 </html>`;
 }
-
 function pickInvoiceStatus(current, next) {
   const priority = { invoiced: 3, pending: 2, rejected: 1 };
   if (!current) return next || '';
@@ -1478,13 +1558,22 @@ const TopupHistoryModal = ({
       return;
     }
     printWindow.opener = null;
+    const stampUrl = `${window.location.origin}/invoice-stamp.png`;
     printWindow.document.open();
-    printWindow.document.write(buildInvoicePrintHtml(invoiceDetail));
+    printWindow.document.write(buildInvoicePrintHtml(invoiceDetail, stampUrl));
     printWindow.document.close();
     printWindow.focus();
-    setTimeout(() => {
+
+    const doPrint = () => {
       printWindow.print();
-    }, 200);
+    };
+    const stampImage = printWindow.document.querySelector('.seal-image');
+    if (stampImage && !stampImage.complete) {
+      stampImage.onload = () => setTimeout(doPrint, 100);
+      stampImage.onerror = () => setTimeout(doPrint, 100);
+      return;
+    }
+    setTimeout(doPrint, 200);
   };
 
   const renderStatusBadge = (status) => {
