@@ -44,6 +44,7 @@
 
 <p align="center">
   <a href="#-快速开始">快速开始</a> •
+  <a href="#-nan-平台教程">平台教程</a> •
   <a href="#-主要特性">主要特性</a> •
   <a href="#-部署">部署</a> •
   <a href="#-文档">文档</a> •
@@ -58,6 +59,24 @@
 > - 本项目仅供个人学习使用，不保证稳定性，且不提供任何技术支持
 > - 使用者必须在遵循 OpenAI 的 [使用条款](https://openai.com/policies/terms-of-use) 以及**法律法规**的情况下使用，不得用于非法用途
 > - 根据 [《生成式人工智能服务管理暂行办法》](http://www.cac.gov.cn/2023-07/13/c_1690898327029107.htm) 的要求，请勿对中国地区公众提供一切未经备案的生成式人工智能服务
+
+---
+
+## 🌐 NAN 平台教程
+
+> 本章节是当前部署实例的用户使用说明，适合对外发给平台用户。底层开源项目仍基于 New API，项目归属、许可证、官方文档与上游链接保持不变。
+
+如果你只是使用平台，不需要阅读完整部署文档，建议先看 [NAN 平台使用教程](./docs/NAN_USAGE.md)。
+
+| 使用场景 | 操作入口 | 说明 |
+|----------|----------|------|
+| 注册与登录 | 首页 / 注册页 | 支持邮箱验证码、邀请链接绑定与 Turnstile 人机校验 |
+| 创建 API 令牌 | 控制台 -> 令牌管理 | 创建后复制令牌，用于接口请求的 `Authorization: Bearer <token>` |
+| 调用接口 | 控制台首页 -> API 信息 | 以页面展示的 API 地址为准，兼容 OpenAI 常用接口格式 |
+| 客户端接入 | [客户端配置教程](./docs/NAN_CLIENTS.md) | Codex、Claude Code、Gemini、OpenCode、OpenClaw、CC Switch |
+| 充值与订阅 | 控制台 -> 钱包管理 | 可充值余额、购买订阅套餐，并查看账单记录 |
+| 明细账单 / 发票 | 钱包管理 -> 账单 | 可选择已支付订单提交申请，管理员审核后发送附件 |
+| 使用排查 | 令牌管理 / 使用日志 | 先测试令牌，再查看模型、分组、余额和调用日志 |
 
 ---
 
@@ -159,11 +178,21 @@ docker run --name new-api -d --restart always \
 
 <div align="center">
 
-### 📖 [官方文档](https://docs.newapi.pro/zh/docs) | [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/QuantumNous/new-api)
+### 📖 [NAN 平台使用教程](./docs/NAN_USAGE.md) | [客户端接入教程](./docs/NAN_CLIENTS.md)
 
 </div>
 
-**快速导航：**
+**最新平台文档：**
+
+| 分类 | 链接 |
+|------|------|
+| 🌐 平台教程 | [NAN 平台使用教程](./docs/NAN_USAGE.md) |
+| 🔌 客户端接入 | [Codex / Claude Code / Gemini / OpenCode / OpenClaw / CC Switch](./docs/NAN_CLIENTS.md) |
+| 🧾 账单与发票 | [明细账单与发票申请](./docs/NAN_USAGE.md#5-明细账单与发票申请) |
+| 🧪 调用排查 | [日志与排查清单](./docs/NAN_USAGE.md#6-查看调用日志) |
+| ⚙️ 管理员操作 | [管理员常用操作](./docs/NAN_USAGE.md#7-管理员常用操作) |
+
+**上游项目文档：**
 
 | 分类 | 链接 |
 |------|------|
@@ -172,6 +201,7 @@ docker run --name new-api -d --restart always \
 | 📡 接口文档 | [API 文档](https://docs.newapi.pro/zh/docs/api) |
 | ❓ 常见问题 | [FAQ](https://docs.newapi.pro/zh/docs/support/faq) |
 | 💬 社区交流 | [交流渠道](https://docs.newapi.pro/zh/docs/support/community-interaction) |
+| 🤖 DeepWiki | [QuantumNous/new-api](https://deepwiki.com/QuantumNous/new-api) |
 
 ---
 
@@ -427,10 +457,12 @@ docker run --name new-api -d --restart always \
 
 | 资源 | 链接 |
 |------|------|
-| 📘 常见问题 | [FAQ](https://docs.newapi.pro/zh/docs/support/faq) |
-| 💬 社区交流 | [交流渠道](https://docs.newapi.pro/zh/docs/support/community-interaction) |
-| 🐛 反馈问题 | [问题反馈](https://docs.newapi.pro/zh/docs/support/feedback-issues) |
-| 📚 完整文档 | [官方文档](https://docs.newapi.pro/zh/docs) |
+| 🌐 平台教程 | [NAN 平台使用教程](./docs/NAN_USAGE.md) |
+| 🔌 客户端接入 | [客户端配置教程](./docs/NAN_CLIENTS.md) |
+| 📘 上游 FAQ | [FAQ](https://docs.newapi.pro/zh/docs/support/faq) |
+| 💬 上游社区 | [交流渠道](https://docs.newapi.pro/zh/docs/support/community-interaction) |
+| 🐛 上游反馈 | [问题反馈](https://docs.newapi.pro/zh/docs/support/feedback-issues) |
+| 📚 上游完整文档 | [官方文档](https://docs.newapi.pro/zh/docs) |
 
 ### 🤝 贡献指南
 
