@@ -5,6 +5,10 @@
 .gitignore
 Makefile
 docs
+!docs
+!docs/NAN_USAGE.md
+!docs/NAN_CLIENTS.md
+!docs/NAN_TROUBLESHOOTING.md
 .eslintcache
 .gocache
 /web/node_modules
