@@ -20,7 +20,7 @@ import (
 
 const (
 	maxInvoicePDFSize        = 10 * 1024 * 1024
-	maxInvoiceDetailBillSize = 2 * 1024 * 1024
+	maxInvoiceDetailBillSize = 10 * 1024 * 1024
 )
 
 type createInvoiceRequestPayload struct {
@@ -211,9 +211,10 @@ func reviewInvoiceRequest(c *gin.Context, action string) {
 		}
 		if err == nil && req.SendEmail {
 			if req.SendDetailBill && detailBillAttachment == nil {
-				detailBillAttachment = buildInvoiceDetailBillAttachment(request)
+				err = fmt.Errorf("请上传明细账单 PDF")
+			} else {
+				request, err = sendInvoiceFileAndUpdateStatus(request, detailBillAttachment)
 			}
-			request, err = sendInvoiceFileAndUpdateStatus(request, detailBillAttachment)
 		}
 	} else {
 		var req reviewInvoiceRequestPayload
@@ -259,7 +260,8 @@ func ResendInvoiceEmail(c *gin.Context) {
 				return
 			}
 		} else {
-			detailBillAttachment = buildInvoiceDetailBillAttachment(request)
+			common.ApiError(c, fmt.Errorf("请上传明细账单 PDF"))
+			return
 		}
 	}
 	request, err = sendInvoiceFileAndUpdateStatus(request, detailBillAttachment)
@@ -327,6 +329,8 @@ func parseInvoiceApprovePayload(c *gin.Context, id int) (invoiceApprovePayload, 
 		if payload.SendDetailBill {
 			if detailBillFileHeader, err := c.FormFile("detail_bill_file"); err == nil {
 				payload.DetailBillFileHeader = detailBillFileHeader
+			} else if payload.SendEmail {
+				return payload, fmt.Errorf("请上传明细账单 PDF")
 			}
 		}
 		if payload.SendEmail && payload.InvoiceSentTo == "" {
@@ -356,6 +360,8 @@ func parseInvoiceEmailPayload(c *gin.Context) (invoiceEmailPayload, error) {
 		if payload.SendDetailBill {
 			if fileHeader, err := c.FormFile("detail_bill_file"); err == nil {
 				payload.DetailBillFileHeader = fileHeader
+			} else {
+				return payload, fmt.Errorf("请上传明细账单 PDF")
 			}
 		}
 		return payload, nil
@@ -368,6 +374,9 @@ func parseInvoiceEmailPayload(c *gin.Context) (invoiceEmailPayload, error) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil && err != io.EOF {
 		return payload, err
+	}
+	if req.SendDetailBill {
+		return payload, fmt.Errorf("请上传明细账单 PDF")
 	}
 	payload.SendDetailBill = req.SendDetailBill
 	return payload, nil
@@ -441,11 +450,11 @@ func readInvoiceDetailBillAttachment(fileHeader *multipart.FileHeader) (*common.
 		return nil, nil
 	}
 	if fileHeader.Size <= 0 || fileHeader.Size > maxInvoiceDetailBillSize {
-		return nil, fmt.Errorf("明细账单附件大小不能超过 2MB")
+		return nil, fmt.Errorf("明细账单 PDF 大小不能超过 10MB")
 	}
 	ext := strings.ToLower(filepath.Ext(fileHeader.Filename))
-	if ext != ".html" && ext != ".htm" {
-		return nil, fmt.Errorf("明细账单附件仅支持 HTML 文件")
+	if ext != ".pdf" {
+		return nil, fmt.Errorf("明细账单附件仅支持 PDF 文件")
 	}
 	file, err := fileHeader.Open()
 	if err != nil {
@@ -457,11 +466,11 @@ func readInvoiceDetailBillAttachment(fileHeader *multipart.FileHeader) (*common.
 		return nil, err
 	}
 	if len(data) == 0 || len(data) > maxInvoiceDetailBillSize {
-		return nil, fmt.Errorf("明细账单附件大小不能超过 2MB")
+		return nil, fmt.Errorf("明细账单 PDF 大小不能超过 10MB")
 	}
 	return &common.EmailAttachment{
 		Filename:    sanitizeInvoiceDetailBillFilename(fileHeader.Filename),
-		ContentType: "text/html",
+		ContentType: "application/pdf",
 		Data:        data,
 	}, nil
 }
@@ -469,17 +478,12 @@ func readInvoiceDetailBillAttachment(fileHeader *multipart.FileHeader) (*common.
 func sanitizeInvoiceDetailBillFilename(filename string) string {
 	filename = filepath.Base(strings.TrimSpace(filename))
 	if filename == "." || filename == string(filepath.Separator) || filename == "" {
-		return "明细账单.html"
+		return "明细账单.pdf"
+	}
+	if strings.ToLower(filepath.Ext(filename)) != ".pdf" {
+		filename += ".pdf"
 	}
 	return filename
-}
-
-func buildInvoiceDetailBillAttachment(request *model.InvoiceRequest) *common.EmailAttachment {
-	return &common.EmailAttachment{
-		Filename:    fmt.Sprintf("明细账单-%d.html", request.Id),
-		ContentType: "text/html",
-		Data:        []byte(buildInvoiceDetailBillHTML(request)),
-	}
 }
 
 func sendInvoiceFileAndUpdateStatus(request *model.InvoiceRequest, detailBillAttachment *common.EmailAttachment) (*model.InvoiceRequest, error) {

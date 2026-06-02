@@ -43,6 +43,8 @@ import {
 } from '@douyinfe/semi-illustrations';
 import { IconFilter, IconSearch } from '@douyinfe/semi-icons';
 import { Coins } from 'lucide-react';
+import html2canvas from 'html2canvas';
+import { PDFDocument } from 'pdf-lib';
 import {
   API,
   renderQuota,
@@ -427,9 +429,9 @@ function buildInvoicePrintHtml(invoice, stampUrl = '') {
   <title>曜算平台交易明细证明 #${cell(invoice?.id)}</title>
   <style>
     @page { size: A4 landscape; margin: 14mm; }
-    * { box-sizing: border-box; }
+    * { box-sizing: border-box; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
     body { margin: 0; color: #243244; background: #fff; font: 14px/1.55 "Songti SC", "SimSun", "Noto Serif CJK SC", serif; }
-    .certificate { position: relative; min-height: 176mm; padding: 4mm 2mm 34mm; }
+    .certificate { position: relative; min-height: 176mm; padding: 4mm 18mm 34mm 2mm; }
     h1 { margin: 0; text-align: center; font: 700 25px/1.25 "PingFang SC", "Microsoft YaHei", sans-serif; letter-spacing: 1px; color: #23364a; }
     .title-line { height: 2px; margin: 14px 0 8px; background: #2d5f86; }
     .intro { margin: 0 26px 16px; text-indent: 2em; font-size: 14px; }
@@ -446,13 +448,22 @@ function buildInvoicePrintHtml(invoice, stampUrl = '') {
     .notes p { margin: 5px 0; text-indent: 2em; }
     .sign { position: absolute; right: 88px; bottom: 4px; min-width: 250px; min-height: 104px; font-size: 14px; }
     .sign p { margin: 8px 0; }
-    .seal-image { position: absolute; width: 118px; height: 118px; right: 44px; bottom: -18px; object-fit: contain; opacity: 0.94; }
+    .stamp-hint { color: #526579; font-size: 13px; }
+    .sign-seal-image { position: absolute; width: 118px; height: 118px; right: 44px; bottom: -18px; object-fit: contain; opacity: 0.94; }
+    .page-seam-seal { position: absolute; top: 50%; right: 0; z-index: 8; width: 60px; height: 118px; overflow: hidden; pointer-events: none; transform: translateY(-50%); }
+    .page-seam-seal .seam-seal-image { display: block; width: 118px; height: 118px; object-fit: contain; opacity: 0.94; }
     .empty { padding: 18px; text-align: center; color: #697586; }
-    @media screen { body { padding: 18px; background: #eef2f7; } .certificate { max-width: 1120px; margin: 0 auto; padding: 28px 32px 72px; background: #fff; box-shadow: 0 10px 34px rgba(15, 23, 42, 0.12); } }
+    @media screen { body { padding: 18px; background: #eef2f7; } .certificate { max-width: 1120px; margin: 0 auto; padding: 28px 76px 72px 32px; background: #fff; box-shadow: 0 10px 34px rgba(15, 23, 42, 0.12); } }
+    @media print { .page-seam-seal { position: fixed; top: 50%; right: 0; } }
   </style>
 </head>
 <body>
   <main class="certificate">
+    ${
+      stampUrl
+        ? `<div class="page-seam-seal" aria-hidden="true"><img class="seam-seal-image" src="${cell(stampUrl)}" alt="" /></div>`
+        : ''
+    }
     <h1>曜算平台交易明细证明</h1>
     <div class="title-line"></div>
     <p class="intro">兹证明：用户 ${cell(formatInvoiceUser(invoice))} 于曜算平台存在相关交易记录。根据该用户申请时所选择的交易类型及时间范围，平台系统记录的交易明细如下：</p>
@@ -492,14 +503,143 @@ function buildInvoicePrintHtml(invoice, stampUrl = '') {
 
     <section class="sign">
       <p>上海曜算智能科技有限公司</p>
-      <p>盖章：</p>
+      <p>盖章：<span class="stamp-hint">见右侧骑缝章</span></p>
       <p>出具日期：${cell(formatInvoicePrintDate(Math.floor(Date.now() / 1000)))}</p>
-      ${stampUrl ? `<img class="seal-image" src="${cell(stampUrl)}" alt="公司公章" />` : ''}
+      ${stampUrl ? `<img class="sign-seal-image" src="${cell(stampUrl)}" alt="公司公章" />` : ''}
     </section>
   </main>
 </body>
 </html>`;
 }
+
+async function waitForInvoiceBillRenderReady(doc) {
+  if (doc?.fonts?.ready) {
+    try {
+      await doc.fonts.ready;
+    } catch (error) {
+      // 字体加载失败不阻断生成，浏览器会使用可用字体兜底。
+    }
+  }
+  const images = Array.from(doc?.images || []);
+  await Promise.all(
+    images.map(
+      (image) =>
+        new Promise((resolve) => {
+          if (image.complete) {
+            resolve();
+            return;
+          }
+          image.onload = resolve;
+          image.onerror = resolve;
+        }),
+    ),
+  );
+}
+
+async function buildInvoiceDetailBillPdfBlob(html, stampUrl = '') {
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.left = '-10000px';
+  iframe.style.top = '0';
+  iframe.style.width = '1120px';
+  iframe.style.height = '820px';
+  iframe.style.opacity = '0';
+  iframe.style.pointerEvents = 'none';
+  iframe.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(iframe);
+
+  try {
+    const doc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!doc) {
+      throw new Error('无法创建明细账单渲染窗口');
+    }
+    doc.open();
+    doc.write(html);
+    doc.close();
+    await waitForInvoiceBillRenderReady(doc);
+
+    const certificate = doc.querySelector('.certificate');
+    if (!certificate) {
+      throw new Error('明细账单内容为空');
+    }
+
+    const canvas = await html2canvas(certificate, {
+      backgroundColor: '#ffffff',
+      scale: 2,
+      useCORS: true,
+      ignoreElements: (element) =>
+        element?.classList?.contains('page-seam-seal'),
+    });
+    const pdfDoc = await PDFDocument.create();
+    const pageWidth = 841.89;
+    const pageHeight = 595.28;
+    const pageSliceHeight = Math.max(
+      1,
+      Math.floor((canvas.width * pageHeight) / pageWidth),
+    );
+    const sliceCanvas = doc.createElement('canvas');
+    const sliceContext = sliceCanvas.getContext('2d');
+    if (!sliceContext) {
+      throw new Error('无法生成明细账单 PDF');
+    }
+    sliceCanvas.width = canvas.width;
+    sliceCanvas.height = pageSliceHeight;
+    let seamStampImage = null;
+    if (stampUrl.startsWith('data:image')) {
+      try {
+        const stampBytes = await fetch(stampUrl).then((response) =>
+          response.arrayBuffer(),
+        );
+        seamStampImage = await pdfDoc.embedPng(stampBytes);
+      } catch (error) {
+        seamStampImage = null;
+      }
+    }
+
+    for (let offsetY = 0; offsetY < canvas.height; offsetY += pageSliceHeight) {
+      sliceContext.fillStyle = '#ffffff';
+      sliceContext.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
+      sliceContext.drawImage(
+        canvas,
+        0,
+        offsetY,
+        canvas.width,
+        Math.min(pageSliceHeight, canvas.height - offsetY),
+        0,
+        0,
+        sliceCanvas.width,
+        Math.min(pageSliceHeight, canvas.height - offsetY),
+      );
+      const page = pdfDoc.addPage([pageWidth, pageHeight]);
+      const pageImage = await pdfDoc.embedJpg(
+        sliceCanvas.toDataURL('image/jpeg', 0.9),
+      );
+      page.drawImage(pageImage, {
+        x: 0,
+        y: 0,
+        width: pageWidth,
+        height: pageHeight,
+      });
+      if (stampUrl.startsWith('data:image')) {
+        const seamStampSize = 96;
+        if (seamStampImage) {
+          page.drawImage(seamStampImage, {
+            x: pageWidth - seamStampSize / 2,
+            y: (pageHeight - seamStampSize) / 2,
+            width: seamStampSize,
+            height: seamStampSize,
+          });
+        }
+      }
+    }
+
+    const pdfBytes = await pdfDoc.save();
+    return new Blob([pdfBytes], { type: 'application/pdf' });
+  } finally {
+    iframe.remove();
+  }
+}
+
 function pickInvoiceStatus(current, next) {
   const priority = { invoiced: 3, pending: 2, rejected: 1 };
   if (!current) return next || '';
@@ -1518,8 +1658,9 @@ const TopupHistoryModal = ({
   const buildInvoiceDetailBillFile = async (record) => {
     const stampUrl = await loadInvoiceStampDataUrl();
     const html = buildInvoicePrintHtml(record, stampUrl);
-    const filename = `明细账单-${Number(record?.id || 0) || 'invoice'}.html`;
-    return new File([html], filename, { type: 'text/html;charset=utf-8' });
+    const blob = await buildInvoiceDetailBillPdfBlob(html, stampUrl);
+    const filename = `明细账单-${Number(record?.id || 0) || 'invoice'}.pdf`;
+    return new File([blob], filename, { type: 'application/pdf' });
   };
 
   const submitInvoiceReview = async () => {
@@ -1718,10 +1859,21 @@ const TopupHistoryModal = ({
     const doPrint = () => {
       printWindow.print();
     };
-    const stampImage = printWindow.document.querySelector('.seal-image');
-    if (stampImage && !stampImage.complete) {
-      stampImage.onload = () => setTimeout(doPrint, 100);
-      stampImage.onerror = () => setTimeout(doPrint, 100);
+    const pendingImages = Array.from(printWindow.document.images || []).filter(
+      (image) => !image.complete,
+    );
+    if (pendingImages.length > 0) {
+      let remaining = pendingImages.length;
+      const onImageReady = () => {
+        remaining -= 1;
+        if (remaining <= 0) {
+          setTimeout(doPrint, 100);
+        }
+      };
+      pendingImages.forEach((image) => {
+        image.onload = onImageReady;
+        image.onerror = onImageReady;
+      });
       return true;
     }
     setTimeout(doPrint, 200);
@@ -4009,7 +4161,7 @@ const TopupHistoryModal = ({
                   }))
                 }
               >
-                {t('同时发送明细账单附件')}
+                {t('同时发送明细账单 PDF 附件')}
               </Checkbox>
             </>
           ) : null}
@@ -4084,7 +4236,7 @@ const TopupHistoryModal = ({
               }))
             }
           >
-            {t('同时发送明细账单附件')}
+            {t('同时发送明细账单 PDF 附件')}
           </Checkbox>
         </div>
       </Modal>
