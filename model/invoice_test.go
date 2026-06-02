@@ -100,6 +100,43 @@ func TestCreateInvoiceRequest_RejectsOtherUsersOrder(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestCreateInvoiceRequest_SpecialInvoiceRequiresTaxNumberAndStoresInfo(t *testing.T) {
+	setupInvoiceTestDB(t)
+
+	user := createPaymentRecordTestUser(t, "alice")
+	topup := createPaymentRecordTopUp(t, user.Id, "T-INV-SPECIAL", 100, common.TopUpStatusSuccess)
+	input := createInvoiceRequestInput(PaymentRecordTypeTopUp, topup.Id)
+	input.InvoiceType = InvoiceTypeSpecial
+	input.TitleType = InvoiceTitleTypePersonal
+	input.Title = ""
+	input.TaxNumber = "SPECIAL-TAX-001"
+
+	_, err := CreateInvoiceRequest(user.Id, input)
+	require.ErrorContains(t, err, "单位名称不能为空")
+
+	input.Title = "测试公司"
+	input.TaxNumber = ""
+
+	_, err = CreateInvoiceRequest(user.Id, input)
+	require.ErrorContains(t, err, "专票需要填写税号")
+
+	input.TaxNumber = "SPECIAL-TAX-001"
+	input.RegisteredAddress = "上海市浦东新区"
+	input.RegisteredPhone = "021-12345678"
+	input.BankName = "测试银行"
+	input.BankAccount = "6222000000000000"
+
+	request, err := CreateInvoiceRequest(user.Id, input)
+	require.NoError(t, err)
+	require.Equal(t, InvoiceTypeSpecial, request.InvoiceType)
+	require.Equal(t, InvoiceTitleTypeCompany, request.TitleType)
+	require.Equal(t, "SPECIAL-TAX-001", request.TaxNumber)
+	require.Equal(t, "上海市浦东新区", request.RegisteredAddress)
+	require.Equal(t, "021-12345678", request.RegisteredPhone)
+	require.Equal(t, "测试银行", request.BankName)
+	require.Equal(t, "6222000000000000", request.BankAccount)
+}
+
 func TestApproveInvoiceRequest_KeepsOrderOccupiedAndPreventsSecondReview(t *testing.T) {
 	setupInvoiceTestDB(t)
 

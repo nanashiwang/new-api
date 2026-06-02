@@ -24,13 +24,18 @@ const (
 )
 
 type createInvoiceRequestPayload struct {
-	TitleType string                  `json:"title_type"`
-	Title     string                  `json:"title"`
-	TaxNumber string                  `json:"tax_number"`
-	Email     string                  `json:"email"`
-	Phone     string                  `json:"phone"`
-	Remark    string                  `json:"remark"`
-	Orders    []model.InvoiceOrderRef `json:"orders"`
+	InvoiceType       string                  `json:"invoice_type"`
+	TitleType         string                  `json:"title_type"`
+	Title             string                  `json:"title"`
+	TaxNumber         string                  `json:"tax_number"`
+	RegisteredAddress string                  `json:"registered_address"`
+	RegisteredPhone   string                  `json:"registered_phone"`
+	BankName          string                  `json:"bank_name"`
+	BankAccount       string                  `json:"bank_account"`
+	Email             string                  `json:"email"`
+	Phone             string                  `json:"phone"`
+	Remark            string                  `json:"remark"`
+	Orders            []model.InvoiceOrderRef `json:"orders"`
 }
 
 type reviewInvoiceRequestPayload struct {
@@ -75,13 +80,18 @@ func CreateInvoiceRequest(c *gin.Context) {
 	}
 
 	invoiceRequest, err := model.CreateInvoiceRequest(c.GetInt("id"), model.CreateInvoiceRequestInput{
-		TitleType: req.TitleType,
-		Title:     req.Title,
-		TaxNumber: req.TaxNumber,
-		Email:     req.Email,
-		Phone:     req.Phone,
-		Remark:    req.Remark,
-		Orders:    req.Orders,
+		InvoiceType:       req.InvoiceType,
+		TitleType:         req.TitleType,
+		Title:             req.Title,
+		TaxNumber:         req.TaxNumber,
+		RegisteredAddress: req.RegisteredAddress,
+		RegisteredPhone:   req.RegisteredPhone,
+		BankName:          req.BankName,
+		BankAccount:       req.BankAccount,
+		Email:             req.Email,
+		Phone:             req.Phone,
+		Remark:            req.Remark,
+		Orders:            req.Orders,
 	})
 	if err != nil {
 		common.ApiError(c, err)
@@ -537,11 +547,33 @@ func buildInvoiceEmailContent(request *model.InvoiceRequest) string {
 	title := html.EscapeString(request.Title)
 	invoiceNo := html.EscapeString(request.InvoiceNo)
 	totalMoney := fmt.Sprintf("%.2f", request.TotalMoney)
-	return fmt.Sprintf(`<p>您好，您的发票申请已审核通过，发票 PDF 见附件。</p>
-<p>发票抬头：%s</p>
+	invoiceType := "普票"
+	titleLabel := "发票抬头"
+	if request.InvoiceType == model.InvoiceTypeSpecial {
+		invoiceType = "专票"
+		titleLabel = "单位名称"
+	}
+	content := fmt.Sprintf(`<p>您好，您的发票申请已审核通过，发票 PDF 见附件。</p>
+<p>发票类型：%s</p>
+<p>%s：%s</p>
 <p>发票号/代码：%s</p>
-<p>开票金额：¥%s</p>
-<p>如有疑问，请联系平台管理员。</p>`, title, invoiceNo, totalMoney)
+<p>开票金额：¥%s</p>`, invoiceType, titleLabel, title, invoiceNo, totalMoney)
+	if request.InvoiceType == model.InvoiceTypeSpecial {
+		content += fmt.Sprintf(`<p>税号：%s</p>`, html.EscapeString(request.TaxNumber))
+		if strings.TrimSpace(request.RegisteredAddress) != "" {
+			content += fmt.Sprintf(`<p>注册地址：%s</p>`, html.EscapeString(request.RegisteredAddress))
+		}
+		if strings.TrimSpace(request.RegisteredPhone) != "" {
+			content += fmt.Sprintf(`<p>注册电话：%s</p>`, html.EscapeString(request.RegisteredPhone))
+		}
+		if strings.TrimSpace(request.BankName) != "" {
+			content += fmt.Sprintf(`<p>开户银行：%s</p>`, html.EscapeString(request.BankName))
+		}
+		if strings.TrimSpace(request.BankAccount) != "" {
+			content += fmt.Sprintf(`<p>银行账号：%s</p>`, html.EscapeString(request.BankAccount))
+		}
+	}
+	return content + `<p>如有疑问，请联系平台管理员。</p>`
 }
 
 type invoiceDetailBillTypeSummary struct {

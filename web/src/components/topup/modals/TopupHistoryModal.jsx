@@ -190,9 +190,14 @@ const EMPTY_INVOICE_FILTERS = {
 };
 
 const EMPTY_INVOICE_FORM = {
+  invoiceType: 'normal',
   titleType: 'company',
   title: '',
   taxNumber: '',
+  registeredAddress: '',
+  registeredPhone: '',
+  bankName: '',
+  bankAccount: '',
   email: '',
   phone: '',
   remark: '',
@@ -264,6 +269,10 @@ function getInvoiceItemKey(item) {
 
 function getInvoiceOrderTypeLabel(orderType) {
   return RECORD_TYPE_MAP[orderType] || orderType || '-';
+}
+
+function getInvoiceTypeLabel(invoiceType) {
+  return invoiceType === 'special' ? '专票' : '普票';
 }
 
 function getInvoicePaymentLabel(paymentMethod) {
@@ -450,20 +459,12 @@ function buildInvoicePrintHtml(invoice, stampUrl = '') {
     .sign p { margin: 8px 0; }
     .stamp-hint { color: #526579; font-size: 13px; }
     .sign-seal-image { position: absolute; width: 118px; height: 118px; right: 44px; bottom: -18px; object-fit: contain; opacity: 0.94; }
-    .page-seam-seal { position: absolute; top: 50%; right: 0; z-index: 8; width: 60px; height: 118px; overflow: hidden; pointer-events: none; transform: translateY(-50%); }
-    .page-seam-seal .seam-seal-image { display: block; width: 118px; height: 118px; object-fit: contain; opacity: 0.94; }
     .empty { padding: 18px; text-align: center; color: #697586; }
     @media screen { body { padding: 18px; background: #eef2f7; } .certificate { max-width: 1120px; margin: 0 auto; padding: 28px 76px 72px 32px; background: #fff; box-shadow: 0 10px 34px rgba(15, 23, 42, 0.12); } }
-    @media print { .page-seam-seal { position: fixed; top: 50%; right: 0; } }
   </style>
 </head>
 <body>
   <main class="certificate">
-    ${
-      stampUrl
-        ? `<div class="page-seam-seal" aria-hidden="true"><img class="seam-seal-image" src="${cell(stampUrl)}" alt="" /></div>`
-        : ''
-    }
     <h1>曜算平台交易明细证明</h1>
     <div class="title-line"></div>
     <p class="intro">兹证明：用户 ${cell(formatInvoiceUser(invoice))} 于曜算平台存在相关交易记录。根据该用户申请时所选择的交易类型及时间范围，平台系统记录的交易明细如下：</p>
@@ -503,7 +504,7 @@ function buildInvoicePrintHtml(invoice, stampUrl = '') {
 
     <section class="sign">
       <p>上海曜算智能科技有限公司</p>
-      <p>盖章：<span class="stamp-hint">见右侧骑缝章</span></p>
+      <p>盖章：<span class="stamp-hint">见右下角公章</span></p>
       <p>出具日期：${cell(formatInvoicePrintDate(Math.floor(Date.now() / 1000)))}</p>
       ${stampUrl ? `<img class="sign-seal-image" src="${cell(stampUrl)}" alt="公司公章" />` : ''}
     </section>
@@ -534,6 +535,81 @@ async function waitForInvoiceBillRenderReady(doc) {
         }),
     ),
   );
+}
+
+async function loadInvoiceStampImage(stampUrl, targetWindow) {
+  return new Promise((resolve, reject) => {
+    const ImageCtor = targetWindow?.Image || window.Image;
+    const image = new ImageCtor();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = stampUrl;
+  });
+}
+
+async function buildSeamStampSlices(doc, stampUrl, pageCount) {
+  if (!stampUrl.startsWith('data:image') || pageCount <= 1) {
+    return null;
+  }
+  try {
+    const image = await loadInvoiceStampImage(stampUrl, doc.defaultView);
+    const stampSize = 128;
+    const padding = 14;
+    const canvas = doc.createElement('canvas');
+    canvas.width = stampSize + padding * 2;
+    canvas.height = stampSize + padding * 2;
+    const context = canvas.getContext('2d');
+    if (!context) {
+      return null;
+    }
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.translate(canvas.width / 2, canvas.height / 2);
+    context.rotate((-8 * Math.PI) / 180);
+    context.globalAlpha = 0.94;
+    context.drawImage(
+      image,
+      -stampSize / 2,
+      -stampSize / 2,
+      stampSize,
+      stampSize,
+    );
+
+    const slices = [];
+    for (let index = 0; index < pageCount; index += 1) {
+      const sx = Math.round((canvas.width * index) / pageCount);
+      const nextSx = Math.round((canvas.width * (index + 1)) / pageCount);
+      const sw = Math.max(1, nextSx - sx);
+      const sliceCanvas = doc.createElement('canvas');
+      sliceCanvas.width = sw;
+      sliceCanvas.height = canvas.height;
+      const sliceContext = sliceCanvas.getContext('2d');
+      if (!sliceContext) {
+        continue;
+      }
+      sliceContext.drawImage(
+        canvas,
+        sx,
+        0,
+        sw,
+        canvas.height,
+        0,
+        0,
+        sw,
+        canvas.height,
+      );
+      slices.push({
+        dataUrl: sliceCanvas.toDataURL('image/png'),
+        widthRatio: sw / canvas.width,
+      });
+    }
+    return {
+      slices,
+      fullWidth: 118,
+      fullHeight: 118,
+    };
+  } catch (error) {
+    return null;
+  }
 }
 
 async function buildInvoiceDetailBillPdfBlob(html, stampUrl = '') {
@@ -567,8 +643,6 @@ async function buildInvoiceDetailBillPdfBlob(html, stampUrl = '') {
       backgroundColor: '#ffffff',
       scale: 2,
       useCORS: true,
-      ignoreElements: (element) =>
-        element?.classList?.contains('page-seam-seal'),
     });
     const pdfDoc = await PDFDocument.create();
     const pageWidth = 841.89;
@@ -584,19 +658,14 @@ async function buildInvoiceDetailBillPdfBlob(html, stampUrl = '') {
     }
     sliceCanvas.width = canvas.width;
     sliceCanvas.height = pageSliceHeight;
-    let seamStampImage = null;
-    if (stampUrl.startsWith('data:image')) {
-      try {
-        const stampBytes = await fetch(stampUrl).then((response) =>
-          response.arrayBuffer(),
-        );
-        seamStampImage = await pdfDoc.embedPng(stampBytes);
-      } catch (error) {
-        seamStampImage = null;
-      }
-    }
+    const pageCount = Math.max(1, Math.ceil(canvas.height / pageSliceHeight));
+    const seamStamp = await buildSeamStampSlices(doc, stampUrl, pageCount);
 
-    for (let offsetY = 0; offsetY < canvas.height; offsetY += pageSliceHeight) {
+    for (
+      let pageIndex = 0, offsetY = 0;
+      offsetY < canvas.height;
+      pageIndex += 1, offsetY += pageSliceHeight
+    ) {
       sliceContext.fillStyle = '#ffffff';
       sliceContext.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
       sliceContext.drawImage(
@@ -620,16 +689,16 @@ async function buildInvoiceDetailBillPdfBlob(html, stampUrl = '') {
         width: pageWidth,
         height: pageHeight,
       });
-      if (stampUrl.startsWith('data:image')) {
-        const seamStampSize = 96;
-        if (seamStampImage) {
-          page.drawImage(seamStampImage, {
-            x: pageWidth - seamStampSize / 2,
-            y: (pageHeight - seamStampSize) / 2,
-            width: seamStampSize,
-            height: seamStampSize,
-          });
-        }
+      const seamSlice = seamStamp?.slices?.[pageIndex];
+      if (seamSlice?.dataUrl) {
+        const seamSliceImage = await pdfDoc.embedPng(seamSlice.dataUrl);
+        const seamSliceWidth = seamStamp.fullWidth * seamSlice.widthRatio;
+        page.drawImage(seamSliceImage, {
+          x: pageWidth - seamSliceWidth - 1,
+          y: pageHeight - seamStamp.fullHeight - 78,
+          width: seamSliceWidth,
+          height: seamStamp.fullHeight,
+        });
       }
     }
 
@@ -1528,10 +1597,16 @@ const TopupHistoryModal = ({
   };
 
   const handleInvoiceFormChange = (key, value) => {
-    setInvoiceForm((prev) => ({
-      ...prev,
-      [key]: value,
-    }));
+    setInvoiceForm((prev) => {
+      const next = {
+        ...prev,
+        [key]: value,
+      };
+      if (key === 'invoiceType' && value === 'special') {
+        next.titleType = 'company';
+      }
+      return next;
+    });
   };
 
   const selectedInvoiceOrders = useMemo(() => {
@@ -1553,9 +1628,14 @@ const TopupHistoryModal = ({
 
   const submitInvoiceRequest = async () => {
     const form = {
+      invoiceType: invoiceForm.invoiceType || 'normal',
       titleType: invoiceForm.titleType,
       title: invoiceForm.title.trim(),
       taxNumber: invoiceForm.taxNumber.trim(),
+      registeredAddress: invoiceForm.registeredAddress.trim(),
+      registeredPhone: invoiceForm.registeredPhone.trim(),
+      bankName: invoiceForm.bankName.trim(),
+      bankAccount: invoiceForm.bankAccount.trim(),
       email: invoiceForm.email.trim(),
       phone: invoiceForm.phone.trim(),
       remark: invoiceForm.remark.trim(),
@@ -1565,7 +1645,17 @@ const TopupHistoryModal = ({
       return;
     }
     if (!form.title) {
-      Toast.error({ content: t('发票抬头不能为空') });
+      Toast.error({
+        content: t(
+          form.invoiceType === 'special'
+            ? '单位名称不能为空'
+            : '发票抬头不能为空',
+        ),
+      });
+      return;
+    }
+    if (form.invoiceType === 'special' && !form.taxNumber) {
+      Toast.error({ content: t('专票需要填写税号') });
       return;
     }
     if (form.titleType === 'company' && !form.taxNumber) {
@@ -1580,9 +1670,14 @@ const TopupHistoryModal = ({
     setInvoiceSubmitting(true);
     try {
       const res = await API.post('/api/user/invoices', {
+        invoice_type: form.invoiceType,
         title_type: form.titleType,
         title: form.title,
         tax_number: form.taxNumber,
+        registered_address: form.registeredAddress,
+        registered_phone: form.registeredPhone,
+        bank_name: form.bankName,
+        bank_account: form.bankAccount,
         email: form.email,
         phone: form.phone,
         remark: form.remark,
@@ -1837,55 +1932,42 @@ const TopupHistoryModal = ({
     setInvoiceDetail(null);
   };
 
-  const writeInvoiceDetailBillWindow = (
+  const openInvoiceDetailBillPdfWindow = async (
     detail,
-    { autoPrint = false, targetWindow = null } = {},
+    { targetWindow = null } = {},
   ) => {
-    const printWindow =
+    const pdfWindow =
       targetWindow || window.open('', '_blank', 'width=960,height=720');
-    if (!printWindow) {
+    if (!pdfWindow) {
       return false;
     }
-    printWindow.opener = null;
-    const stampUrl = `${window.location.origin}/invoice-stamp.png`;
-    printWindow.document.open();
-    printWindow.document.write(buildInvoicePrintHtml(detail, stampUrl));
-    printWindow.document.close();
-    printWindow.focus();
-    if (!autoPrint) {
-      return true;
-    }
-
-    const doPrint = () => {
-      printWindow.print();
-    };
-    const pendingImages = Array.from(printWindow.document.images || []).filter(
-      (image) => !image.complete,
+    pdfWindow.opener = null;
+    pdfWindow.document.open();
+    pdfWindow.document.write(
+      '<!doctype html><meta charset="utf-8"><title>明细账单</title><body style="font:14px sans-serif;padding:24px;">正在生成明细账单 PDF...</body>',
     );
-    if (pendingImages.length > 0) {
-      let remaining = pendingImages.length;
-      const onImageReady = () => {
-        remaining -= 1;
-        if (remaining <= 0) {
-          setTimeout(doPrint, 100);
-        }
-      };
-      pendingImages.forEach((image) => {
-        image.onload = onImageReady;
-        image.onerror = onImageReady;
-      });
-      return true;
-    }
-    setTimeout(doPrint, 200);
+    pdfWindow.document.close();
+    pdfWindow.focus();
+
+    const stampUrl = await loadInvoiceStampDataUrl();
+    const html = buildInvoicePrintHtml(detail, stampUrl);
+    const blob = await buildInvoiceDetailBillPdfBlob(html, stampUrl);
+    const pdfUrl = URL.createObjectURL(blob);
+    pdfWindow.location.replace(pdfUrl);
+    setTimeout(() => URL.revokeObjectURL(pdfUrl), 10 * 60 * 1000);
     return true;
   };
 
-  const printInvoiceDetail = () => {
+  const printInvoiceDetail = async () => {
     if (!invoiceDetail) {
       return;
     }
-    if (!writeInvoiceDetailBillWindow(invoiceDetail, { autoPrint: true })) {
-      Toast.error({ content: t('浏览器阻止了打印窗口') });
+    try {
+      if (!(await openInvoiceDetailBillPdfWindow(invoiceDetail))) {
+        Toast.error({ content: t('浏览器阻止了打印窗口') });
+      }
+    } catch (error) {
+      Toast.error({ content: t('生成明细账单失败') });
     }
   };
 
@@ -1903,7 +1985,7 @@ const TopupHistoryModal = ({
     targetWindow.document.close();
     try {
       const detail = await loadInvoiceDetailData(record);
-      writeInvoiceDetailBillWindow(detail, { targetWindow });
+      await openInvoiceDetailBillPdfWindow(detail, { targetWindow });
     } catch (error) {
       targetWindow.document.open();
       targetWindow.document.write(
@@ -2867,6 +2949,13 @@ const TopupHistoryModal = ({
         render: (_, record) => (
           <div className='flex flex-col gap-1'>
             <Space wrap>
+              <Tag
+                shape='circle'
+                size='small'
+                color={record?.invoice_type === 'special' ? 'red' : 'green'}
+              >
+                {t(getInvoiceTypeLabel(record?.invoice_type))}
+              </Tag>
               <Tag shape='circle' size='small' color='blue'>
                 {t(record?.title_type === 'company' ? '企业' : '个人')}
               </Tag>
@@ -3739,11 +3828,31 @@ const TopupHistoryModal = ({
         >
           <div className='grid gap-3' style={infoGridStyle}>
             {renderInvoiceDetailValue(
+              '发票类型',
+              t(getInvoiceTypeLabel(detail?.invoice_type)),
+            )}
+            {renderInvoiceDetailValue(
               '抬头类型',
               t(detail?.title_type === 'company' ? '企业' : '个人'),
             )}
-            {renderInvoiceDetailValue('抬头名称', detail?.title, true)}
+            {renderInvoiceDetailValue(
+              detail?.invoice_type === 'special' ? '单位名称' : '抬头名称',
+              detail?.title,
+              true,
+            )}
             {renderInvoiceDetailValue('税号', detail?.tax_number, true)}
+            {renderInvoiceDetailValue(
+              '注册地址',
+              detail?.registered_address,
+              true,
+            )}
+            {renderInvoiceDetailValue(
+              '注册电话',
+              detail?.registered_phone,
+              true,
+            )}
+            {renderInvoiceDetailValue('开户银行', detail?.bank_name, true)}
+            {renderInvoiceDetailValue('银行账号', detail?.bank_account, true)}
             {renderInvoiceDetailValue('接收邮箱', detail?.email, true)}
             {renderInvoiceDetailValue('手机号', detail?.phone, true)}
             {renderInvoiceDetailValue('用户备注', detail?.remark)}
@@ -3951,9 +4060,24 @@ const TopupHistoryModal = ({
             }}
           >
             <div>
+              <div className='text-xs mb-1'>{t('发票类型')}</div>
+              <Select
+                value={invoiceForm.invoiceType}
+                optionList={[
+                  { label: t('普票'), value: 'normal' },
+                  { label: t('专票'), value: 'special' },
+                ]}
+                onChange={(value) =>
+                  handleInvoiceFormChange('invoiceType', value)
+                }
+                style={{ width: '100%' }}
+              />
+            </div>
+            <div>
               <div className='text-xs mb-1'>{t('抬头类型')}</div>
               <Select
                 value={invoiceForm.titleType}
+                disabled={invoiceForm.invoiceType === 'special'}
                 optionList={[
                   { label: t('企业'), value: 'company' },
                   { label: t('个人'), value: 'personal' },
@@ -3965,11 +4089,21 @@ const TopupHistoryModal = ({
               />
             </div>
             <div>
-              <div className='text-xs mb-1'>{t('发票抬头')}</div>
+              <div className='text-xs mb-1'>
+                {t(
+                  invoiceForm.invoiceType === 'special'
+                    ? '单位名称'
+                    : '发票抬头',
+                )}
+              </div>
               <Input
                 value={invoiceForm.title}
                 onChange={(value) => handleInvoiceFormChange('title', value)}
-                placeholder={t('请输入发票抬头')}
+                placeholder={t(
+                  invoiceForm.invoiceType === 'special'
+                    ? '请输入单位名称'
+                    : '请输入发票抬头',
+                )}
                 maxLength={128}
                 showClear
               />
@@ -3981,11 +4115,67 @@ const TopupHistoryModal = ({
                 onChange={(value) =>
                   handleInvoiceFormChange('taxNumber', value)
                 }
-                placeholder={t('企业抬头必填')}
+                placeholder={t(
+                  invoiceForm.invoiceType === 'special'
+                    ? '专票必填'
+                    : '企业抬头必填',
+                )}
                 maxLength={64}
                 showClear
               />
             </div>
+            {invoiceForm.invoiceType === 'special' ? (
+              <>
+                <div>
+                  <div className='text-xs mb-1'>{t('注册地址')}</div>
+                  <Input
+                    value={invoiceForm.registeredAddress}
+                    onChange={(value) =>
+                      handleInvoiceFormChange('registeredAddress', value)
+                    }
+                    placeholder={t('可选')}
+                    maxLength={255}
+                    showClear
+                  />
+                </div>
+                <div>
+                  <div className='text-xs mb-1'>{t('注册电话')}</div>
+                  <Input
+                    value={invoiceForm.registeredPhone}
+                    onChange={(value) =>
+                      handleInvoiceFormChange('registeredPhone', value)
+                    }
+                    placeholder={t('可选')}
+                    maxLength={64}
+                    showClear
+                  />
+                </div>
+                <div>
+                  <div className='text-xs mb-1'>{t('开户银行')}</div>
+                  <Input
+                    value={invoiceForm.bankName}
+                    onChange={(value) =>
+                      handleInvoiceFormChange('bankName', value)
+                    }
+                    placeholder={t('可选')}
+                    maxLength={128}
+                    showClear
+                  />
+                </div>
+                <div>
+                  <div className='text-xs mb-1'>{t('银行账号')}</div>
+                  <Input
+                    value={invoiceForm.bankAccount}
+                    onChange={(value) =>
+                      handleInvoiceFormChange('bankAccount', value)
+                    }
+                    placeholder={t('可选')}
+                    maxLength={128}
+                    showClear
+                  />
+                </div>
+              </>
+            ) : null}
             <div>
               <div className='text-xs mb-1'>{t('接收邮箱')}</div>
               <Input

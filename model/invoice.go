@@ -18,6 +18,9 @@ const (
 	InvoiceSendStatusSent    = "sent"
 	InvoiceSendStatusFailed  = "failed"
 
+	InvoiceTypeNormal  = "normal"
+	InvoiceTypeSpecial = "special"
+
 	InvoiceTitleTypePersonal = "personal"
 	InvoiceTitleTypeCompany  = "company"
 )
@@ -31,9 +34,14 @@ var (
 type InvoiceRequest struct {
 	Id                int     `json:"id"`
 	UserId            int     `json:"user_id" gorm:"index;not null"`
+	InvoiceType       string  `json:"invoice_type" gorm:"type:varchar(16);not null;default:'normal'"`
 	TitleType         string  `json:"title_type" gorm:"type:varchar(16);not null;default:'personal'"`
 	Title             string  `json:"title" gorm:"type:varchar(128);not null;default:''"`
 	TaxNumber         string  `json:"tax_number" gorm:"type:varchar(64);not null;default:''"`
+	RegisteredAddress string  `json:"registered_address" gorm:"type:varchar(255);not null;default:''"`
+	RegisteredPhone   string  `json:"registered_phone" gorm:"type:varchar(64);not null;default:''"`
+	BankName          string  `json:"bank_name" gorm:"type:varchar(128);not null;default:''"`
+	BankAccount       string  `json:"bank_account" gorm:"type:varchar(128);not null;default:''"`
 	Email             string  `json:"email" gorm:"type:varchar(128);not null;default:''"`
 	Phone             string  `json:"phone" gorm:"type:varchar(32);not null;default:''"`
 	Remark            string  `json:"remark" gorm:"type:text"`
@@ -81,13 +89,18 @@ type InvoiceOrderRef struct {
 }
 
 type CreateInvoiceRequestInput struct {
-	TitleType string
-	Title     string
-	TaxNumber string
-	Email     string
-	Phone     string
-	Remark    string
-	Orders    []InvoiceOrderRef
+	InvoiceType       string
+	TitleType         string
+	Title             string
+	TaxNumber         string
+	RegisteredAddress string
+	RegisteredPhone   string
+	BankName          string
+	BankAccount       string
+	Email             string
+	Phone             string
+	Remark            string
+	Orders            []InvoiceOrderRef
 }
 
 type InvoiceRequestSearchParams struct {
@@ -171,17 +184,22 @@ func CreateInvoiceRequest(userID int, input CreateInvoiceRequestInput) (*Invoice
 		}
 
 		request = InvoiceRequest{
-			UserId:     userID,
-			TitleType:  input.TitleType,
-			Title:      input.Title,
-			TaxNumber:  input.TaxNumber,
-			Email:      input.Email,
-			Phone:      input.Phone,
-			Remark:     input.Remark,
-			Status:     InvoiceStatusPending,
-			TotalMoney: totalMoney,
-			TotalQuota: totalQuota,
-			CreatedAt:  common.GetTimestamp(),
+			UserId:            userID,
+			InvoiceType:       input.InvoiceType,
+			TitleType:         input.TitleType,
+			Title:             input.Title,
+			TaxNumber:         input.TaxNumber,
+			RegisteredAddress: input.RegisteredAddress,
+			RegisteredPhone:   input.RegisteredPhone,
+			BankName:          input.BankName,
+			BankAccount:       input.BankAccount,
+			Email:             input.Email,
+			Phone:             input.Phone,
+			Remark:            input.Remark,
+			Status:            InvoiceStatusPending,
+			TotalMoney:        totalMoney,
+			TotalQuota:        totalQuota,
+			CreatedAt:         common.GetTimestamp(),
 		}
 		if err := tx.Create(&request).Error; err != nil {
 			return err
@@ -303,9 +321,17 @@ func RejectInvoiceRequest(id int, reviewerUserID int, adminRemark string) (*Invo
 }
 
 func normalizeCreateInvoiceInput(input CreateInvoiceRequestInput) CreateInvoiceRequestInput {
+	input.InvoiceType = normalizeInvoiceType(input.InvoiceType)
 	input.TitleType = normalizeInvoiceTitleType(input.TitleType)
+	if input.InvoiceType == InvoiceTypeSpecial {
+		input.TitleType = InvoiceTitleTypeCompany
+	}
 	input.Title = strings.TrimSpace(input.Title)
 	input.TaxNumber = strings.TrimSpace(input.TaxNumber)
+	input.RegisteredAddress = strings.TrimSpace(input.RegisteredAddress)
+	input.RegisteredPhone = strings.TrimSpace(input.RegisteredPhone)
+	input.BankName = strings.TrimSpace(input.BankName)
+	input.BankAccount = strings.TrimSpace(input.BankAccount)
 	input.Email = strings.TrimSpace(input.Email)
 	input.Phone = strings.TrimSpace(input.Phone)
 	input.Remark = strings.TrimSpace(input.Remark)
@@ -320,16 +346,34 @@ func validateCreateInvoiceInput(input CreateInvoiceRequestInput) error {
 		return errors.New("单次最多选择 100 笔订单")
 	}
 	if input.Title == "" {
+		if input.InvoiceType == InvoiceTypeSpecial {
+			return errors.New("单位名称不能为空")
+		}
 		return errors.New("发票抬头不能为空")
 	}
 	if len([]rune(input.Title)) > 128 {
 		return errors.New("发票抬头不能超过 128 个字符")
+	}
+	if input.InvoiceType == InvoiceTypeSpecial && input.TaxNumber == "" {
+		return errors.New("专票需要填写税号")
 	}
 	if input.TitleType == InvoiceTitleTypeCompany && input.TaxNumber == "" {
 		return errors.New("企业抬头需要填写税号")
 	}
 	if len([]rune(input.TaxNumber)) > 64 {
 		return errors.New("税号不能超过 64 个字符")
+	}
+	if len([]rune(input.RegisteredAddress)) > 255 {
+		return errors.New("注册地址不能超过 255 个字符")
+	}
+	if len([]rune(input.RegisteredPhone)) > 64 {
+		return errors.New("注册电话不能超过 64 个字符")
+	}
+	if len([]rune(input.BankName)) > 128 {
+		return errors.New("开户银行不能超过 128 个字符")
+	}
+	if len([]rune(input.BankAccount)) > 128 {
+		return errors.New("银行账号不能超过 128 个字符")
 	}
 	if input.Email == "" {
 		return errors.New("接收邮箱不能为空")
@@ -344,6 +388,15 @@ func validateCreateInvoiceInput(input CreateInvoiceRequestInput) error {
 		return errors.New("备注不能超过 1000 个字符")
 	}
 	return nil
+}
+
+func normalizeInvoiceType(invoiceType string) string {
+	switch strings.ToLower(strings.TrimSpace(invoiceType)) {
+	case InvoiceTypeSpecial:
+		return InvoiceTypeSpecial
+	default:
+		return InvoiceTypeNormal
+	}
 }
 
 func normalizeInvoiceTitleType(titleType string) string {
