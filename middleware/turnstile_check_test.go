@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRegisterTurnstileCheckSkipsWhenEmailVerificationEnabled(t *testing.T) {
+func TestRegisterTurnstileCheckRequiresTokenWithEmailVerification(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	originTurnstileCheckEnabled := common.TurnstileCheckEnabled
@@ -32,7 +32,7 @@ func TestRegisterTurnstileCheckSkipsWhenEmailVerificationEnabled(t *testing.T) {
 	router.ServeHTTP(recorder, req)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
-	require.JSONEq(t, `{"success":true}`, recorder.Body.String())
+	require.JSONEq(t, `{"success":false,"message":"Turnstile token 为空"}`, recorder.Body.String())
 }
 
 func TestRegisterTurnstileCheckRequiresTokenWithoutEmailVerification(t *testing.T) {
