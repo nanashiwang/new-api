@@ -70,13 +70,14 @@
 
 | 使用场景 | 操作入口 | 说明 |
 |----------|----------|------|
+| 快速开始 | [5 分钟快速开始](./docs/NAN_USAGE.md#1-5-分钟快速开始) | 注册、创建令牌、跑通第一条 API 请求 |
 | 注册与登录 | 首页 / 注册页 | 支持邮箱验证码、邀请链接绑定与 Turnstile 人机校验 |
 | 创建 API 令牌 | 控制台 -> 令牌管理 | 创建后复制令牌，用于接口请求的 `Authorization: Bearer <token>` |
 | 调用接口 | 控制台首页 -> API 信息 | 以页面展示的 API 地址为准，兼容 OpenAI 常用接口格式 |
 | 客户端接入 | [客户端配置教程](./docs/NAN_CLIENTS.md) | Codex、Claude Code、Gemini、OpenCode、OpenClaw、CC Switch |
 | 充值与订阅 | 控制台 -> 钱包管理 | 可充值余额、购买订阅套餐，并查看账单记录 |
 | 明细账单 / 发票 | 钱包管理 -> 账单 | 可选择已支付订单提交申请，管理员审核后发送附件 |
-| 使用排查 | 令牌管理 / 使用日志 | 先测试令牌，再查看模型、分组、余额和调用日志 |
+| 使用排查 | [常见报错排查](./docs/NAN_TROUBLESHOOTING.md) | 按错误文本排查注册、认证、模型、客户端、网络问题 |
 
 ---
 
@@ -186,11 +187,16 @@ docker run --name new-api -d --restart always \
 
 | 分类 | 链接 |
 |------|------|
+| 🚀 5 分钟快速开始 | [注册、建令牌、跑通第一条请求](./docs/NAN_USAGE.md#1-5-分钟快速开始) |
 | 🌐 平台教程 | [NAN 平台使用教程](./docs/NAN_USAGE.md) |
 | 🔌 客户端接入 | [Codex / Claude Code / Gemini / OpenCode / OpenClaw / CC Switch](./docs/NAN_CLIENTS.md) |
-| 🧾 账单与发票 | [明细账单与发票申请](./docs/NAN_USAGE.md#5-明细账单与发票申请) |
-| 🧪 调用排查 | [日志与排查清单](./docs/NAN_USAGE.md#6-查看调用日志) |
-| ⚙️ 管理员操作 | [管理员常用操作](./docs/NAN_USAGE.md#7-管理员常用操作) |
+| 🧭 客户端选择 | [我该选哪个客户端](./docs/NAN_CLIENTS.md#1-我该选哪个客户端) |
+| ⚡ 配置速查 | [Base URL / Key / 分组速查表](./docs/NAN_CLIENTS.md#2-一页配置速查) |
+| 🧾 账单与发票 | [明细账单与发票申请](./docs/NAN_USAGE.md#6-明细账单与发票申请) |
+| 🧪 常见报错排查 | [按错误文本快速定位问题](./docs/NAN_TROUBLESHOOTING.md) |
+| 💰 费用与扣费 | [余额、订阅、倍率、使用日志说明](./docs/NAN_USAGE.md#8-费用与扣费说明) |
+| 🔐 安全提醒 | [API Key 与本地网关安全](./docs/NAN_USAGE.md#9-安全提醒) |
+| ⚙️ 管理员操作 | [管理员常用操作](./docs/NAN_USAGE.md#10-管理员常用操作) |
 
 **上游项目文档：**
 
@@ -457,8 +463,10 @@ docker run --name new-api -d --restart always \
 
 | 资源 | 链接 |
 |------|------|
+| 🚀 快速开始 | [5 分钟快速开始](./docs/NAN_USAGE.md#1-5-分钟快速开始) |
 | 🌐 平台教程 | [NAN 平台使用教程](./docs/NAN_USAGE.md) |
 | 🔌 客户端接入 | [客户端配置教程](./docs/NAN_CLIENTS.md) |
+| 🧪 常见报错排查 | [NAN 常见报错排查](./docs/NAN_TROUBLESHOOTING.md) |
 | 📘 上游 FAQ | [FAQ](https://docs.newapi.pro/zh/docs/support/faq) |
 | 💬 上游社区 | [交流渠道](https://docs.newapi.pro/zh/docs/support/community-interaction) |
 | 🐛 上游反馈 | [问题反馈](https://docs.newapi.pro/zh/docs/support/feedback-issues) |

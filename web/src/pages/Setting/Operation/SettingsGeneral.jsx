@@ -156,7 +156,9 @@ export default function GeneralSettings(props) {
       currentInputs['general_setting.custom_currency_exchange_rate'] =
         props.options['general_setting.custom_currency_exchange_rate'];
     }
-    if (props.options['general_setting.payment_currency_symbol'] !== undefined) {
+    if (
+      props.options['general_setting.payment_currency_symbol'] !== undefined
+    ) {
       currentInputs['general_setting.payment_currency_symbol'] =
         props.options['general_setting.payment_currency_symbol'];
     }
@@ -190,7 +192,7 @@ export default function GeneralSettings(props) {
                   field={'general_setting.docs_link'}
                   label={t('文档地址')}
                   initValue={''}
-                  placeholder={t('例如 https://docs.newapi.pro')}
+                  placeholder={t('例如 /docs 或 https://docs.newapi.pro')}
                   onChange={handleFieldChange('general_setting.docs_link')}
                   showClear
                 />
@@ -311,7 +313,9 @@ export default function GeneralSettings(props) {
                   field={'token_setting.max_user_tokens'}
                   step={1}
                   min={1}
-                  extraText={t('每个用户最多可创建的令牌数量，默认 1000，设置过大可能会影响性能')}
+                  extraText={t(
+                    '每个用户最多可创建的令牌数量，默认 1000，设置过大可能会影响性能',
+                  )}
                   placeholder={'1000'}
                   onChange={handleFieldChange('token_setting.max_user_tokens')}
                 />

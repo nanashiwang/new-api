@@ -17,13 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, {
-  lazy,
-  Suspense,
-  useContext,
-  useEffect,
-  useState,
-} from 'react';
+import React, { lazy, Suspense, useContext, useEffect, useState } from 'react';
 import { API } from '../../helpers/apiCore';
 import { copy } from '../../helpers/clipboard';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
@@ -32,7 +26,7 @@ import { StatusContext } from '../../context/Status';
 import { useActualTheme } from '../../context/Theme';
 import { usePublicTranslation } from '../../helpers/publicLocale';
 import { Github, Play, FileText, Copy } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 const PublicNoticeModal = lazy(
   () => import('../../components/layout/PublicNoticeModal'),
@@ -60,6 +54,7 @@ const providerBadges = [
 
 const Home = () => {
   const { t, language, isChinese } = usePublicTranslation();
+  const navigate = useNavigate();
   const [statusState] = useContext(StatusContext);
   const actualTheme = useActualTheme();
   const [homePageContent, setHomePageContent] = useState(
@@ -127,6 +122,15 @@ const Home = () => {
 
   const handleCopyBaseURL = async () => {
     await copy(serverAddress);
+  };
+
+  const handleOpenDocs = () => {
+    if (!docsLink) return;
+    if (docsLink.startsWith('/')) {
+      navigate(docsLink);
+      return;
+    }
+    window.open(docsLink, '_blank', 'noopener,noreferrer');
   };
 
   useEffect(() => {
@@ -269,7 +273,7 @@ const Home = () => {
                       <button
                         type='button'
                         className='home-action-button home-action-secondary'
-                        onClick={() => window.open(docsLink, '_blank')}
+                        onClick={handleOpenDocs}
                       >
                         <FileText size={isMobile ? 16 : 18} />
                         {t('文档')}

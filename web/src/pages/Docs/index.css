@@ -1,0 +1,122 @@
+.nan-docs-page {
+  min-height: calc(100vh - 64px);
+  padding: 88px 24px 40px;
+  background: radial-gradient(
+      circle at top left,
+      rgba(46, 118, 255, 0.12),
+      transparent 28rem
+    ),
+    linear-gradient(180deg, var(--semi-color-bg-0), var(--semi-color-bg-1));
+}
+
+.nan-docs-hero {
+  max-width: 1200px;
+  margin: 0 auto 20px;
+  padding: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--semi-color-border);
+  border-radius: 20px;
+  background: var(--semi-color-bg-0);
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.08);
+}
+
+.nan-docs-eyebrow {
+  display: inline-block;
+  margin-bottom: 8px;
+  color: var(--semi-color-primary);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.nan-docs-title {
+  margin: 0 0 8px !important;
+}
+
+.nan-docs-layout {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.nan-docs-sidebar {
+  position: sticky;
+  top: 88px;
+  padding: 14px;
+  border: 1px solid var(--semi-color-border);
+  border-radius: 18px;
+  background: var(--semi-color-bg-0);
+}
+
+.nan-docs-nav-button {
+  justify-content: flex-start !important;
+  text-align: left;
+}
+
+.nan-docs-content {
+  min-width: 0;
+}
+
+.nan-docs-card {
+  border-radius: 18px !important;
+  overflow: hidden;
+}
+
+.nan-docs-card-header {
+  margin-bottom: 18px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--semi-color-border);
+}
+
+.nan-docs-card .semi-card-body {
+  padding: 28px;
+}
+
+.nan-docs-card .markdown-body table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+}
+
+.nan-docs-card .markdown-body pre {
+  overflow-x: auto;
+}
+
+@media (max-width: 900px) {
+  .nan-docs-page {
+    padding: 76px 12px 28px;
+  }
+
+  .nan-docs-hero {
+    padding: 18px;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .nan-docs-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .nan-docs-sidebar {
+    position: static;
+  }
+
+  .nan-docs-sidebar .semi-space {
+    flex-direction: row !important;
+    flex-wrap: wrap;
+  }
+
+  .nan-docs-nav-button {
+    width: auto !important;
+  }
+
+  .nan-docs-card .semi-card-body {
+    padding: 18px;
+  }
+}

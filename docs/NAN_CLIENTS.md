@@ -2,7 +2,108 @@
 
 > 本文已经把现有飞书教程整理为仓库内正文。底层开源项目仍基于 New API，项目归属、许可证、官方文档与上游链接保持不变。
 
-## 1. 平台侧准备
+
+## 快速导航
+
+| 模块 | 适合场景 |
+|------|----------|
+| [我该选哪个客户端](#1-我该选哪个客户端) | 不知道 Codex、Claude Code、Gemini、OpenCode、OpenClaw 怎么选 |
+| [一页配置速查](#2-一页配置速查) | 只想确认 Base URL、环境变量、分组 |
+| [平台侧准备](#3-平台侧准备) | 创建令牌、选择分组、测试 key |
+| [Node.js 与基础环境](#4-nodejs-与基础环境) | 安装 CLI 前的基础环境 |
+| [Codex CLI 配置](#5-codex-cli-配置) | Codex 接入平台 Responses |
+| [Claude Code 使用 Claude 模型](#6-claude-code-使用-claude-模型) | Claude Code 调 Claude 模型 |
+| [Claude Code 使用 OpenAI / Codex 模型](#7-claude-code-使用-openai--codex-模型) | Claude Code 调 OpenAI / Codex 模型 |
+| [Gemini CLI 配置](#8-gemini-cli-配置) | Gemini CLI 接入平台 |
+| [OpenCode 配置](#9-opencode-配置) | OpenCode 接入平台 |
+| [OpenClaw 配置](#10-openclaw-配置) | OpenClaw WebChat / CLI / 本地网关 |
+| [CC Switch 一键导入](#11-cc-switch-一键导入) | 用 CC Switch 统一管理客户端配置 |
+| [平台聊天快捷方式配置](#12-平台聊天快捷方式配置) | 管理员配置聊天入口和 Deep Link |
+| [排查清单](#13-排查清单) | 客户端常见错误快速定位 |
+| [完整报错排查](./NAN_TROUBLESHOOTING.md) | 按错误文本查原因和处理 |
+
+## 1. 我该选哪个客户端
+
+如果你是新手，先按使用目标选择，不要一开始就配置全部工具。
+
+| 目标 | 推荐客户端 | 适合人群 | 备注 |
+|------|------------|----------|------|
+| 在终端里用 Codex 写代码 | Codex CLI | 代码开发、命令行用户 | 推荐优先配置，Base URL 带 `/v1` |
+| 想用 Claude Code 的交互体验 | Claude Code | 习惯 Claude Code 的用户 | 调 Claude 模型选 `claude` 分组 |
+| 想在 Claude Code 里用 OpenAI / Codex 模型 | Claude Code(OpenAI) | 想复用 Claude Code 客户端 | 分组不要选 `claude` |
+| 使用 Gemini CLI | Gemini CLI | Gemini 模型用户 | 令牌分组选 `gemini` |
+| 想用 OpenCode | OpenCode | OpenCode 用户 | 使用 `CRS_OAI_KEY` |
+| 想要本地 WebChat / 多 Provider | OpenClaw | 有一定本地环境经验的用户 | 会启动本地网关，注意安全 |
+| 想统一管理多个 CLI 配置 | CC Switch | 多客户端用户 | 可从令牌管理一键导入 |
+
+建议路径：
+
+1. 第一次使用：先跑通 [Codex CLI](#5-codex-cli-配置) 或 [Claude Code](#6-claude-code-使用-claude-模型)。
+2. 多客户端用户：再配置 [CC Switch](#11-cc-switch-一键导入)。
+3. 需要 WebChat 或混合 Provider：最后再配置 [OpenClaw](#10-openclaw-配置)。
+
+## 2. 一页配置速查
+
+### 2.1 客户端配置总表
+
+| 客户端 | Base URL | 是否带 `/v1` | Key 变量 | 推荐分组 | 常用模型示例 |
+|--------|----------|--------------|----------|----------|--------------|
+| Codex CLI | `https://cn.meta-api.vip/v1` | 是 | `NAN_API_KEY` | `default` / `vip` / `svip` | `gpt-5.3-codex` |
+| Claude Code 调 Claude | `https://cn.meta-api.vip` | 否 | `ANTHROPIC_AUTH_TOKEN` | `claude` | `claude-sonnet-4-5-20250929` |
+| Claude Code 调 OpenAI / Codex | `https://cn.meta-api.vip` | 否 | `ANTHROPIC_AUTH_TOKEN` | 非 `claude` 的可用分组 | `gpt-5.3-codex` |
+| Gemini CLI | `https://cn.meta-api.vip` | 否 | `GEMINI_API_KEY` | `gemini` | `gemini-3.1-pro-preview` |
+| OpenCode | `https://cn.meta-api.vip/v1` | 是 | `CRS_OAI_KEY` | `default` / `vip` / `svip` | `gpt-5.3-codex` |
+| OpenClaw Codex | `https://cn.meta-api.vip/v1` | 是 | 明文或 `OPI_AUTH_TOKEN` | `default` / `vip` / `svip` | `gpt-5.3-codex` |
+| OpenClaw Claude | `https://cn.meta-api.vip` | 否 | 明文或 `OPI_AUTH_TOKEN` | `claude` | `claude-opus-4-6` |
+| CC Switch | 自动生成 | Codex 默认带 `/v1` | 当前令牌 key | 看目标客户端 | 导入后在客户端内确认 |
+
+### 2.2 最小环境变量复制版
+
+Codex：
+
+```bash
+export NAN_API_KEY="你的API密钥"
+```
+
+Claude Code：
+
+```bash
+export ANTHROPIC_BASE_URL="https://cn.meta-api.vip"
+export ANTHROPIC_AUTH_TOKEN="你的API密钥"
+```
+
+Gemini：
+
+```bash
+export GOOGLE_GEMINI_BASE_URL="https://cn.meta-api.vip"
+export GEMINI_API_KEY="你的API密钥"
+export GEMINI_MODEL="gemini-3.1-pro-preview"
+```
+
+OpenCode：
+
+```bash
+export CRS_OAI_KEY="你的API密钥"
+```
+
+OpenClaw：
+
+```bash
+export OPI_AUTH_TOKEN="你的API密钥"
+```
+
+### 2.3 最容易填错的地方
+
+| 易错点 | 正确做法 |
+|--------|----------|
+| Claude Code 的 Base URL 写成 `/v1` | 不带 `/v1`，填 `https://cn.meta-api.vip` |
+| Codex 的 Base URL 没写 `/v1` | 要带 `/v1`，填 `https://cn.meta-api.vip/v1` |
+| Gemini 分组选错 | Gemini CLI 应选 `gemini` 分组 |
+| Claude 模型分组选错 | Claude 模型应选 `claude` 分组 |
+| OpenAI / Codex 模型选了 `claude` 分组 | 不要选 `claude`，选能访问目标模型的分组 |
+| 环境变量设置后仍不生效 | 重启终端、VSCode、IDE 或对应 CLI |
+
+## 3. 平台侧准备
 
 所有客户端接入前，都先完成这几步：
 
@@ -34,7 +135,7 @@ Base URL 边界：
 
 如果控制台首页 `API 信息` 里有多条线路，以页面展示线路为准。
 
-## 2. Node.js 与基础环境
+## 4. Node.js 与基础环境
 
 这些 CLI 基本都依赖 Node.js。先安装 Node.js LTS 版本：
 
@@ -53,15 +154,15 @@ npm --version
 https://git-scm.cn/
 ```
 
-## 3. Codex CLI 配置
+## 5. Codex CLI 配置
 
-### 3.1 安装
+### 5.1 安装
 
 ```bash
 npm install -g @openai/codex
 ```
 
-### 3.2 设置 API 密钥
+### 5.2 设置 API 密钥
 
 macOS / Linux zsh：
 
@@ -83,7 +184,7 @@ Windows cmd：
 setx NAN_API_KEY "你的API密钥"
 ```
 
-### 3.3 手动配置
+### 5.3 手动配置
 
 在 `~/.codex/config.toml` 文件开头添加：
 
@@ -102,7 +203,7 @@ requires_openai_auth = true
 env_key = "NAN_API_KEY"
 ```
 
-### 3.4 使用 `npx zcf` 一键配置
+### 5.4 使用 `npx zcf` 一键配置
 
 也可以用 `npx zcf` 走菜单配置：
 
@@ -121,18 +222,18 @@ npx zcf
 7. Key 填写平台生成的 API 密钥。
 8. 配置完成后设为默认供应商并退出。
 
-### 3.5 验证
+### 5.5 验证
 
 ```bash
 codex --version
 codex
 ```
 
-## 4. Claude Code 使用 Claude 模型
+## 6. Claude Code 使用 Claude 模型
 
 这种模式用于 Claude Code 调 Claude 模型，令牌分组应选择 `claude`。
 
-### 4.1 安装
+### 6.1 安装
 
 ```bash
 npm install -g @anthropic-ai/claude-code
@@ -140,7 +241,7 @@ npm install -g @anthropic-ai/claude-code
 
 Linux / macOS 如遇权限问题，可在命令前加 `sudo`。
 
-### 4.2 配置环境变量
+### 6.2 配置环境变量
 
 Claude Code 需要两个变量：
 
@@ -181,7 +282,7 @@ Windows PowerShell 永久设置：
 
 永久设置后，需要重新打开 PowerShell 窗口。
 
-### 4.3 验证环境变量
+### 6.3 验证环境变量
 
 macOS / Linux：
 
@@ -197,7 +298,7 @@ echo $env:ANTHROPIC_BASE_URL
 echo $env:ANTHROPIC_AUTH_TOKEN
 ```
 
-### 4.4 可选：指定默认 Claude 模型
+### 6.4 可选：指定默认 Claude 模型
 
 在 `~/.claude/settings.json` 中添加或替换：
 
@@ -209,7 +310,7 @@ echo $env:ANTHROPIC_AUTH_TOKEN
 }
 ```
 
-### 4.5 使用
+### 6.5 使用
 
 先进入项目目录，再启动 Claude Code：
 
@@ -233,7 +334,7 @@ claude --version
 
 可选安装 VSCode / IDEA 插件，用于图形化查看代码差异。如果 VSCode 一直读取旧配置，彻底退出 VSCode 进程后再打开。
 
-## 5. Claude Code 使用 OpenAI / Codex 模型
+## 7. Claude Code 使用 OpenAI / Codex 模型
 
 这种模式仍使用 Claude Code 客户端，但实际模型走平台上的 OpenAI / Codex 模型。
 
@@ -266,9 +367,9 @@ export ANTHROPIC_AUTH_TOKEN="你的API密钥"
 claude
 ```
 
-## 6. Gemini CLI 配置
+## 8. Gemini CLI 配置
 
-### 6.1 安装
+### 8.1 安装
 
 ```bash
 npm install -g @google/gemini-cli
@@ -276,7 +377,7 @@ npm install -g @google/gemini-cli
 
 Linux / macOS 如遇权限问题，可在命令前加 `sudo`。
 
-### 6.2 配置环境变量
+### 8.2 配置环境变量
 
 Gemini CLI 需要：
 
@@ -320,7 +421,7 @@ Windows PowerShell 永久设置：
 [System.Environment]::SetEnvironmentVariable("GEMINI_MODEL", "gemini-3.1-pro-preview", [System.EnvironmentVariableTarget]::User)
 ```
 
-### 6.3 验证和使用
+### 8.3 验证和使用
 
 macOS / Linux：
 
@@ -352,9 +453,9 @@ gemini --version
 
 也可以在 Gemini CLI 中通过 `/model` 切换模型。
 
-## 7. OpenCode 配置
+## 9. OpenCode 配置
 
-### 7.1 安装
+### 9.1 安装
 
 ```bash
 npm install -g opencode-ai
@@ -368,7 +469,7 @@ sudo npm install -g opencode-ai
 
 Windows 如遇权限问题，以管理员身份运行 PowerShell。
 
-### 7.2 配置 API 密钥
+### 9.2 配置 API 密钥
 
 macOS / Linux zsh：
 
@@ -390,7 +491,7 @@ Windows 当前会话：
 set CRS_OAI_KEY=你的API密钥
 ```
 
-### 7.3 配置 OpenCode 模型
+### 9.3 配置 OpenCode 模型
 
 在 OpenCode 配置文件中配置 Codex 模型：
 
@@ -424,18 +525,18 @@ set CRS_OAI_KEY=你的API密钥
 }
 ```
 
-### 7.4 验证和启动
+### 9.4 验证和启动
 
 ```bash
 opencode --version
 opencode
 ```
 
-## 8. OpenClaw 配置
+## 10. OpenClaw 配置
 
 OpenClaw 有本地网关和 WebChat，存在本地服务暴露风险。使用前确认你知道本机端口、代理软件和防火墙配置，不要把本地服务暴露到不可信网络。
 
-### 8.1 安装前准备
+### 10.1 安装前准备
 
 确认 Node.js：
 
@@ -450,7 +551,7 @@ npm --version
 https://git-scm.cn/
 ```
 
-### 8.2 安装 OpenClaw
+### 10.2 安装 OpenClaw
 
 NPM 安装：
 
@@ -471,7 +572,7 @@ openclaw onboard
 3. 如果之前安装过，看到 restart / skip / reinstall 时，旧配置没问题就 restart 或 skip，不放心就 reinstall。
 4. 如需复杂多模型配置，不要直接整体覆盖原 `openclaw.json`，只替换不同字段。
 
-### 8.3 设置 `OPI_AUTH_TOKEN`
+### 10.3 设置 `OPI_AUTH_TOKEN`
 
 Windows PowerShell 永久设置：
 
@@ -500,7 +601,7 @@ echo 'export OPI_AUTH_TOKEN="你的API密钥"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
-### 8.4 配置文件位置
+### 10.4 配置文件位置
 
 常见位置：
 
@@ -510,7 +611,7 @@ source ~/.bashrc
 | macOS | `~/.openclaw/openclaw.json` |
 | Linux | `/home/你的用户名/.openclaw/openclaw.json` |
 
-### 8.5 单独配置 Codex / OpenAI Responses
+### 10.5 单独配置 Codex / OpenAI Responses
 
 ```json
 {
@@ -549,7 +650,7 @@ source ~/.bashrc
 }
 ```
 
-### 8.6 单独配置 Claude / Opus
+### 10.6 单独配置 Claude / Opus
 
 ```json
 {
@@ -585,7 +686,7 @@ source ~/.bashrc
 }
 ```
 
-### 8.7 同时配置 Codex 和 Opus
+### 10.7 同时配置 Codex 和 Opus
 
 ```json
 {
@@ -650,7 +751,7 @@ source ~/.bashrc
 | `models[].input` | 模型支持的输入类型，例如 `text`、`image` |
 | `cost` | OpenClaw 内部成本统计显示，不影响真实请求计费 |
 
-### 8.8 启动和使用
+### 10.8 启动和使用
 
 前台运行本地网关：
 
@@ -686,7 +787,7 @@ openclaw tui
 | WebChat | `openclaw dashboard --no-open` | 打开浏览器页面使用 |
 | CLI | `openclaw tui` | 在终端聊天 |
 
-### 8.9 OpenClaw 常见问题
+### 10.9 OpenClaw 常见问题
 
 | 问题 | 处理方式 |
 |------|----------|
@@ -697,7 +798,7 @@ openclaw tui
 | 权限不足 | Windows 用管理员 PowerShell；macOS / Linux 检查 npm 全局目录权限 |
 | 配置脚本失败 | 手动编辑 `openclaw.json`，不要覆盖已有多模型配置 |
 
-## 9. CC Switch 一键导入
+## 11. CC Switch 一键导入
 
 CC Switch 用于统一管理 Claude Code、Codex、Gemini CLI、OpenCode、OpenClaw 等工具的 Provider 配置。平台的令牌管理页可以通过 `ccswitch://` Deep Link 把当前令牌一键导入 CC Switch。
 
@@ -706,7 +807,7 @@ CC Switch 用于统一管理 Claude Code、Codex、Gemini CLI、OpenCode、OpenC
 - 官方网站：https://ccswitch.ai/
 - GitHub：https://github.com/farion1231/cc-switch
 
-### 9.1 管理员配置
+### 11.1 管理员配置
 
 进入 `系统设置 -> 聊天设置`，添加：
 
@@ -726,7 +827,7 @@ CC Switch 用于统一管理 Claude Code、Codex、Gemini CLI、OpenCode、OpenC
 ccswitch://v1/import?resource=provider&app=codex&name=<令牌名称>&endpoint=https%3A%2F%2Fcn.meta-api.vip%2Fv1&apiKey=<API密钥>&homepage=https%3A%2F%2Fcn.meta-api.vip&enabled=true
 ```
 
-### 9.2 使用边界
+### 11.2 使用边界
 
 | 场景 | 建议 |
 |------|------|
@@ -743,11 +844,11 @@ ccswitch://v1/import?resource=provider&app=codex&name=<令牌名称>&endpoint=ht
 
 修改 Provider 后，通常需要重启终端或重新启动对应 CLI。
 
-## 10. 平台聊天快捷方式配置
+## 12. 平台聊天快捷方式配置
 
 配置入口：`系统设置 -> 聊天设置`。
 
-### 10.1 数据格式
+### 12.1 数据格式
 
 ```json
 [
@@ -757,7 +858,7 @@ ccswitch://v1/import?resource=provider&app=codex&name=<令牌名称>&endpoint=ht
 ]
 ```
 
-### 10.2 支持的占位符
+### 12.2 支持的占位符
 
 | 占位符 | 替换内容 | 用途 |
 |--------|----------|------|
@@ -768,7 +869,7 @@ ccswitch://v1/import?resource=provider&app=codex&name=<令牌名称>&endpoint=ht
 | `{deepchatConfig}` | Base64 后的 DeepChat 配置 | DeepChat 一键导入 |
 | `ccswitch` | 触发 CC Switch Deep Link | CC Switch 一键导入 |
 
-### 10.3 普通 Web Chat 示例
+### 12.3 普通 Web Chat 示例
 
 ```json
 [
@@ -780,7 +881,7 @@ ccswitch://v1/import?resource=provider&app=codex&name=<令牌名称>&endpoint=ht
 
 普通 URL 会出现在左侧 `聊天` 区域，并通过 iframe 打开。
 
-### 10.4 客户端一键导入示例
+### 12.4 客户端一键导入示例
 
 ```json
 [
@@ -792,14 +893,14 @@ ccswitch://v1/import?resource=provider&app=codex&name=<令牌名称>&endpoint=ht
 
 `ccswitch`、`fluent`、`aionui`、`deepchat` 这类客户端集成不适合 iframe，会出现在令牌管理的 `聊天` 下拉菜单中。
 
-### 10.5 安全边界
+### 12.5 安全边界
 
 - 不要把带 `{key}` 的链接配置给不可信第三方页面。
 - iframe 聊天页适合 Web Chat，不适合本地客户端协议。
 - Deep Link 只负责导入配置，不保证目标客户端一定已安装。
 - `{address}` 不带 `/v1`，如客户端要求 `/v1`，需要在 URL 模板里自己拼上。
 
-## 11. 排查清单
+## 13. 排查清单
 
 | 问题 | 优先检查 |
 |------|----------|
@@ -812,7 +913,7 @@ ccswitch://v1/import?resource=provider&app=codex&name=<令牌名称>&endpoint=ht
 | OpenClaw 不通 | `openclaw status`、`openclaw logs --follow`，检查 gateway 是否 reachable |
 | CC Switch 没有弹起 | 本机是否安装 CC Switch，浏览器是否允许打开 `ccswitch://` 协议 |
 
-## 12. 原始飞书链接备查
+## 14. 原始飞书链接备查
 
 正文已经整理在本文中，下面链接仅用于后续核对原始截图或历史教程：
 

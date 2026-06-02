@@ -58,6 +58,7 @@ const Playground = lazy(() => import('./pages/Playground'));
 const ImagePlayground = lazy(() => import('./pages/ImagePlayground'));
 const Subscription = lazy(() => import('./pages/Subscription'));
 const Usage = lazy(() => import('./pages/Usage'));
+const Docs = lazy(() => import('./pages/Docs'));
 const UserAgreement = lazy(() => import('./pages/UserAgreement'));
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 const PersonalSetting = lazy(
@@ -102,7 +103,9 @@ function App() {
   const [statusState] = useContext(StatusContext);
 
   useEffect(() => {
-    const canonicalPath = getCanonicalPathFromFullwidthQuestion(window.location);
+    const canonicalPath = getCanonicalPathFromFullwidthQuestion(
+      window.location,
+    );
     if (canonicalPath) {
       window.location.replace(canonicalPath);
     }
@@ -420,6 +423,14 @@ function App() {
           element={
             <Suspense fallback={<Loading></Loading>} key={location.pathname}>
               <Usage />
+            </Suspense>
+          }
+        />
+        <Route
+          path='/docs/:section?'
+          element={
+            <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+              <Docs />
             </Suspense>
           }
         />
