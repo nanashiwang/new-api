@@ -20,7 +20,6 @@ tiktoken_cache
 .gomodcache/
 .cache
 web/bun.lock
-web/apps/image-playground/bun.lock
 plans
 .claude
 

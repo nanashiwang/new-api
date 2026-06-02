@@ -29,6 +29,15 @@ jobs:
           echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
           echo "SHORT_SHA=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
 
+      - name: Pull BuildKit image with retry
+        shell: bash
+        run: |
+          for i in 1 2 3; do
+            docker pull moby/buildkit:buildx-stable-1 && exit 0
+            sleep $((i * 10))
+          done
+          docker pull moby/buildkit:buildx-stable-1
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 

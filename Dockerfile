@@ -12,7 +12,7 @@ ENV PUPPETEER_SKIP_DOWNLOAD=true \
 WORKDIR /build
 COPY web/package.json .
 COPY web/bun.lock .
-RUN bun install
+RUN bun install --frozen-lockfile
 COPY ./web .
 COPY ./VERSION .
 RUN DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION=$(cat VERSION) bun run build
