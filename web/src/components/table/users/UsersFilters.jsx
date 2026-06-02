@@ -108,14 +108,6 @@ const UsersFilters = ({
     ],
     [t],
   );
-  const hasSellableTokenOptions = useMemo(
-    () => [
-      { label: t('令牌情况：全部'), value: '' },
-      { label: t('令牌情况：有'), value: 'true' },
-      { label: t('令牌情况：无'), value: 'false' },
-    ],
-    [t],
-  );
   // 两种排序可同时生效（例如 ID 降序 + 钱包额度升序）。
   // ID 与钱包额度排序使用独立文案，避免 "asc/desc" 歧义。
   const idSortDirectionOptions = useMemo(
@@ -372,19 +364,6 @@ const UsersFilters = ({
                 }
                 optionList={hasActiveSubscriptionOptions}
                 placeholder={t('套餐筛选')}
-                showClear
-              />
-              <Select
-                value={draftAdvancedFilters.searchHasSellableToken}
-                onChange={(value) =>
-                  setDraftAdvancedFilters((prev) => ({
-                    ...prev,
-                    searchHasSellableToken:
-                      value === null || value === undefined ? '' : value,
-                  }))
-                }
-                optionList={hasSellableTokenOptions}
-                placeholder={t('令牌情况筛选')}
                 showClear
               />
               <InputNumber

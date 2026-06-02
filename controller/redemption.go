@@ -251,21 +251,7 @@ func validateRedemptionPayload(redemption *model.Redemption) error {
 	}
 
 	if benefitType == model.RedemptionBenefitTypeSellableToken {
-		if redemption.SellableTokenProductId <= 0 {
-			return errors.New("可售令牌兑换码必须选择有效商品")
-		}
-		product, err := model.GetSellableTokenProductById(redemption.SellableTokenProductId)
-		if err != nil {
-			return err
-		}
-		if err := model.ValidateSellableTokenProductAvailability(product); err != nil {
-			return err
-		}
-		redemption.Quota = 0
-		redemption.PlanId = 0
-		redemption.SubscriptionPurchaseMode = model.SubscriptionPurchaseModeStack
-		redemption.SubscriptionPurchaseQuantity = 1
-		return nil
+		return errors.New("可售令牌兑换码功能已下线")
 	}
 
 	// 余额码沿用旧逻辑，统一清空套餐相关字段，避免脏数据落库。

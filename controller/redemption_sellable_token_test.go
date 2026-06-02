@@ -25,32 +25,31 @@ func setupRedemptionControllerTestDB(t *testing.T) {
 	model.LOG_DB = db
 	common.RedisEnabled = false
 
-	require.NoError(t, db.AutoMigrate(&model.Redemption{}, &model.SellableTokenProduct{}))
+	require.NoError(t, db.AutoMigrate(&model.Redemption{}))
 }
 
-func createControllerSellableTokenProduct(t *testing.T, name string) *model.SellableTokenProduct {
+func requireSellableRedemptionDisabled(t *testing.T, recorder *httptest.ResponseRecorder) {
 	t.Helper()
-	product := &model.SellableTokenProduct{
-		Name:       name,
-		Status:     model.SellableTokenProductStatusEnabled,
-		PriceQuota: 0,
-		TotalQuota: 1000,
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var body struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
 	}
-	require.NoError(t, model.CreateSellableTokenProduct(product))
-	return product
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &body))
+	require.False(t, body.Success)
+	require.Contains(t, body.Message, "可售令牌兑换码功能已下线")
 }
 
-func TestAddRedemption_PersistsSellableTokenProductID(t *testing.T) {
+func TestAddRedemption_RejectsSellableTokenBenefit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	setupRedemptionControllerTestDB(t)
 
-	product := createControllerSellableTokenProduct(t, "控制器商品")
-	body := fmt.Sprintf(`{
+	body := `{
 		"name":"可售令牌码",
 		"count":1,
 		"benefit_type":"sellable_token",
-		"sellable_token_product_id":%d
-	}`, product.Id)
+		"sellable_token_product_id":1
+	}`
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
@@ -59,28 +58,25 @@ func TestAddRedemption_PersistsSellableTokenProductID(t *testing.T) {
 	ctx.Set("id", 1)
 
 	AddRedemption(ctx)
-	require.Equal(t, http.StatusOK, recorder.Code)
+	requireSellableRedemptionDisabled(t, recorder)
 
-	var redemption model.Redemption
-	require.NoError(t, model.DB.First(&redemption).Error)
-	require.Equal(t, model.RedemptionBenefitTypeSellableToken, redemption.BenefitType)
-	require.Equal(t, product.Id, redemption.SellableTokenProductId)
+	var count int64
+	require.NoError(t, model.DB.Model(&model.Redemption{}).Count(&count).Error)
+	require.Zero(t, count)
 }
 
-func TestUpdateRedemption_PersistsSellableTokenProductID(t *testing.T) {
+func TestUpdateRedemption_RejectsSellableTokenBenefit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	setupRedemptionControllerTestDB(t)
 
-	firstProduct := createControllerSellableTokenProduct(t, "原商品")
-	secondProduct := createControllerSellableTokenProduct(t, "新商品")
 	redemption := &model.Redemption{
-		UserId:                 1,
-		Key:                    common.GetUUID(),
-		Status:                 common.RedemptionCodeStatusEnabled,
-		Name:                   "待更新兑换码",
-		BenefitType:            model.RedemptionBenefitTypeSellableToken,
-		SellableTokenProductId: firstProduct.Id,
-		CreatedTime:            common.GetTimestamp(),
+		UserId:      1,
+		Key:         common.GetUUID(),
+		Status:      common.RedemptionCodeStatusEnabled,
+		Name:        "待更新兑换码",
+		BenefitType: model.RedemptionBenefitTypeQuota,
+		Quota:       100,
+		CreatedTime: common.GetTimestamp(),
 	}
 	require.NoError(t, redemption.Insert())
 
@@ -88,9 +84,9 @@ func TestUpdateRedemption_PersistsSellableTokenProductID(t *testing.T) {
 		"id":%d,
 		"name":"待更新兑换码",
 		"benefit_type":"sellable_token",
-		"sellable_token_product_id":%d,
+		"sellable_token_product_id":1,
 		"expired_time":0
-	}`, redemption.Id, secondProduct.Id)
+	}`, redemption.Id)
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
@@ -98,9 +94,10 @@ func TestUpdateRedemption_PersistsSellableTokenProductID(t *testing.T) {
 	ctx.Request.Header.Set("Content-Type", "application/json")
 
 	UpdateRedemption(ctx)
-	require.Equal(t, http.StatusOK, recorder.Code)
+	requireSellableRedemptionDisabled(t, recorder)
 
 	var refreshed model.Redemption
 	require.NoError(t, model.DB.First(&refreshed, "id = ?", redemption.Id).Error)
-	require.Equal(t, secondProduct.Id, refreshed.SellableTokenProductId)
+	require.Equal(t, model.RedemptionBenefitTypeQuota, refreshed.BenefitType)
+	require.Zero(t, refreshed.SellableTokenProductId)
 }

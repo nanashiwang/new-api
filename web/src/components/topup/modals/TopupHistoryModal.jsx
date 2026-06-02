@@ -455,10 +455,10 @@ function buildInvoicePrintHtml(invoice, stampUrl = '') {
     .summary div { margin: 2px 0; }
     .notes { margin: 10px 20px 0; }
     .notes p { margin: 5px 0; text-indent: 2em; }
-    .sign { position: absolute; right: 88px; bottom: 4px; min-width: 250px; min-height: 104px; font-size: 14px; }
+    .sign { position: absolute; right: 88px; bottom: 18px; min-width: 250px; min-height: 118px; font-size: 14px; }
     .sign p { margin: 8px 0; }
     .stamp-hint { color: #526579; font-size: 13px; }
-    .sign-seal-image { position: absolute; width: 118px; height: 118px; right: 44px; bottom: -18px; object-fit: contain; opacity: 0.94; }
+    .sign-seal-image { position: absolute; width: 118px; height: 118px; right: 44px; bottom: 0; object-fit: contain; opacity: 0.94; }
     .empty { padding: 18px; text-align: center; color: #697586; }
     @media screen { body { padding: 18px; background: #eef2f7; } .certificate { max-width: 1120px; margin: 0 auto; padding: 28px 76px 72px 32px; background: #fff; box-shadow: 0 10px 34px rgba(15, 23, 42, 0.12); } }
   </style>
@@ -612,6 +612,55 @@ async function buildSeamStampSlices(doc, stampUrl, pageCount) {
   }
 }
 
+function buildInvoicePageSlices(certificate, canvas, pageSliceHeight) {
+  const certificateRect = certificate.getBoundingClientRect();
+  const scaleY = certificateRect.height
+    ? canvas.height / certificateRect.height
+    : 1;
+  const rowRanges = Array.from(certificate.querySelectorAll('tr'))
+    .map((row) => {
+      const rect = row.getBoundingClientRect();
+      return {
+        start: Math.max(0, Math.round((rect.top - certificateRect.top) * scaleY)),
+        end: Math.min(
+          canvas.height,
+          Math.round((rect.bottom - certificateRect.top) * scaleY),
+        ),
+      };
+    })
+    .filter((range) => range.end > range.start)
+    .sort((a, b) => a.start - b.start);
+  const slices = [];
+  const minUsefulSliceHeight = pageSliceHeight * 0.28;
+  let offsetY = 0;
+
+  while (offsetY < canvas.height) {
+    const remainingHeight = canvas.height - offsetY;
+    if (remainingHeight <= pageSliceHeight) {
+      slices.push({ offsetY, height: remainingHeight });
+      break;
+    }
+
+    const targetEnd = offsetY + pageSliceHeight;
+    let sliceEnd = targetEnd;
+    const splitRow = rowRanges.find(
+      (range) =>
+        range.start < targetEnd &&
+        range.end > targetEnd &&
+        range.start > offsetY,
+    );
+    if (splitRow && splitRow.start - offsetY >= minUsefulSliceHeight) {
+      sliceEnd = splitRow.start;
+    }
+
+    const sliceHeight = Math.max(1, Math.min(sliceEnd - offsetY, pageSliceHeight));
+    slices.push({ offsetY, height: sliceHeight });
+    offsetY += sliceHeight;
+  }
+
+  return slices;
+}
+
 async function buildInvoiceDetailBillPdfBlob(html, stampUrl = '') {
   const iframe = document.createElement('iframe');
   iframe.style.position = 'fixed';
@@ -658,26 +707,30 @@ async function buildInvoiceDetailBillPdfBlob(html, stampUrl = '') {
     }
     sliceCanvas.width = canvas.width;
     sliceCanvas.height = pageSliceHeight;
-    const pageCount = Math.max(1, Math.ceil(canvas.height / pageSliceHeight));
-    const seamStamp = await buildSeamStampSlices(doc, stampUrl, pageCount);
+    const pageSlices = buildInvoicePageSlices(
+      certificate,
+      canvas,
+      pageSliceHeight,
+    );
+    const seamStamp = await buildSeamStampSlices(
+      doc,
+      stampUrl,
+      pageSlices.length,
+    );
 
-    for (
-      let pageIndex = 0, offsetY = 0;
-      offsetY < canvas.height;
-      pageIndex += 1, offsetY += pageSliceHeight
-    ) {
+    for (const [pageIndex, pageSlice] of pageSlices.entries()) {
       sliceContext.fillStyle = '#ffffff';
       sliceContext.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
       sliceContext.drawImage(
         canvas,
         0,
-        offsetY,
+        pageSlice.offsetY,
         canvas.width,
-        Math.min(pageSliceHeight, canvas.height - offsetY),
+        pageSlice.height,
         0,
         0,
         sliceCanvas.width,
-        Math.min(pageSliceHeight, canvas.height - offsetY),
+        pageSlice.height,
       );
       const page = pdfDoc.addPage([pageWidth, pageHeight]);
       const pageImage = await pdfDoc.embedJpg(

@@ -88,40 +88,33 @@ const RechargeCard = ({
   activeQuantityByPlan = {},
   allSubscriptions = [],
   reloadSubscriptionSelf,
-  sellableTokenContent = null,
-  showSellableTokenTab = false,
 }) => {
   const onlineFormApiRef = useRef(null);
   const initialTabSetRef = useRef(false);
   const [activeTab, setActiveTab] = useState('topup');
   const shouldShowSubscription =
     !subscriptionLoading && subscriptionPlans.length > 0;
-  const shouldShowTabs = shouldShowSubscription || showSellableTokenTab;
+  const shouldShowTabs = shouldShowSubscription;
 
   useEffect(() => {
     if (initialTabSetRef.current) return;
     if (subscriptionLoading) return;
     if (shouldShowSubscription) {
       setActiveTab('subscription');
-    } else if (showSellableTokenTab) {
-      setActiveTab('sellable-token');
     } else {
       setActiveTab('topup');
     }
     initialTabSetRef.current = true;
-  }, [shouldShowSubscription, showSellableTokenTab, subscriptionLoading]);
+  }, [shouldShowSubscription, subscriptionLoading]);
 
   useEffect(() => {
     if (!shouldShowTabs && activeTab !== 'topup') {
       setActiveTab('topup');
     }
     if (!shouldShowSubscription && activeTab === 'subscription') {
-      setActiveTab(showSellableTokenTab ? 'sellable-token' : 'topup');
+      setActiveTab('topup');
     }
-    if (!showSellableTokenTab && activeTab === 'sellable-token') {
-      setActiveTab(shouldShowSubscription ? 'subscription' : 'topup');
-    }
-  }, [shouldShowSubscription, shouldShowTabs, showSellableTokenTab, activeTab]);
+  }, [shouldShowSubscription, shouldShowTabs, activeTab]);
   const hasSelectedPayMethod = Boolean(payWay);
   const topupContent = (
     <Space vertical style={{ width: '100%' }}>
@@ -636,19 +629,6 @@ const RechargeCard = ({
                   withCard={false}
                 />
               </div>
-            </TabPane>
-          ) : null}
-          {showSellableTokenTab ? (
-            <TabPane
-              tab={
-                <div className='flex items-center gap-2'>
-                  <Coins size={16} />
-                  {t('可售令牌')}
-                </div>
-              }
-              itemKey='sellable-token'
-            >
-              <div className='py-2'>{sellableTokenContent}</div>
             </TabPane>
           ) : null}
           <TabPane

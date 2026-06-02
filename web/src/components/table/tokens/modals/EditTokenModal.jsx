@@ -466,36 +466,6 @@ const EditTokenModal = (props) => {
           localGroupOptions.sort((a, b) => (a.value === 'auto' ? -1 : 1));
         }
       }
-      // For sellable tokens, restrict groups to those allowed by the product
-      if (isSellableToken && props.editingToken?.sellable_token_product_id) {
-        try {
-          const productsRes = await API.get(
-            '/api/user/sellable-token/products',
-          );
-          if (productsRes.data?.success) {
-            const products = productsRes.data.data || [];
-            const matchedProduct = products.find(
-              (item) =>
-                Number(item?.product?.id || 0) ===
-                Number(props.editingToken.sellable_token_product_id),
-            );
-            if (matchedProduct) {
-              const allowedGroups = matchedProduct.allowed_groups || [];
-              const userGroups = (matchedProduct.user_groups || []).map(
-                (g) => g?.value,
-              );
-              if (allowedGroups.length > 0 || userGroups.length > 0) {
-                const allowedSet = new Set(
-                  userGroups.length > 0 ? userGroups : allowedGroups,
-                );
-                localGroupOptions = localGroupOptions.filter((g) =>
-                  allowedSet.has(g.value),
-                );
-              }
-            }
-          }
-        } catch (_) {}
-      }
       setGroups(localGroupOptions);
     } else {
       showError(t(message));

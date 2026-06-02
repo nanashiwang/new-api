@@ -33,8 +33,6 @@ const DEFAULT_ADVANCED_FILTERS = {
   searchHasInvitees: '',
   // 订阅筛选统一口径：active 且未过期。
   searchHasActiveSubscription: '',
-  // 可售令牌筛选：是否有启用中的可售令牌。
-  searchHasSellableToken: '',
   // 钱包额度区间筛选，不再混入已使用额度或套餐额度。
   searchWalletMin: '',
   searchWalletMax: '',
@@ -131,7 +129,6 @@ export const useUsersData = () => {
       searchHasInviter: next.searchHasInviter ?? '',
       searchHasInvitees: next.searchHasInvitees ?? '',
       searchHasActiveSubscription: next.searchHasActiveSubscription ?? '',
-      searchHasSellableToken: next.searchHasSellableToken ?? '',
       searchWalletMin: next.searchWalletMin ?? '',
       searchWalletMax: next.searchWalletMax ?? '',
       searchUsedBalanceMin: next.searchUsedBalanceMin ?? '',
@@ -344,9 +341,6 @@ export const useUsersData = () => {
       if (resolvedAdvanced.searchHasActiveSubscription !== '') {
         params.has_active_subscription =
           resolvedAdvanced.searchHasActiveSubscription;
-      }
-      if (resolvedAdvanced.searchHasSellableToken !== '') {
-        params.has_sellable_token = resolvedAdvanced.searchHasSellableToken;
       }
       // 额度筛选经 axios params 下发；后端负责区间校验与参数化查询。
       if (walletMin !== '' && walletMin !== null && walletMin !== undefined) {

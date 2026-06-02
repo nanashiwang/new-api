@@ -32,7 +32,6 @@ import DeleteUserModal from './modals/DeleteUserModal';
 import ResetPasskeyModal from './modals/ResetPasskeyModal';
 import ResetTwoFAModal from './modals/ResetTwoFAModal';
 import UserSubscriptionsModal from './modals/UserSubscriptionsModal';
-import UserSellableTokensModal from './modals/UserSellableTokensModal';
 import UserInviteRelationsSheet from './modals/UserInviteRelationsSheet';
 
 const initialInviteRelationsState = {
@@ -74,8 +73,6 @@ const UsersTable = (usersData) => {
   const [showResetTwoFAModal, setShowResetTwoFAModal] = useState(false);
   const [showUserSubscriptionsModal, setShowUserSubscriptionsModal] =
     useState(false);
-  const [showUserSellableTokensModal, setShowUserSellableTokensModal] =
-    useState(false);
   const [inviteRelationsState, setInviteRelationsState] = useState(
     initialInviteRelationsState,
   );
@@ -115,11 +112,6 @@ const UsersTable = (usersData) => {
   const showUserSubscriptionsUserModal = (user) => {
     setModalUser(user);
     setShowUserSubscriptionsModal(true);
-  };
-
-  const showUserSellableTokensUserModal = (user) => {
-    setModalUser(user);
-    setShowUserSellableTokensModal(true);
   };
 
   const showInviteRelationsUserModal = (user) => {
@@ -214,7 +206,6 @@ const UsersTable = (usersData) => {
       showResetPasskeyModal: showResetPasskeyUserModal,
       showResetTwoFAModal: showResetTwoFAUserModal,
       showUserSubscriptionsModal: showUserSubscriptionsUserModal,
-      showUserSellableTokensModal: showUserSellableTokensUserModal,
       showInviteRelationsModal: showInviteRelationsUserModal,
       openInviteRelationsUser: showInviteRelationsUserModal,
       blacklistUserIP,
@@ -230,7 +221,6 @@ const UsersTable = (usersData) => {
     showResetPasskeyUserModal,
     showResetTwoFAUserModal,
     showUserSubscriptionsUserModal,
-    showUserSellableTokensUserModal,
     showInviteRelationsUserModal,
     blacklistUserIP,
   ]);
@@ -337,13 +327,6 @@ const UsersTable = (usersData) => {
       <UserSubscriptionsModal
         visible={showUserSubscriptionsModal}
         onCancel={() => setShowUserSubscriptionsModal(false)}
-        user={modalUser}
-        t={t}
-        onSuccess={() => refresh?.()}
-      />
-      <UserSellableTokensModal
-        visible={showUserSellableTokensModal}
-        onCancel={() => setShowUserSellableTokensModal(false)}
         user={modalUser}
         t={t}
         onSuccess={() => refresh?.()}
