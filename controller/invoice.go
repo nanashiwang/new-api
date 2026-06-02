@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -17,7 +18,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const maxInvoicePDFSize = 10 * 1024 * 1024
+const (
+	maxInvoicePDFSize        = 10 * 1024 * 1024
+	maxInvoiceDetailBillSize = 2 * 1024 * 1024
+)
 
 type createInvoiceRequestPayload struct {
 	TitleType string                  `json:"title_type"`
@@ -36,12 +40,19 @@ type reviewInvoiceRequestPayload struct {
 }
 
 type invoiceApprovePayload struct {
-	InvoiceNo     string
-	InvoiceUrl    string
-	AdminRemark   string
-	InvoiceSentTo string
-	SendEmail     bool
-	FileHeader    *multipart.FileHeader
+	InvoiceNo            string
+	InvoiceUrl           string
+	AdminRemark          string
+	InvoiceSentTo        string
+	SendEmail            bool
+	SendDetailBill       bool
+	FileHeader           *multipart.FileHeader
+	DetailBillFileHeader *multipart.FileHeader
+}
+
+type invoiceEmailPayload struct {
+	SendDetailBill       bool
+	DetailBillFileHeader *multipart.FileHeader
 }
 
 func GetEligibleInvoiceOrders(c *gin.Context) {
@@ -162,6 +173,14 @@ func reviewInvoiceRequest(c *gin.Context, action string) {
 			common.ApiError(c, err)
 			return
 		}
+		var detailBillAttachment *common.EmailAttachment
+		if req.SendEmail && req.SendDetailBill && req.DetailBillFileHeader != nil {
+			detailBillAttachment, err = readInvoiceDetailBillAttachment(req.DetailBillFileHeader)
+			if err != nil {
+				common.ApiError(c, err)
+				return
+			}
+		}
 		fileName := ""
 		filePath := ""
 		cleanupFile := false
@@ -191,7 +210,10 @@ func reviewInvoiceRequest(c *gin.Context, action string) {
 			cleanupFile = false
 		}
 		if err == nil && req.SendEmail {
-			request, err = sendInvoiceFileAndUpdateStatus(request)
+			if req.SendDetailBill && detailBillAttachment == nil {
+				detailBillAttachment = buildInvoiceDetailBillAttachment(request)
+			}
+			request, err = sendInvoiceFileAndUpdateStatus(request, detailBillAttachment)
 		}
 	} else {
 		var req reviewInvoiceRequestPayload
@@ -223,7 +245,24 @@ func ResendInvoiceEmail(c *gin.Context) {
 		common.ApiErrorMsg(c, "发票尚未开具")
 		return
 	}
-	request, err = sendInvoiceFileAndUpdateStatus(request)
+	payload, err := parseInvoiceEmailPayload(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	var detailBillAttachment *common.EmailAttachment
+	if payload.SendDetailBill {
+		if payload.DetailBillFileHeader != nil {
+			detailBillAttachment, err = readInvoiceDetailBillAttachment(payload.DetailBillFileHeader)
+			if err != nil {
+				common.ApiError(c, err)
+				return
+			}
+		} else {
+			detailBillAttachment = buildInvoiceDetailBillAttachment(request)
+		}
+	}
+	request, err = sendInvoiceFileAndUpdateStatus(request, detailBillAttachment)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -275,13 +314,21 @@ func parseInvoiceApprovePayload(c *gin.Context, id int) (invoiceApprovePayload, 
 			payload.InvoiceSentTo = detail.Email
 		}
 		if raw := strings.TrimSpace(c.PostForm("send_email")); raw != "" {
-			payload.SendEmail = raw == "true" || raw == "1" || strings.EqualFold(raw, "on")
+			payload.SendEmail = parseInvoiceBool(raw, payload.SendEmail)
+		}
+		if raw := strings.TrimSpace(c.PostForm("send_detail_bill")); raw != "" {
+			payload.SendDetailBill = parseInvoiceBool(raw, false)
 		}
 		fileHeader, err := c.FormFile("invoice_file")
 		if err != nil {
 			return payload, fmt.Errorf("请上传发票 PDF")
 		}
 		payload.FileHeader = fileHeader
+		if payload.SendDetailBill {
+			if detailBillFileHeader, err := c.FormFile("detail_bill_file"); err == nil {
+				payload.DetailBillFileHeader = detailBillFileHeader
+			}
+		}
 		if payload.SendEmail && payload.InvoiceSentTo == "" {
 			return payload, fmt.Errorf("发票接收邮箱不能为空")
 		}
@@ -297,6 +344,41 @@ func parseInvoiceApprovePayload(c *gin.Context, id int) (invoiceApprovePayload, 
 	payload.AdminRemark = req.AdminRemark
 	payload.SendEmail = false
 	return payload, nil
+}
+
+func parseInvoiceEmailPayload(c *gin.Context) (invoiceEmailPayload, error) {
+	payload := invoiceEmailPayload{}
+	contentType := strings.ToLower(c.GetHeader("Content-Type"))
+	if strings.HasPrefix(contentType, "multipart/form-data") {
+		if raw := strings.TrimSpace(c.PostForm("send_detail_bill")); raw != "" {
+			payload.SendDetailBill = parseInvoiceBool(raw, false)
+		}
+		if payload.SendDetailBill {
+			if fileHeader, err := c.FormFile("detail_bill_file"); err == nil {
+				payload.DetailBillFileHeader = fileHeader
+			}
+		}
+		return payload, nil
+	}
+	if c.Request.ContentLength == 0 {
+		return payload, nil
+	}
+	var req struct {
+		SendDetailBill bool `json:"send_detail_bill"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil && err != io.EOF {
+		return payload, err
+	}
+	payload.SendDetailBill = req.SendDetailBill
+	return payload, nil
+}
+
+func parseInvoiceBool(raw string, defaultValue bool) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return defaultValue
+	}
+	return raw == "true" || raw == "1" || strings.EqualFold(raw, "on") || strings.EqualFold(raw, "yes")
 }
 
 func saveInvoicePDFFile(invoiceID int, fileHeader *multipart.FileHeader) (string, string, error) {
@@ -354,11 +436,57 @@ func sanitizeInvoiceFilename(filename string) string {
 	return filename
 }
 
-func sendInvoiceFileAndUpdateStatus(request *model.InvoiceRequest) (*model.InvoiceRequest, error) {
+func readInvoiceDetailBillAttachment(fileHeader *multipart.FileHeader) (*common.EmailAttachment, error) {
+	if fileHeader == nil {
+		return nil, nil
+	}
+	if fileHeader.Size <= 0 || fileHeader.Size > maxInvoiceDetailBillSize {
+		return nil, fmt.Errorf("明细账单附件大小不能超过 2MB")
+	}
+	ext := strings.ToLower(filepath.Ext(fileHeader.Filename))
+	if ext != ".html" && ext != ".htm" {
+		return nil, fmt.Errorf("明细账单附件仅支持 HTML 文件")
+	}
+	file, err := fileHeader.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maxInvoiceDetailBillSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 || len(data) > maxInvoiceDetailBillSize {
+		return nil, fmt.Errorf("明细账单附件大小不能超过 2MB")
+	}
+	return &common.EmailAttachment{
+		Filename:    sanitizeInvoiceDetailBillFilename(fileHeader.Filename),
+		ContentType: "text/html",
+		Data:        data,
+	}, nil
+}
+
+func sanitizeInvoiceDetailBillFilename(filename string) string {
+	filename = filepath.Base(strings.TrimSpace(filename))
+	if filename == "." || filename == string(filepath.Separator) || filename == "" {
+		return "明细账单.html"
+	}
+	return filename
+}
+
+func buildInvoiceDetailBillAttachment(request *model.InvoiceRequest) *common.EmailAttachment {
+	return &common.EmailAttachment{
+		Filename:    fmt.Sprintf("明细账单-%d.html", request.Id),
+		ContentType: "text/html",
+		Data:        []byte(buildInvoiceDetailBillHTML(request)),
+	}
+}
+
+func sendInvoiceFileAndUpdateStatus(request *model.InvoiceRequest, detailBillAttachment *common.EmailAttachment) (*model.InvoiceRequest, error) {
 	if request == nil {
 		return nil, model.ErrInvoiceRequestNotFound
 	}
-	err := sendInvoiceFileEmail(request)
+	err := sendInvoiceFileEmail(request, detailBillAttachment)
 	if err != nil {
 		updated, updateErr := model.UpdateInvoiceSendStatus(request.Id, model.InvoiceSendStatusFailed, err.Error())
 		if updateErr != nil {
@@ -369,7 +497,7 @@ func sendInvoiceFileAndUpdateStatus(request *model.InvoiceRequest) (*model.Invoi
 	return model.UpdateInvoiceSendStatus(request.Id, model.InvoiceSendStatusSent, "")
 }
 
-func sendInvoiceFileEmail(request *model.InvoiceRequest) error {
+func sendInvoiceFileEmail(request *model.InvoiceRequest, detailBillAttachment *common.EmailAttachment) error {
 	if strings.TrimSpace(request.InvoiceFilePath) == "" {
 		return fmt.Errorf("发票 PDF 文件不存在")
 	}
@@ -390,11 +518,15 @@ func sendInvoiceFileEmail(request *model.InvoiceRequest) error {
 	}
 	subject := fmt.Sprintf("%s 发票已开具", common.SystemName)
 	content := buildInvoiceEmailContent(request)
-	return common.SendEmailWithAttachments(subject, receiver, content, []common.EmailAttachment{{
+	attachments := []common.EmailAttachment{{
 		Filename:    filename,
 		ContentType: "application/pdf",
 		Data:        data,
-	}})
+	}}
+	if detailBillAttachment != nil && len(detailBillAttachment.Data) > 0 {
+		attachments = append(attachments, *detailBillAttachment)
+	}
+	return common.SendEmailWithAttachments(subject, receiver, content, attachments)
 }
 
 func buildInvoiceEmailContent(request *model.InvoiceRequest) string {
@@ -406,6 +538,278 @@ func buildInvoiceEmailContent(request *model.InvoiceRequest) string {
 <p>发票号/代码：%s</p>
 <p>开票金额：¥%s</p>
 <p>如有疑问，请联系平台管理员。</p>`, title, invoiceNo, totalMoney)
+}
+
+type invoiceDetailBillTypeSummary struct {
+	Count int
+	Money float64
+}
+
+func buildInvoiceDetailBillHTML(request *model.InvoiceRequest) string {
+	items := request.Items
+	count := len(items)
+	totalMoney := request.TotalMoney
+	startTime := int64(0)
+	endTime := int64(0)
+	byType := make(map[string]invoiceDetailBillTypeSummary)
+	for _, item := range items {
+		stats := byType[item.OrderType]
+		stats.Count++
+		stats.Money += item.Money
+		byType[item.OrderType] = stats
+		orderTime := item.CompleteTime
+		if orderTime == 0 {
+			orderTime = item.CreateTime
+		}
+		if orderTime > 0 {
+			if startTime == 0 || orderTime < startTime {
+				startTime = orderTime
+			}
+			if orderTime > endTime {
+				endTime = orderTime
+			}
+		}
+	}
+	cell := func(value interface{}) string {
+		text := strings.TrimSpace(fmt.Sprint(value))
+		if text == "" || text == "<nil>" {
+			text = "-"
+		}
+		return html.EscapeString(text)
+	}
+	orderRows := strings.Builder{}
+	if len(items) == 0 {
+		orderRows.WriteString(`<tr><td colspan="8" class="empty">暂无订单明细</td></tr>`)
+	} else {
+		for index, item := range items {
+			fmt.Fprintf(&orderRows, `<tr>
+<td class="center">%d</td>
+<td class="center">%s</td>
+<td class="center">%d</td>
+<td>%s</td>
+<td class="center">%s</td>
+<td class="center">%s</td>
+<td class="money">%s</td>
+<td class="center">%s</td>
+</tr>`,
+				index+1,
+				cell(invoiceDetailBillOrderTypeLabel(item.OrderType)),
+				item.OrderId,
+				cell(invoiceDetailBillCode(item)),
+				cell(item.ProductName),
+				cell(invoiceDetailBillPaymentLabel(item.PaymentMethod)),
+				cell(invoiceDetailBillPaymentAmount(item)),
+				cell(invoiceDetailBillTime(invoiceDetailBillOrderTime(item))),
+			)
+		}
+	}
+	typeSummary := invoiceDetailBillTypeSummaryText(byType)
+	timeRange := "-"
+	if startTime > 0 {
+		timeRange = fmt.Sprintf("%s 至 %s", invoiceDetailBillTime(startTime), invoiceDetailBillTime(endTime))
+	}
+	return fmt.Sprintf(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>曜算平台交易明细证明 #%s</title>
+  <style>
+    @page { size: A4 landscape; margin: 14mm; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #243244; background: #fff; font: 14px/1.55 "Songti SC", "SimSun", "Noto Serif CJK SC", serif; }
+    .certificate { position: relative; min-height: 176mm; padding: 4mm 2mm 34mm; }
+    h1 { margin: 0; text-align: center; font: 700 25px/1.25 "PingFang SC", "Microsoft YaHei", sans-serif; letter-spacing: 1px; color: #23364a; }
+    .title-line { height: 2px; margin: 14px 0 8px; background: #2d5f86; }
+    .intro { margin: 0 26px 16px; text-indent: 2em; font-size: 14px; }
+    h2 { margin: 0 0 8px; font: 700 16px/1.2 "PingFang SC", "Microsoft YaHei", sans-serif; color: #1f3447; }
+    table { width: calc(100%% - 40px); border-collapse: collapse; table-layout: fixed; margin-left: 20px; }
+    th { background: #22364b; color: #fff; font-weight: 700; }
+    th, td { border: 1px solid #cfd8e3; padding: 5px 7px; vertical-align: middle; word-break: break-all; }
+    tbody tr:nth-child(even) { background: #f7f9fb; }
+    .center { text-align: center; }
+    .money { text-align: right; white-space: nowrap; }
+    .summary { margin: 16px 20px 10px; padding: 9px 12px; border: 1px solid #b9c7d7; background: #f7f9fc; font-size: 14px; }
+    .summary div { margin: 2px 0; }
+    .notes { margin: 10px 20px 0; }
+    .notes p { margin: 5px 0; text-indent: 2em; }
+    .sign { position: absolute; right: 88px; bottom: 4px; min-width: 250px; min-height: 104px; font-size: 14px; }
+    .sign p { margin: 8px 0; }
+    .empty { padding: 18px; text-align: center; color: #697586; }
+    @media screen { body { padding: 18px; background: #eef2f7; } .certificate { max-width: 1120px; margin: 0 auto; padding: 28px 32px 52px; background: #fff; box-shadow: 0 10px 34px rgba(15, 23, 42, 0.12); } }
+  </style>
+</head>
+<body>
+  <main class="certificate">
+    <h1>曜算平台交易明细证明</h1>
+    <div class="title-line"></div>
+    <p class="intro">兹证明：用户 %s 于曜算平台存在相关交易记录。根据该用户申请时所选择的交易类型及时间范围，平台系统记录的交易明细如下：</p>
+
+    <h2>交易明细表</h2>
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 44px;">序号</th>
+          <th style="width: 90px;">订单类型</th>
+          <th style="width: 96px;">平台订单 ID</th>
+          <th>订单编码/交易号</th>
+          <th style="width: 110px;">商品/套餐</th>
+          <th style="width: 96px;">支付渠道</th>
+          <th style="width: 120px;">支付金额</th>
+          <th style="width: 160px;">支付时间</th>
+        </tr>
+      </thead>
+      <tbody>%s</tbody>
+    </table>
+
+    <section class="summary">
+      <div>合计：共 %d 笔交易，支付金额合计人民币 %s。</div>
+      <div>其中：%s。</div>
+      <div>交易时间范围：%s。</div>
+    </section>
+
+    <section class="notes">
+      <h2>说明</h2>
+      <p>本《曜算平台交易明细证明》仅用于证明用户在其申请范围内，于曜算平台产生的相关支付订单记录。</p>
+      <p>本证明所列订单明细依据用户申请时选择的订单及平台系统记录生成，具体筛选条件以用户申请页面选择内容为准。</p>
+      <p>本证明仅限用于证明用户在曜算平台的相关交易记录，不作为其他权利义务认定依据。</p>
+      <p>本证明不得擅自修改、涂改、拆分或用于与申请目的不一致的其他用途。</p>
+      <p>本证明中所列时间均为北京时间（UTC+08:00）。</p>
+      <p>本证明经上海曜算智能科技有限公司加盖公章后生效。</p>
+    </section>
+
+    <section class="sign">
+      <p>上海曜算智能科技有限公司</p>
+      <p>盖章：</p>
+      <p>出具日期：%s</p>
+    </section>
+  </main>
+</body>
+</html>`,
+		cell(request.Id),
+		cell(invoiceDetailBillUser(request)),
+		orderRows.String(),
+		count,
+		cell(invoiceDetailBillMoney(totalMoney)),
+		cell(typeSummary),
+		cell(timeRange),
+		cell(invoiceDetailBillDate(common.GetTimestamp())),
+	)
+}
+
+func invoiceDetailBillOrderTypeLabel(orderType string) string {
+	switch orderType {
+	case model.PaymentRecordTypeTopUp:
+		return "在线充值"
+	case model.PaymentOrderTypeSubscription:
+		return "订阅订单"
+	case model.PaymentRecordTypeSellableTokenPurchase:
+		return "钱包购买令牌"
+	default:
+		if strings.TrimSpace(orderType) == "" {
+			return "-"
+		}
+		return orderType
+	}
+}
+
+func invoiceDetailBillPaymentLabel(paymentMethod string) string {
+	switch paymentMethod {
+	case "alipay":
+		return "支付宝"
+	case "wxpay":
+		return "微信"
+	case "stripe":
+		return "Stripe"
+	case "creem":
+		return "Creem"
+	case model.PaymentMethodWallet:
+		return "钱包余额"
+	default:
+		if strings.TrimSpace(paymentMethod) == "" {
+			return "-"
+		}
+		return paymentMethod
+	}
+}
+
+func invoiceDetailBillCode(item model.InvoiceRequestItem) string {
+	if strings.TrimSpace(item.TradeNo) != "" {
+		return item.TradeNo
+	}
+	return fmt.Sprintf("%s-%d", item.OrderType, item.OrderId)
+}
+
+func invoiceDetailBillOrderTime(item model.InvoiceRequestItem) int64 {
+	if item.CompleteTime > 0 {
+		return item.CompleteTime
+	}
+	return item.CreateTime
+}
+
+func invoiceDetailBillPaymentAmount(item model.InvoiceRequestItem) string {
+	if item.Money > 0 {
+		return invoiceDetailBillMoney(item.Money)
+	}
+	return invoiceDetailBillMoney(0)
+}
+
+func invoiceDetailBillMoney(value float64) string {
+	return fmt.Sprintf("¥%.2f", value)
+}
+
+func invoiceDetailBillTime(value int64) string {
+	if value <= 0 {
+		return "-"
+	}
+	return time.Unix(value, 0).In(time.FixedZone("CST", 8*3600)).Format("2006-01-02 15:04:05")
+}
+
+func invoiceDetailBillDate(value int64) string {
+	if value <= 0 {
+		return "-"
+	}
+	return time.Unix(value, 0).In(time.FixedZone("CST", 8*3600)).Format("2006年1月2日")
+}
+
+func invoiceDetailBillUser(request *model.InvoiceRequest) string {
+	if strings.TrimSpace(request.Username) != "" {
+		displayName := ""
+		if strings.TrimSpace(request.DisplayName) != "" && request.DisplayName != request.Username {
+			displayName = " / " + strings.TrimSpace(request.DisplayName)
+		}
+		return fmt.Sprintf("%s%s（用户 ID：%d）", request.Username, displayName, request.UserId)
+	}
+	if request.UserId > 0 {
+		return fmt.Sprintf("用户 ID：%d", request.UserId)
+	}
+	return "-"
+}
+
+func invoiceDetailBillTypeSummaryText(byType map[string]invoiceDetailBillTypeSummary) string {
+	if len(byType) == 0 {
+		return "-"
+	}
+	keys := make([]string, 0, len(byType))
+	for orderType := range byType {
+		keys = append(keys, orderType)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(byType))
+	for _, orderType := range keys {
+		stats := byType[orderType]
+		if stats.Count <= 0 {
+			continue
+		}
+		part := fmt.Sprintf("%s %d 笔", invoiceDetailBillOrderTypeLabel(orderType), stats.Count)
+		if stats.Money > 0 {
+			part += fmt.Sprintf("，金额合计 %s", invoiceDetailBillMoney(stats.Money))
+		}
+		parts = append(parts, part)
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, "；")
 }
 
 func downloadInvoiceFile(c *gin.Context, request *model.InvoiceRequest) {

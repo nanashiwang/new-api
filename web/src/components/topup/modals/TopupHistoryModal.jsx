@@ -297,9 +297,9 @@ function formatInvoiceUser(invoice) {
       invoice.display_name && invoice.display_name !== invoice.username
         ? ` / ${invoice.display_name}`
         : '';
-    return `${invoice.username}${displayName}（ID: ${invoice.user_id || '-'}）`;
+    return `${invoice.username}${displayName}（用户 ID：${invoice.user_id || '-'}）`;
   }
-  return invoice?.user_id ? `ID: ${invoice.user_id}` : '-';
+  return invoice?.user_id ? `用户 ID：${invoice.user_id}` : '-';
 }
 
 function formatInvoiceReviewer(invoice) {
@@ -336,9 +336,6 @@ function formatInvoicePrintMoney(value) {
 function formatInvoicePaymentAmount(item) {
   if (Number(item?.money || 0) > 0) {
     return formatInvoicePrintMoney(item.money);
-  }
-  if (Number(item?.amount || 0) > 0) {
-    return renderQuota(item.amount);
   }
   return formatInvoicePrintMoney(0);
 }
@@ -382,9 +379,6 @@ function formatInvoiceTypeSummary(summary) {
       if (Number(stats.money || 0) > 0) {
         parts.push(`金额合计 ${formatInvoicePrintMoney(stats.money)}`);
       }
-      if (Number(stats.quota || 0) > 0) {
-        parts.push(`额度合计 ${renderQuota(stats.quota)}`);
-      }
       return parts.join('，');
     })
     .join('；');
@@ -399,9 +393,6 @@ function buildInvoicePrintHtml(invoice, stampUrl = '') {
     totalParts.push(
       `支付金额合计人民币 ${formatInvoicePrintMoney(summary.money)}`,
     );
-  }
-  if (summary.quota > 0) {
-    totalParts.push(`额度合计 ${renderQuota(summary.quota)}`);
   }
   if (totalParts.length === 0) {
     totalParts.push(`支付金额合计人民币 ${formatInvoicePrintMoney(0)}`);
@@ -429,21 +420,16 @@ function buildInvoicePrintHtml(invoice, stampUrl = '') {
           )
           .join('')
       : '<tr><td colspan="8" class="empty">暂无订单明细</td></tr>';
-  const invoiceTitle = invoice?.title || '-';
-  const invoiceContact = [invoice?.email, invoice?.phone]
-    .filter(Boolean)
-    .join(' / ');
-
   return `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>曜算平台发票申请明细证明 #${cell(invoice?.id)}</title>
+  <title>曜算平台交易明细证明 #${cell(invoice?.id)}</title>
   <style>
     @page { size: A4 landscape; margin: 14mm; }
     * { box-sizing: border-box; }
     body { margin: 0; color: #243244; background: #fff; font: 14px/1.55 "Songti SC", "SimSun", "Noto Serif CJK SC", serif; }
-    .certificate { position: relative; min-height: 176mm; padding: 4mm 2mm 0; }
+    .certificate { position: relative; min-height: 176mm; padding: 4mm 2mm 34mm; }
     h1 { margin: 0; text-align: center; font: 700 25px/1.25 "PingFang SC", "Microsoft YaHei", sans-serif; letter-spacing: 1px; color: #23364a; }
     .title-line { height: 2px; margin: 14px 0 8px; background: #2d5f86; }
     .intro { margin: 0 26px 16px; text-indent: 2em; font-size: 14px; }
@@ -458,18 +444,18 @@ function buildInvoicePrintHtml(invoice, stampUrl = '') {
     .summary div { margin: 2px 0; }
     .notes { margin: 10px 20px 0; }
     .notes p { margin: 5px 0; text-indent: 2em; }
-    .sign { position: absolute; right: 88px; bottom: 22px; min-width: 250px; min-height: 104px; font-size: 14px; }
+    .sign { position: absolute; right: 88px; bottom: 4px; min-width: 250px; min-height: 104px; font-size: 14px; }
     .sign p { margin: 8px 0; }
-    .seal-image { position: absolute; width: 118px; height: 118px; right: 44px; bottom: -5px; object-fit: contain; opacity: 0.94; }
+    .seal-image { position: absolute; width: 118px; height: 118px; right: 44px; bottom: -18px; object-fit: contain; opacity: 0.94; }
     .empty { padding: 18px; text-align: center; color: #697586; }
-    @media screen { body { padding: 18px; background: #eef2f7; } .certificate { max-width: 1120px; margin: 0 auto; padding: 28px 32px; background: #fff; box-shadow: 0 10px 34px rgba(15, 23, 42, 0.12); } }
+    @media screen { body { padding: 18px; background: #eef2f7; } .certificate { max-width: 1120px; margin: 0 auto; padding: 28px 32px 72px; background: #fff; box-shadow: 0 10px 34px rgba(15, 23, 42, 0.12); } }
   </style>
 </head>
 <body>
   <main class="certificate">
-    <h1>曜算平台发票申请明细证明</h1>
+    <h1>曜算平台交易明细证明</h1>
     <div class="title-line"></div>
-    <p class="intro">兹证明：用户 ${cell(formatInvoiceUser(invoice))} 于曜算平台提交发票申请。根据该用户申请时所选择的订单范围，平台系统记录的开票订单明细如下：</p>
+    <p class="intro">兹证明：用户 ${cell(formatInvoiceUser(invoice))} 于曜算平台存在相关交易记录。根据该用户申请时所选择的交易类型及时间范围，平台系统记录的交易明细如下：</p>
 
     <h2>交易明细表</h2>
     <table>
@@ -492,12 +478,11 @@ function buildInvoicePrintHtml(invoice, stampUrl = '') {
       <div>合计：共 ${summary.count} 笔交易，${cell(totalParts.join('，'))}。</div>
       <div>其中：${cell(typeSummary || '-')}。</div>
       <div>交易时间范围：${cell(timeRange)}。</div>
-      <div>发票抬头：${cell(invoiceTitle)}；税号：${cell(invoice?.tax_number)}；接收方式：${cell(invoiceContact || '-')}。</div>
     </section>
 
     <section class="notes">
       <h2>说明</h2>
-      <p>本《曜算平台发票申请明细证明》仅用于证明用户在其发票申请范围内，于曜算平台产生的相关支付订单记录。</p>
+      <p>本《曜算平台交易明细证明》仅用于证明用户在其申请范围内，于曜算平台产生的相关支付订单记录。</p>
       <p>本证明所列订单明细依据用户申请时选择的订单及平台系统记录生成，具体筛选条件以用户申请页面选择内容为准。</p>
       <p>本证明仅限用于证明用户在曜算平台的相关交易记录，不作为其他权利义务认定依据。</p>
       <p>本证明不得擅自修改、涂改、拆分或用于与申请目的不一致的其他用途。</p>
@@ -671,10 +656,17 @@ const TopupHistoryModal = ({
     invoiceUrl: '',
     invoiceSentTo: '',
     sendEmail: true,
+    sendDetailBill: true,
     adminRemark: '',
   });
   const [invoiceReviewFile, setInvoiceReviewFile] = useState(null);
   const [invoiceReviewSubmitting, setInvoiceReviewSubmitting] = useState(false);
+  const [invoiceEmailState, setInvoiceEmailState] = useState({
+    visible: false,
+    record: null,
+    sendDetailBill: true,
+    submitting: false,
+  });
   const [invoiceDetailVisible, setInvoiceDetailVisible] = useState(false);
   const [invoiceDetailLoading, setInvoiceDetailLoading] = useState(false);
   const [invoiceDetail, setInvoiceDetail] = useState(null);
@@ -1485,6 +1477,7 @@ const TopupHistoryModal = ({
       invoiceUrl: record?.invoice_url || '',
       invoiceSentTo: record?.invoice_sent_to || record?.email || '',
       sendEmail: true,
+      sendDetailBill: true,
       adminRemark: '',
     });
     setInvoiceReviewFile(null);
@@ -1497,9 +1490,36 @@ const TopupHistoryModal = ({
       invoiceUrl: '',
       invoiceSentTo: '',
       sendEmail: true,
+      sendDetailBill: true,
       adminRemark: '',
     });
     setInvoiceReviewFile(null);
+  };
+
+  const loadInvoiceStampDataUrl = async () => {
+    const stampUrl = `${window.location.origin}/invoice-stamp.png`;
+    try {
+      const response = await fetch(stampUrl, { cache: 'force-cache' });
+      if (!response.ok) {
+        return stampUrl;
+      }
+      const blob = await response.blob();
+      return await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result || stampUrl);
+        reader.onerror = () => resolve(stampUrl);
+        reader.readAsDataURL(blob);
+      });
+    } catch (error) {
+      return stampUrl;
+    }
+  };
+
+  const buildInvoiceDetailBillFile = async (record) => {
+    const stampUrl = await loadInvoiceStampDataUrl();
+    const html = buildInvoicePrintHtml(record, stampUrl);
+    const filename = `明细账单-${Number(record?.id || 0) || 'invoice'}.html`;
+    return new File([html], filename, { type: 'text/html;charset=utf-8' });
   };
 
   const submitInvoiceReview = async () => {
@@ -1530,8 +1550,20 @@ const TopupHistoryModal = ({
           invoiceReviewForm.invoiceSentTo.trim(),
         );
         payload.append('send_email', String(invoiceReviewForm.sendEmail));
+        payload.append(
+          'send_detail_bill',
+          String(
+            invoiceReviewForm.sendEmail && invoiceReviewForm.sendDetailBill,
+          ),
+        );
         payload.append('admin_remark', invoiceReviewForm.adminRemark.trim());
         payload.append('invoice_file', invoiceReviewFile);
+        if (invoiceReviewForm.sendEmail && invoiceReviewForm.sendDetailBill) {
+          payload.append(
+            'detail_bill_file',
+            await buildInvoiceDetailBillFile(record),
+          );
+        }
       } else {
         payload = {
           admin_remark: invoiceReviewForm.adminRemark.trim(),
@@ -1565,11 +1597,61 @@ const TopupHistoryModal = ({
     }
   };
 
-  const resendInvoiceEmail = async (record) => {
+  const loadInvoiceDetailData = async (record) => {
     const id = Number(record?.id || 0);
+    if (!id) {
+      throw new Error('参数错误');
+    }
+    const endpoint = userIsAdmin
+      ? `/api/user/invoices/${id}`
+      : `/api/user/invoices/self/${id}`;
+    const res = await API.get(endpoint);
+    const { success, message, data } = res.data || {};
+    if (!success) {
+      throw new Error(message || '加载发票详情失败');
+    }
+    return data || record || null;
+  };
+
+  const openResendInvoiceEmailModal = (record) => {
+    setInvoiceEmailState({
+      visible: true,
+      record,
+      sendDetailBill: true,
+      submitting: false,
+    });
+  };
+
+  const closeResendInvoiceEmailModal = () => {
+    setInvoiceEmailState({
+      visible: false,
+      record: null,
+      sendDetailBill: true,
+      submitting: false,
+    });
+  };
+
+  const submitResendInvoiceEmail = async () => {
+    const id = Number(invoiceEmailState.record?.id || 0);
     if (!id) return;
+    setInvoiceEmailState((prev) => ({ ...prev, submitting: true }));
     try {
-      const res = await API.post(`/api/user/invoices/${id}/resend-email`);
+      const detail = await loadInvoiceDetailData(invoiceEmailState.record);
+      const payload = new FormData();
+      payload.append(
+        'send_detail_bill',
+        String(invoiceEmailState.sendDetailBill),
+      );
+      if (invoiceEmailState.sendDetailBill) {
+        payload.append(
+          'detail_bill_file',
+          await buildInvoiceDetailBillFile(detail),
+        );
+      }
+      const res = await API.post(
+        `/api/user/invoices/${id}/resend-email`,
+        payload,
+      );
       const { success, message, data } = res.data || {};
       if (!success) {
         Toast.error({ content: t(message || '重发邮件失败') });
@@ -1582,9 +1664,12 @@ const TopupHistoryModal = ({
       } else {
         Toast.success({ content: t('邮件已发送') });
       }
+      closeResendInvoiceEmailModal();
       await refreshInvoices();
     } catch (error) {
-      Toast.error({ content: t('重发邮件失败') });
+      Toast.error({ content: t(error?.message || '重发邮件失败') });
+    } finally {
+      setInvoiceEmailState((prev) => ({ ...prev, submitting: false }));
     }
   };
 
@@ -1598,18 +1683,9 @@ const TopupHistoryModal = ({
     setInvoiceDetailVisible(true);
     setInvoiceDetailLoading(true);
     try {
-      const endpoint = userIsAdmin
-        ? `/api/user/invoices/${id}`
-        : `/api/user/invoices/self/${id}`;
-      const res = await API.get(endpoint);
-      const { success, message, data } = res.data || {};
-      if (!success) {
-        Toast.error({ content: t(message || '加载发票详情失败') });
-        return;
-      }
-      setInvoiceDetail(data || record || null);
+      setInvoiceDetail(await loadInvoiceDetailData(record));
     } catch (error) {
-      Toast.error({ content: t('加载发票详情失败') });
+      Toast.error({ content: t(error?.message || '加载发票详情失败') });
     } finally {
       setInvoiceDetailLoading(false);
     }
@@ -1620,21 +1696,24 @@ const TopupHistoryModal = ({
     setInvoiceDetail(null);
   };
 
-  const printInvoiceDetail = () => {
-    if (!invoiceDetail) {
-      return;
-    }
-    const printWindow = window.open('', '_blank', 'width=960,height=720');
+  const writeInvoiceDetailBillWindow = (
+    detail,
+    { autoPrint = false, targetWindow = null } = {},
+  ) => {
+    const printWindow =
+      targetWindow || window.open('', '_blank', 'width=960,height=720');
     if (!printWindow) {
-      Toast.error({ content: t('浏览器阻止了打印窗口') });
-      return;
+      return false;
     }
     printWindow.opener = null;
     const stampUrl = `${window.location.origin}/invoice-stamp.png`;
     printWindow.document.open();
-    printWindow.document.write(buildInvoicePrintHtml(invoiceDetail, stampUrl));
+    printWindow.document.write(buildInvoicePrintHtml(detail, stampUrl));
     printWindow.document.close();
     printWindow.focus();
+    if (!autoPrint) {
+      return true;
+    }
 
     const doPrint = () => {
       printWindow.print();
@@ -1643,9 +1722,45 @@ const TopupHistoryModal = ({
     if (stampImage && !stampImage.complete) {
       stampImage.onload = () => setTimeout(doPrint, 100);
       stampImage.onerror = () => setTimeout(doPrint, 100);
-      return;
+      return true;
     }
     setTimeout(doPrint, 200);
+    return true;
+  };
+
+  const printInvoiceDetail = () => {
+    if (!invoiceDetail) {
+      return;
+    }
+    if (!writeInvoiceDetailBillWindow(invoiceDetail, { autoPrint: true })) {
+      Toast.error({ content: t('浏览器阻止了打印窗口') });
+    }
+  };
+
+  const viewInvoiceDetailBill = async (record) => {
+    const targetWindow = window.open('', '_blank', 'width=960,height=720');
+    if (!targetWindow) {
+      Toast.error({ content: t('浏览器阻止了明细账单窗口') });
+      return;
+    }
+    targetWindow.opener = null;
+    targetWindow.document.open();
+    targetWindow.document.write(
+      '<!doctype html><meta charset="utf-8"><title>明细账单</title><body style="font:14px sans-serif;padding:24px;">正在加载明细账单...</body>',
+    );
+    targetWindow.document.close();
+    try {
+      const detail = await loadInvoiceDetailData(record);
+      writeInvoiceDetailBillWindow(detail, { targetWindow });
+    } catch (error) {
+      targetWindow.document.open();
+      targetWindow.document.write(
+        `<!doctype html><meta charset="utf-8"><title>明细账单</title><body style="font:14px sans-serif;padding:24px;color:#b91c1c;">${escapeHtml(
+          error?.message || '加载明细账单失败',
+        )}</body>`,
+      );
+      targetWindow.document.close();
+    }
   };
 
   const renderStatusBadge = (status) => {
@@ -2727,7 +2842,7 @@ const TopupHistoryModal = ({
     columns.push({
       title: t('操作'),
       key: 'action',
-      width: isReviewMode ? 230 : 110,
+      width: isReviewMode ? 300 : 110,
       render: (_, record) => (
         <Space wrap>
           <Button
@@ -2735,8 +2850,17 @@ const TopupHistoryModal = ({
             theme='outline'
             onClick={() => openInvoiceDetail(record)}
           >
-            {t('详情/打印')}
+            {t('详情')}
           </Button>
+          {isReviewMode ? (
+            <Button
+              size='small'
+              theme='outline'
+              onClick={() => viewInvoiceDetailBill(record)}
+            >
+              {t('明细账单')}
+            </Button>
+          ) : null}
           {isReviewMode && record?.status === 'pending' ? (
             <>
               <Button
@@ -2765,7 +2889,7 @@ const TopupHistoryModal = ({
               size='small'
               type='warning'
               theme='outline'
-              onClick={() => resendInvoiceEmail(record)}
+              onClick={() => openResendInvoiceEmailModal(record)}
             >
               {t('重发邮件')}
             </Button>
@@ -3645,7 +3769,7 @@ const TopupHistoryModal = ({
               disabled={!invoiceDetail}
               onClick={printInvoiceDetail}
             >
-              {t('打印')}
+              {t('打印明细账单')}
             </Button>
           </Space>
         }
@@ -3875,6 +3999,18 @@ const TopupHistoryModal = ({
               >
                 {t('通过后自动发送到用户邮箱')}
               </Checkbox>
+              <Checkbox
+                checked={invoiceReviewForm.sendDetailBill}
+                disabled={!invoiceReviewForm.sendEmail}
+                onChange={(event) =>
+                  setInvoiceReviewForm((prev) => ({
+                    ...prev,
+                    sendDetailBill: event.target.checked,
+                  }))
+                }
+              >
+                {t('同时发送明细账单附件')}
+              </Checkbox>
             </>
           ) : null}
           <TextArea
@@ -3924,6 +4060,32 @@ const TopupHistoryModal = ({
             maxLength={255}
             showClear
           />
+        </div>
+      </Modal>
+
+      <Modal
+        title={t('重发发票邮件')}
+        visible={invoiceEmailState.visible}
+        onOk={submitResendInvoiceEmail}
+        onCancel={closeResendInvoiceEmailModal}
+        confirmLoading={invoiceEmailState.submitting}
+        maskClosable={false}
+      >
+        <div className='space-y-3'>
+          <Text type='secondary'>
+            {t('将重新发送已上传的发票 PDF 到用户接收邮箱。')}
+          </Text>
+          <Checkbox
+            checked={invoiceEmailState.sendDetailBill}
+            onChange={(event) =>
+              setInvoiceEmailState((prev) => ({
+                ...prev,
+                sendDetailBill: event.target.checked,
+              }))
+            }
+          >
+            {t('同时发送明细账单附件')}
+          </Checkbox>
         </div>
       </Modal>
     </>
