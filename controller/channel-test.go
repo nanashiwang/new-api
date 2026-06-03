@@ -1203,13 +1203,21 @@ func resolvePendingDisableFailureReason(result testResult) string {
 	return "pending disable confirmation failed"
 }
 
+func pendingDisableConfirmationTestOptions(reason string) (string, *bool) {
+	if !strings.Contains(reason, service.ResponsesStreamMissingCompletedReason) {
+		return "", nil
+	}
+	return string(constant.EndpointTypeOpenAIResponse), common.GetPointer(true)
+}
+
 func confirmSingleChannelPendingDisable(channel *model.Channel) {
 	testUserID, err := resolveChannelTestUserID(nil)
 	if err != nil {
 		common.SysError("resolve pending disable test user failed: " + err.Error())
 		return
 	}
-	result := testChannel(channel, testUserID, "", "", nil, nil)
+	endpointType, streamOverride := pendingDisableConfirmationTestOptions(channel.GetPendingDisableReason())
+	result := testChannel(channel, testUserID, "", endpointType, streamOverride, nil)
 	if result.newAPIError == nil && result.localErr == nil {
 		if err := model.ClearChannelPreDisable(channel.Id, ""); err != nil {
 			common.SysError(fmt.Sprintf("clear pending disable failed after success: channel=%d err=%v", channel.Id, err))
@@ -1230,7 +1238,8 @@ func confirmMultiKeyPendingDisable(channel *model.Channel, keyIndex int) {
 		common.SysError("resolve pending key disable test user failed: " + err.Error())
 		return
 	}
-	result := testChannel(channel, testUserID, "", "", nil, common.GetPointer(keyIndex))
+	endpointType, streamOverride := pendingDisableConfirmationTestOptions(channel.GetPendingDisableKeyReason(keyIndex))
+	result := testChannel(channel, testUserID, "", endpointType, streamOverride, common.GetPointer(keyIndex))
 	if result.newAPIError == nil && result.localErr == nil {
 		if err := model.ClearChannelPreDisable(channel.Id, key); err != nil {
 			common.SysError(fmt.Sprintf("clear pending key disable failed after success: channel=%d key_index=%d err=%v", channel.Id, keyIndex, err))

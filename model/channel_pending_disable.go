@@ -105,6 +105,13 @@ func (channel *Channel) HasPendingDisableKey(index int) bool {
 	return channel.ChannelInfo.MultiKeyPendingDisableUntil[index] > 0
 }
 
+func (channel *Channel) GetPendingDisableKeyReason(index int) string {
+	if channel == nil || index < 0 || channel.ChannelInfo.MultiKeyPendingDisableReason == nil {
+		return ""
+	}
+	return channel.ChannelInfo.MultiKeyPendingDisableReason[index]
+}
+
 func (channel *Channel) SetPendingDisableKey(index int, until int64, reason string) {
 	if channel == nil || index < 0 {
 		return
