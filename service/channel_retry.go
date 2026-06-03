@@ -1,6 +1,7 @@
 package service
 
 import (
+	"net/http"
 	"strings"
 
 	"github.com/QuantumNous/new-api/model"
@@ -112,5 +113,26 @@ func shouldExcludeRetryByTag(err *types.NewAPIError) bool {
 	if err == nil {
 		return false
 	}
-	return IsRetryableUpstreamQuotaError(err)
+	return IsRetryableSharedUpstreamPoolError(err)
+}
+
+func IsRetryableSharedUpstreamPoolError(err *types.NewAPIError) bool {
+	if err == nil || types.IsSkipRetryError(err) {
+		return false
+	}
+	return IsQuotaRelatedError(err) ||
+		IsUpstreamModelTemporaryUnavailableError(err) ||
+		IsUpstreamRateLimitError(err)
+}
+
+func IsUpstreamRateLimitError(err *types.NewAPIError) bool {
+	if err == nil || types.IsSkipRetryError(err) {
+		return false
+	}
+	if err.StatusCode == http.StatusTooManyRequests {
+		return true
+	}
+	lowerMessage := normalizeUpstreamErrorMessage(err)
+	return strings.Contains(lowerMessage, "rate limit") ||
+		strings.Contains(lowerMessage, "too many requests")
 }

@@ -166,6 +166,17 @@ func TestIsRetryableUpstreamQuotaError_UpstreamQuotaPositive(t *testing.T) {
 	}
 }
 
+func TestIsRetryableSharedUpstreamPoolError_RateLimitPositive(t *testing.T) {
+	err := types.WithOpenAIError(types.OpenAIError{
+		Message: "rate limit exceeded",
+		Type:    "upstream_error",
+		Code:    nil,
+	}, 429)
+	if !IsRetryableSharedUpstreamPoolError(err) {
+		t.Fatalf("expected upstream rate limit to be treated as shared upstream pool error")
+	}
+}
+
 func TestApplyChannelFailureRetryExclusion_UsesTagGroup(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
@@ -235,7 +246,7 @@ func TestApplyChannelFailureRetryExclusion_UsesTagGroup(t *testing.T) {
 	}
 }
 
-func TestApplyChannelFailureRetryExclusion_TemporaryModelUnavailableFallsBackToChannelID(t *testing.T) {
+func TestApplyChannelFailureRetryExclusion_TemporaryModelUnavailableUsesTagGroup(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -289,7 +300,10 @@ func TestApplyChannelFailureRetryExclusion_TemporaryModelUnavailableFallsBackToC
 
 	ApplyChannelFailureRetryExclusion(param, channel, retryErr)
 
-	if len(param.ExcludeChannels) != 1 || param.ExcludeChannels[0] != 7 {
+	if len(param.ExcludeChannels) != 2 {
+		t.Fatalf("expected two excluded channels, got %v", param.ExcludeChannels)
+	}
+	if !slices.Contains(param.ExcludeChannels, 7) || !slices.Contains(param.ExcludeChannels, 8) {
 		t.Fatalf("unexpected excluded channels: %v", param.ExcludeChannels)
 	}
 }
