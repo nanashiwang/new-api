@@ -378,6 +378,39 @@ function tryWrapHtmlCode(text) {
     );
 }
 
+function getTextFromChildren(children) {
+  return React.Children.toArray(children)
+    .map((child) => {
+      if (typeof child === 'string' || typeof child === 'number') {
+        return String(child);
+      }
+      if (React.isValidElement(child)) {
+        return getTextFromChildren(child.props.children);
+      }
+      return '';
+    })
+    .join('');
+}
+
+function createHeadingId(children) {
+  return getTextFromChildren(children)
+    .toLowerCase()
+    .trim()
+    .replace(/[^\p{L}\p{N}\s-]/gu, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+function MarkdownHeading({ as: Tag, children, node, ...props }) {
+  const id = props.id || createHeadingId(children);
+  return (
+    <Tag {...props} id={id || undefined}>
+      {children}
+    </Tag>
+  );
+}
+
 function _MarkdownContent(props) {
   const {
     content,
@@ -466,7 +499,8 @@ function _MarkdownContent(props) {
           );
         },
         h1: (props) => (
-          <h1
+          <MarkdownHeading
+            as='h1'
             {...props}
             style={{
               fontSize: '24px',
@@ -477,7 +511,8 @@ function _MarkdownContent(props) {
           />
         ),
         h2: (props) => (
-          <h2
+          <MarkdownHeading
+            as='h2'
             {...props}
             style={{
               fontSize: '20px',
@@ -488,7 +523,8 @@ function _MarkdownContent(props) {
           />
         ),
         h3: (props) => (
-          <h3
+          <MarkdownHeading
+            as='h3'
             {...props}
             style={{
               fontSize: '18px',
@@ -499,7 +535,8 @@ function _MarkdownContent(props) {
           />
         ),
         h4: (props) => (
-          <h4
+          <MarkdownHeading
+            as='h4'
             {...props}
             style={{
               fontSize: '16px',
@@ -510,7 +547,8 @@ function _MarkdownContent(props) {
           />
         ),
         h5: (props) => (
-          <h5
+          <MarkdownHeading
+            as='h5'
             {...props}
             style={{
               fontSize: '14px',
@@ -521,7 +559,8 @@ function _MarkdownContent(props) {
           />
         ),
         h6: (props) => (
-          <h6
+          <MarkdownHeading
+            as='h6'
             {...props}
             style={{
               fontSize: '13px',

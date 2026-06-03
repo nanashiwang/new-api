@@ -8,6 +8,13 @@ docs
 !docs
 !docs/NAN_USAGE.md
 !docs/NAN_CLIENTS.md
+!docs/NAN_CLIENT_CODEX.md
+!docs/NAN_CLIENT_CLAUDE_CODE.md
+!docs/NAN_CLIENT_CLAUDE_CODE_OPENAI.md
+!docs/NAN_CLIENT_GEMINI.md
+!docs/NAN_CLIENT_OPENCODE.md
+!docs/NAN_CLIENT_OPENCLAW.md
+!docs/NAN_CLIENT_CCSWITCH.md
 !docs/NAN_TROUBLESHOOTING.md
 .eslintcache
 .gocache

@@ -25,6 +25,13 @@ import { useTranslation } from 'react-i18next';
 import MarkdownRenderer from '../../components/common/markdown/MarkdownRenderer';
 import usageMarkdown from '../../../../docs/NAN_USAGE.md?raw';
 import clientsMarkdown from '../../../../docs/NAN_CLIENTS.md?raw';
+import codexMarkdown from '../../../../docs/NAN_CLIENT_CODEX.md?raw';
+import claudeCodeMarkdown from '../../../../docs/NAN_CLIENT_CLAUDE_CODE.md?raw';
+import claudeCodeOpenAIMarkdown from '../../../../docs/NAN_CLIENT_CLAUDE_CODE_OPENAI.md?raw';
+import geminiMarkdown from '../../../../docs/NAN_CLIENT_GEMINI.md?raw';
+import opencodeMarkdown from '../../../../docs/NAN_CLIENT_OPENCODE.md?raw';
+import openclawMarkdown from '../../../../docs/NAN_CLIENT_OPENCLAW.md?raw';
+import ccSwitchMarkdown from '../../../../docs/NAN_CLIENT_CCSWITCH.md?raw';
 import troubleshootingMarkdown from '../../../../docs/NAN_TROUBLESHOOTING.md?raw';
 import './index.css';
 
@@ -36,6 +43,7 @@ const DOCS = [
   {
     key: 'usage',
     path: '/docs',
+    group: '基础',
     title: '平台教程',
     description: '注册、令牌、调用、充值、发票、扣费和安全提醒',
     content: usageMarkdown,
@@ -43,13 +51,71 @@ const DOCS = [
   {
     key: 'clients',
     path: '/docs/clients',
+    group: '客户端',
     title: '客户端接入',
     description: 'Codex、Claude Code、Gemini、OpenCode、OpenClaw、CC Switch',
     content: clientsMarkdown,
   },
   {
+    key: 'client-codex',
+    path: '/docs/clients/codex',
+    group: '客户端',
+    title: 'Codex',
+    description: 'Codex 一键配置与手动配置',
+    content: codexMarkdown,
+  },
+  {
+    key: 'client-claude-code',
+    path: '/docs/clients/claude-code',
+    group: '客户端',
+    title: 'Claude Code',
+    description: 'Claude Code 使用 Claude 模型',
+    content: claudeCodeMarkdown,
+  },
+  {
+    key: 'client-claude-code-openai',
+    path: '/docs/clients/claude-code-openai',
+    group: '客户端',
+    title: 'Claude Code OpenAI',
+    description: 'Claude Code 使用 OpenAI / Codex 模型',
+    content: claudeCodeOpenAIMarkdown,
+  },
+  {
+    key: 'client-gemini',
+    path: '/docs/clients/gemini',
+    group: '客户端',
+    title: 'Gemini CLI',
+    description: 'Gemini CLI 配置与验证',
+    content: geminiMarkdown,
+  },
+  {
+    key: 'client-opencode',
+    path: '/docs/clients/opencode',
+    group: '客户端',
+    title: 'OpenCode',
+    description: 'OpenCode 环境变量与配置文件',
+    content: opencodeMarkdown,
+  },
+  {
+    key: 'client-openclaw',
+    path: '/docs/clients/openclaw',
+    group: '客户端',
+    title: 'OpenClaw',
+    description: 'OpenClaw 本地网关与多模型配置',
+    content: openclawMarkdown,
+  },
+  {
+    key: 'client-ccswitch',
+    path: '/docs/clients/ccswitch',
+    group: '客户端',
+    title: 'CC Switch',
+    description: '一键导入配置与聊天入口边界',
+    content: ccSwitchMarkdown,
+  },
+  {
     key: 'troubleshooting',
     path: '/docs/troubleshooting',
+    group: '排查',
     title: '常见报错排查',
     description: '按错误文本排查注册、认证、模型、客户端、网络、支付问题',
     content: troubleshootingMarkdown,
@@ -59,8 +125,25 @@ const DOCS = [
 const DOC_LINK_REPLACEMENTS = [
   [/\.\/NAN_USAGE\.md/g, '/docs'],
   [/\.\/NAN_CLIENTS\.md/g, '/docs/clients'],
+  [/\.\/NAN_CLIENT_CODEX\.md/g, '/docs/clients/codex'],
+  [/\.\/NAN_CLIENT_CLAUDE_CODE\.md/g, '/docs/clients/claude-code'],
+  [
+    /\.\/NAN_CLIENT_CLAUDE_CODE_OPENAI\.md/g,
+    '/docs/clients/claude-code-openai',
+  ],
+  [/\.\/NAN_CLIENT_GEMINI\.md/g, '/docs/clients/gemini'],
+  [/\.\/NAN_CLIENT_OPENCODE\.md/g, '/docs/clients/opencode'],
+  [/\.\/NAN_CLIENT_OPENCLAW\.md/g, '/docs/clients/openclaw'],
+  [/\.\/NAN_CLIENT_CCSWITCH\.md/g, '/docs/clients/ccswitch'],
   [/\.\/NAN_TROUBLESHOOTING\.md/g, '/docs/troubleshooting'],
 ];
+
+const NAV_GROUPS = DOCS.reduce((groups, doc) => {
+  if (!groups.includes(doc.group)) {
+    groups.push(doc.group);
+  }
+  return groups;
+}, []);
 
 function normalizeMarkdownLinks(content) {
   return DOC_LINK_REPLACEMENTS.reduce(
@@ -70,9 +153,14 @@ function normalizeMarkdownLinks(content) {
 }
 
 function getActiveDoc(pathname) {
-  const matched = DOCS.find(
-    (doc) => doc.path !== '/docs' && pathname.startsWith(doc.path),
-  );
+  const normalizedPath = pathname.replace(/\/+$/, '') || '/docs';
+  const matched = [...DOCS]
+    .sort((a, b) => b.path.length - a.path.length)
+    .find(
+      (doc) =>
+        normalizedPath === doc.path ||
+        normalizedPath.startsWith(`${doc.path}/`),
+    );
   return matched || DOCS[0];
 }
 
@@ -111,21 +199,26 @@ export default function DocsPage() {
 
       <div className='nan-docs-layout'>
         <aside className='nan-docs-sidebar'>
-          <Space vertical align='start' style={{ width: '100%' }}>
-            {DOCS.map((doc) => (
-              <Button
-                key={doc.key}
-                block
-                icon={<IconBookOpenStroked />}
-                theme={doc.key === activeDoc.key ? 'solid' : 'borderless'}
-                type={doc.key === activeDoc.key ? 'primary' : 'tertiary'}
-                className='nan-docs-nav-button'
-                onClick={() => navigate(doc.path)}
-              >
-                {t(doc.title)}
-              </Button>
-            ))}
-          </Space>
+          {NAV_GROUPS.map((group) => (
+            <div className='nan-docs-nav-group' key={group}>
+              <Text className='nan-docs-nav-group-title'>{t(group)}</Text>
+              <Space vertical align='start' style={{ width: '100%' }}>
+                {DOCS.filter((doc) => doc.group === group).map((doc) => (
+                  <Button
+                    key={doc.key}
+                    block
+                    icon={<IconBookOpenStroked />}
+                    theme={doc.key === activeDoc.key ? 'solid' : 'borderless'}
+                    type={doc.key === activeDoc.key ? 'primary' : 'tertiary'}
+                    className='nan-docs-nav-button'
+                    onClick={() => navigate(doc.path)}
+                  >
+                    {t(doc.title)}
+                  </Button>
+                ))}
+              </Space>
+            </div>
+          ))}
         </aside>
 
         <main className='nan-docs-content'>

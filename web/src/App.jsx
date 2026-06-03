@@ -427,7 +427,7 @@ function App() {
           }
         />
         <Route
-          path='/docs/:section?'
+          path='/docs/*'
           element={
             <Suspense fallback={<Loading></Loading>} key={location.pathname}>
               <Docs />
