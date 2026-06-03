@@ -146,8 +146,7 @@ const RegisterForm = () => {
   );
 
   const [showEmailVerification, setShowEmailVerification] = useState(false);
-  const shouldCheckTurnstileForRegister =
-    turnstileEnabled && !showEmailVerification;
+  const shouldCheckTurnstileForRegister = turnstileEnabled;
 
   useEffect(() => {
     setShowEmailVerification(!!status?.email_verification);
