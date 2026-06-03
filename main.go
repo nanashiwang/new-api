@@ -96,6 +96,7 @@ func main() {
 
 	// 数据看板
 	go model.UpdateQuotaData()
+	model.StartUserBalanceSnapshotTask()
 	perfmetrics.Init()
 	model.StartProfitBoardAggregateSyncTask()
 	model.StartProfitBoardRemoteObserverSyncTask()

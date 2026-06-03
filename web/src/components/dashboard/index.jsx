@@ -25,6 +25,7 @@ import { StatusContext } from '../../context/Status';
 import DashboardHeader from './DashboardHeader';
 import StatsCards from './StatsCards';
 import ChartsPanel from './ChartsPanel';
+import UserBalanceTrendPanel from './UserBalanceTrendPanel';
 import ApiInfoPanel from './ApiInfoPanel';
 import AnnouncementsPanel from './AnnouncementsPanel';
 import FaqPanel from './FaqPanel';
@@ -114,6 +115,9 @@ const Dashboard = () => {
     const optionalTasks = [quotaTask];
     if (dashboardData.uptimeEnabled) {
       optionalTasks.push(dashboardData.loadUptimeData());
+    }
+    if (dashboardData.isAdminUser) {
+      optionalTasks.push(dashboardData.loadUserBalanceTrend());
     }
 
     await Promise.allSettled(optionalTasks);
@@ -249,6 +253,16 @@ const Dashboard = () => {
         CARD_PROPS={CARD_PROPS}
         CHART_CONFIG={CHART_CONFIG}
       />
+
+      {dashboardData.isAdminUser && (
+        <UserBalanceTrendPanel
+          report={dashboardData.userBalanceTrend}
+          loading={dashboardData.userBalanceTrendLoading}
+          CARD_PROPS={CARD_PROPS}
+          CHART_CONFIG={CHART_CONFIG}
+          t={dashboardData.t}
+        />
+      )}
 
       {/* API信息和图表面板 */}
       <div className='mb-4'>

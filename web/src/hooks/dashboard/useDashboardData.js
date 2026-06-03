@@ -40,6 +40,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const userQuotaRequestGuard = useLatestRequestGuard();
   const perfMetricsRequestGuard = useLatestRequestGuard();
   const modelChannelStatsRequestGuard = useLatestRequestGuard();
+  const userBalanceTrendRequestGuard = useLatestRequestGuard();
 
   // ========== 基础状态 ==========
   const [loading, setLoading] = useState(false);
@@ -72,6 +73,8 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const [modelChannelStats, setModelChannelStats] = useState(null);
   const [modelChannelStatsLoading, setModelChannelStatsLoading] =
     useState(false);
+  const [userBalanceTrend, setUserBalanceTrend] = useState(null);
+  const [userBalanceTrendLoading, setUserBalanceTrendLoading] = useState(false);
 
   // ========== 图表状态 ==========
   const [activeChartTab, setActiveChartTab] = useState('1');
@@ -336,6 +339,44 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     modelChannelStatsRequestGuard,
   ]);
 
+  const loadUserBalanceTrend = useCallback(async () => {
+    if (!isAdminUser) return null;
+    const requestId = userBalanceTrendRequestGuard.createRequestId();
+    setUserBalanceTrendLoading(true);
+    try {
+      const start = Date.parse(inputs.start_timestamp) / 1000;
+      const end = Date.parse(inputs.end_timestamp) / 1000;
+      const res = await API.get('/api/data/user-balance-trend', {
+        params: {
+          start_timestamp: start,
+          end_timestamp: end,
+        },
+      });
+      if (!userBalanceTrendRequestGuard.isLatestRequest(requestId)) {
+        return null;
+      }
+      const { success, message, data } = res.data;
+      if (success) {
+        setUserBalanceTrend(data || null);
+        return data || null;
+      }
+      showError(message);
+      return null;
+    } catch (err) {
+      console.error(err);
+      return null;
+    } finally {
+      if (userBalanceTrendRequestGuard.isLatestRequest(requestId)) {
+        setUserBalanceTrendLoading(false);
+      }
+    }
+  }, [
+    inputs.start_timestamp,
+    inputs.end_timestamp,
+    isAdminUser,
+    userBalanceTrendRequestGuard,
+  ]);
+
   const getUserData = useCallback(async () => {
     let res = await API.get(`/api/user/self`);
     const { success, message, data } = res.data;
@@ -349,8 +390,11 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
 
   const refresh = useCallback(
     async (options = {}) => {
-      const { includeUptime = uptimeEnabled, includePerfMetrics = false } =
-        options;
+      const {
+        includeUptime = uptimeEnabled,
+        includePerfMetrics = false,
+        includeUserBalanceTrend = isAdminUser,
+      } = options;
       const data = await loadQuotaData();
       const tasks = [];
       if (includeUptime) {
@@ -362,6 +406,9 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
       if (options.includeModelChannelStats) {
         tasks.push(loadModelChannelTagStats());
       }
+      if (includeUserBalanceTrend) {
+        tasks.push(loadUserBalanceTrend());
+      }
       if (tasks.length > 0) {
         await Promise.allSettled(tasks);
       }
@@ -372,7 +419,9 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
       loadUptimeData,
       loadPerfMetricsSummary,
       loadModelChannelTagStats,
+      loadUserBalanceTrend,
       uptimeEnabled,
+      isAdminUser,
     ],
   );
 
@@ -419,6 +468,8 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     perfMetricsLoading,
     modelChannelStats,
     modelChannelStatsLoading,
+    userBalanceTrend,
+    userBalanceTrendLoading,
 
     // 图表状态
     activeChartTab,
@@ -455,6 +506,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     loadUptimeData,
     loadPerfMetricsSummary,
     loadModelChannelTagStats,
+    loadUserBalanceTrend,
     getUserData,
     refresh,
     handleSearchConfirm,
