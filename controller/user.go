@@ -172,11 +172,6 @@ func Register(c *gin.Context) {
 			common.ApiErrorI18n(c, i18n.MsgUserEmailVerificationRequired)
 			return
 		}
-		if !common.VerifyCodeWithKey(user.Email, user.VerificationCode, common.EmailVerificationPurpose) {
-			common.ApiErrorI18n(c, i18n.MsgUserVerificationCodeError)
-			return
-		}
-		common.DeleteKey(user.Email, common.EmailVerificationPurpose)
 	}
 	conflict, err := model.CheckUserRegisterConflict(user.Username, user.Email)
 	if err != nil {
@@ -194,6 +189,22 @@ func Register(c *gin.Context) {
 	case model.UserRegisterConflictBoth:
 		common.ApiErrorI18n(c, i18n.MsgUserUsernameAndEmailExists)
 		return
+	}
+	if err := enforceUserRegisterRisk(c, &user); err != nil {
+		if errors.Is(err, errRegisterRiskBlocked) {
+			common.ApiError(c, err)
+			return
+		}
+		common.ApiErrorI18n(c, i18n.MsgDatabaseError)
+		common.SysLog(fmt.Sprintf("enforceUserRegisterRisk error: %v", err))
+		return
+	}
+	if common.EmailVerificationEnabled {
+		if !common.VerifyCodeWithKey(user.Email, user.VerificationCode, common.EmailVerificationPurpose) {
+			common.ApiErrorI18n(c, i18n.MsgUserVerificationCodeError)
+			return
+		}
+		common.DeleteKey(user.Email, common.EmailVerificationPurpose)
 	}
 	affCode := user.AffCode // this code is the inviter's code, not the user's own code
 	inviterId := resolveInviterIDByAffCode(affCode)
