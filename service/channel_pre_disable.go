@@ -11,7 +11,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const ResponsesStreamMissingCompletedReason = "responses stream ended without response.completed"
+const (
+	ResponsesStreamMissingCompletedReason = "responses stream ended without response.completed"
+	ResponsesStreamEmptyCompletedReason   = "responses stream completed without visible output"
+)
 
 func IsChannelUnavailableForRequest(channel *model.Channel) bool {
 	if channel == nil {

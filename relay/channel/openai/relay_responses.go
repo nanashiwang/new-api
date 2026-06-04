@@ -108,9 +108,12 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		// 检查当前数据是否包含 completed 状态和 usage 信息
 		var streamResponse dto.ResponsesStreamResponse
 		if err := common.UnmarshalJsonStr(data, &streamResponse); err == nil {
-			sendResponsesStreamData(c, streamResponse, data)
-			if isEffectiveResponsesStreamOutput(streamResponse) {
-				hasEffectiveOutput = true
+			delayCompletedEvent := streamResponse.Type == "response.completed"
+			if !delayCompletedEvent {
+				sendResponsesStreamData(c, streamResponse, data)
+				if isEffectiveResponsesStreamOutput(streamResponse) {
+					hasEffectiveOutput = true
+				}
 			}
 			if streamResponse.Response != nil {
 				if streamResponse.Response.ID != "" {
@@ -125,6 +128,9 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 			if streamResponse.Error != nil {
 				terminalWithoutCompleted = true
+			}
+			if delayCompletedEvent && isEffectiveResponsesStreamOutput(streamResponse) {
+				hasEffectiveOutput = true
 			}
 			switch streamResponse.Type {
 			case "response.completed":
@@ -150,6 +156,16 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 						c.Set("image_generation_call_quality", streamResponse.Response.GetQuality())
 						c.Set("image_generation_call_size", streamResponse.Response.GetSize())
 					}
+				}
+				if shouldFailEmptyResponsesCompleted(hasEffectiveOutput) {
+					reason := service.ResponsesStreamEmptyCompletedReason
+					if info != nil && info.StreamStatus != nil {
+						info.StreamStatus.RecordError(reason)
+					}
+					scheduleResponsesStreamCooldown(c, reason)
+					sendSyntheticResponsesFailed(c, info, usage, reason, responseID, responseModel, responseCreatedAt)
+				} else {
+					sendResponsesStreamData(c, streamResponse, data)
 				}
 			case "response.output_text.delta":
 				// 处理输出文本
@@ -202,7 +218,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			return usage, types.NewOpenAIError(errors.New(reason), types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 		}
 		if !terminalWithoutCompleted {
-			if shouldFailMissingResponsesCompleted(info, hasEffectiveOutput) {
+			if shouldFailMissingResponsesCompleted(hasEffectiveOutput) {
 				sendSyntheticResponsesFailed(c, info, usage, reason, responseID, responseModel, responseCreatedAt)
 			} else {
 				sendSyntheticResponsesCompleted(c, info, usage, responseID, responseModel, responseCreatedAt)
@@ -218,25 +234,40 @@ func isEffectiveResponsesStreamOutput(streamResponse dto.ResponsesStreamResponse
 		return true
 	}
 	if streamResponse.Item != nil && streamResponse.Item.Type != "" {
-		return true
+		return isEffectiveResponsesOutput(*streamResponse.Item)
 	}
-	return streamResponse.Response != nil && len(streamResponse.Response.Output) > 0
+	if streamResponse.Response == nil {
+		return false
+	}
+	for _, output := range streamResponse.Response.Output {
+		if isEffectiveResponsesOutput(output) {
+			return true
+		}
+	}
+	return false
 }
 
-func shouldFailMissingResponsesCompleted(info *relaycommon.RelayInfo, hasEffectiveOutput bool) bool {
-	if hasEffectiveOutput || info == nil || info.StreamStatus == nil {
+func isEffectiveResponsesOutput(output dto.ResponsesOutput) bool {
+	if output.Type == "" {
 		return false
 	}
-	switch info.StreamStatus.EndReason {
-	case relaycommon.StreamEndReasonTimeout,
-		relaycommon.StreamEndReasonClientGone,
-		relaycommon.StreamEndReasonScannerErr,
-		relaycommon.StreamEndReasonPanic,
-		relaycommon.StreamEndReasonPingFail:
+	if output.Type != "message" {
 		return true
-	default:
-		return false
 	}
+	for _, content := range output.Content {
+		if content.Text != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func shouldFailMissingResponsesCompleted(hasEffectiveOutput bool) bool {
+	return !hasEffectiveOutput
+}
+
+func shouldFailEmptyResponsesCompleted(hasEffectiveOutput bool) bool {
+	return !hasEffectiveOutput
 }
 
 func scheduleResponsesStreamCooldown(c *gin.Context, reason string) {
