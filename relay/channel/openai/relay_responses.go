@@ -98,6 +98,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	var responseTextBuilder strings.Builder
 	completed := false
 	terminalWithoutCompleted := false
+	hasEffectiveOutput := false
 	responseID := ""
 	responseModel := ""
 	responseCreatedAt := 0
@@ -108,6 +109,9 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		var streamResponse dto.ResponsesStreamResponse
 		if err := common.UnmarshalJsonStr(data, &streamResponse); err == nil {
 			sendResponsesStreamData(c, streamResponse, data)
+			if isEffectiveResponsesStreamOutput(streamResponse) {
+				hasEffectiveOutput = true
+			}
 			if streamResponse.Response != nil {
 				if streamResponse.Response.ID != "" {
 					responseID = streamResponse.Response.ID
@@ -198,11 +202,41 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			return usage, types.NewOpenAIError(errors.New(reason), types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 		}
 		if !terminalWithoutCompleted {
-			sendSyntheticResponsesCompleted(c, info, usage, responseID, responseModel, responseCreatedAt)
+			if shouldFailMissingResponsesCompleted(info, hasEffectiveOutput) {
+				sendSyntheticResponsesFailed(c, info, usage, reason, responseID, responseModel, responseCreatedAt)
+			} else {
+				sendSyntheticResponsesCompleted(c, info, usage, responseID, responseModel, responseCreatedAt)
+			}
 		}
 	}
 
 	return usage, nil
+}
+
+func isEffectiveResponsesStreamOutput(streamResponse dto.ResponsesStreamResponse) bool {
+	if streamResponse.Delta != "" {
+		return true
+	}
+	if streamResponse.Item != nil && streamResponse.Item.Type != "" {
+		return true
+	}
+	return streamResponse.Response != nil && len(streamResponse.Response.Output) > 0
+}
+
+func shouldFailMissingResponsesCompleted(info *relaycommon.RelayInfo, hasEffectiveOutput bool) bool {
+	if hasEffectiveOutput || info == nil || info.StreamStatus == nil {
+		return false
+	}
+	switch info.StreamStatus.EndReason {
+	case relaycommon.StreamEndReasonTimeout,
+		relaycommon.StreamEndReasonClientGone,
+		relaycommon.StreamEndReasonScannerErr,
+		relaycommon.StreamEndReasonPanic,
+		relaycommon.StreamEndReasonPingFail:
+		return true
+	default:
+		return false
+	}
 }
 
 func scheduleResponsesStreamCooldown(c *gin.Context, reason string) {
@@ -232,24 +266,7 @@ func sendSyntheticResponsesCompleted(c *gin.Context, info *relaycommon.RelayInfo
 	if createdAt == 0 {
 		createdAt = int(time.Now().Unix())
 	}
-	if usage == nil {
-		usage = &dto.Usage{}
-	}
-	responseUsage := *usage
-	if responseUsage.InputTokens == 0 {
-		responseUsage.InputTokens = responseUsage.PromptTokens
-	}
-	if responseUsage.OutputTokens == 0 {
-		responseUsage.OutputTokens = responseUsage.CompletionTokens
-	}
-	if responseUsage.TotalTokens == 0 {
-		responseUsage.TotalTokens = responseUsage.InputTokens + responseUsage.OutputTokens
-	}
-	if responseUsage.InputTokensDetails == nil && usage.PromptTokensDetails.CachedTokens != 0 {
-		responseUsage.InputTokensDetails = &dto.InputTokenDetails{
-			CachedTokens: usage.PromptTokensDetails.CachedTokens,
-		}
-	}
+	responseUsage := normalizeResponsesUsage(usage)
 	streamResponse := dto.ResponsesStreamResponse{
 		Type: "response.completed",
 		Response: &dto.OpenAIResponsesResponse{
@@ -268,4 +285,74 @@ func sendSyntheticResponsesCompleted(c *gin.Context, info *relaycommon.RelayInfo
 		return
 	}
 	sendResponsesStreamData(c, streamResponse, string(jsonData))
+}
+
+func sendSyntheticResponsesFailed(c *gin.Context, info *relaycommon.RelayInfo, usage *dto.Usage, reason, responseID, model string, createdAt int) {
+	if c == nil {
+		return
+	}
+	if responseID == "" {
+		responseID = "resp_" + c.GetString(common.RequestIdKey)
+	}
+	if model == "" && info != nil {
+		model = info.UpstreamModelName
+		if model == "" {
+			model = info.OriginModelName
+		}
+	}
+	if createdAt == 0 {
+		createdAt = int(time.Now().Unix())
+	}
+	message := reason
+	if info != nil && info.StreamStatus != nil && info.StreamStatus.EndReason != "" {
+		message = fmt.Sprintf("%s (stream end: %s)", reason, info.StreamStatus.EndReason)
+	}
+	logger.LogError(c, "responses stream failed without output: "+message)
+	openaiError := types.OpenAIError{
+		Message: message,
+		Type:    string(types.ErrorCodeBadResponseBody),
+		Code:    types.ErrorCodeBadResponseBody,
+	}
+	responseUsage := normalizeResponsesUsage(usage)
+	streamResponse := dto.ResponsesStreamResponse{
+		Type: "response.failed",
+		Response: &dto.OpenAIResponsesResponse{
+			ID:        responseID,
+			Object:    "response",
+			CreatedAt: createdAt,
+			Status:    "failed",
+			Model:     model,
+			Error:     openaiError,
+			Output:    []dto.ResponsesOutput{},
+			Usage:     &responseUsage,
+		},
+	}
+	jsonData, err := common.Marshal(streamResponse)
+	if err != nil {
+		logger.LogError(c, "failed to marshal synthetic responses failed event: "+err.Error())
+		return
+	}
+	sendResponsesStreamData(c, streamResponse, string(jsonData))
+}
+
+func normalizeResponsesUsage(usage *dto.Usage) dto.Usage {
+	if usage == nil {
+		usage = &dto.Usage{}
+	}
+	responseUsage := *usage
+	if responseUsage.InputTokens == 0 {
+		responseUsage.InputTokens = responseUsage.PromptTokens
+	}
+	if responseUsage.OutputTokens == 0 {
+		responseUsage.OutputTokens = responseUsage.CompletionTokens
+	}
+	if responseUsage.TotalTokens == 0 {
+		responseUsage.TotalTokens = responseUsage.InputTokens + responseUsage.OutputTokens
+	}
+	if responseUsage.InputTokensDetails == nil && usage.PromptTokensDetails.CachedTokens != 0 {
+		responseUsage.InputTokensDetails = &dto.InputTokenDetails{
+			CachedTokens: usage.PromptTokensDetails.CachedTokens,
+		}
+	}
+	return responseUsage
 }
