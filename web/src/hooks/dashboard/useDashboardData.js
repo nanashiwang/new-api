@@ -75,6 +75,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     useState(false);
   const [userBalanceTrend, setUserBalanceTrend] = useState(null);
   const [userBalanceTrendLoading, setUserBalanceTrendLoading] = useState(false);
+  const [userBalanceTrendDays, setUserBalanceTrendDays] = useState(7);
 
   // ========== 图表状态 ==========
   const [activeChartTab, setActiveChartTab] = useState('1');
@@ -339,17 +340,15 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     modelChannelStatsRequestGuard,
   ]);
 
-  const loadUserBalanceTrend = useCallback(async () => {
+  const loadUserBalanceTrend = useCallback(async (daysOverride) => {
     if (!isAdminUser) return null;
     const requestId = userBalanceTrendRequestGuard.createRequestId();
     setUserBalanceTrendLoading(true);
     try {
-      const start = Date.parse(inputs.start_timestamp) / 1000;
-      const end = Date.parse(inputs.end_timestamp) / 1000;
+      const days = Number(daysOverride || userBalanceTrendDays || 7);
       const res = await API.get('/api/data/user-balance-trend', {
         params: {
-          start_timestamp: start,
-          end_timestamp: end,
+          days,
         },
       });
       if (!userBalanceTrendRequestGuard.isLatestRequest(requestId)) {
@@ -371,11 +370,18 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
       }
     }
   }, [
-    inputs.start_timestamp,
-    inputs.end_timestamp,
     isAdminUser,
+    userBalanceTrendDays,
     userBalanceTrendRequestGuard,
   ]);
+
+  const handleUserBalanceTrendDaysChange = useCallback(
+    async (days) => {
+      setUserBalanceTrendDays(days);
+      return loadUserBalanceTrend(days);
+    },
+    [loadUserBalanceTrend],
+  );
 
   const getUserData = useCallback(async () => {
     let res = await API.get(`/api/user/self`);
@@ -393,7 +399,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
       const {
         includeUptime = uptimeEnabled,
         includePerfMetrics = false,
-        includeUserBalanceTrend = isAdminUser,
+        includeUserBalanceTrend = false,
       } = options;
       const data = await loadQuotaData();
       const tasks = [];
@@ -470,6 +476,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     modelChannelStatsLoading,
     userBalanceTrend,
     userBalanceTrendLoading,
+    userBalanceTrendDays,
 
     // 图表状态
     activeChartTab,
@@ -507,6 +514,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     loadPerfMetricsSummary,
     loadModelChannelTagStats,
     loadUserBalanceTrend,
+    handleUserBalanceTrendDaysChange,
     getUserData,
     refresh,
     handleSearchConfirm,

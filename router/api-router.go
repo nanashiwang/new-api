@@ -407,6 +407,8 @@ func SetApiRouter(router *gin.Engine) {
 		dataRoute.GET("/users", middleware.AdminAuth(), controller.GetQuotaDatesByUser)
 		dataRoute.GET("/model-channel-tags", middleware.AdminAuth(), controller.GetModelChannelTagStats)
 		dataRoute.GET("/user-balance-trend", middleware.AdminAuth(), controller.GetUserBalanceTrend)
+		dataRoute.GET("/user-balance-trend/users", middleware.AdminAuth(), controller.GetUserBalanceTrendUsers)
+		dataRoute.PUT("/user-balance-trend/users/:id", middleware.AdminAuth(), controller.UpdateUserBalanceTrendUser)
 		dataRoute.GET("/self", middleware.UserAuth(), controller.GetUserQuotaDates)
 
 		logRoute.Use(middleware.CORS(), middleware.CriticalRateLimit())

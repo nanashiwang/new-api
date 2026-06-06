@@ -33,6 +33,7 @@ import {
   renderNumber,
   renderQuota,
 } from '../../helpers/dashboardFormat';
+import UserBalanceTrendPanel from './UserBalanceTrendPanel';
 
 const VChart = lazy(() =>
   import('@visactor/react-vchart').then((module) => ({
@@ -58,6 +59,10 @@ const ChartsPanel = ({
   perfMetricsLoading,
   modelChannelStats,
   modelChannelStatsLoading,
+  userBalanceTrend,
+  userBalanceTrendLoading,
+  userBalanceTrendDays,
+  onUserBalanceTrendDaysChange,
   isAdminUser,
   CARD_PROPS,
   CHART_CONFIG,
@@ -233,6 +238,7 @@ const ChartsPanel = ({
       rank: index + 1,
     }));
   const isModelChannelTab = activeChartTab === '6' && isAdminUser;
+  const isUserBalanceTrendTab = activeChartTab === '8' && isAdminUser;
 
   return (
     <Card
@@ -257,13 +263,18 @@ const ChartsPanel = ({
             {isAdminUser && (
               <TabPane tab={<span>{t('模型金额占比')}</span>} itemKey='6' />
             )}
+            {isAdminUser && (
+              <TabPane tab={<span>{t('用户余额走势')}</span>} itemKey='8' />
+            )}
             <TabPane tab={<span>{t('性能表现')}</span>} itemKey='7' />
           </Tabs>
         </div>
       }
       bodyStyle={{ padding: 0 }}
     >
-      <div className={isModelChannelTab ? 'p-2' : 'h-96 p-2'}>
+      <div
+        className={isModelChannelTab || isUserBalanceTrendTab ? 'p-2' : 'h-96 p-2'}
+      >
         <Suspense fallback={<ChartFallback t={t} />}>
           {activeChartTab === '1' && (
             <VChart spec={spec_line} option={CHART_CONFIG} />
@@ -379,6 +390,17 @@ const ChartsPanel = ({
                 </div>
               )}
             </Spin>
+          )}
+          {isUserBalanceTrendTab && (
+            <UserBalanceTrendPanel
+              report={userBalanceTrend}
+              loading={userBalanceTrendLoading}
+              days={userBalanceTrendDays}
+              onDaysChange={onUserBalanceTrendDaysChange}
+              embedded
+              CHART_CONFIG={CHART_CONFIG}
+              t={t}
+            />
           )}
         </Suspense>
         {activeChartTab === '7' && (

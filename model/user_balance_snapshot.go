@@ -3,6 +3,8 @@ package model
 import (
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -30,10 +32,11 @@ type UserBalanceSnapshot struct {
 }
 
 type UserBalanceSnapshotUser struct {
-	Id          int    `json:"id"`
-	Username    string `json:"username"`
-	DisplayName string `json:"display_name"`
-	Quota       int64  `json:"quota"`
+	Id                   int    `json:"id"`
+	Username             string `json:"username"`
+	DisplayName          string `json:"display_name"`
+	Quota                int64  `json:"quota"`
+	BalanceTrendDisabled bool   `json:"balance_trend_disabled"`
 }
 
 type UserBalanceSnapshotPoint struct {
@@ -59,6 +62,13 @@ type UserBalanceSnapshotReport struct {
 	DeltaRate     float64                    `json:"delta_rate"`
 	TopUsers      []UserBalanceSnapshotUser  `json:"top_users"`
 	NegativeUsers []UserBalanceSnapshotUser  `json:"negative_users"`
+}
+
+type UserBalanceTrendUserSearchParams struct {
+	Keyword       string
+	IncludeStatus string
+	StartIdx      int
+	PageSize      int
 }
 
 type userBalanceAggregateRow struct {
@@ -184,7 +194,7 @@ func SaveUserBalanceSnapshot(now time.Time) (*UserBalanceSnapshot, error) {
 
 func queryUserBalanceAggregate() (userBalanceAggregateRow, error) {
 	var aggregate userBalanceAggregateRow
-	err := DB.Model(&User{}).Select(`
+	err := DB.Model(&User{}).Where("balance_trend_disabled = ?", false).Select(`
 		COALESCE(SUM(quota), 0) AS total_quota,
 		COALESCE(SUM(CASE WHEN quota > 0 THEN quota ELSE 0 END), 0) AS total_positive_quota,
 		COUNT(*) AS user_count,
@@ -198,7 +208,7 @@ func queryUserBalanceTopUsers(limit int) ([]UserBalanceSnapshotUser, error) {
 	users := make([]UserBalanceSnapshotUser, 0, limit)
 	err := DB.Model(&User{}).
 		Select("id, username, display_name, quota").
-		Where("quota > 0").
+		Where("balance_trend_disabled = ? AND quota > 0", false).
 		Order("quota desc").
 		Order("id asc").
 		Limit(limit).
@@ -210,7 +220,7 @@ func queryUserBalanceNegativeUsers(limit int) ([]UserBalanceSnapshotUser, error)
 	users := make([]UserBalanceSnapshotUser, 0, limit)
 	err := DB.Model(&User{}).
 		Select("id, username, display_name, quota").
-		Where("quota < 0").
+		Where("balance_trend_disabled = ? AND quota < 0", false).
 		Order("quota asc").
 		Order("id asc").
 		Limit(limit).
@@ -267,6 +277,87 @@ func GetUserBalanceSnapshotReport(startTime int64, endTime int64) (*UserBalanceS
 		}
 	}
 	return report, nil
+}
+
+func GetUserBalanceSnapshotReportByDays(days int) (*UserBalanceSnapshotReport, error) {
+	if days <= 0 {
+		days = 7
+	}
+	if days > 365 {
+		days = 365
+	}
+	endTime := time.Now().Unix()
+	startTime := time.Unix(endTime, 0).AddDate(0, 0, -days).Unix()
+	return GetUserBalanceSnapshotReport(startTime, endTime)
+}
+
+func SearchUserBalanceTrendUsers(params UserBalanceTrendUserSearchParams) ([]UserBalanceSnapshotUser, int64, error) {
+	if DB == nil {
+		return nil, 0, errors.New("database not initialized")
+	}
+	users := make([]UserBalanceSnapshotUser, 0)
+	var total int64
+	query := DB.Model(&User{})
+
+	keyword := strings.TrimSpace(params.Keyword)
+	if keyword != "" {
+		likeCondition := "username LIKE ? OR email LIKE ? OR display_name LIKE ? OR remark LIKE ?"
+		if keywordInt, parseErr := strconv.Atoi(keyword); parseErr == nil {
+			query = query.Where(
+				"id = ? OR "+likeCondition,
+				keywordInt, "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%",
+			)
+		} else {
+			query = query.Where(likeCondition, "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%")
+		}
+	}
+
+	switch strings.TrimSpace(params.IncludeStatus) {
+	case "included":
+		query = query.Where("balance_trend_disabled = ?", false)
+	case "excluded":
+		query = query.Where("balance_trend_disabled = ?", true)
+	}
+
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	startIdx := params.StartIdx
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	pageSize := params.PageSize
+	if pageSize <= 0 {
+		pageSize = common.ItemsPerPage
+	}
+
+	err := query.Select("id, username, display_name, quota, balance_trend_disabled").
+		Order("quota desc").
+		Order("id asc").
+		Limit(pageSize).
+		Offset(startIdx).
+		Scan(&users).Error
+	return users, total, err
+}
+
+func UpdateUserBalanceTrendDisabled(userId int, disabled bool) (*UserBalanceSnapshotUser, error) {
+	if userId <= 0 {
+		return nil, errors.New("invalid user id")
+	}
+	if err := DB.Model(&User{}).Where("id = ?", userId).Update("balance_trend_disabled", disabled).Error; err != nil {
+		return nil, err
+	}
+	if err := syncUserCacheByID(userId); err != nil {
+		return nil, err
+	}
+	var user UserBalanceSnapshotUser
+	if err := DB.Model(&User{}).
+		Select("id, username, display_name, quota, balance_trend_disabled").
+		Where("id = ?", userId).
+		First(&user).Error; err != nil {
+		return nil, err
+	}
+	return &user, nil
 }
 
 func buildUserBalanceSnapshotPoint(snapshot UserBalanceSnapshot) UserBalanceSnapshotPoint {

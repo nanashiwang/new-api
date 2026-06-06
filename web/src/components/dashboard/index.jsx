@@ -25,7 +25,6 @@ import { StatusContext } from '../../context/Status';
 import DashboardHeader from './DashboardHeader';
 import StatsCards from './StatsCards';
 import ChartsPanel from './ChartsPanel';
-import UserBalanceTrendPanel from './UserBalanceTrendPanel';
 import ApiInfoPanel from './ApiInfoPanel';
 import AnnouncementsPanel from './AnnouncementsPanel';
 import FaqPanel from './FaqPanel';
@@ -60,6 +59,7 @@ const Dashboard = () => {
   const userChartLoadedRef = useRef(false);
   const perfMetricsLoadedRef = useRef(false);
   const modelChannelStatsLoadedRef = useRef(false);
+  const userBalanceTrendLoadedRef = useRef(false);
 
   // ========== 主要数据管理 ==========
   const dashboardData = useDashboardData(userState, userDispatch, statusState);
@@ -116,19 +116,17 @@ const Dashboard = () => {
     if (dashboardData.uptimeEnabled) {
       optionalTasks.push(dashboardData.loadUptimeData());
     }
-    if (dashboardData.isAdminUser) {
-      optionalTasks.push(dashboardData.loadUserBalanceTrend());
-    }
-
     await Promise.allSettled(optionalTasks);
   };
 
   const handleRefresh = async () => {
     const isUserChartTab = dashboardData.activeChartTab === '5';
     const isModelChannelStatsTab = dashboardData.activeChartTab === '6';
+    const isUserBalanceTrendTab = dashboardData.activeChartTab === '8';
     const data = await dashboardData.refresh({
       includePerfMetrics: dashboardData.activeChartTab === '7',
       includeModelChannelStats: isModelChannelStatsTab,
+      includeUserBalanceTrend: isUserBalanceTrendTab,
     });
     if (data && data.length > 0) {
       dashboardCharts.updateChartData(data);
@@ -142,6 +140,7 @@ const Dashboard = () => {
     const isUserChartTab = dashboardData.activeChartTab === '5';
     const isModelChannelStatsTab = dashboardData.activeChartTab === '6';
     const isPerfMetricsTab = dashboardData.activeChartTab === '7';
+    const isUserBalanceTrendTab = dashboardData.activeChartTab === '8';
     if (!isUserChartTab) {
       userChartLoadedRef.current = false;
     }
@@ -151,15 +150,22 @@ const Dashboard = () => {
     if (!isPerfMetricsTab) {
       perfMetricsLoadedRef.current = false;
     }
+    if (!isUserBalanceTrendTab) {
+      userBalanceTrendLoadedRef.current = false;
+    }
     await dashboardData.handleSearchConfirm(dashboardCharts.updateChartData, {
       includePerfMetrics: isPerfMetricsTab,
       includeModelChannelStats: isModelChannelStatsTab,
+      includeUserBalanceTrend: isUserBalanceTrendTab,
     });
     if (isUserChartTab) {
       await loadUserData();
     }
     if (isModelChannelStatsTab) {
       modelChannelStatsLoadedRef.current = true;
+    }
+    if (isUserBalanceTrendTab) {
+      userBalanceTrendLoadedRef.current = true;
     }
   };
 
@@ -222,6 +228,17 @@ const Dashboard = () => {
     }
   }, [dashboardData.activeChartTab, dashboardData.loadPerfMetricsSummary]);
 
+  useEffect(() => {
+    if (
+      dashboardData.isAdminUser &&
+      dashboardData.activeChartTab === '8' &&
+      !userBalanceTrendLoadedRef.current
+    ) {
+      userBalanceTrendLoadedRef.current = true;
+      dashboardData.loadUserBalanceTrend();
+    }
+  }, [dashboardData.activeChartTab, dashboardData.isAdminUser]);
+
   return (
     <div className='h-full'>
       <DashboardHeader
@@ -254,16 +271,6 @@ const Dashboard = () => {
         CHART_CONFIG={CHART_CONFIG}
       />
 
-      {dashboardData.isAdminUser && (
-        <UserBalanceTrendPanel
-          report={dashboardData.userBalanceTrend}
-          loading={dashboardData.userBalanceTrendLoading}
-          CARD_PROPS={CARD_PROPS}
-          CHART_CONFIG={CHART_CONFIG}
-          t={dashboardData.t}
-        />
-      )}
-
       {/* API信息和图表面板 */}
       <div className='mb-4'>
         <div
@@ -279,6 +286,12 @@ const Dashboard = () => {
             perfMetricsLoading={dashboardData.perfMetricsLoading}
             modelChannelStats={dashboardData.modelChannelStats}
             modelChannelStatsLoading={dashboardData.modelChannelStatsLoading}
+            userBalanceTrend={dashboardData.userBalanceTrend}
+            userBalanceTrendLoading={dashboardData.userBalanceTrendLoading}
+            userBalanceTrendDays={dashboardData.userBalanceTrendDays}
+            onUserBalanceTrendDaysChange={
+              dashboardData.handleUserBalanceTrendDaysChange
+            }
             isAdminUser={dashboardData.isAdminUser}
             CARD_PROPS={CARD_PROPS}
             CHART_CONFIG={CHART_CONFIG}
