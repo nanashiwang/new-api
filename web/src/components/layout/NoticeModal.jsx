@@ -40,7 +40,7 @@ import {
   IllustrationNoContentDark,
 } from '@douyinfe/semi-illustrations';
 import { StatusContext } from '../../context/Status';
-import { Bell, Megaphone, Wallet } from 'lucide-react';
+import { Bell, FileText, Megaphone, Wallet } from 'lucide-react';
 
 const { Text } = Typography;
 
@@ -52,7 +52,10 @@ const NoticeModal = ({
   unreadKeys = [],
   pendingWithdrawalCount = 0,
   pendingWithdrawals = [],
+  pendingInvoiceCount = 0,
+  pendingInvoices = [],
   showWithdrawalTab = false,
+  showInvoiceTab = false,
 }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -68,6 +71,7 @@ const NoticeModal = ({
 
   const getKeyForItem = (item) =>
     `${item?.publishDate || ''}-${(item?.content || '').slice(0, 30)}`;
+  const formatBadgeCount = (count) => (count > 99 ? '99+' : count);
 
   const processedAnnouncements = useMemo(() => {
     return (announcements || []).slice(0, 20).map((item) => {
@@ -220,6 +224,9 @@ const NoticeModal = ({
     if (activeTab === 'withdrawals') {
       return renderWithdrawalTab();
     }
+    if (activeTab === 'invoices') {
+      return renderInvoiceTab();
+    }
     return renderAnnouncementTimeline();
   };
 
@@ -305,6 +312,95 @@ const NoticeModal = ({
     );
   };
 
+  const renderInvoiceTab = () => {
+    if (pendingInvoiceCount === 0) {
+      return (
+        <div className='py-12'>
+          <Empty
+            image={
+              <IllustrationNoContent style={{ width: 150, height: 150 }} />
+            }
+            darkModeImage={
+              <IllustrationNoContentDark style={{ width: 150, height: 150 }} />
+            }
+            description={t('暂无待处理发票申请')}
+          />
+        </div>
+      );
+    }
+    const goToReview = () => {
+      onClose();
+      navigate('/console/topup?tab=invoices');
+    };
+    return (
+      <div className='max-h-[55vh] overflow-y-auto card-content-scroll pr-2'>
+        <div className='flex items-center justify-between mb-3 px-1'>
+          <Text type='tertiary' size='small'>
+            {t('共 {{count}} 条待处理', { count: pendingInvoiceCount })}
+          </Text>
+          <Button
+            type='primary'
+            theme='solid'
+            size='small'
+            onClick={goToReview}
+          >
+            {t('前往处理')}
+          </Button>
+        </div>
+        <div className='flex flex-col gap-2'>
+          {pendingInvoices.map((item) => {
+            const name =
+              item.username || item.display_name || `#${item.user_id}`;
+            const ts = item.created_at ? item.created_at * 1000 : null;
+            return (
+              <div
+                key={item.id}
+                className='flex items-center justify-between gap-3 p-3 rounded-md bg-gray-50 dark:bg-zinc-800/50'
+              >
+                <div className='flex items-center gap-2 min-w-0 flex-1'>
+                  <Avatar size='small' color={stringToColor(name)}>
+                    {name.slice(0, 1).toUpperCase()}
+                  </Avatar>
+                  <div className='flex flex-col leading-tight min-w-0 flex-1'>
+                    <Text size='small' ellipsis={{ showTooltip: true }}>
+                      {name}
+                    </Text>
+                    <Text
+                      type='tertiary'
+                      size='small'
+                      ellipsis={{ showTooltip: true }}
+                    >
+                      {item.title || t('未填写发票抬头')}
+                    </Text>
+                    <Text type='tertiary' size='small'>
+                      {ts ? getRelativeTime(ts) : ''}
+                    </Text>
+                  </div>
+                </div>
+                <Text strong size='small' className='flex-shrink-0'>
+                  ¥{Number(item.total_money || 0).toFixed(2)}
+                </Text>
+              </div>
+            );
+          })}
+        </div>
+        {pendingInvoiceCount > pendingInvoices.length && (
+          <div className='text-center mt-3'>
+            <Text
+              type='tertiary'
+              size='small'
+              link
+              style={{ cursor: 'pointer' }}
+              onClick={goToReview}
+            >
+              {t('查看全部 {{count}} 条', { count: pendingInvoiceCount })}
+            </Text>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <Modal
       title={
@@ -334,14 +430,27 @@ const NoticeModal = ({
                     <Wallet size={14} /> {t('提现审核')}
                     {pendingWithdrawalCount > 0 && (
                       <span className='ml-1 px-1.5 rounded-full bg-red-500 text-white text-xs'>
-                        {pendingWithdrawalCount > 99
-                          ? '99+'
-                          : pendingWithdrawalCount}
+                        {formatBadgeCount(pendingWithdrawalCount)}
                       </span>
                     )}
                   </span>
                 }
                 itemKey='withdrawals'
+              />
+            )}
+            {showInvoiceTab && (
+              <TabPane
+                tab={
+                  <span className='flex items-center gap-1'>
+                    <FileText size={14} /> {t('发票审核')}
+                    {pendingInvoiceCount > 0 && (
+                      <span className='ml-1 px-1.5 rounded-full bg-red-500 text-white text-xs'>
+                        {formatBadgeCount(pendingInvoiceCount)}
+                      </span>
+                    )}
+                  </span>
+                }
+                itemKey='invoices'
               />
             )}
           </Tabs>

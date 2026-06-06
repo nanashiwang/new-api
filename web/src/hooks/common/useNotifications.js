@@ -26,6 +26,8 @@ export const useNotifications = (statusState) => {
   const [announcementUnread, setAnnouncementUnread] = useState(0);
   const [pendingWithdrawals, setPendingWithdrawals] = useState([]);
   const [pendingWithdrawalCount, setPendingWithdrawalCount] = useState(0);
+  const [pendingInvoices, setPendingInvoices] = useState([]);
+  const [pendingInvoiceCount, setPendingInvoiceCount] = useState(0);
   const admin = isAdmin();
 
   const announcements = statusState?.status?.announcements || [];
@@ -40,6 +42,22 @@ export const useNotifications = (statusState) => {
         const data = res.data.data || {};
         setPendingWithdrawals(Array.isArray(data.items) ? data.items : []);
         setPendingWithdrawalCount(Number(data.total) || 0);
+      }
+    } catch (_) {
+      // silent: keep previous value to avoid badge flicker
+    }
+  };
+
+  const fetchPendingInvoices = async () => {
+    if (!admin) return;
+    try {
+      const res = await API.get(
+        '/api/user/invoices?status=pending&p=1&page_size=5',
+      );
+      if (res?.data?.success) {
+        const data = res.data.data || {};
+        setPendingInvoices(Array.isArray(data.items) ? data.items : []);
+        setPendingInvoiceCount(Number(data.total) || 0);
       }
     } catch (_) {
       // silent: keep previous value to avoid badge flicker
@@ -84,11 +102,13 @@ export const useNotifications = (statusState) => {
 
   useEffect(() => {
     fetchPendingWithdrawals();
+    fetchPendingInvoices();
   }, [admin]);
 
   // 操作函数
   const handleNoticeOpen = () => {
     fetchPendingWithdrawals();
+    fetchPendingInvoices();
     setNoticeVisible(true);
   };
 
@@ -111,10 +131,14 @@ export const useNotifications = (statusState) => {
 
   return {
     noticeVisible,
-    unreadCount: announcementUnread + (admin ? pendingWithdrawalCount : 0),
+    unreadCount:
+      announcementUnread +
+      (admin ? pendingWithdrawalCount + pendingInvoiceCount : 0),
     announcementUnread,
     pendingWithdrawalCount,
     pendingWithdrawals,
+    pendingInvoiceCount,
+    pendingInvoices,
     isAdminUser: admin,
     announcements,
     handleNoticeOpen,

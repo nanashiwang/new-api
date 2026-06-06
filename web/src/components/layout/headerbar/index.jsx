@@ -61,6 +61,8 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
     announcementUnread,
     pendingWithdrawalCount,
     pendingWithdrawals,
+    pendingInvoiceCount,
+    pendingInvoices,
     isAdminUser,
     handleNoticeOpen,
     handleNoticeClose,
@@ -80,14 +82,19 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
             defaultTab={
               isAdminUser && pendingWithdrawalCount > 0
                 ? 'withdrawals'
-                : announcementUnread > 0
-                  ? 'system'
-                  : 'inApp'
+                : isAdminUser && pendingInvoiceCount > 0
+                  ? 'invoices'
+                  : announcementUnread > 0
+                    ? 'system'
+                    : 'inApp'
             }
             unreadKeys={getUnreadKeys()}
             pendingWithdrawalCount={pendingWithdrawalCount}
             pendingWithdrawals={pendingWithdrawals}
+            pendingInvoiceCount={pendingInvoiceCount}
+            pendingInvoices={pendingInvoices}
             showWithdrawalTab={isAdminUser}
+            showInvoiceTab={isAdminUser}
           />
         </Suspense>
       )}
