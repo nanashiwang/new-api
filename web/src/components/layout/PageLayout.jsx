@@ -22,7 +22,7 @@ import { Layout } from '@douyinfe/semi-ui';
 import App from '../../App';
 import FooterBar from './Footer';
 import ErrorBoundary from '../common/ErrorBoundary';
-import React, { lazy, Suspense, useContext, useEffect, useState } from 'react';
+import React, { lazy, Suspense, useContext, useEffect, useMemo, useState } from 'react';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import { useSidebarCollapsed } from '../../hooks/common/useSidebarCollapsed';
 import { useTranslation } from 'react-i18next';
@@ -68,6 +68,18 @@ const PageLayout = () => {
   const isConsoleRoute = location.pathname.startsWith('/console');
   const isStandalonePage = location.pathname === '/usage';
   const showSider = isConsoleRoute && (!isMobile || drawerOpen);
+
+  // 首页若设置了自定义 home_page_content，自定义 HTML 自带顶部导航，
+  // 全局 Header 与之并排会出现"双顶栏"。此时隐藏全局 Header，
+  // 让自定义 landing 独立接管视觉。其他路径行为完全不变。
+  const hideHeaderForCustomLanding = useMemo(() => {
+    if (location.pathname !== '/') return false;
+    try {
+      return Boolean(localStorage.getItem('home_page_content'));
+    } catch {
+      return false;
+    }
+  }, [location.pathname]);
 
   useEffect(() => {
     if (isMobile && drawerOpen && collapsed) {
@@ -152,28 +164,30 @@ const PageLayout = () => {
       }}
     >
       <GlobalTopProgress />
-      <Header
-        style={{
-          padding: 0,
-          height: 'auto',
-          lineHeight: 'normal',
-          position: 'fixed',
-          width: '100%',
-          top: 0,
-          zIndex: 100,
-        }}
-      >
-        <HeaderBar
-          onMobileMenuToggle={() => setDrawerOpen((prev) => !prev)}
-          drawerOpen={drawerOpen}
-        />
-      </Header>
+      {!hideHeaderForCustomLanding && (
+        <Header
+          style={{
+            padding: 0,
+            height: 'auto',
+            lineHeight: 'normal',
+            position: 'fixed',
+            width: '100%',
+            top: 0,
+            zIndex: 100,
+          }}
+        >
+          <HeaderBar
+            onMobileMenuToggle={() => setDrawerOpen((prev) => !prev)}
+            drawerOpen={drawerOpen}
+          />
+        </Header>
+      )}
       <Layout
         style={{
           overflow: isMobile ? 'visible' : 'auto',
           display: 'flex',
           flexDirection: isMobile ? 'column' : 'row',
-          paddingTop: '64px',
+          paddingTop: hideHeaderForCustomLanding ? '0' : '64px',
           flex: '1 1 auto',
           minHeight: 0,
         }}

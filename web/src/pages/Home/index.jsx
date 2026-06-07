@@ -308,10 +308,9 @@ const Home = () => {
               className='w-full h-screen border-none'
             />
           ) : (
-            <div
-              className='mt-[60px]'
-              dangerouslySetInnerHTML={{ __html: homePageContent }}
-            />
+            // 自定义首页 HTML 自带顶部 nav 时，PageLayout 已经隐藏了全局 Header，
+            // 这里也不再加 mt-[60px] 顶部留白，避免与自定义 nav 之间出现空白带。
+            <div dangerouslySetInnerHTML={{ __html: homePageContent }} />
           )}
         </div>
       )}
