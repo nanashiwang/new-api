@@ -2169,24 +2169,6 @@ const TopupHistoryModal = ({
     }
   };
 
-  const openInvoiceDetail = async (record) => {
-    const id = Number(record?.id || 0);
-    if (!id) {
-      return;
-    }
-
-    setInvoiceDetail(record || null);
-    setInvoiceDetailVisible(true);
-    setInvoiceDetailLoading(true);
-    try {
-      setInvoiceDetail(await loadInvoiceDetailData(record));
-    } catch (error) {
-      Toast.error({ content: t(error?.message || '加载发票详情失败') });
-    } finally {
-      setInvoiceDetailLoading(false);
-    }
-  };
-
   const closeInvoiceDetail = () => {
     setInvoiceDetailVisible(false);
     setInvoiceDetail(null);
@@ -3423,73 +3405,63 @@ const TopupHistoryModal = ({
       },
     );
 
-    columns.push({
-      title: t('操作'),
-      key: 'action',
-      width: isReviewMode ? 300 : 110,
-      render: (_, record) => (
-        <Space wrap>
-          <Button
-            size='small'
-            theme='outline'
-            onClick={() => openInvoiceDetail(record)}
-          >
-            {t('详情')}
-          </Button>
-          {isReviewMode ? (
-            <>
-              <Button
-                size='small'
-                theme='outline'
-                onClick={() => viewInvoiceDetailBill(record)}
-              >
-                {t('明细账单')}
-              </Button>
-              <Button
-                size='small'
-                theme='outline'
-                onClick={() => viewInvoiceServiceConfirmation(record)}
-              >
-                {t('服务产品清单')}
-              </Button>
-            </>
-          ) : null}
-          {isReviewMode && record?.status === 'pending' ? (
-            <>
-              <Button
-                size='small'
-                type='primary'
-                theme='outline'
-                onClick={() => openInvoiceReviewModal(record, 'approve')}
-              >
-                {t('通过')}
-              </Button>
-              <Button
-                size='small'
-                type='danger'
-                theme='outline'
-                onClick={() => openInvoiceReviewModal(record, 'reject')}
-              >
-                {t('驳回')}
-              </Button>
-            </>
-          ) : null}
-          {isReviewMode &&
-          record?.status === 'invoiced' &&
-          record?.invoice_file_name &&
-          record?.invoice_send_status !== 'sent' ? (
+    if (isReviewMode) {
+      columns.push({
+        title: t('操作'),
+        key: 'action',
+        width: 260,
+        render: (_, record) => (
+          <Space wrap>
             <Button
               size='small'
-              type='warning'
               theme='outline'
-              onClick={() => openResendInvoiceEmailModal(record)}
+              onClick={() => viewInvoiceDetailBill(record)}
             >
-              {t('重发邮件')}
+              {t('明细账单')}
             </Button>
-          ) : null}
-        </Space>
-      ),
-    });
+            <Button
+              size='small'
+              theme='outline'
+              onClick={() => viewInvoiceServiceConfirmation(record)}
+            >
+              {t('服务产品清单')}
+            </Button>
+            {record?.status === 'pending' ? (
+              <>
+                <Button
+                  size='small'
+                  type='primary'
+                  theme='outline'
+                  onClick={() => openInvoiceReviewModal(record, 'approve')}
+                >
+                  {t('通过')}
+                </Button>
+                <Button
+                  size='small'
+                  type='danger'
+                  theme='outline'
+                  onClick={() => openInvoiceReviewModal(record, 'reject')}
+                >
+                  {t('驳回')}
+                </Button>
+              </>
+            ) : null}
+            {record?.status === 'invoiced' &&
+            record?.invoice_file_name &&
+            record?.invoice_send_status !== 'sent' ? (
+              <Button
+                size='small'
+                type='warning'
+                theme='outline'
+                onClick={() => openResendInvoiceEmailModal(record)}
+              >
+                {t('重发邮件')}
+              </Button>
+            ) : null}
+          </Space>
+        ),
+      });
+    }
 
     return columns;
   }, [userIsAdmin, activeTab, t]);
