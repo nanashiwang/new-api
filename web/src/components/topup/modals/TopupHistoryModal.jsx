@@ -281,6 +281,7 @@ function buildInvoiceTitleCopyText(record) {
     `发票类型：${getInvoiceTypeLabel(record?.invoice_type)}`,
     `单位名称：${record?.title || '-'}`,
     `税号：${record?.tax_number || '-'}`,
+    `申请金额：${formatMoney(record?.total_money)}`,
   ].join('\n');
 }
 
@@ -2203,6 +2204,36 @@ const TopupHistoryModal = ({
     return true;
   };
 
+  const openInvoiceServiceConfirmationPdfWindow = async (
+    detail,
+    { targetWindow = null } = {},
+  ) => {
+    const pdfWindow =
+      targetWindow || window.open('', '_blank', 'width=960,height=720');
+    if (!pdfWindow) {
+      return false;
+    }
+    pdfWindow.opener = null;
+    pdfWindow.document.open();
+    pdfWindow.document.write(
+      '<!doctype html><meta charset="utf-8"><title>服务产品清单</title><body style="font:14px sans-serif;padding:24px;">正在生成服务产品清单 PDF...</body>',
+    );
+    pdfWindow.document.close();
+    pdfWindow.focus();
+
+    const stampUrl = await loadInvoiceStampDataUrl();
+    const html = buildInvoiceServiceConfirmationHtml(detail, stampUrl);
+    const blob = await buildInvoiceDetailBillPdfBlob(
+      html,
+      stampUrl,
+      '服务产品清单',
+    );
+    const pdfUrl = URL.createObjectURL(blob);
+    pdfWindow.location.replace(pdfUrl);
+    setTimeout(() => URL.revokeObjectURL(pdfUrl), 10 * 60 * 1000);
+    return true;
+  };
+
   const printInvoiceDetail = async () => {
     if (!invoiceDetail) {
       return;
@@ -2213,6 +2244,19 @@ const TopupHistoryModal = ({
       }
     } catch (error) {
       Toast.error({ content: t('生成明细账单失败') });
+    }
+  };
+
+  const printInvoiceServiceConfirmation = async () => {
+    if (!invoiceDetail) {
+      return;
+    }
+    try {
+      if (!(await openInvoiceServiceConfirmationPdfWindow(invoiceDetail))) {
+        Toast.error({ content: t('浏览器阻止了服务产品清单窗口') });
+      }
+    } catch (error) {
+      Toast.error({ content: t('生成服务产品清单失败') });
     }
   };
 
@@ -2236,6 +2280,32 @@ const TopupHistoryModal = ({
       targetWindow.document.write(
         `<!doctype html><meta charset="utf-8"><title>明细账单</title><body style="font:14px sans-serif;padding:24px;color:#b91c1c;">${escapeHtml(
           error?.message || '加载明细账单失败',
+        )}</body>`,
+      );
+      targetWindow.document.close();
+    }
+  };
+
+  const viewInvoiceServiceConfirmation = async (record) => {
+    const targetWindow = window.open('', '_blank', 'width=960,height=720');
+    if (!targetWindow) {
+      Toast.error({ content: t('浏览器阻止了服务产品清单窗口') });
+      return;
+    }
+    targetWindow.opener = null;
+    targetWindow.document.open();
+    targetWindow.document.write(
+      '<!doctype html><meta charset="utf-8"><title>服务产品清单</title><body style="font:14px sans-serif;padding:24px;">正在加载服务产品清单...</body>',
+    );
+    targetWindow.document.close();
+    try {
+      const detail = await loadInvoiceDetailData(record);
+      await openInvoiceServiceConfirmationPdfWindow(detail, { targetWindow });
+    } catch (error) {
+      targetWindow.document.open();
+      targetWindow.document.write(
+        `<!doctype html><meta charset="utf-8"><title>服务产品清单</title><body style="font:14px sans-serif;padding:24px;color:#b91c1c;">${escapeHtml(
+          error?.message || '加载服务产品清单失败',
         )}</body>`,
       );
       targetWindow.document.close();
@@ -3353,13 +3423,22 @@ const TopupHistoryModal = ({
             {t('详情')}
           </Button>
           {isReviewMode ? (
-            <Button
-              size='small'
-              theme='outline'
-              onClick={() => viewInvoiceDetailBill(record)}
-            >
-              {t('明细账单')}
-            </Button>
+            <>
+              <Button
+                size='small'
+                theme='outline'
+                onClick={() => viewInvoiceDetailBill(record)}
+              >
+                {t('明细账单')}
+              </Button>
+              <Button
+                size='small'
+                theme='outline'
+                onClick={() => viewInvoiceServiceConfirmation(record)}
+              >
+                {t('服务产品清单')}
+              </Button>
+            </>
           ) : null}
           {isReviewMode && record?.status === 'pending' ? (
             <>
@@ -4100,10 +4179,16 @@ const TopupHistoryModal = ({
             )}
             {renderInvoiceDetailValue(
               detail?.invoice_type === 'special' ? '单位名称' : '抬头名称',
-              detail?.title,
-              true,
+              <Text copyable={{ content: buildInvoiceTitleCopyText(detail) }}>
+                {displayValue(detail?.title)}
+              </Text>,
             )}
-            {renderInvoiceDetailValue('税号', detail?.tax_number, true)}
+            {renderInvoiceDetailValue(
+              '税号',
+              <Text copyable={{ content: buildInvoiceTitleCopyText(detail) }}>
+                {displayValue(detail?.tax_number)}
+              </Text>,
+            )}
             {renderInvoiceDetailValue(
               '注册地址',
               detail?.registered_address,
@@ -4287,6 +4372,13 @@ const TopupHistoryModal = ({
         footer={
           <Space>
             <Button onClick={closeInvoiceDetail}>{t('关闭')}</Button>
+            <Button
+              loading={invoiceDetailLoading}
+              disabled={!invoiceDetail}
+              onClick={printInvoiceServiceConfirmation}
+            >
+              {t('服务产品清单')}
+            </Button>
             <Button
               type='primary'
               loading={invoiceDetailLoading}
