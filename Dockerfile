@@ -10,18 +10,25 @@ ENV PUPPETEER_SKIP_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 WORKDIR /build
+ARG APP_VERSION=""
 COPY web/package.json .
 COPY web/bun.lock .
 RUN bun install --frozen-lockfile
 COPY ./web .
 COPY ./docs /docs
 COPY ./VERSION .
-RUN DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION=$(cat VERSION) bun run build
+RUN BUILD_VERSION="${APP_VERSION:-$(cat VERSION 2>/dev/null)}"; \
+    if [ -z "$BUILD_VERSION" ]; then BUILD_VERSION="dev"; fi; \
+    DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION="$BUILD_VERSION" bun run build
 
 FROM golang:alpine AS builder2
 ENV GO111MODULE=on CGO_ENABLED=0
 ARG GOPROXY=https://goproxy.cn,direct
 ARG GOSUMDB=sum.golang.google.cn
+ARG APP_VERSION=""
+ARG BUILD_COMMIT=""
+ARG BUILD_REPOSITORY="QuantumNous/new-api"
+ARG BUILD_BRANCH="main"
 ENV GOPROXY=${GOPROXY} GOSUMDB=${GOSUMDB}
 
 ARG TARGETOS
@@ -36,7 +43,9 @@ RUN go mod download
 
 COPY . .
 COPY --from=builder /build/dist ./web/dist
-RUN go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$(cat VERSION)'" -o new-api
+RUN BUILD_VERSION="${APP_VERSION:-$(cat VERSION 2>/dev/null)}"; \
+    if [ -z "$BUILD_VERSION" ]; then BUILD_VERSION="dev"; fi; \
+    go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=${BUILD_VERSION}' -X 'github.com/QuantumNous/new-api/common.BuildCommit=${BUILD_COMMIT}' -X 'github.com/QuantumNous/new-api/common.BuildRepository=${BUILD_REPOSITORY}' -X 'github.com/QuantumNous/new-api/common.BuildBranch=${BUILD_BRANCH}'" -o new-api
 
 FROM debian:bookworm-slim
 

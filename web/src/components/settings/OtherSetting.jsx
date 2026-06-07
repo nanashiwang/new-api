@@ -51,9 +51,11 @@ const OtherSetting = () => {
   });
   let [loading, setLoading] = useState(false);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
-  const [statusState, statusDispatch] = useContext(StatusContext);
+  const [statusState] = useContext(StatusContext);
   const [updateData, setUpdateData] = useState({
-    tag_name: '',
+    latest_version: '',
+    release_url: '',
+    compare_url: '',
     content: '',
   });
 
@@ -234,37 +236,21 @@ const OtherSetting = () => {
         ...loadingInput,
         CheckUpdate: true,
       }));
-      // Use a CORS proxy to avoid direct cross-origin requests to GitHub API
-      // Option 1: Use a public CORS proxy service
-      // const proxyUrl = 'https://cors-anywhere.herokuapp.com/';
-      // const res = await API.get(
-      //   `${proxyUrl}https://api.github.com/repos/Calcium-Ion/new-api/releases/latest`,
-      // );
+      const res = await API.get('/api/status/update');
+      const { success, message, data } = res.data;
+      if (!success) {
+        showError(message || '检查更新失败，请稍后再试');
+        return;
+      }
 
-      // Option 2: Use the JSON proxy approach which often works better with GitHub API
-      const res = await fetch(
-        'https://api.github.com/repos/Calcium-Ion/new-api/releases/latest',
-        {
-          headers: {
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-            // Adding User-Agent which is often required by GitHub API
-            'User-Agent': 'new-api-update-checker',
-          },
-        },
-      ).then((response) => response.json());
-
-      // Option 3: Use a local proxy endpoint
-      // Create a cached version of the response to avoid frequent GitHub API calls
-      // const res = await API.get('/api/status/github-latest-release');
-
-      const { tag_name, body } = res;
-      if (tag_name === statusState?.status?.version) {
-        showSuccess(`已是最新版本：${tag_name}`);
+      if (!data?.update_available) {
+        showSuccess(data?.message || `已是最新版本：${data?.latest_version || ''}`);
       } else {
         setUpdateData({
-          tag_name: tag_name,
-          content: marked.parse(body),
+          latest_version: data.latest_version,
+          release_url: data.release_url,
+          compare_url: data.compare_url,
+          content: marked.parse(data.body || data.message || ''),
         });
         setShowUpdateModal(true);
       }
@@ -302,10 +288,7 @@ const OtherSetting = () => {
 
   // Function to open GitHub release page
   const openGitHubRelease = () => {
-    window.open(
-      `https://github.com/Calcium-Ion/new-api/releases/tag/${updateData.tag_name}`,
-      '_blank',
-    );
+    window.open(updateData.compare_url || updateData.release_url, '_blank');
   };
 
   const getStartTimeString = () => {
@@ -499,7 +482,7 @@ const OtherSetting = () => {
         </Form>
       </Col>
       <Modal
-        title={t('新版本') + '：' + updateData.tag_name}
+        title={t('新版本') + '：' + updateData.latest_version}
         visible={showUpdateModal}
         onCancel={() => setShowUpdateModal(false)}
         footer={[

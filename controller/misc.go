@@ -1,9 +1,15 @@
 package controller
 
 import (
+	"context"
+	"encoding/xml"
 	"fmt"
 	"net/http"
+	"os"
+	"regexp"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -17,6 +23,67 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+const updateCheckCacheTTL = 10 * time.Minute
+
+var (
+	updateCheckCacheMutex sync.Mutex
+	updateCheckCacheData  *updateCheckData
+	updateCheckCacheUntil time.Time
+	versionSHARegexp      = regexp.MustCompile(`(?i)([0-9a-f]{7,40})`)
+)
+
+type updateCheckData struct {
+	CurrentVersion  string `json:"current_version"`
+	LatestVersion   string `json:"latest_version"`
+	CurrentCommit   string `json:"current_commit"`
+	LatestCommit    string `json:"latest_commit"`
+	Repository      string `json:"repository"`
+	Branch          string `json:"branch"`
+	ReleaseURL      string `json:"release_url"`
+	CompareURL      string `json:"compare_url"`
+	UpdateAvailable bool   `json:"update_available"`
+	Mode            string `json:"mode"`
+	Message         string `json:"message"`
+	Body            string `json:"body"`
+	CheckedAt       int64  `json:"checked_at"`
+}
+
+type githubReleaseResponse struct {
+	TagName string `json:"tag_name"`
+	Body    string `json:"body"`
+	HTMLURL string `json:"html_url"`
+	Message string `json:"message"`
+}
+
+type githubCommitResponse struct {
+	SHA     string `json:"sha"`
+	HTMLURL string `json:"html_url"`
+	Message string `json:"message"`
+}
+
+type githubAtomFeed struct {
+	Entries []githubAtomEntry `xml:"entry"`
+}
+
+type githubAtomEntry struct {
+	ID      string            `xml:"id"`
+	Title   string            `xml:"title"`
+	Updated string            `xml:"updated"`
+	Links   []githubAtomLink  `xml:"link"`
+	Content githubAtomContent `xml:"content"`
+}
+
+type githubAtomLink struct {
+	Rel  string `xml:"rel,attr"`
+	Type string `xml:"type,attr"`
+	Href string `xml:"href,attr"`
+}
+
+type githubAtomContent struct {
+	Type string `xml:"type,attr"`
+	Text string `xml:",chardata"`
+}
 
 func TestStatus(c *gin.Context) {
 	err := model.PingDB()
@@ -48,6 +115,9 @@ func GetStatus(c *gin.Context) {
 
 	data := gin.H{
 		"version":                     common.Version,
+		"build_commit":                common.BuildCommit,
+		"build_repository":            common.BuildRepository,
+		"build_branch":                common.BuildBranch,
 		"start_time":                  common.StartTime,
 		"email_verification":          common.EmailVerificationEnabled,
 		"github_oauth":                common.GitHubOAuthEnabled,
@@ -164,6 +234,292 @@ func GetStatus(c *gin.Context) {
 		"data":    data,
 	})
 	return
+}
+
+func CheckUpdate(c *gin.Context) {
+	data, err := getUpdateCheckData(c.Request.Context())
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+	common.ApiSuccess(c, data)
+}
+
+func getUpdateCheckData(parentCtx context.Context) (*updateCheckData, error) {
+	updateCheckCacheMutex.Lock()
+	if updateCheckCacheData != nil && time.Now().Before(updateCheckCacheUntil) {
+		cached := *updateCheckCacheData
+		updateCheckCacheMutex.Unlock()
+		return &cached, nil
+	}
+	updateCheckCacheMutex.Unlock()
+
+	repository := normalizeGitHubRepository(firstNonEmpty(os.Getenv("UPDATE_CHECK_REPOSITORY"), common.BuildRepository, "QuantumNous/new-api"))
+	branch := strings.TrimSpace(firstNonEmpty(os.Getenv("UPDATE_CHECK_BRANCH"), common.BuildBranch, "main"))
+	currentVersion := strings.TrimSpace(common.Version)
+	currentCommit := strings.TrimSpace(firstNonEmpty(os.Getenv("UPDATE_CHECK_CURRENT_COMMIT"), common.BuildCommit, extractVersionSHA(currentVersion)))
+
+	ctx, cancel := context.WithTimeout(parentCtx, 8*time.Second)
+	defer cancel()
+
+	var data *updateCheckData
+	var err error
+	if currentCommit != "" {
+		data, err = getGitHubCommitUpdate(ctx, repository, branch, currentVersion, currentCommit)
+	} else {
+		data, err = getGitHubReleaseUpdate(ctx, repository, currentVersion)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	updateCheckCacheMutex.Lock()
+	updateCheckCacheData = data
+	updateCheckCacheUntil = time.Now().Add(updateCheckCacheTTL)
+	updateCheckCacheMutex.Unlock()
+
+	return data, nil
+}
+
+func getGitHubCommitUpdate(ctx context.Context, repository string, branch string, currentVersion string, currentCommit string) (*updateCheckData, error) {
+	latestCommit, commitURL, err := fetchGitHubLatestCommit(ctx, repository, branch)
+	if err != nil {
+		return nil, err
+	}
+	if latestCommit == "" {
+		return nil, fmt.Errorf("GitHub 未返回最新提交信息")
+	}
+
+	latestShort := shortSHA(latestCommit)
+	currentShort := shortSHA(currentCommit)
+	updateAvailable := latestShort != "" && currentShort != "" && latestShort != currentShort
+	compareURL := ""
+	if currentCommit != "" {
+		compareURL = fmt.Sprintf("https://github.com/%s/compare/%s...%s", repository, currentCommit, latestCommit)
+	}
+	message := fmt.Sprintf("当前已是最新提交：%s", latestShort)
+	body := fmt.Sprintf("当前部署提交：`%s`\n\n最新主分支提交：`%s`", currentShort, latestShort)
+	if updateAvailable {
+		message = fmt.Sprintf("发现新提交：%s", latestShort)
+		body = fmt.Sprintf("当前部署提交：`%s`\n\n最新主分支提交：`%s`\n\n建议确认构建流水线是否已基于最新代码发布。", currentShort, latestShort)
+	}
+
+	return &updateCheckData{
+		CurrentVersion:  currentVersion,
+		LatestVersion:   fmt.Sprintf("%s-%s", branch, latestShort),
+		CurrentCommit:   currentCommit,
+		LatestCommit:    latestCommit,
+		Repository:      repository,
+		Branch:          branch,
+		ReleaseURL:      firstNonEmpty(commitURL, fmt.Sprintf("https://github.com/%s/commit/%s", repository, latestCommit)),
+		CompareURL:      compareURL,
+		UpdateAvailable: updateAvailable,
+		Mode:            "commit",
+		Message:         message,
+		Body:            body,
+		CheckedAt:       time.Now().Unix(),
+	}, nil
+}
+
+func getGitHubReleaseUpdate(ctx context.Context, repository string, currentVersion string) (*updateCheckData, error) {
+	latestVersion, releaseURL, body, err := fetchGitHubLatestRelease(ctx, repository)
+	if err != nil {
+		return nil, err
+	}
+	if latestVersion == "" {
+		return nil, fmt.Errorf("GitHub 未返回最新版本信息")
+	}
+
+	currentComparable := currentVersion != "" && currentVersion != "v0.0.0" && currentVersion != "dev"
+	updateAvailable := !currentComparable || latestVersion != currentVersion
+	message := fmt.Sprintf("已是最新版本：%s", latestVersion)
+	if updateAvailable {
+		message = fmt.Sprintf("发现新版本：%s", latestVersion)
+		if !currentComparable {
+			message = fmt.Sprintf("当前构建版本为空或无效，最新版本为：%s", latestVersion)
+		}
+	}
+
+	return &updateCheckData{
+		CurrentVersion:  currentVersion,
+		LatestVersion:   latestVersion,
+		Repository:      repository,
+		ReleaseURL:      firstNonEmpty(releaseURL, fmt.Sprintf("https://github.com/%s/releases/tag/%s", repository, latestVersion)),
+		UpdateAvailable: updateAvailable,
+		Mode:            "release",
+		Message:         message,
+		Body:            firstNonEmpty(body, message),
+		CheckedAt:       time.Now().Unix(),
+	}, nil
+}
+
+func fetchGitHubLatestCommit(ctx context.Context, repository string, branch string) (string, string, error) {
+	atomURL := fmt.Sprintf("https://github.com/%s/commits/%s.atom", repository, branch)
+	feed, err := fetchGitHubAtom(ctx, atomURL)
+	if err == nil && len(feed.Entries) > 0 {
+		entry := feed.Entries[0]
+		commitURL := atomEntryAlternateLink(entry)
+		sha := extractCommitSHA(firstNonEmpty(entry.ID, commitURL))
+		if sha != "" {
+			return sha, commitURL, nil
+		}
+	}
+
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/commits/%s", repository, branch)
+	var resp githubCommitResponse
+	if apiErr := fetchGitHubJSON(ctx, apiURL, &resp); apiErr != nil {
+		if err != nil {
+			return "", "", fmt.Errorf("%v；API 兜底也失败：%w", err, apiErr)
+		}
+		return "", "", apiErr
+	}
+	return resp.SHA, resp.HTMLURL, nil
+}
+
+func fetchGitHubLatestRelease(ctx context.Context, repository string) (string, string, string, error) {
+	atomURL := fmt.Sprintf("https://github.com/%s/releases.atom", repository)
+	feed, err := fetchGitHubAtom(ctx, atomURL)
+	if err == nil && len(feed.Entries) > 0 {
+		entry := feed.Entries[0]
+		releaseURL := atomEntryAlternateLink(entry)
+		tagName := extractReleaseTag(releaseURL)
+		if tagName != "" {
+			return tagName, releaseURL, strings.TrimSpace(entry.Content.Text), nil
+		}
+	}
+
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", repository)
+	var resp githubReleaseResponse
+	if apiErr := fetchGitHubJSON(ctx, apiURL, &resp); apiErr != nil {
+		if err != nil {
+			return "", "", "", fmt.Errorf("%v；API 兜底也失败：%w", err, apiErr)
+		}
+		return "", "", "", apiErr
+	}
+	return resp.TagName, resp.HTMLURL, resp.Body, nil
+}
+
+func fetchGitHubAtom(ctx context.Context, atomURL string) (*githubAtomFeed, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, atomURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/atom+xml, application/xml")
+	req.Header.Set("User-Agent", "new-api-update-checker")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("连接 GitHub Atom 失败：%w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("GitHub Atom 返回 HTTP %d", resp.StatusCode)
+	}
+
+	var feed githubAtomFeed
+	if err := xml.NewDecoder(resp.Body).Decode(&feed); err != nil {
+		return nil, fmt.Errorf("解析 GitHub Atom 失败：%w", err)
+	}
+	return &feed, nil
+}
+
+func fetchGitHubJSON(ctx context.Context, apiURL string, target any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req.Header.Set("User-Agent", "new-api-update-checker")
+	if token := strings.TrimSpace(firstNonEmpty(os.Getenv("UPDATE_CHECK_GITHUB_TOKEN"), os.Getenv("GITHUB_TOKEN"))); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("连接 GitHub 失败：%w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		var errResp githubReleaseResponse
+		_ = common.DecodeJson(resp.Body, &errResp)
+		if resp.StatusCode == http.StatusForbidden && strings.Contains(strings.ToLower(errResp.Message), "rate limit") {
+			return fmt.Errorf("GitHub API 已限流，请稍后再试，或配置 UPDATE_CHECK_GITHUB_TOKEN")
+		}
+		if errResp.Message != "" {
+			return fmt.Errorf("GitHub 返回错误：%s", errResp.Message)
+		}
+		return fmt.Errorf("GitHub 返回 HTTP %d", resp.StatusCode)
+	}
+
+	if err := common.DecodeJson(resp.Body, target); err != nil {
+		return fmt.Errorf("解析 GitHub 响应失败：%w", err)
+	}
+	return nil
+}
+
+func normalizeGitHubRepository(repository string) string {
+	repository = strings.TrimSpace(repository)
+	repository = strings.TrimPrefix(repository, "https://github.com/")
+	repository = strings.TrimPrefix(repository, "http://github.com/")
+	repository = strings.TrimSuffix(repository, ".git")
+	repository = strings.Trim(repository, "/")
+	if matched, _ := regexp.MatchString(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`, repository); matched {
+		return repository
+	}
+	return "QuantumNous/new-api"
+}
+
+func extractVersionSHA(version string) string {
+	return extractCommitSHA(version)
+}
+
+func extractCommitSHA(value string) string {
+	matches := versionSHARegexp.FindAllStringSubmatch(value, -1)
+	if len(matches) == 0 {
+		return ""
+	}
+	return matches[len(matches)-1][1]
+}
+
+func extractReleaseTag(releaseURL string) string {
+	parts := strings.Split(strings.TrimSpace(releaseURL), "/releases/tag/")
+	if len(parts) != 2 {
+		return ""
+	}
+	return strings.TrimSpace(parts[1])
+}
+
+func atomEntryAlternateLink(entry githubAtomEntry) string {
+	for _, link := range entry.Links {
+		if link.Rel == "alternate" || link.Type == "text/html" {
+			return strings.TrimSpace(link.Href)
+		}
+	}
+	if len(entry.Links) > 0 {
+		return strings.TrimSpace(entry.Links[0].Href)
+	}
+	return ""
+}
+
+func shortSHA(sha string) string {
+	sha = strings.TrimSpace(sha)
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func GetNotice(c *gin.Context) {

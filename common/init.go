@@ -35,6 +35,18 @@ func InitEnv() {
 	if envVersion != "" {
 		Version = envVersion
 	}
+	envBuildCommit := os.Getenv("BUILD_COMMIT")
+	if envBuildCommit != "" {
+		BuildCommit = envBuildCommit
+	}
+	envBuildRepository := os.Getenv("BUILD_REPOSITORY")
+	if envBuildRepository != "" {
+		BuildRepository = envBuildRepository
+	}
+	envBuildBranch := os.Getenv("BUILD_BRANCH")
+	if envBuildBranch != "" {
+		BuildBranch = envBuildBranch
+	}
 
 	if *PrintVersion {
 		fmt.Println(Version)

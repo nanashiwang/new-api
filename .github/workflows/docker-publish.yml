@@ -28,6 +28,8 @@ jobs:
         run: |
           echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
           echo "SHORT_SHA=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          echo "APP_VERSION=${GITHUB_REF_NAME}-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          echo "BUILD_BRANCH=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
 
       - name: Pull BuildKit image with retry
         shell: bash
@@ -60,3 +62,8 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: false
           sbom: false
+          build-args: |
+            APP_VERSION=${{ env.APP_VERSION }}
+            BUILD_COMMIT=${{ github.sha }}
+            BUILD_REPOSITORY=${{ github.repository }}
+            BUILD_BRANCH=${{ env.BUILD_BRANCH }}
