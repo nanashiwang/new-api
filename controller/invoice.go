@@ -24,18 +24,19 @@ const (
 )
 
 type createInvoiceRequestPayload struct {
-	InvoiceType       string                  `json:"invoice_type"`
-	TitleType         string                  `json:"title_type"`
-	Title             string                  `json:"title"`
-	TaxNumber         string                  `json:"tax_number"`
-	RegisteredAddress string                  `json:"registered_address"`
-	RegisteredPhone   string                  `json:"registered_phone"`
-	BankName          string                  `json:"bank_name"`
-	BankAccount       string                  `json:"bank_account"`
-	Email             string                  `json:"email"`
-	Phone             string                  `json:"phone"`
-	Remark            string                  `json:"remark"`
-	Orders            []model.InvoiceOrderRef `json:"orders"`
+	InvoiceType             string                  `json:"invoice_type"`
+	TitleType               string                  `json:"title_type"`
+	Title                   string                  `json:"title"`
+	TaxNumber               string                  `json:"tax_number"`
+	RegisteredAddress       string                  `json:"registered_address"`
+	RegisteredPhone         string                  `json:"registered_phone"`
+	BankName                string                  `json:"bank_name"`
+	BankAccount             string                  `json:"bank_account"`
+	Email                   string                  `json:"email"`
+	Phone                   string                  `json:"phone"`
+	Remark                  string                  `json:"remark"`
+	NeedServiceConfirmation bool                    `json:"need_service_confirmation"`
+	Orders                  []model.InvoiceOrderRef `json:"orders"`
 }
 
 type reviewInvoiceRequestPayload struct {
@@ -45,19 +46,23 @@ type reviewInvoiceRequestPayload struct {
 }
 
 type invoiceApprovePayload struct {
-	InvoiceNo            string
-	InvoiceUrl           string
-	AdminRemark          string
-	InvoiceSentTo        string
-	SendEmail            bool
-	SendDetailBill       bool
-	FileHeader           *multipart.FileHeader
-	DetailBillFileHeader *multipart.FileHeader
+	InvoiceNo                     string
+	InvoiceUrl                    string
+	AdminRemark                   string
+	InvoiceSentTo                 string
+	SendEmail                     bool
+	SendDetailBill                bool
+	SendServiceConfirmation       bool
+	FileHeader                    *multipart.FileHeader
+	DetailBillFileHeader          *multipart.FileHeader
+	ServiceConfirmationFileHeader *multipart.FileHeader
 }
 
 type invoiceEmailPayload struct {
-	SendDetailBill       bool
-	DetailBillFileHeader *multipart.FileHeader
+	SendDetailBill                bool
+	SendServiceConfirmation       bool
+	DetailBillFileHeader          *multipart.FileHeader
+	ServiceConfirmationFileHeader *multipart.FileHeader
 }
 
 func GetEligibleInvoiceOrders(c *gin.Context) {
@@ -80,18 +85,19 @@ func CreateInvoiceRequest(c *gin.Context) {
 	}
 
 	invoiceRequest, err := model.CreateInvoiceRequest(c.GetInt("id"), model.CreateInvoiceRequestInput{
-		InvoiceType:       req.InvoiceType,
-		TitleType:         req.TitleType,
-		Title:             req.Title,
-		TaxNumber:         req.TaxNumber,
-		RegisteredAddress: req.RegisteredAddress,
-		RegisteredPhone:   req.RegisteredPhone,
-		BankName:          req.BankName,
-		BankAccount:       req.BankAccount,
-		Email:             req.Email,
-		Phone:             req.Phone,
-		Remark:            req.Remark,
-		Orders:            req.Orders,
+		InvoiceType:             req.InvoiceType,
+		TitleType:               req.TitleType,
+		Title:                   req.Title,
+		TaxNumber:               req.TaxNumber,
+		RegisteredAddress:       req.RegisteredAddress,
+		RegisteredPhone:         req.RegisteredPhone,
+		BankName:                req.BankName,
+		BankAccount:             req.BankAccount,
+		Email:                   req.Email,
+		Phone:                   req.Phone,
+		Remark:                  req.Remark,
+		NeedServiceConfirmation: req.NeedServiceConfirmation,
+		Orders:                  req.Orders,
 	})
 	if err != nil {
 		common.ApiError(c, err)
@@ -183,13 +189,22 @@ func reviewInvoiceRequest(c *gin.Context, action string) {
 			common.ApiError(c, err)
 			return
 		}
-		var detailBillAttachment *common.EmailAttachment
-		if req.SendEmail && req.SendDetailBill && req.DetailBillFileHeader != nil {
-			detailBillAttachment, err = readInvoiceDetailBillAttachment(req.DetailBillFileHeader)
-			if err != nil {
-				common.ApiError(c, err)
+		extraAttachments := make([]*common.EmailAttachment, 0, 2)
+		if req.SendEmail && req.SendDetailBill {
+			detailBillAttachment, readErr := readInvoiceDetailBillAttachment(req.DetailBillFileHeader)
+			if readErr != nil {
+				common.ApiError(c, readErr)
 				return
 			}
+			extraAttachments = append(extraAttachments, detailBillAttachment)
+		}
+		if req.SendEmail && req.SendServiceConfirmation {
+			serviceConfirmationAttachment, readErr := readInvoiceServiceConfirmationAttachment(req.ServiceConfirmationFileHeader)
+			if readErr != nil {
+				common.ApiError(c, readErr)
+				return
+			}
+			extraAttachments = append(extraAttachments, serviceConfirmationAttachment)
 		}
 		fileName := ""
 		filePath := ""
@@ -220,11 +235,7 @@ func reviewInvoiceRequest(c *gin.Context, action string) {
 			cleanupFile = false
 		}
 		if err == nil && req.SendEmail {
-			if req.SendDetailBill && detailBillAttachment == nil {
-				err = fmt.Errorf("请上传明细账单 PDF")
-			} else {
-				request, err = sendInvoiceFileAndUpdateStatus(request, detailBillAttachment)
-			}
+			request, err = sendInvoiceFileAndUpdateStatus(request, extraAttachments...)
 		}
 	} else {
 		var req reviewInvoiceRequestPayload
@@ -261,20 +272,24 @@ func ResendInvoiceEmail(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	var detailBillAttachment *common.EmailAttachment
+	extraAttachments := make([]*common.EmailAttachment, 0, 2)
 	if payload.SendDetailBill {
-		if payload.DetailBillFileHeader != nil {
-			detailBillAttachment, err = readInvoiceDetailBillAttachment(payload.DetailBillFileHeader)
-			if err != nil {
-				common.ApiError(c, err)
-				return
-			}
-		} else {
-			common.ApiError(c, fmt.Errorf("请上传明细账单 PDF"))
+		detailBillAttachment, readErr := readInvoiceDetailBillAttachment(payload.DetailBillFileHeader)
+		if readErr != nil {
+			common.ApiError(c, readErr)
 			return
 		}
+		extraAttachments = append(extraAttachments, detailBillAttachment)
 	}
-	request, err = sendInvoiceFileAndUpdateStatus(request, detailBillAttachment)
+	if payload.SendServiceConfirmation {
+		serviceConfirmationAttachment, readErr := readInvoiceServiceConfirmationAttachment(payload.ServiceConfirmationFileHeader)
+		if readErr != nil {
+			common.ApiError(c, readErr)
+			return
+		}
+		extraAttachments = append(extraAttachments, serviceConfirmationAttachment)
+	}
+	request, err = sendInvoiceFileAndUpdateStatus(request, extraAttachments...)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -331,6 +346,9 @@ func parseInvoiceApprovePayload(c *gin.Context, id int) (invoiceApprovePayload, 
 		if raw := strings.TrimSpace(c.PostForm("send_detail_bill")); raw != "" {
 			payload.SendDetailBill = parseInvoiceBool(raw, false)
 		}
+		if raw := strings.TrimSpace(c.PostForm("send_service_confirmation")); raw != "" {
+			payload.SendServiceConfirmation = parseInvoiceBool(raw, false)
+		}
 		fileHeader, err := c.FormFile("invoice_file")
 		if err != nil {
 			return payload, fmt.Errorf("请上传发票 PDF")
@@ -341,6 +359,13 @@ func parseInvoiceApprovePayload(c *gin.Context, id int) (invoiceApprovePayload, 
 				payload.DetailBillFileHeader = detailBillFileHeader
 			} else if payload.SendEmail {
 				return payload, fmt.Errorf("请上传明细账单 PDF")
+			}
+		}
+		if payload.SendServiceConfirmation {
+			if serviceConfirmationFileHeader, err := c.FormFile("service_confirmation_file"); err == nil {
+				payload.ServiceConfirmationFileHeader = serviceConfirmationFileHeader
+			} else if payload.SendEmail {
+				return payload, fmt.Errorf("请上传服务确认单 PDF")
 			}
 		}
 		if payload.SendEmail && payload.InvoiceSentTo == "" {
@@ -367,11 +392,21 @@ func parseInvoiceEmailPayload(c *gin.Context) (invoiceEmailPayload, error) {
 		if raw := strings.TrimSpace(c.PostForm("send_detail_bill")); raw != "" {
 			payload.SendDetailBill = parseInvoiceBool(raw, false)
 		}
+		if raw := strings.TrimSpace(c.PostForm("send_service_confirmation")); raw != "" {
+			payload.SendServiceConfirmation = parseInvoiceBool(raw, false)
+		}
 		if payload.SendDetailBill {
 			if fileHeader, err := c.FormFile("detail_bill_file"); err == nil {
 				payload.DetailBillFileHeader = fileHeader
 			} else {
 				return payload, fmt.Errorf("请上传明细账单 PDF")
+			}
+		}
+		if payload.SendServiceConfirmation {
+			if fileHeader, err := c.FormFile("service_confirmation_file"); err == nil {
+				payload.ServiceConfirmationFileHeader = fileHeader
+			} else {
+				return payload, fmt.Errorf("请上传服务确认单 PDF")
 			}
 		}
 		return payload, nil
@@ -380,7 +415,8 @@ func parseInvoiceEmailPayload(c *gin.Context) (invoiceEmailPayload, error) {
 		return payload, nil
 	}
 	var req struct {
-		SendDetailBill bool `json:"send_detail_bill"`
+		SendDetailBill          bool `json:"send_detail_bill"`
+		SendServiceConfirmation bool `json:"send_service_confirmation"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil && err != io.EOF {
 		return payload, err
@@ -388,7 +424,11 @@ func parseInvoiceEmailPayload(c *gin.Context) (invoiceEmailPayload, error) {
 	if req.SendDetailBill {
 		return payload, fmt.Errorf("请上传明细账单 PDF")
 	}
+	if req.SendServiceConfirmation {
+		return payload, fmt.Errorf("请上传服务确认单 PDF")
+	}
 	payload.SendDetailBill = req.SendDetailBill
+	payload.SendServiceConfirmation = req.SendServiceConfirmation
 	return payload, nil
 }
 
@@ -456,15 +496,23 @@ func sanitizeInvoiceFilename(filename string) string {
 }
 
 func readInvoiceDetailBillAttachment(fileHeader *multipart.FileHeader) (*common.EmailAttachment, error) {
+	return readInvoicePDFAttachment(fileHeader, "明细账单", "明细账单.pdf")
+}
+
+func readInvoiceServiceConfirmationAttachment(fileHeader *multipart.FileHeader) (*common.EmailAttachment, error) {
+	return readInvoicePDFAttachment(fileHeader, "服务确认单", "服务确认单.pdf")
+}
+
+func readInvoicePDFAttachment(fileHeader *multipart.FileHeader, label string, defaultFilename string) (*common.EmailAttachment, error) {
 	if fileHeader == nil {
-		return nil, nil
+		return nil, fmt.Errorf("请上传%s PDF", label)
 	}
 	if fileHeader.Size <= 0 || fileHeader.Size > maxInvoiceDetailBillSize {
-		return nil, fmt.Errorf("明细账单 PDF 大小不能超过 10MB")
+		return nil, fmt.Errorf("%s PDF 大小不能超过 10MB", label)
 	}
 	ext := strings.ToLower(filepath.Ext(fileHeader.Filename))
 	if ext != ".pdf" {
-		return nil, fmt.Errorf("明细账单附件仅支持 PDF 文件")
+		return nil, fmt.Errorf("%s附件仅支持 PDF 文件", label)
 	}
 	file, err := fileHeader.Open()
 	if err != nil {
@@ -476,19 +524,23 @@ func readInvoiceDetailBillAttachment(fileHeader *multipart.FileHeader) (*common.
 		return nil, err
 	}
 	if len(data) == 0 || len(data) > maxInvoiceDetailBillSize {
-		return nil, fmt.Errorf("明细账单 PDF 大小不能超过 10MB")
+		return nil, fmt.Errorf("%s PDF 大小不能超过 10MB", label)
 	}
 	return &common.EmailAttachment{
-		Filename:    sanitizeInvoiceDetailBillFilename(fileHeader.Filename),
+		Filename:    sanitizeInvoicePDFAttachmentFilename(fileHeader.Filename, defaultFilename),
 		ContentType: "application/pdf",
 		Data:        data,
 	}, nil
 }
 
 func sanitizeInvoiceDetailBillFilename(filename string) string {
+	return sanitizeInvoicePDFAttachmentFilename(filename, "明细账单.pdf")
+}
+
+func sanitizeInvoicePDFAttachmentFilename(filename string, defaultFilename string) string {
 	filename = filepath.Base(strings.TrimSpace(filename))
 	if filename == "." || filename == string(filepath.Separator) || filename == "" {
-		return "明细账单.pdf"
+		return defaultFilename
 	}
 	if strings.ToLower(filepath.Ext(filename)) != ".pdf" {
 		filename += ".pdf"
@@ -496,11 +548,11 @@ func sanitizeInvoiceDetailBillFilename(filename string) string {
 	return filename
 }
 
-func sendInvoiceFileAndUpdateStatus(request *model.InvoiceRequest, detailBillAttachment *common.EmailAttachment) (*model.InvoiceRequest, error) {
+func sendInvoiceFileAndUpdateStatus(request *model.InvoiceRequest, extraAttachments ...*common.EmailAttachment) (*model.InvoiceRequest, error) {
 	if request == nil {
 		return nil, model.ErrInvoiceRequestNotFound
 	}
-	err := sendInvoiceFileEmail(request, detailBillAttachment)
+	err := sendInvoiceFileEmail(request, extraAttachments...)
 	if err != nil {
 		updated, updateErr := model.UpdateInvoiceSendStatus(request.Id, model.InvoiceSendStatusFailed, err.Error())
 		if updateErr != nil {
@@ -511,7 +563,7 @@ func sendInvoiceFileAndUpdateStatus(request *model.InvoiceRequest, detailBillAtt
 	return model.UpdateInvoiceSendStatus(request.Id, model.InvoiceSendStatusSent, "")
 }
 
-func sendInvoiceFileEmail(request *model.InvoiceRequest, detailBillAttachment *common.EmailAttachment) error {
+func sendInvoiceFileEmail(request *model.InvoiceRequest, extraAttachments ...*common.EmailAttachment) error {
 	if strings.TrimSpace(request.InvoiceFilePath) == "" {
 		return fmt.Errorf("发票 PDF 文件不存在")
 	}
@@ -537,8 +589,10 @@ func sendInvoiceFileEmail(request *model.InvoiceRequest, detailBillAttachment *c
 		ContentType: "application/pdf",
 		Data:        data,
 	}}
-	if detailBillAttachment != nil && len(detailBillAttachment.Data) > 0 {
-		attachments = append(attachments, *detailBillAttachment)
+	for _, attachment := range extraAttachments {
+		if attachment != nil && len(attachment.Data) > 0 {
+			attachments = append(attachments, *attachment)
+		}
 	}
 	return common.SendEmailWithAttachments(subject, receiver, content, attachments)
 }

@@ -201,6 +201,7 @@ const EMPTY_INVOICE_FORM = {
   email: '',
   phone: '',
   remark: '',
+  needServiceConfirmation: false,
 };
 
 const RISK_RECORD_TYPE_OPTIONS = [
@@ -275,6 +276,14 @@ function getInvoiceTypeLabel(invoiceType) {
   return invoiceType === 'special' ? '专票' : '普票';
 }
 
+function buildInvoiceTitleCopyText(record) {
+  return [
+    `发票类型：${getInvoiceTypeLabel(record?.invoice_type)}`,
+    `单位名称：${record?.title || '-'}`,
+    `税号：${record?.tax_number || '-'}`,
+  ].join('\n');
+}
+
 function getInvoicePaymentLabel(paymentMethod) {
   return PAYMENT_METHOD_MAP[paymentMethod] || paymentMethod || '-';
 }
@@ -333,6 +342,16 @@ function formatInvoicePrintDate(timestamp) {
   return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
 }
 
+function formatInvoiceDateCompact(timestamp) {
+  const date = timestamp ? new Date(timestamp * 1000) : new Date();
+  if (Number.isNaN(date.getTime())) {
+    return '00000000';
+  }
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${date.getFullYear()}${month}${day}`;
+}
+
 function formatInvoicePrintMoney(value) {
   const amount = Number(value || 0);
   if (!Number.isFinite(amount)) {
@@ -342,6 +361,22 @@ function formatInvoicePrintMoney(value) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
+}
+
+function formatInvoiceServiceAmount(invoice) {
+  const totalMoney = Number(invoice?.total_money || 0);
+  if (Number.isFinite(totalMoney) && totalMoney > 0) {
+    return `人民币 ${formatInvoicePrintMoney(totalMoney)}`;
+  }
+  return '以账户实际订单金额及发票开具金额为准';
+}
+
+function formatInvoiceServiceQuota(invoice) {
+  const totalQuota = Number(invoice?.total_quota || 0);
+  if (Number.isFinite(totalQuota) && totalQuota > 0) {
+    return `${totalQuota.toLocaleString('zh-CN')} 额度单位`;
+  }
+  return '以账户实际可用额度及调用扣减记录为准';
 }
 
 function formatInvoicePaymentAmount(item) {
@@ -513,6 +548,102 @@ function buildInvoicePrintHtml(invoice, stampUrl = '') {
 </html>`;
 }
 
+function buildInvoiceServiceConfirmationHtml(invoice, stampUrl = '') {
+  const cell = (value) => escapeHtml(displayValue(value));
+  const documentNo = `YS-AIAPI-${formatInvoiceDateCompact(invoice?.created_at)}-${String(
+    invoice?.id || 0,
+  ).padStart(4, '0')}`;
+  const issueDate = formatInvoicePrintDate(
+    invoice?.reviewed_at || Math.floor(Date.now() / 1000),
+  );
+  const clientName = invoice?.title || formatInvoiceUser(invoice);
+  const serviceAmount = formatInvoiceServiceAmount(invoice);
+  const quotaText = formatInvoiceServiceQuota(invoice);
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>AI API 技术服务产品确认单 #${cell(invoice?.id)}</title>
+  <style>
+    @page { size: A4 landscape; margin: 12mm; }
+    * { box-sizing: border-box; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+    body { margin: 0; color: #1f2d3d; background: #fff; font: 14px/1.5 "Songti SC", "SimSun", "Noto Serif CJK SC", serif; }
+    .certificate { position: relative; min-height: 176mm; padding: 3mm 6mm 22mm; }
+    .topline { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; color: #4b5b6a; font-size: 12px; }
+    h1 { margin: 0 0 6px; text-align: center; font: 700 25px/1.25 "PingFang SC", "Microsoft YaHei", sans-serif; color: #1e3448; letter-spacing: 1px; }
+    .lead { margin: 0 16px 8px; text-indent: 2em; color: #34475a; }
+    .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin: 0 12px 8px; border: 1px solid #b9c7d7; border-bottom: 0; }
+    .meta div { display: grid; grid-template-columns: 108px 1fr; min-height: 32px; border-bottom: 1px solid #b9c7d7; }
+    .meta strong { padding: 7px 9px; background: #edf3f8; border-right: 1px solid #b9c7d7; }
+    .meta span { padding: 7px 9px; }
+    h2 { margin: 8px 12px 5px; font: 700 15px/1.2 "PingFang SC", "Microsoft YaHei", sans-serif; color: #1f3447; }
+    table { width: calc(100% - 24px); margin: 0 12px 7px; border-collapse: collapse; table-layout: fixed; }
+    th { background: #22364b; color: #fff; font-weight: 700; }
+    th, td { border: 1px solid #c9d4e1; padding: 5px 7px; vertical-align: middle; word-break: break-word; }
+    .center { text-align: center; }
+    .notes { margin: 4px 12px 0; }
+    .notes p { margin: 3px 0; text-indent: 2em; }
+    .sign { position: absolute; right: 74px; bottom: 7px; min-width: 310px; min-height: 86px; }
+    .provider-name { position: relative; display: inline-block; padding: 8px 18px 8px 0; font-weight: 700; }
+    .provider-seal { position: absolute; left: 86px; top: -34px; width: 118px; height: 118px; object-fit: contain; opacity: 0.94; transform: rotate(-8deg); }
+    .stamp-hint { color: #526579; font-size: 12px; }
+    @media screen { body { padding: 18px; background: #eef2f7; } .certificate { max-width: 1120px; margin: 0 auto; padding: 28px 38px 58px; background: #fff; box-shadow: 0 10px 34px rgba(15, 23, 42, 0.12); } }
+  </style>
+</head>
+<body>
+  <main class="certificate">
+    <div class="topline">
+      <span>上海曜算智能科技有限公司</span>
+      <span>第 1 页 / 共 1 页</span>
+    </div>
+    <h1>AI API 技术服务产品确认单</h1>
+    <p class="lead">本文件用于确认 API 调用额度、计费规则及配套技术服务内容，随对应发票申请生成，盖章后作为服务交付与费用确认依据。</p>
+    <section class="meta">
+      <div><strong>文件编号</strong><span>${cell(documentNo)}</span></div>
+      <div><strong>签发日期</strong><span>${cell(issueDate)}</span></div>
+      <div><strong>服务提供方</strong><span>上海曜算智能科技有限公司</span></div>
+      <div><strong>客户名称</strong><span>${cell(clientName)}</span></div>
+      <div><strong>服务周期</strong><span>自服务开通之日起至所购调用额度消耗完毕，或双方另行书面约定期限届满。</span></div>
+      <div><strong>交付方式</strong><span>线上 API 接入、接口文档、远程技术支持。</span></div>
+    </section>
+
+    <h2>一、服务资源</h2>
+    <table>
+      <thead><tr><th style="width: 56px;">序号</th><th style="width: 190px;">服务名称</th><th>服务说明及主要配置</th></tr></thead>
+      <tbody><tr><td class="center">1</td><td>大语言模型 API 调用服务</td><td>支持文本生成、文本理解、代码辅助、多轮对话等能力；支持多种模型按需切换；通过 API Key 调用；按 Token 实际使用量计量并扣减额度。</td></tr></tbody>
+    </table>
+
+    <h2>二、产品资源费用</h2>
+    <table>
+      <thead><tr><th style="width: 56px;">序号</th><th style="width: 180px;">产品名称</th><th style="width: 230px;">计费规则</th><th style="width: 180px;">购买金额</th><th>额度说明</th></tr></thead>
+      <tbody><tr><td class="center">1</td><td>API 调用 Token 额度</td><td>输入、输出及缓存读取按系统实时价格折算扣减。</td><td>${cell(serviceAmount)}</td><td>本次申请涉及 ${cell(quotaText)}；以账户实际调用产生的输入、输出及缓存读取 Token 数量折算扣减；不同模型、参数和上下文长度对应消耗可能不同，具体以系统实时扣费价格及实际扣费记录为准。</td></tr></tbody>
+    </table>
+
+    <h2>三、技术服务内容</h2>
+    <table>
+      <thead><tr><th style="width: 120px;">类别</th><th>服务内容</th></tr></thead>
+      <tbody>
+        <tr><td class="center">基础服务</td><td>平台接入支持、API Key 配置、接口文档说明、请求参数配置、返回值解析、Token 用量统计、账单查询、余额提醒及常见错误排查。</td></tr>
+        <tr><td class="center">增值服务</td><td>应用集成辅助、提示词优化建议、批量文本任务调用策略、并发控制建议、结果质量反馈及模型参数调整建议。</td></tr>
+      </tbody>
+    </table>
+
+    <h2>四、服务边界与合规说明</h2>
+    <section class="notes">
+      <p>本服务提供 API 调用额度及相关技术支持，不包含客户业务系统定制开发、私有化部署、长期驻场运维或第三方平台账号代运营，除非双方另有书面约定。</p>
+      <p>大语言模型输出具有概率性，服务提供方不承诺输出内容完全满足特定业务结果；用户应自行审核、确认和合规使用。</p>
+      <p>用户不得将本服务用于违法违规、侵犯第三方权益、规避监管或违反上游模型服务政策的用途。</p>
+    </section>
+
+    <section class="sign">
+      <div>服务提供方（盖章）：<span class="provider-name">上海曜算智能科技有限公司${stampUrl ? `<img class="provider-seal" src="${cell(stampUrl)}" alt="公司公章" />` : ''}</span></div>
+      <div>日期：${cell(issueDate)} <span class="stamp-hint">正式用印覆盖公司名称处</span></div>
+    </section>
+  </main>
+</body>
+</html>`;
+}
+
 async function waitForInvoiceBillRenderReady(doc) {
   if (doc?.fonts?.ready) {
     try {
@@ -621,7 +752,10 @@ function buildInvoicePageSlices(certificate, canvas, pageSliceHeight) {
     .map((row) => {
       const rect = row.getBoundingClientRect();
       return {
-        start: Math.max(0, Math.round((rect.top - certificateRect.top) * scaleY)),
+        start: Math.max(
+          0,
+          Math.round((rect.top - certificateRect.top) * scaleY),
+        ),
         end: Math.min(
           canvas.height,
           Math.round((rect.bottom - certificateRect.top) * scaleY),
@@ -653,7 +787,10 @@ function buildInvoicePageSlices(certificate, canvas, pageSliceHeight) {
       sliceEnd = splitRow.start;
     }
 
-    const sliceHeight = Math.max(1, Math.min(sliceEnd - offsetY, pageSliceHeight));
+    const sliceHeight = Math.max(
+      1,
+      Math.min(sliceEnd - offsetY, pageSliceHeight),
+    );
     slices.push({ offsetY, height: sliceHeight });
     offsetY += sliceHeight;
   }
@@ -661,7 +798,11 @@ function buildInvoicePageSlices(certificate, canvas, pageSliceHeight) {
   return slices;
 }
 
-async function buildInvoiceDetailBillPdfBlob(html, stampUrl = '') {
+async function buildInvoiceDetailBillPdfBlob(
+  html,
+  stampUrl = '',
+  label = '明细账单',
+) {
   const iframe = document.createElement('iframe');
   iframe.style.position = 'fixed';
   iframe.style.left = '-10000px';
@@ -676,7 +817,7 @@ async function buildInvoiceDetailBillPdfBlob(html, stampUrl = '') {
   try {
     const doc = iframe.contentDocument || iframe.contentWindow?.document;
     if (!doc) {
-      throw new Error('无法创建明细账单渲染窗口');
+      throw new Error(`无法创建${label}渲染窗口`);
     }
     doc.open();
     doc.write(html);
@@ -685,7 +826,7 @@ async function buildInvoiceDetailBillPdfBlob(html, stampUrl = '') {
 
     const certificate = doc.querySelector('.certificate');
     if (!certificate) {
-      throw new Error('明细账单内容为空');
+      throw new Error(`${label}内容为空`);
     }
 
     const canvas = await html2canvas(certificate, {
@@ -703,7 +844,7 @@ async function buildInvoiceDetailBillPdfBlob(html, stampUrl = '') {
     const sliceCanvas = doc.createElement('canvas');
     const sliceContext = sliceCanvas.getContext('2d');
     if (!sliceContext) {
-      throw new Error('无法生成明细账单 PDF');
+      throw new Error(`无法生成${label} PDF`);
     }
     sliceCanvas.width = canvas.width;
     sliceCanvas.height = pageSliceHeight;
@@ -919,6 +1060,7 @@ const TopupHistoryModal = ({
     invoiceSentTo: '',
     sendEmail: true,
     sendDetailBill: true,
+    sendServiceConfirmation: false,
     adminRemark: '',
   });
   const [invoiceReviewFile, setInvoiceReviewFile] = useState(null);
@@ -927,6 +1069,7 @@ const TopupHistoryModal = ({
     visible: false,
     record: null,
     sendDetailBill: true,
+    sendServiceConfirmation: false,
     submitting: false,
   });
   const [invoiceDetailVisible, setInvoiceDetailVisible] = useState(false);
@@ -1734,6 +1877,7 @@ const TopupHistoryModal = ({
         email: form.email,
         phone: form.phone,
         remark: form.remark,
+        need_service_confirmation: Boolean(invoiceForm.needServiceConfirmation),
         orders: selectedInvoiceOrders.map((item) => ({
           order_type: resolveOrderType(item),
           id: item.id,
@@ -1766,6 +1910,7 @@ const TopupHistoryModal = ({
       invoiceSentTo: record?.invoice_sent_to || record?.email || '',
       sendEmail: true,
       sendDetailBill: true,
+      sendServiceConfirmation: Boolean(record?.need_service_confirmation),
       adminRemark: '',
     });
     setInvoiceReviewFile(null);
@@ -1779,6 +1924,7 @@ const TopupHistoryModal = ({
       invoiceSentTo: '',
       sendEmail: true,
       sendDetailBill: true,
+      sendServiceConfirmation: false,
       adminRemark: '',
     });
     setInvoiceReviewFile(null);
@@ -1808,6 +1954,18 @@ const TopupHistoryModal = ({
     const html = buildInvoicePrintHtml(record, stampUrl);
     const blob = await buildInvoiceDetailBillPdfBlob(html, stampUrl);
     const filename = `明细账单-${Number(record?.id || 0) || 'invoice'}.pdf`;
+    return new File([blob], filename, { type: 'application/pdf' });
+  };
+
+  const buildInvoiceServiceConfirmationFile = async (record) => {
+    const stampUrl = await loadInvoiceStampDataUrl();
+    const html = buildInvoiceServiceConfirmationHtml(record, stampUrl);
+    const blob = await buildInvoiceDetailBillPdfBlob(
+      html,
+      stampUrl,
+      '服务确认单',
+    );
+    const filename = `服务确认单-${Number(record?.id || 0) || 'invoice'}.pdf`;
     return new File([blob], filename, { type: 'application/pdf' });
   };
 
@@ -1845,12 +2003,34 @@ const TopupHistoryModal = ({
             invoiceReviewForm.sendEmail && invoiceReviewForm.sendDetailBill,
           ),
         );
+        payload.append(
+          'send_service_confirmation',
+          String(
+            invoiceReviewForm.sendEmail &&
+              invoiceReviewForm.sendServiceConfirmation,
+          ),
+        );
         payload.append('admin_remark', invoiceReviewForm.adminRemark.trim());
         payload.append('invoice_file', invoiceReviewFile);
-        if (invoiceReviewForm.sendEmail && invoiceReviewForm.sendDetailBill) {
+        const shouldBuildDetailBill =
+          invoiceReviewForm.sendEmail && invoiceReviewForm.sendDetailBill;
+        const shouldBuildServiceConfirmation =
+          invoiceReviewForm.sendEmail &&
+          invoiceReviewForm.sendServiceConfirmation;
+        const attachmentDetail =
+          shouldBuildDetailBill || shouldBuildServiceConfirmation
+            ? await loadInvoiceDetailData(record)
+            : record;
+        if (shouldBuildDetailBill) {
           payload.append(
             'detail_bill_file',
-            await buildInvoiceDetailBillFile(record),
+            await buildInvoiceDetailBillFile(attachmentDetail),
+          );
+        }
+        if (shouldBuildServiceConfirmation) {
+          payload.append(
+            'service_confirmation_file',
+            await buildInvoiceServiceConfirmationFile(attachmentDetail),
           );
         }
       } else {
@@ -1907,6 +2087,7 @@ const TopupHistoryModal = ({
       visible: true,
       record,
       sendDetailBill: true,
+      sendServiceConfirmation: Boolean(record?.need_service_confirmation),
       submitting: false,
     });
   };
@@ -1916,6 +2097,7 @@ const TopupHistoryModal = ({
       visible: false,
       record: null,
       sendDetailBill: true,
+      sendServiceConfirmation: false,
       submitting: false,
     });
   };
@@ -1931,10 +2113,20 @@ const TopupHistoryModal = ({
         'send_detail_bill',
         String(invoiceEmailState.sendDetailBill),
       );
+      payload.append(
+        'send_service_confirmation',
+        String(invoiceEmailState.sendServiceConfirmation),
+      );
       if (invoiceEmailState.sendDetailBill) {
         payload.append(
           'detail_bill_file',
           await buildInvoiceDetailBillFile(detail),
+        );
+      }
+      if (invoiceEmailState.sendServiceConfirmation) {
+        payload.append(
+          'service_confirmation_file',
+          await buildInvoiceServiceConfirmationFile(detail),
         );
       }
       const res = await API.post(
@@ -2998,7 +3190,7 @@ const TopupHistoryModal = ({
       {
         title: t('发票抬头'),
         key: 'title',
-        width: 220,
+        width: 240,
         render: (_, record) => (
           <div className='flex flex-col gap-1'>
             <Space wrap>
@@ -3012,10 +3204,24 @@ const TopupHistoryModal = ({
               <Tag shape='circle' size='small' color='blue'>
                 {t(record?.title_type === 'company' ? '企业' : '个人')}
               </Tag>
-              <Text strong>{record?.title || '-'}</Text>
+              <Text
+                strong
+                copyable={{ content: buildInvoiceTitleCopyText(record) }}
+              >
+                {record?.title || '-'}
+              </Text>
             </Space>
+            {record?.need_service_confirmation ? (
+              <Tag shape='circle' size='small' color='purple'>
+                {t('已申请服务确认单')}
+              </Tag>
+            ) : null}
             {record?.tax_number ? (
-              <Text type='tertiary' size='small' copyable>
+              <Text
+                type='tertiary'
+                size='small'
+                copyable={{ content: buildInvoiceTitleCopyText(record) }}
+              >
                 {record.tax_number}
               </Text>
             ) : null}
@@ -3870,6 +4076,10 @@ const TopupHistoryModal = ({
                 ? renderQuota(detail.total_quota)
                 : '-',
             )}
+            {renderInvoiceDetailValue(
+              '服务确认单',
+              detail?.need_service_confirmation ? '需要随发票发送' : '不需要',
+            )}
           </div>
         </Card>
 
@@ -4269,6 +4479,32 @@ const TopupHistoryModal = ({
               border: '1px solid var(--semi-color-border)',
             }}
           >
+            <Checkbox
+              checked={invoiceForm.needServiceConfirmation}
+              onChange={(event) =>
+                handleInvoiceFormChange(
+                  'needServiceConfirmation',
+                  event.target.checked,
+                )
+              }
+            >
+              {t('同时申请服务确认单')}
+            </Checkbox>
+            <div className='mt-1'>
+              <Text type='tertiary' size='small'>
+                {t('审核通过后可随发票邮件一并发送，用于确认 API 服务内容。')}
+              </Text>
+            </div>
+          </Card>
+
+          <Card
+            bordered={false}
+            bodyStyle={{ padding: 12 }}
+            style={{
+              background: 'var(--semi-color-fill-0)',
+              border: '1px solid var(--semi-color-border)',
+            }}
+          >
             <Space wrap>
               <Text strong>
                 {t('已选')} {selectedInvoiceOrders.length} {t('笔订单')}
@@ -4406,6 +4642,18 @@ const TopupHistoryModal = ({
               >
                 {t('同时发送明细账单 PDF 附件')}
               </Checkbox>
+              <Checkbox
+                checked={invoiceReviewForm.sendServiceConfirmation}
+                disabled={!invoiceReviewForm.sendEmail}
+                onChange={(event) =>
+                  setInvoiceReviewForm((prev) => ({
+                    ...prev,
+                    sendServiceConfirmation: event.target.checked,
+                  }))
+                }
+              >
+                {t('同时发送服务确认单 PDF 附件')}
+              </Checkbox>
             </>
           ) : null}
           <TextArea
@@ -4480,6 +4728,17 @@ const TopupHistoryModal = ({
             }
           >
             {t('同时发送明细账单 PDF 附件')}
+          </Checkbox>
+          <Checkbox
+            checked={invoiceEmailState.sendServiceConfirmation}
+            onChange={(event) =>
+              setInvoiceEmailState((prev) => ({
+                ...prev,
+                sendServiceConfirmation: event.target.checked,
+              }))
+            }
+          >
+            {t('同时发送服务确认单 PDF 附件')}
           </Checkbox>
         </div>
       </Modal>

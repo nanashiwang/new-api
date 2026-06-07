@@ -89,6 +89,23 @@ func TestCreateInvoiceRequest_OccupiesOrderAndRejectedReleasesIt(t *testing.T) {
 	require.Equal(t, topup.Id, records[0].Id)
 }
 
+func TestCreateInvoiceRequest_StoresServiceConfirmationOption(t *testing.T) {
+	setupInvoiceTestDB(t)
+
+	user := createPaymentRecordTestUser(t, "alice")
+	topup := createPaymentRecordTopUp(t, user.Id, "T-INV-SERVICE", 100, common.TopUpStatusSuccess)
+	input := createInvoiceRequestInput(PaymentRecordTypeTopUp, topup.Id)
+	input.NeedServiceConfirmation = true
+
+	request, err := CreateInvoiceRequest(user.Id, input)
+	require.NoError(t, err)
+	require.True(t, request.NeedServiceConfirmation)
+
+	detail, err := GetUserInvoiceRequestDetail(user.Id, request.Id)
+	require.NoError(t, err)
+	require.True(t, detail.NeedServiceConfirmation)
+}
+
 func TestCreateInvoiceRequest_RejectsOtherUsersOrder(t *testing.T) {
 	setupInvoiceTestDB(t)
 

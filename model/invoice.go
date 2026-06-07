@@ -32,34 +32,35 @@ var (
 )
 
 type InvoiceRequest struct {
-	Id                int     `json:"id"`
-	UserId            int     `json:"user_id" gorm:"index;not null"`
-	InvoiceType       string  `json:"invoice_type" gorm:"type:varchar(16);not null;default:'normal'"`
-	TitleType         string  `json:"title_type" gorm:"type:varchar(16);not null;default:'personal'"`
-	Title             string  `json:"title" gorm:"type:varchar(128);not null;default:''"`
-	TaxNumber         string  `json:"tax_number" gorm:"type:varchar(64);not null;default:''"`
-	RegisteredAddress string  `json:"registered_address" gorm:"type:varchar(255);not null;default:''"`
-	RegisteredPhone   string  `json:"registered_phone" gorm:"type:varchar(64);not null;default:''"`
-	BankName          string  `json:"bank_name" gorm:"type:varchar(128);not null;default:''"`
-	BankAccount       string  `json:"bank_account" gorm:"type:varchar(128);not null;default:''"`
-	Email             string  `json:"email" gorm:"type:varchar(128);not null;default:''"`
-	Phone             string  `json:"phone" gorm:"type:varchar(32);not null;default:''"`
-	Remark            string  `json:"remark" gorm:"type:text"`
-	Status            string  `json:"status" gorm:"type:varchar(16);index;not null;default:'pending'"`
-	TotalMoney        float64 `json:"total_money" gorm:"type:decimal(20,6);not null;default:0"`
-	TotalQuota        int64   `json:"total_quota" gorm:"type:bigint;not null;default:0"`
-	InvoiceNo         string  `json:"invoice_no" gorm:"type:varchar(128);not null;default:''"`
-	InvoiceUrl        string  `json:"invoice_url" gorm:"type:text"`
-	InvoiceFileName   string  `json:"invoice_file_name" gorm:"type:varchar(255);not null;default:''"`
-	InvoiceFilePath   string  `json:"-" gorm:"type:text"`
-	InvoiceSentTo     string  `json:"invoice_sent_to" gorm:"type:varchar(128);not null;default:''"`
-	InvoiceSentAt     int64   `json:"invoice_sent_at" gorm:"index;not null;default:0"`
-	InvoiceSendStatus string  `json:"invoice_send_status" gorm:"type:varchar(16);index;not null;default:''"`
-	InvoiceSendError  string  `json:"invoice_send_error" gorm:"type:text"`
-	AdminRemark       string  `json:"admin_remark" gorm:"type:text"`
-	ReviewerUserId    int     `json:"reviewer_user_id" gorm:"index;not null;default:0"`
-	CreatedAt         int64   `json:"created_at" gorm:"index"`
-	ReviewedAt        int64   `json:"reviewed_at" gorm:"index;not null;default:0"`
+	Id                      int     `json:"id"`
+	UserId                  int     `json:"user_id" gorm:"index;not null"`
+	InvoiceType             string  `json:"invoice_type" gorm:"type:varchar(16);not null;default:'normal'"`
+	TitleType               string  `json:"title_type" gorm:"type:varchar(16);not null;default:'personal'"`
+	Title                   string  `json:"title" gorm:"type:varchar(128);not null;default:''"`
+	TaxNumber               string  `json:"tax_number" gorm:"type:varchar(64);not null;default:''"`
+	RegisteredAddress       string  `json:"registered_address" gorm:"type:varchar(255);not null;default:''"`
+	RegisteredPhone         string  `json:"registered_phone" gorm:"type:varchar(64);not null;default:''"`
+	BankName                string  `json:"bank_name" gorm:"type:varchar(128);not null;default:''"`
+	BankAccount             string  `json:"bank_account" gorm:"type:varchar(128);not null;default:''"`
+	Email                   string  `json:"email" gorm:"type:varchar(128);not null;default:''"`
+	Phone                   string  `json:"phone" gorm:"type:varchar(32);not null;default:''"`
+	Remark                  string  `json:"remark" gorm:"type:text"`
+	NeedServiceConfirmation bool    `json:"need_service_confirmation" gorm:"not null;default:false"`
+	Status                  string  `json:"status" gorm:"type:varchar(16);index;not null;default:'pending'"`
+	TotalMoney              float64 `json:"total_money" gorm:"type:decimal(20,6);not null;default:0"`
+	TotalQuota              int64   `json:"total_quota" gorm:"type:bigint;not null;default:0"`
+	InvoiceNo               string  `json:"invoice_no" gorm:"type:varchar(128);not null;default:''"`
+	InvoiceUrl              string  `json:"invoice_url" gorm:"type:text"`
+	InvoiceFileName         string  `json:"invoice_file_name" gorm:"type:varchar(255);not null;default:''"`
+	InvoiceFilePath         string  `json:"-" gorm:"type:text"`
+	InvoiceSentTo           string  `json:"invoice_sent_to" gorm:"type:varchar(128);not null;default:''"`
+	InvoiceSentAt           int64   `json:"invoice_sent_at" gorm:"index;not null;default:0"`
+	InvoiceSendStatus       string  `json:"invoice_send_status" gorm:"type:varchar(16);index;not null;default:''"`
+	InvoiceSendError        string  `json:"invoice_send_error" gorm:"type:text"`
+	AdminRemark             string  `json:"admin_remark" gorm:"type:text"`
+	ReviewerUserId          int     `json:"reviewer_user_id" gorm:"index;not null;default:0"`
+	CreatedAt               int64   `json:"created_at" gorm:"index"`
+	ReviewedAt              int64   `json:"reviewed_at" gorm:"index;not null;default:0"`
 
 	Username            string               `json:"username,omitempty" gorm:"column:username;->"`
 	DisplayName         string               `json:"display_name,omitempty" gorm:"column:display_name;->"`
@@ -89,18 +90,19 @@ type InvoiceOrderRef struct {
 }
 
 type CreateInvoiceRequestInput struct {
-	InvoiceType       string
-	TitleType         string
-	Title             string
-	TaxNumber         string
-	RegisteredAddress string
-	RegisteredPhone   string
-	BankName          string
-	BankAccount       string
-	Email             string
-	Phone             string
-	Remark            string
-	Orders            []InvoiceOrderRef
+	InvoiceType             string
+	TitleType               string
+	Title                   string
+	TaxNumber               string
+	RegisteredAddress       string
+	RegisteredPhone         string
+	BankName                string
+	BankAccount             string
+	Email                   string
+	Phone                   string
+	Remark                  string
+	NeedServiceConfirmation bool
+	Orders                  []InvoiceOrderRef
 }
 
 type InvoiceRequestSearchParams struct {
@@ -184,22 +186,23 @@ func CreateInvoiceRequest(userID int, input CreateInvoiceRequestInput) (*Invoice
 		}
 
 		request = InvoiceRequest{
-			UserId:            userID,
-			InvoiceType:       input.InvoiceType,
-			TitleType:         input.TitleType,
-			Title:             input.Title,
-			TaxNumber:         input.TaxNumber,
-			RegisteredAddress: input.RegisteredAddress,
-			RegisteredPhone:   input.RegisteredPhone,
-			BankName:          input.BankName,
-			BankAccount:       input.BankAccount,
-			Email:             input.Email,
-			Phone:             input.Phone,
-			Remark:            input.Remark,
-			Status:            InvoiceStatusPending,
-			TotalMoney:        totalMoney,
-			TotalQuota:        totalQuota,
-			CreatedAt:         common.GetTimestamp(),
+			UserId:                  userID,
+			InvoiceType:             input.InvoiceType,
+			TitleType:               input.TitleType,
+			Title:                   input.Title,
+			TaxNumber:               input.TaxNumber,
+			RegisteredAddress:       input.RegisteredAddress,
+			RegisteredPhone:         input.RegisteredPhone,
+			BankName:                input.BankName,
+			BankAccount:             input.BankAccount,
+			Email:                   input.Email,
+			Phone:                   input.Phone,
+			Remark:                  input.Remark,
+			NeedServiceConfirmation: input.NeedServiceConfirmation,
+			Status:                  InvoiceStatusPending,
+			TotalMoney:              totalMoney,
+			TotalQuota:              totalQuota,
+			CreatedAt:               common.GetTimestamp(),
 		}
 		if err := tx.Create(&request).Error; err != nil {
 			return err
