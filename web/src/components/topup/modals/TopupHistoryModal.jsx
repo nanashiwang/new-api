@@ -577,13 +577,14 @@ function buildInvoiceServiceConfirmationHtml(invoice, stampUrl = '') {
     .meta-table { margin-bottom: 10px; }
     .meta-table th { width: 24mm; background: #edf3f8; color: #1f2d3d; text-align: left; font-weight: 700; }
     .meta-table td { background: #fff; color: #1f2d3d; }
-    .meta-table th, .meta-table td { padding: 4px 8px 5px; vertical-align: top; line-height: 1.35; }
+    /* 中文宋体在 PDF 渲染中视觉重心偏下，表格内用非对称留白做光学校正。 */
+    .meta-table th, .meta-table td { padding: 2px 8px 7px; vertical-align: top; line-height: 1.3; }
     h2 { margin: 10px 0 5px; padding-left: 7px; border-left: 4px solid #1f4e79; font: 700 14px/1.25 "PingFang SC", "Microsoft YaHei", sans-serif; color: #1f3447; }
     table { width: 100%; margin: 0 0 8px; border-collapse: collapse; table-layout: fixed; page-break-inside: avoid; }
     th { background: #22364b; color: #fff; font-weight: 700; text-align: center; }
-    th, td { border: 1px solid #c8d4e2; padding: 4px 7px 6px; vertical-align: top; word-break: break-word; line-height: 1.38; }
-    th { padding-top: 5px; padding-bottom: 5px; line-height: 1.2; }
-    .center { text-align: center; vertical-align: top; padding-top: 8px; }
+    th, td { border: 1px solid #c8d4e2; padding: 2px 7px 7px; vertical-align: top; word-break: break-word; line-height: 1.34; }
+    th { padding-top: 3px; padding-bottom: 7px; line-height: 1.15; }
+    .center { text-align: center; vertical-align: top; padding-top: 4px; padding-bottom: 7px; }
     .notes { margin: 0; padding: 8px 10px; border: 1px solid #c8d4e2; background: #fafcff; page-break-inside: avoid; }
     .notes p { margin: 4px 0; text-indent: 2em; }
     .sign { display: flex; justify-content: flex-end; margin-top: 12px; page-break-inside: avoid; }
