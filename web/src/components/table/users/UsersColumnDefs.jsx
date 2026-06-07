@@ -24,6 +24,7 @@ import {
   Tag,
   Tooltip,
   Dropdown,
+  Typography,
 } from '@douyinfe/semi-ui';
 import { IconMore } from '@douyinfe/semi-icons';
 import {
@@ -32,6 +33,8 @@ import {
   renderQuota,
   timestamp2string,
 } from '../../../helpers';
+
+const { Text } = Typography;
 
 const renderTimestamp = (text) => (text ? timestamp2string(text) : '-');
 
@@ -193,6 +196,18 @@ const renderUsername = (text, record) => {
         </Tag>
       </Tooltip>
     </Space>
+  );
+};
+
+const renderEmail = (email) => {
+  const value = typeof email === 'string' ? email.trim() : '';
+  if (!value) {
+    return <span>-</span>;
+  }
+  return (
+    <Text copyable ellipsis={{ showTooltip: true }} style={{ maxWidth: 220 }}>
+      {value}
+    </Text>
   );
 };
 
@@ -622,6 +637,12 @@ export const getUsersColumns = ({
       title: t('用户名'),
       dataIndex: 'username',
       render: (text, record) => renderUsername(text, record),
+    },
+    {
+      title: t('邮箱'),
+      dataIndex: 'email',
+      width: 240,
+      render: (text) => renderEmail(text),
     },
     {
       title: t('注册来源'),
