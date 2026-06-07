@@ -930,13 +930,13 @@ html.dark .home-shell {
 }
 
 .public-notice-modal {
-  width: min(640px, 100%);
+  width: min(600px, 100%);
   max-height: min(620px, calc(100vh - 36px));
   display: flex;
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--semi-color-border);
-  border-radius: 8px;
+  border-radius: 6px;
   color: var(--semi-color-text-0);
   background: var(--semi-color-bg-0);
   box-shadow: 0 24px 80px rgba(15, 23, 42, 0.22);
@@ -946,20 +946,20 @@ html.dark .home-shell {
 .public-notice-footer {
   display: flex;
   align-items: center;
-  padding: 14px 18px;
 }
 
 .public-notice-header {
   justify-content: space-between;
   gap: 12px;
+  padding: 20px 24px 16px;
   border-bottom: 1px solid var(--semi-color-border);
 }
 
 .public-notice-header h2 {
   margin: 0;
-  font-size: 18px;
+  font-size: 16px;
   line-height: 1.4;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .public-notice-close,
@@ -983,9 +983,9 @@ html.dark .home-shell {
 
 .public-notice-content {
   min-height: 120px;
-  max-height: 420px;
+  max-height: 55vh;
   overflow-y: auto;
-  padding: 18px;
+  padding: 0 24px 24px;
   color: var(--semi-color-text-0);
   line-height: 1.7;
   white-space: pre-wrap;
@@ -995,6 +995,7 @@ html.dark .home-shell {
 .public-notice-footer {
   justify-content: flex-end;
   gap: 10px;
+  padding: 16px 24px;
   border-top: 1px solid var(--semi-color-border);
 }
 
