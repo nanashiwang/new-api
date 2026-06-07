@@ -160,3 +160,24 @@ func TestSearchAndUpdateUserBalanceTrendUsers(t *testing.T) {
 	require.Len(t, included, 1)
 	require.Equal(t, "bob", included[0].Username)
 }
+
+func TestUserBalanceSnapshotReportCurrentSkipsDisabledUsers(t *testing.T) {
+	setupUserBalanceSnapshotTestDB(t)
+	createUserBalanceSnapshotTestUser(t, "alice", 1000)
+	bob := createUserBalanceSnapshotTestUser(t, "bob", 900)
+
+	snapshotTime := time.Date(2026, 6, 5, 4, 0, 0, 0, time.Local)
+	_, err := SaveUserBalanceSnapshot(snapshotTime)
+	require.NoError(t, err)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", bob.Id).Update("balance_trend_disabled", true).Error)
+
+	report, err := GetUserBalanceSnapshotReport(snapshotTime.Add(-time.Hour).Unix(), time.Now().Add(time.Hour).Unix())
+	require.NoError(t, err)
+	require.NotNil(t, report.Latest)
+	require.NotNil(t, report.Current)
+	require.EqualValues(t, 1900, report.Latest.TotalQuota)
+	require.EqualValues(t, 1000, report.Current.TotalQuota)
+	require.EqualValues(t, -900, report.CurrentDeltaQuota)
+	require.Len(t, report.CurrentTopUsers, 1)
+	require.Equal(t, "alice", report.CurrentTopUsers[0].Username)
+}

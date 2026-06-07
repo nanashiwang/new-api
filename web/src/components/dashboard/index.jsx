@@ -292,6 +292,7 @@ const Dashboard = () => {
             onUserBalanceTrendDaysChange={
               dashboardData.handleUserBalanceTrendDaysChange
             }
+            onUserBalanceTrendUsersChanged={dashboardData.loadUserBalanceTrend}
             isAdminUser={dashboardData.isAdminUser}
             CARD_PROPS={CARD_PROPS}
             CHART_CONFIG={CHART_CONFIG}

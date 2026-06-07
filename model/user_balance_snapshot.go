@@ -55,13 +55,18 @@ type UserBalanceSnapshotPoint struct {
 }
 
 type UserBalanceSnapshotReport struct {
-	Snapshots     []UserBalanceSnapshotPoint `json:"snapshots"`
-	Latest        *UserBalanceSnapshotPoint  `json:"latest"`
-	Previous      *UserBalanceSnapshotPoint  `json:"previous"`
-	DeltaQuota    int64                      `json:"delta_quota"`
-	DeltaRate     float64                    `json:"delta_rate"`
-	TopUsers      []UserBalanceSnapshotUser  `json:"top_users"`
-	NegativeUsers []UserBalanceSnapshotUser  `json:"negative_users"`
+	Snapshots            []UserBalanceSnapshotPoint `json:"snapshots"`
+	Latest               *UserBalanceSnapshotPoint  `json:"latest"`
+	Previous             *UserBalanceSnapshotPoint  `json:"previous"`
+	Current              *UserBalanceSnapshotPoint  `json:"current"`
+	DeltaQuota           int64                      `json:"delta_quota"`
+	DeltaRate            float64                    `json:"delta_rate"`
+	CurrentDeltaQuota    int64                      `json:"current_delta_quota"`
+	CurrentDeltaRate     float64                    `json:"current_delta_rate"`
+	TopUsers             []UserBalanceSnapshotUser  `json:"top_users"`
+	NegativeUsers        []UserBalanceSnapshotUser  `json:"negative_users"`
+	CurrentTopUsers      []UserBalanceSnapshotUser  `json:"current_top_users"`
+	CurrentNegativeUsers []UserBalanceSnapshotUser  `json:"current_negative_users"`
 }
 
 type UserBalanceTrendUserSearchParams struct {
@@ -276,6 +281,19 @@ func GetUserBalanceSnapshotReport(startTime int64, endTime int64) (*UserBalanceS
 			report.DeltaRate = float64(report.DeltaQuota) / float64(previous.TotalQuota)
 		}
 	}
+	current, currentTopUsers, currentNegativeUsers, err := buildCurrentUserBalanceSnapshotPoint(time.Now())
+	if err != nil {
+		return nil, err
+	}
+	report.Current = current
+	report.CurrentTopUsers = currentTopUsers
+	report.CurrentNegativeUsers = currentNegativeUsers
+	if report.Latest != nil {
+		report.CurrentDeltaQuota = current.TotalQuota - report.Latest.TotalQuota
+		if report.Latest.TotalQuota != 0 {
+			report.CurrentDeltaRate = float64(report.CurrentDeltaQuota) / float64(report.Latest.TotalQuota)
+		}
+	}
 	return report, nil
 }
 
@@ -358,6 +376,37 @@ func UpdateUserBalanceTrendDisabled(userId int, disabled bool) (*UserBalanceSnap
 		return nil, err
 	}
 	return &user, nil
+}
+
+func buildCurrentUserBalanceSnapshotPoint(now time.Time) (*UserBalanceSnapshotPoint, []UserBalanceSnapshotUser, []UserBalanceSnapshotUser, error) {
+	aggregate, err := queryUserBalanceAggregate()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	topUsers, err := queryUserBalanceTopUsers(10)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	negativeUsers, err := queryUserBalanceNegativeUsers(10)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	top10Quota := int64(0)
+	for _, user := range topUsers {
+		top10Quota += user.Quota
+	}
+	point := buildUserBalanceSnapshotPoint(UserBalanceSnapshot{
+		SnapshotDate:       now.Format("2006-01-02"),
+		SnapshotAt:         now.Unix(),
+		TotalQuota:         aggregate.TotalQuota,
+		TotalPositiveQuota: aggregate.TotalPositiveQuota,
+		UserCount:          int(aggregate.UserCount),
+		PositiveUserCount:  int(aggregate.PositiveUserCount),
+		NegativeUserCount:  int(aggregate.NegativeUserCount),
+		Top10Quota:         top10Quota,
+	})
+	return &point, topUsers, negativeUsers, nil
 }
 
 func buildUserBalanceSnapshotPoint(snapshot UserBalanceSnapshot) UserBalanceSnapshotPoint {

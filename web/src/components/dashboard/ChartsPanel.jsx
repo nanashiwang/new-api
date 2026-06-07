@@ -63,6 +63,7 @@ const ChartsPanel = ({
   userBalanceTrendLoading,
   userBalanceTrendDays,
   onUserBalanceTrendDaysChange,
+  onUserBalanceTrendUsersChanged,
   isAdminUser,
   CARD_PROPS,
   CHART_CONFIG,
@@ -397,6 +398,7 @@ const ChartsPanel = ({
               loading={userBalanceTrendLoading}
               days={userBalanceTrendDays}
               onDaysChange={onUserBalanceTrendDaysChange}
+              onUsersChanged={onUserBalanceTrendUsersChanged}
               embedded
               CHART_CONFIG={CHART_CONFIG}
               t={t}

@@ -54,6 +54,56 @@ const VChart = lazy(() =>
 
 const formatPercent = (value) => `${(Number(value || 0) * 100).toFixed(1)}%`;
 
+const getQuotaPerUnit = () => {
+  const raw = parseFloat(localStorage.getItem('quota_per_unit') || '1');
+  return Number.isFinite(raw) && raw > 0 ? raw : 1;
+};
+
+const getCurrencyConfig = () => {
+  const type = localStorage.getItem('quota_display_type') || 'USD';
+  const statusStr = localStorage.getItem('status');
+  let symbol = '$';
+  let rate = 1;
+
+  if (type === 'CNY') {
+    symbol = '¥';
+    try {
+      if (statusStr) {
+        const status = JSON.parse(statusStr);
+        rate = status?.usd_exchange_rate || 1;
+      }
+    } catch (e) {}
+  } else if (type === 'CUSTOM') {
+    symbol = '¤';
+    try {
+      if (statusStr) {
+        const status = JSON.parse(statusStr);
+        symbol = status?.custom_currency_symbol || symbol;
+        rate = status?.custom_currency_exchange_rate || rate;
+      }
+    } catch (e) {}
+  }
+
+  return { type, symbol, rate };
+};
+
+const quotaToDisplayAmount = (quota) => {
+  const value = Number(quota || 0);
+  if (!Number.isFinite(value)) return 0;
+  const { type, rate } = getCurrencyConfig();
+  if (type === 'TOKENS') return value;
+  return (value / getQuotaPerUnit()) * (type === 'USD' ? 1 : rate || 1);
+};
+
+const renderDisplayAmount = (amount, digits = 2) => {
+  const value = Number(amount || 0);
+  const { type, symbol } = getCurrencyConfig();
+  if (type === 'TOKENS') {
+    return renderNumber(value);
+  }
+  return `${symbol}${value.toFixed(digits)}`;
+};
+
 const formatSnapshotTime = (timestamp) => {
   if (!timestamp) return '-';
   const date = new Date(Number(timestamp) * 1000);
@@ -65,8 +115,12 @@ const formatSnapshotTime = (timestamp) => {
 };
 
 const buildMetricCards = (report, t) => {
-  const latest = report?.latest || {};
-  const deltaQuota = Number(report?.delta_quota || 0);
+  const latest = report?.current || report?.latest || {};
+  const deltaQuota = Number(
+    report?.current
+      ? report?.current_delta_quota || 0
+      : report?.delta_quota || 0,
+  );
   return [
     {
       label: t('当前总余额'),
@@ -74,7 +128,7 @@ const buildMetricCards = (report, t) => {
       color: 'blue',
     },
     {
-      label: t('较上次统计'),
+      label: report?.current ? t('较 04:00 统计') : t('较上次统计'),
       value: renderQuota(deltaQuota, 2),
       color: deltaQuota >= 0 ? 'green' : 'red',
     },
@@ -101,7 +155,7 @@ const RANGE_OPTIONS = [
   { label: '近30天', value: 30 },
 ];
 
-const UserBalanceTrendUsersModal = ({ visible, onCancel, t }) => {
+const UserBalanceTrendUsersModal = ({ visible, onCancel, onChanged, t }) => {
   const [keyword, setKeyword] = useState('');
   const [appliedKeyword, setAppliedKeyword] = useState('');
   const [includeStatus, setIncludeStatus] = useState('all');
@@ -180,7 +234,8 @@ const UserBalanceTrendUsersModal = ({ visible, onCancel, t }) => {
       } else {
         loadUsers(pagination.currentPage);
       }
-      showSuccess(t('统计设置已更新，将在下一次 04:00 统计时生效'));
+      await onChanged?.();
+      showSuccess(t('统计设置已更新，当前汇总已刷新'));
     } catch (err) {
       showError(err);
     }
@@ -279,6 +334,7 @@ const UserBalanceTrendPanel = ({
   loading,
   days = 7,
   onDaysChange,
+  onUsersChanged,
   embedded = false,
   CARD_PROPS,
   CHART_CONFIG,
@@ -295,18 +351,18 @@ const UserBalanceTrendPanel = ({
           id: 'userBalanceTrend',
           values: snapshots.map((item) => ({
             date: item.snapshot_date,
-            quota: item.total_quota,
+            amount: quotaToDisplayAmount(item.total_quota),
             positiveUsers: item.positive_user_count,
           })),
         },
       ],
       xField: 'date',
-      yField: 'quota',
+      yField: 'amount',
       title: {
         visible: true,
-        text: t('全站用户余额走势'),
-        subtext: `${t('每日 04:00 自动统计')} · ${t('最近统计')}：${formatSnapshotTime(
-          report?.latest?.snapshot_at,
+        text: t('全站用户余额走势（金额）'),
+        subtext: `${t('每日 04:00 自动统计')} · ${t('当前汇总')}：${formatSnapshotTime(
+          report?.current?.snapshot_at || report?.latest?.snapshot_at,
         )}`,
       },
       line: { style: { stroke: '#1664FF', lineWidth: 2 } },
@@ -331,7 +387,7 @@ const UserBalanceTrendPanel = ({
         {
           orient: 'left',
           type: 'linear',
-          label: { formatMethod: (value) => renderQuota(value, 0) },
+          label: { formatMethod: (value) => renderDisplayAmount(value, 0) },
         },
       ],
       tooltip: {
@@ -340,7 +396,7 @@ const UserBalanceTrendPanel = ({
             { key: t('统计日期'), value: (datum) => datum.date },
             {
               key: t('总余额'),
-              value: (datum) => renderQuota(datum.quota || 0, 2),
+              value: (datum) => renderDisplayAmount(datum.amount || 0, 2),
             },
             {
               key: t('有余额用户'),
@@ -350,7 +406,7 @@ const UserBalanceTrendPanel = ({
         },
       },
     }),
-    [report?.latest?.snapshot_at, snapshots, t],
+    [report?.current?.snapshot_at, report?.latest?.snapshot_at, snapshots, t],
   );
 
   const topUserColumns = [
@@ -429,15 +485,25 @@ const UserBalanceTrendPanel = ({
                   </div>
                   <Table
                     columns={topUserColumns}
-                    dataSource={report?.top_users || []}
+                    dataSource={
+                      report?.current_top_users || report?.top_users || []
+                    }
                     rowKey='id'
                     pagination={false}
                     size='small'
                   />
-                  {(report?.negative_users || []).length > 0 ? (
+                  {(
+                    report?.current_negative_users ||
+                    report?.negative_users ||
+                    []
+                  ).length > 0 ? (
                     <div className='mt-3 rounded-lg bg-red-50 p-2 text-xs text-red-600'>
                       {t('发现负余额用户')}：
-                      {(report?.negative_users || [])
+                      {(
+                        report?.current_negative_users ||
+                        report?.negative_users ||
+                        []
+                      )
                         .slice(0, 3)
                         .map((item) => item.display_name || item.username)
                         .join('、')}
@@ -459,6 +525,7 @@ const UserBalanceTrendPanel = ({
       <UserBalanceTrendUsersModal
         visible={settingsVisible}
         onCancel={() => setSettingsVisible(false)}
+        onChanged={onUsersChanged}
         t={t}
       />
     </>
