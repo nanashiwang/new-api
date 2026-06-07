@@ -38,6 +38,9 @@ const en = {
   大模型接口网关: 'LLM API Gateway',
   '更好的价格，更好的稳定性，只需要将模型基址替换为：':
     'Better prices and better stability. Just replace the model base URL with:',
+  '一衡调山海，万模皆可达': 'Balance the vast — every model within reach.',
+  '聚合万模，平衡调度，一口稳定接入，只需将模型基址替换为：':
+    'Aggregate every model, balance every request, one stable integration. Just replace the model base URL with:',
   已复制到剪切板: 'Copied',
   获取密钥: 'Get Key',
   支持众多的大模型供应商: 'Supporting various LLM providers',

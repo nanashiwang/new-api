@@ -69,7 +69,7 @@ const providerBadges = [
   '30+',
 ];
 
-const Home = () => {
+const Home = ({ onLandingChange } = {}) => {
   const { t, language, isChinese } = usePublicTranslation();
   const navigate = useNavigate();
   const [statusState] = useContext(StatusContext);
@@ -180,6 +180,15 @@ const Home = () => {
     displayHomePageContent().then();
   }, []);
 
+  // 上报当前是否为自定义首页（自带顶部导航）：homePageContent 非空即为远程 iframe
+  // 或自定义 HTML，二者都自带 nav。外层 PublicHomeShell 据此隐藏项目 public-header，
+  // 避免与自定义 nav 叠成双顶栏。onLandingChange 可选，App.jsx 内联使用 Home 时不传。
+  useEffect(() => {
+    if (typeof onLandingChange === 'function') {
+      onLandingChange(homePageContent !== '');
+    }
+  }, [homePageContent, onLandingChange]);
+
   useEffect(() => {
     const timer = setInterval(() => {
       setEndpointIndex((prev) => (prev + 1) % endpointItems.length);
@@ -224,8 +233,11 @@ const Home = () => {
                       <span className='shine-text'>{t('大模型接口网关')}</span>
                     </>
                   </h1>
-                  <p className='text-base md:text-lg lg:text-xl home-text-secondary mt-4 md:mt-6 max-w-xl'>
-                    {t('更好的价格，更好的稳定性，只需要将模型基址替换为：')}
+                  <p className='text-xl md:text-2xl lg:text-3xl font-semibold home-text-primary mt-4 md:mt-6'>
+                    {t('一衡调山海，万模皆可达')}
+                  </p>
+                  <p className='text-base md:text-lg lg:text-xl home-text-secondary mt-3 md:mt-4 max-w-xl'>
+                    {t('聚合万模，平衡调度，一口稳定接入，只需将模型基址替换为：')}
                   </p>
                   <div className='flex flex-col md:flex-row items-center justify-center gap-4 w-full mt-4 md:mt-6 max-w-md'>
                     <div className='home-endpoint-control'>

@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useContext, useEffect } from 'react';
+import React, { useContext, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { StatusContext } from '../../context/Status';
 import { UserContext } from '../../context/User';
@@ -66,6 +66,16 @@ const PublicHomeShell = () => {
   const modules = parseHeaderModules(status.HeaderNavModules);
   const docsLink = status.docs_link || localStorage.getItem('docs_link') || '';
   const showRegister = !status.self_use_mode_enabled;
+
+  // 自定义首页（自带顶部导航）时隐藏项目 public-header，避免双顶栏。
+  // 初值同步读取 localStorage 缓存避免首屏闪烁，随后由 Home 的 onLandingChange 校正。
+  const [customLanding, setCustomLanding] = useState(() => {
+    try {
+      return Boolean(localStorage.getItem('home_page_content'));
+    } catch {
+      return false;
+    }
+  });
 
   const navLinks = [
     modules.home && { text: t('首页'), to: '/' },
@@ -149,7 +159,8 @@ const PublicHomeShell = () => {
   return (
     <div className='public-shell min-h-screen bg-[var(--semi-color-bg-0,#fff)] text-[var(--semi-color-text-0,#111827)]'>
       <GlobalTopProgress />
-      <header className='public-header fixed top-0 left-0 right-0 z-50 bg-white/75 dark:bg-zinc-900/75 backdrop-blur-lg'>
+      {!customLanding && (
+        <header className='public-header fixed top-0 left-0 right-0 z-50 bg-white/75 dark:bg-zinc-900/75 backdrop-blur-lg'>
         <div className='flex items-center justify-between h-16 px-2'>
           <Link to='/' className='group flex items-center gap-2 min-w-0'>
             <img
@@ -223,7 +234,8 @@ const PublicHomeShell = () => {
           </div>
         </div>
       </header>
-      <Home />
+      )}
+      <Home onLandingChange={setCustomLanding} />
       <footer className='public-footer'>
         <div className='flex flex-col md:flex-row items-center justify-between w-full max-w-[1110px] gap-6 mx-auto'>
           <span className='text-sm text-[var(--semi-color-text-1,#4b5563)]'>
