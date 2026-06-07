@@ -16,6 +16,11 @@ docs
 !docs/NAN_CLIENT_OPENCLAW.md
 !docs/NAN_CLIENT_CCSWITCH.md
 !docs/NAN_TROUBLESHOOTING.md
+!docs/images
+!docs/images/nan-token-management-overview.png
+!web/public/docs
+!web/public/docs/images
+!web/public/docs/images/nan-token-management-overview.png
 .eslintcache
 .gocache
 /web/node_modules

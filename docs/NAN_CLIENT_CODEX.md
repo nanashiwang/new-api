@@ -10,6 +10,10 @@
 4. 可用模型以 `https://cn.meta-api.vip/pricing` 为准。
 5. 复制完整 API Key。
 
+![令牌管理入口和关键字段](./images/nan-token-management-overview.png)
+
+重点看 `添加令牌`、`分组`、`密钥` 三个位置。创建后把密钥复制到 Codex 配置里，分组要选 Codex/OpenAI 可用分组。
+
 ## 2. 方法一：npx zcf 一键配置
 
 ### 2.1 安装 Node.js

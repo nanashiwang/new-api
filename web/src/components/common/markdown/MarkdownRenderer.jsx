@@ -278,18 +278,34 @@ export function PreCode(props) {
 }
 
 function CustomCode(props) {
+  const { children, className, inline, node, ...restProps } = props;
+  const codeText = String(children ?? '');
+  const isInline =
+    inline === true ||
+    (!className && !codeText.includes('\n') && !codeText.includes('\r'));
   const ref = useRef(null);
   const [collapsed, setCollapsed] = useState(true);
   const [showToggle, setShowToggle] = useState(false);
   const { t } = useTranslation();
 
   useEffect(() => {
+    if (isInline) {
+      return;
+    }
     if (ref.current) {
       const codeHeight = ref.current.scrollHeight;
       setShowToggle(codeHeight > 400);
       ref.current.scrollTop = ref.current.scrollHeight;
     }
-  }, [props.children]);
+  }, [children, isInline]);
+
+  if (isInline) {
+    return (
+      <code className={clsx(className)} {...restProps}>
+        {children}
+      </code>
+    );
+  }
 
   const toggleCollapsed = () => {
     setCollapsed((collapsed) => !collapsed);
@@ -320,8 +336,9 @@ function CustomCode(props) {
   return (
     <div style={{ position: 'relative' }}>
       <code
-        className={clsx(props?.className)}
+        className={clsx(className)}
         ref={ref}
+        {...restProps}
         style={{
           maxHeight: collapsed ? '400px' : 'none',
           overflowY: 'hidden',
@@ -333,7 +350,7 @@ function CustomCode(props) {
           lineHeight: '1.4',
         }}
       >
-        {props.children}
+        {children}
       </code>
       {renderShowMoreButton()}
     </div>

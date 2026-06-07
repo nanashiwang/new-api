@@ -34,6 +34,8 @@
 | Claude 模型         | `claude`                              |
 | Gemini 模型         | `gemini`                              |
 
+![令牌管理入口和关键字段](./images/nan-token-management-overview.png)
+
 4. 复制完整 API Key，通常以 `sk-` 开头。
 
 ### 1.3 跑通第一条请求

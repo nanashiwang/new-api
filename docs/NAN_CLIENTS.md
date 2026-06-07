@@ -36,7 +36,26 @@
 
 模型以 `https://cn.meta-api.vip/pricing` 展示为准，不同分组可用模型不同。
 
-## 4. 通用环境
+![令牌管理入口和关键字段](./images/nan-token-management-overview.png)
+
+图里重点看三处：
+
+- `添加令牌`：创建新的 API Key。
+- `分组`：决定这个令牌能调用哪些模型。
+- `密钥`：复制后填到 Codex、Claude Code、Gemini、OpenCode 等客户端里。
+
+## 4. 分组速查
+
+| 客户端 / 模型         | 推荐分组                   |
+| --------------------- | -------------------------- |
+| Codex / OpenAI 模型   | `default` / `vip` / `svip` |
+| Claude Code 调 Claude | `claude`                   |
+| Claude Code 调 OpenAI | 非 `claude`                |
+| Gemini CLI            | `gemini`                   |
+| OpenCode              | `default` / `vip` / `svip` |
+| OpenClaw              | 按实际模型选择对应分组     |
+
+## 5. 通用环境
 
 多数 CLI 依赖 Node.js：
 
@@ -47,7 +66,7 @@ npm --version
 
 没有 Node.js 时，去 `https://nodejs.org/` 下载 LTS 版本。
 
-## 5. 独立教程
+## 6. 独立教程
 
 - [Codex 配置教程](./NAN_CLIENT_CODEX.md)
 - [Claude Code 使用 Claude 模型](./NAN_CLIENT_CLAUDE_CODE.md)
@@ -57,7 +76,7 @@ npm --version
 - [OpenClaw 配置教程](./NAN_CLIENT_OPENCLAW.md)
 - [CC Switch 与聊天入口配置](./NAN_CLIENT_CCSWITCH.md)
 
-## 6. 原始飞书链接备查
+## 7. 原始飞书链接备查
 
 正文已经迁移，下面只用于核对历史版本：
 

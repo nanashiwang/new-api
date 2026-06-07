@@ -136,6 +136,7 @@ const DOC_LINK_REPLACEMENTS = [
   [/\.\/NAN_CLIENT_OPENCLAW\.md/g, '/docs/clients/openclaw'],
   [/\.\/NAN_CLIENT_CCSWITCH\.md/g, '/docs/clients/ccswitch'],
   [/\.\/NAN_TROUBLESHOOTING\.md/g, '/docs/troubleshooting'],
+  [/\.\/images\//g, '/docs/images/'],
 ];
 
 const NAV_GROUPS = DOCS.reduce((groups, doc) => {
