@@ -566,36 +566,39 @@ function buildInvoiceServiceConfirmationHtml(invoice, stampUrl = '') {
   <meta charset="utf-8" />
   <title>AI API 技术服务产品确认单 #${cell(invoice?.id)}</title>
   <style>
-    @page { size: A4 landscape; margin: 12mm; }
+    @page { size: A4 portrait; margin: 0; }
     * { box-sizing: border-box; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-    body { margin: 0; color: #1f2d3d; background: #fff; font: 14px/1.5 "Songti SC", "SimSun", "Noto Serif CJK SC", serif; }
-    .certificate { position: relative; min-height: 176mm; padding: 3mm 6mm 22mm; }
-    .topline { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; color: #4b5b6a; font-size: 12px; }
-    h1 { margin: 0 0 6px; text-align: center; font: 700 25px/1.25 "PingFang SC", "Microsoft YaHei", sans-serif; color: #1e3448; letter-spacing: 1px; }
-    .lead { margin: 0 16px 8px; text-indent: 2em; color: #34475a; }
-    .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin: 0 12px 8px; border: 1px solid #b9c7d7; border-bottom: 0; }
-    .meta div { display: grid; grid-template-columns: 108px 1fr; min-height: 32px; border-bottom: 1px solid #b9c7d7; }
-    .meta strong { padding: 7px 9px; background: #edf3f8; border-right: 1px solid #b9c7d7; }
-    .meta span { padding: 7px 9px; }
-    h2 { margin: 8px 12px 5px; font: 700 15px/1.2 "PingFang SC", "Microsoft YaHei", sans-serif; color: #1f3447; }
-    table { width: calc(100% - 24px); margin: 0 12px 7px; border-collapse: collapse; table-layout: fixed; }
-    th { background: #22364b; color: #fff; font-weight: 700; }
-    th, td { border: 1px solid #c9d4e1; padding: 5px 7px; vertical-align: middle; word-break: break-word; }
-    .center { text-align: center; }
-    .notes { margin: 4px 12px 0; }
-    .notes p { margin: 3px 0; text-indent: 2em; }
-    .sign { position: absolute; right: 74px; bottom: 7px; min-width: 310px; min-height: 86px; }
-    .provider-name { position: relative; display: inline-block; padding: 8px 18px 8px 0; font-weight: 700; }
-    .provider-seal { position: absolute; left: 86px; top: -34px; width: 118px; height: 118px; object-fit: contain; opacity: 0.94; transform: rotate(-8deg); }
-    .stamp-hint { color: #526579; font-size: 12px; }
-    @media screen { body { padding: 18px; background: #eef2f7; } .certificate { max-width: 1120px; margin: 0 auto; padding: 28px 38px 58px; background: #fff; box-shadow: 0 10px 34px rgba(15, 23, 42, 0.12); } }
+    html, body { margin: 0; background: #fff; }
+    body { color: #1f2d3d; font: 12px/1.55 "Songti SC", "SimSun", "Noto Serif CJK SC", serif; }
+    .certificate { width: 210mm; min-height: 297mm; margin: 0 auto; padding: 16mm 16mm 15mm; background: #fff; }
+    .topline { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 6px; border-bottom: 1px solid #d8dee8; color: #586575; font-size: 11px; }
+    h1 { margin: 10px 0 8px; text-align: center; font: 700 22px/1.25 "PingFang SC", "Microsoft YaHei", sans-serif; color: #14233a; letter-spacing: 1px; }
+    .lead { margin: 0 0 10px; text-indent: 2em; color: #37475a; }
+    .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin: 0 0 10px; border: 1px solid #b9c7d7; border-bottom: 0; }
+    .meta div { display: grid; grid-template-columns: 25mm 1fr; min-height: 28px; border-bottom: 1px solid #b9c7d7; }
+    .meta strong { padding: 6px 8px; background: #edf3f8; border-right: 1px solid #b9c7d7; font-weight: 700; }
+    .meta span { padding: 6px 8px; }
+    h2 { margin: 10px 0 5px; padding-left: 7px; border-left: 4px solid #1f4e79; font: 700 14px/1.25 "PingFang SC", "Microsoft YaHei", sans-serif; color: #1f3447; }
+    table { width: 100%; margin: 0 0 8px; border-collapse: collapse; table-layout: fixed; page-break-inside: avoid; }
+    th { background: #22364b; color: #fff; font-weight: 700; text-align: center; }
+    th, td { border: 1px solid #c8d4e2; padding: 6px 7px; vertical-align: top; word-break: break-word; }
+    .center { text-align: center; vertical-align: middle; }
+    .notes { margin: 0; padding: 8px 10px; border: 1px solid #c8d4e2; background: #fafcff; page-break-inside: avoid; }
+    .notes p { margin: 4px 0; text-indent: 2em; }
+    .sign { display: flex; justify-content: flex-end; margin-top: 14px; page-break-inside: avoid; }
+    .sign-box { width: 74mm; min-height: 34mm; }
+    .sign-row { display: flex; align-items: center; margin: 7px 0; }
+    .sign-label { flex: 0 0 36mm; }
+    .provider-name { position: relative; display: inline-block; min-width: 42mm; padding: 4px 10px 5px 0; font-weight: 700; line-height: 1.5; }
+    .provider-seal { position: absolute; left: 50%; top: 50%; width: 34mm; height: 34mm; object-fit: contain; opacity: 0.94; transform: translate(-50%, -50%) rotate(-8deg); }
+    @media screen { body { padding: 18px; background: #eef2f7; } .certificate { box-shadow: 0 10px 34px rgba(15, 23, 42, 0.12); } }
   </style>
 </head>
 <body>
-  <main class="certificate">
+  <main class="certificate" data-page-orientation="portrait">
     <div class="topline">
       <span>上海曜算智能科技有限公司</span>
-      <span>第 1 页 / 共 1 页</span>
+      <span>文件编号：${cell(documentNo)}</span>
     </div>
     <h1>AI API 技术服务产品确认单</h1>
     <p class="lead">本文件用于确认 API 调用额度、计费规则及配套技术服务内容，随对应发票申请生成，盖章后作为服务交付与费用确认依据。</p>
@@ -610,19 +613,19 @@ function buildInvoiceServiceConfirmationHtml(invoice, stampUrl = '') {
 
     <h2>一、服务资源</h2>
     <table>
-      <thead><tr><th style="width: 56px;">序号</th><th style="width: 190px;">服务名称</th><th>服务说明及主要配置</th></tr></thead>
+      <thead><tr><th style="width: 13mm;">序号</th><th style="width: 38mm;">服务名称</th><th>服务说明及主要配置</th></tr></thead>
       <tbody><tr><td class="center">1</td><td>大语言模型 API 调用服务</td><td>支持文本生成、文本理解、代码辅助、多轮对话等能力；支持多种模型按需切换；通过 API Key 调用；按 Token 实际使用量计量并扣减额度。</td></tr></tbody>
     </table>
 
     <h2>二、产品资源费用</h2>
     <table>
-      <thead><tr><th style="width: 56px;">序号</th><th style="width: 180px;">产品名称</th><th style="width: 230px;">计费规则</th><th style="width: 180px;">购买金额</th><th>额度说明</th></tr></thead>
+      <thead><tr><th style="width: 13mm;">序号</th><th style="width: 34mm;">产品名称</th><th style="width: 42mm;">计费规则</th><th style="width: 30mm;">购买金额</th><th>额度说明</th></tr></thead>
       <tbody><tr><td class="center">1</td><td>API 调用 Token 额度</td><td>输入、输出及缓存读取按系统实时价格折算扣减。</td><td>${cell(serviceAmount)}</td><td>本次申请涉及 ${cell(quotaText)}；以账户实际调用产生的输入、输出及缓存读取 Token 数量折算扣减；不同模型、参数和上下文长度对应消耗可能不同，具体以系统实时扣费价格及实际扣费记录为准。</td></tr></tbody>
     </table>
 
     <h2>三、技术服务内容</h2>
     <table>
-      <thead><tr><th style="width: 120px;">类别</th><th>服务内容</th></tr></thead>
+      <thead><tr><th style="width: 28mm;">类别</th><th>服务内容</th></tr></thead>
       <tbody>
         <tr><td class="center">基础服务</td><td>平台接入支持、API Key 配置、接口文档说明、请求参数配置、返回值解析、Token 用量统计、账单查询、余额提醒及常见错误排查。</td></tr>
         <tr><td class="center">增值服务</td><td>应用集成辅助、提示词优化建议、批量文本任务调用策略、并发控制建议、结果质量反馈及模型参数调整建议。</td></tr>
@@ -637,8 +640,10 @@ function buildInvoiceServiceConfirmationHtml(invoice, stampUrl = '') {
     </section>
 
     <section class="sign">
-      <div>服务提供方（盖章）：<span class="provider-name">上海曜算智能科技有限公司${stampUrl ? `<img class="provider-seal" src="${cell(stampUrl)}" alt="公司公章" />` : ''}</span></div>
-      <div>日期：${cell(issueDate)} <span class="stamp-hint">正式用印覆盖公司名称处</span></div>
+      <div class="sign-box">
+        <div class="sign-row"><span class="sign-label">服务提供方（盖章）：</span><span class="provider-name">上海曜算智能科技有限公司${stampUrl ? `<img class="provider-seal" src="${cell(stampUrl)}" alt="公司公章" />` : ''}</span></div>
+        <div class="sign-row"><span class="sign-label">日期：</span><span>${cell(issueDate)}</span></div>
+      </div>
     </section>
   </main>
 </body>
@@ -836,8 +841,10 @@ async function buildInvoiceDetailBillPdfBlob(
       useCORS: true,
     });
     const pdfDoc = await PDFDocument.create();
-    const pageWidth = 841.89;
-    const pageHeight = 595.28;
+    const isPortrait =
+      certificate.getAttribute('data-page-orientation') === 'portrait';
+    const pageWidth = isPortrait ? 595.28 : 841.89;
+    const pageHeight = isPortrait ? 841.89 : 595.28;
     const pageSliceHeight = Math.max(
       1,
       Math.floor((canvas.width * pageHeight) / pageWidth),
