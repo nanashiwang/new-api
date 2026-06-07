@@ -569,7 +569,7 @@ function buildInvoiceServiceConfirmationHtml(invoice, stampUrl = '') {
     @page { size: A4 portrait; margin: 0; }
     * { box-sizing: border-box; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
     html, body { margin: 0; background: #fff; }
-    body { color: #1f2d3d; font: 12px/1.55 "Songti SC", "SimSun", "Noto Serif CJK SC", serif; }
+    body { color: #1f2d3d; font: 12px/1.42 "Songti SC", "SimSun", "Noto Serif CJK SC", serif; }
     .certificate { width: 210mm; min-height: 297mm; margin: 0 auto; padding: 16mm 16mm 15mm; background: #fff; }
     .topline { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 6px; border-bottom: 1px solid #d8dee8; color: #586575; font-size: 11px; }
     h1 { margin: 10px 0 8px; text-align: center; font: 700 22px/1.25 "PingFang SC", "Microsoft YaHei", sans-serif; color: #14233a; letter-spacing: 1px; }
@@ -577,12 +577,13 @@ function buildInvoiceServiceConfirmationHtml(invoice, stampUrl = '') {
     .meta-table { margin-bottom: 10px; }
     .meta-table th { width: 24mm; background: #edf3f8; color: #1f2d3d; text-align: left; font-weight: 700; }
     .meta-table td { background: #fff; color: #1f2d3d; }
-    .meta-table th, .meta-table td { padding: 6px 8px; vertical-align: middle; line-height: 1.45; }
+    .meta-table th, .meta-table td { padding: 4px 8px 5px; vertical-align: top; line-height: 1.35; }
     h2 { margin: 10px 0 5px; padding-left: 7px; border-left: 4px solid #1f4e79; font: 700 14px/1.25 "PingFang SC", "Microsoft YaHei", sans-serif; color: #1f3447; }
     table { width: 100%; margin: 0 0 8px; border-collapse: collapse; table-layout: fixed; page-break-inside: avoid; }
     th { background: #22364b; color: #fff; font-weight: 700; text-align: center; }
-    th, td { border: 1px solid #c8d4e2; padding: 6px 7px; vertical-align: top; word-break: break-word; }
-    .center { text-align: center; vertical-align: middle; }
+    th, td { border: 1px solid #c8d4e2; padding: 4px 7px 6px; vertical-align: top; word-break: break-word; line-height: 1.38; }
+    th { padding-top: 5px; padding-bottom: 5px; line-height: 1.2; }
+    .center { text-align: center; vertical-align: top; padding-top: 8px; }
     .notes { margin: 0; padding: 8px 10px; border: 1px solid #c8d4e2; background: #fafcff; page-break-inside: avoid; }
     .notes p { margin: 4px 0; text-indent: 2em; }
     .sign { display: flex; justify-content: flex-end; margin-top: 12px; page-break-inside: avoid; }
