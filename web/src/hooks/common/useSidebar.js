@@ -81,7 +81,9 @@ export const mergeAdminConfig = (savedConfig) => {
 export const useSidebar = () => {
   const [statusState] = useContext(StatusContext);
   const [userConfig, setUserConfig] = useState(null);
-  const [loading, setLoading] = useState(true);
+  // 默认 false：finalConfig 已基于默认 adminConfig 提供兜底，菜单可立即渲染，
+  // 不需要骨架屏阻塞首屏。loadUserConfig 异步刷新 userConfig 后会自动 patch。
+  const [loading, setLoading] = useState(false);
   const instanceIdRef = useRef(null);
   const hasLoadedOnceRef = useRef(false);
 
@@ -105,10 +107,9 @@ export const useSidebar = () => {
 
   // 加载用户配置的通用方法
   const loadUserConfig = async ({ withLoading } = {}) => {
-    const shouldShowLoader =
-      typeof withLoading === 'boolean'
-        ? withLoading
-        : !hasLoadedOnceRef.current;
+    // 默认不显示骨架屏：finalConfig 已有基于 adminConfig 的兜底，
+    // user/self 在后台异步刷新即可。仅当显式传 withLoading:true 时（如手动刷新）才展示。
+    const shouldShowLoader = withLoading === true;
 
     try {
       if (shouldShowLoader) {
@@ -183,11 +184,12 @@ export const useSidebar = () => {
 
   // 加载用户配置
   useEffect(() => {
-    // 只有当管理员配置加载完成后才加载用户配置
-    if (Object.keys(adminConfig).length > 0) {
-      loadUserConfig();
-    }
-  }, [adminConfig]);
+    // mount 时立刻触发：adminConfig 永远有默认兜底（mergeAdminConfig(null) 返回
+    // DEFAULT_ADMIN_CONFIG），不必等 /api/status 返回，避免侧边栏被串行链路阻塞。
+    loadUserConfig();
+    // 仅 mount 触发一次；adminConfig 因 statusState 更新引起的二次执行无意义。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 监听全局刷新事件
   useEffect(() => {
@@ -222,15 +224,16 @@ export const useSidebar = () => {
       return result;
     }
 
-    // 如果userConfig未加载，等待加载完成
-    if (!userConfig) {
-      return result;
-    }
+    // userConfig 未加载时不再 return 空对象；下面的遍历逻辑会把 userSection 视为
+    // undefined → 默认放行（与 useSection ? ... : true 的兜底分支一致），
+    // 这样侧边栏可以基于 adminConfig 立即渲染出默认菜单，避免首屏白屏。
+    // 待 user/self 返回后 userConfig 更新会触发 finalConfig 重新计算并 patch 差异。
 
     // 遍历所有区域
     Object.keys(adminConfig).forEach((sectionKey) => {
       const adminSection = adminConfig[sectionKey];
-      const userSection = userConfig[sectionKey];
+      // userConfig 可能为 null（首次 mount 时 user/self 尚未返回），用可选链兜底。
+      const userSection = userConfig?.[sectionKey];
 
       // 如果管理员禁用了整个区域，则该区域不显示
       if (!adminSection?.enabled) {

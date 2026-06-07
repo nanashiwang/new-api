@@ -24,7 +24,6 @@ import { getLucideIcon } from './sidebarIcons';
 import { ChevronLeft } from 'lucide-react';
 import { useSidebarCollapsed } from '../../hooks/common/useSidebarCollapsed';
 import { useSidebar } from '../../hooks/common/useSidebar';
-import { useMinimumLoadingTime } from '../../hooks/common/useMinimumLoadingTime';
 import { API } from '../../helpers/apiCore';
 import { isAdmin, isRoot } from '../../helpers/storage';
 import { showError } from '../../helpers/toast';
@@ -64,7 +63,10 @@ const SiderBar = ({ onNavigate = () => {} }) => {
     loading: sidebarLoading,
   } = useSidebar();
 
-  const showSkeleton = useMinimumLoadingTime(sidebarLoading, 200);
+  // 不再使用 useMinimumLoadingTime 强制 200ms 最小骨架时间——
+  // useSidebar 已基于默认 adminConfig 提供兜底 finalConfig，菜单可立即渲染。
+  // 骨架屏仅在显式刷新等少数场景显示（loadUserConfig({withLoading:true})）。
+  const showSkeleton = sidebarLoading;
 
   const [selectedKeys, setSelectedKeys] = useState(['home']);
   const [chatItems, setChatItems] = useState([]);
