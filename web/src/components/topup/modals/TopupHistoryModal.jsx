@@ -574,10 +574,10 @@ function buildInvoiceServiceConfirmationHtml(invoice, stampUrl = '') {
     .topline { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 6px; border-bottom: 1px solid #d8dee8; color: #586575; font-size: 11px; }
     h1 { margin: 10px 0 8px; text-align: center; font: 700 22px/1.25 "PingFang SC", "Microsoft YaHei", sans-serif; color: #14233a; letter-spacing: 1px; }
     .lead { margin: 0 0 10px; text-indent: 2em; color: #37475a; }
-    .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin: 0 0 10px; border: 1px solid #b9c7d7; border-bottom: 0; }
-    .meta div { display: grid; grid-template-columns: 25mm 1fr; min-height: 28px; border-bottom: 1px solid #b9c7d7; }
-    .meta strong { padding: 6px 8px; background: #edf3f8; border-right: 1px solid #b9c7d7; font-weight: 700; }
-    .meta span { padding: 6px 8px; }
+    .meta-table { margin-bottom: 10px; }
+    .meta-table th { width: 24mm; background: #edf3f8; color: #1f2d3d; text-align: left; font-weight: 700; }
+    .meta-table td { background: #fff; color: #1f2d3d; }
+    .meta-table th, .meta-table td { padding: 6px 8px; vertical-align: middle; line-height: 1.45; }
     h2 { margin: 10px 0 5px; padding-left: 7px; border-left: 4px solid #1f4e79; font: 700 14px/1.25 "PingFang SC", "Microsoft YaHei", sans-serif; color: #1f3447; }
     table { width: 100%; margin: 0 0 8px; border-collapse: collapse; table-layout: fixed; page-break-inside: avoid; }
     th { background: #22364b; color: #fff; font-weight: 700; text-align: center; }
@@ -585,12 +585,13 @@ function buildInvoiceServiceConfirmationHtml(invoice, stampUrl = '') {
     .center { text-align: center; vertical-align: middle; }
     .notes { margin: 0; padding: 8px 10px; border: 1px solid #c8d4e2; background: #fafcff; page-break-inside: avoid; }
     .notes p { margin: 4px 0; text-indent: 2em; }
-    .sign { display: flex; justify-content: flex-end; margin-top: 14px; page-break-inside: avoid; }
-    .sign-box { width: 74mm; min-height: 34mm; }
-    .sign-row { display: flex; align-items: center; margin: 7px 0; }
+    .sign { display: flex; justify-content: flex-end; margin-top: 12px; page-break-inside: avoid; }
+    .sign-box { width: 78mm; min-height: 38mm; }
+    .sign-row { display: flex; align-items: flex-start; margin: 6px 0; }
     .sign-label { flex: 0 0 36mm; }
-    .provider-name { position: relative; display: inline-block; min-width: 42mm; padding: 4px 10px 5px 0; font-weight: 700; line-height: 1.5; }
-    .provider-seal { position: absolute; left: 50%; top: 50%; width: 34mm; height: 34mm; object-fit: contain; opacity: 0.94; transform: translate(-50%, -50%) rotate(-8deg); }
+    .seal-field { position: relative; flex: 1; min-height: 28mm; }
+    .provider-name { position: relative; z-index: 1; display: inline-block; padding-top: 5mm; font-weight: 700; line-height: 1.5; }
+    .provider-seal { position: absolute; z-index: 2; left: 50%; top: 13mm; width: 30mm; height: 30mm; object-fit: contain; opacity: 0.94; transform: translate(-50%, -50%) rotate(-8deg); }
     @media screen { body { padding: 18px; background: #eef2f7; } .certificate { box-shadow: 0 10px 34px rgba(15, 23, 42, 0.12); } }
   </style>
 </head>
@@ -602,14 +603,13 @@ function buildInvoiceServiceConfirmationHtml(invoice, stampUrl = '') {
     </div>
     <h1>AI API 技术服务产品确认单</h1>
     <p class="lead">本文件用于确认 API 调用额度、计费规则及配套技术服务内容，随对应发票申请生成，盖章后作为服务交付与费用确认依据。</p>
-    <section class="meta">
-      <div><strong>文件编号</strong><span>${cell(documentNo)}</span></div>
-      <div><strong>签发日期</strong><span>${cell(issueDate)}</span></div>
-      <div><strong>服务提供方</strong><span>上海曜算智能科技有限公司</span></div>
-      <div><strong>客户名称</strong><span>${cell(clientName)}</span></div>
-      <div><strong>服务周期</strong><span>自服务开通之日起至所购调用额度消耗完毕，或双方另行书面约定期限届满。</span></div>
-      <div><strong>交付方式</strong><span>线上 API 接入、接口文档、远程技术支持。</span></div>
-    </section>
+    <table class="meta-table">
+      <tbody>
+        <tr><th>文件编号</th><td>${cell(documentNo)}</td><th>签发日期</th><td>${cell(issueDate)}</td></tr>
+        <tr><th>服务提供方</th><td>上海曜算智能科技有限公司</td><th>客户名称</th><td>${cell(clientName)}</td></tr>
+        <tr><th>服务周期</th><td>自服务开通之日起至所购调用额度消耗完毕，或双方另行书面约定期限届满。</td><th>交付方式</th><td>线上 API 接入、接口文档、远程技术支持。</td></tr>
+      </tbody>
+    </table>
 
     <h2>一、服务资源</h2>
     <table>
@@ -641,7 +641,7 @@ function buildInvoiceServiceConfirmationHtml(invoice, stampUrl = '') {
 
     <section class="sign">
       <div class="sign-box">
-        <div class="sign-row"><span class="sign-label">服务提供方（盖章）：</span><span class="provider-name">上海曜算智能科技有限公司${stampUrl ? `<img class="provider-seal" src="${cell(stampUrl)}" alt="公司公章" />` : ''}</span></div>
+        <div class="sign-row"><span class="sign-label">服务提供方（盖章）：</span><span class="seal-field"><span class="provider-name">上海曜算智能科技有限公司</span>${stampUrl ? `<img class="provider-seal" src="${cell(stampUrl)}" alt="公司公章" />` : ''}</span></div>
         <div class="sign-row"><span class="sign-label">日期：</span><span>${cell(issueDate)}</span></div>
       </div>
     </section>
@@ -750,6 +750,11 @@ async function buildSeamStampSlices(doc, stampUrl, pageCount) {
 }
 
 function buildInvoicePageSlices(certificate, canvas, pageSliceHeight) {
+  const singlePageTolerance = Math.round(pageSliceHeight * 0.025);
+  if (canvas.height <= pageSliceHeight + singlePageTolerance) {
+    return [{ offsetY: 0, height: Math.min(canvas.height, pageSliceHeight) }];
+  }
+
   const certificateRect = certificate.getBoundingClientRect();
   const scaleY = certificateRect.height
     ? canvas.height / certificateRect.height
