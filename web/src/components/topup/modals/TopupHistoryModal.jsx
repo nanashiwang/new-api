@@ -478,7 +478,7 @@ function buildInvoicePrintHtml(invoice, stampUrl = '') {
     @page { size: A4 landscape; margin: 14mm; }
     * { box-sizing: border-box; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
     body { margin: 0; color: #243244; background: #fff; font: 14px/1.55 "Songti SC", "SimSun", "Noto Serif CJK SC", serif; }
-    .certificate { position: relative; min-height: 176mm; padding: 4mm 18mm 34mm 2mm; }
+    .certificate { position: relative; min-height: 176mm; padding: 4mm 18mm 6mm 2mm; }
     h1 { margin: 0; text-align: center; font: 700 25px/1.25 "PingFang SC", "Microsoft YaHei", sans-serif; letter-spacing: 1px; color: #23364a; }
     .title-line { height: 2px; margin: 14px 0 8px; background: #2d5f86; }
     .intro { margin: 0 26px 16px; text-indent: 2em; font-size: 14px; }
@@ -493,10 +493,11 @@ function buildInvoicePrintHtml(invoice, stampUrl = '') {
     .summary div { margin: 2px 0; }
     .notes { margin: 10px 20px 0; }
     .notes p { margin: 5px 0; text-indent: 2em; }
-    .sign { position: absolute; right: 88px; bottom: 18px; min-width: 250px; min-height: 118px; font-size: 14px; }
-    .sign p { margin: 8px 0; }
+    .sign { display: flex; justify-content: flex-end; margin: 20px 20px 0; font-size: 14px; break-inside: avoid; page-break-inside: avoid; }
+    .sign-box { position: relative; min-width: 250px; min-height: 118px; break-inside: avoid; }
+    .sign-box p { margin: 8px 0; }
     .stamp-hint { color: #526579; font-size: 13px; }
-    .sign-seal-image { position: absolute; width: 118px; height: 118px; right: 44px; bottom: 0; object-fit: contain; opacity: 0.94; }
+    .sign-seal-image { position: absolute; width: 110px; height: 110px; right: 0; bottom: 0; object-fit: contain; opacity: 0.94; }
     .empty { padding: 18px; text-align: center; color: #697586; }
     @media screen { body { padding: 18px; background: #eef2f7; } .certificate { max-width: 1120px; margin: 0 auto; padding: 28px 76px 72px 32px; background: #fff; box-shadow: 0 10px 34px rgba(15, 23, 42, 0.12); } }
   </style>
@@ -541,10 +542,12 @@ function buildInvoicePrintHtml(invoice, stampUrl = '') {
     </section>
 
     <section class="sign">
-      <p>上海曜算智能科技有限公司</p>
-      <p>盖章：<span class="stamp-hint">见右下角公章</span></p>
-      <p>出具日期：${cell(formatInvoicePrintDate(Math.floor(Date.now() / 1000)))}</p>
-      ${stampUrl ? `<img class="sign-seal-image" src="${cell(stampUrl)}" alt="公司公章" />` : ''}
+      <div class="sign-box">
+        <p>上海曜算智能科技有限公司</p>
+        <p>盖章：<span class="stamp-hint">见右下角公章</span></p>
+        <p>出具日期：${cell(formatInvoicePrintDate(Math.floor(Date.now() / 1000)))}</p>
+        ${stampUrl ? `<img class="sign-seal-image" src="${cell(stampUrl)}" alt="公司公章" />` : ''}
+      </div>
     </section>
   </main>
 </body>
@@ -589,13 +592,12 @@ function buildInvoiceServiceConfirmationHtml(invoice, stampUrl = '') {
     .center { text-align: center; }
     .notes { margin: 0; padding: 8px 10px; border: 1px solid #c8d4e2; background: #fafcff; page-break-inside: avoid; }
     .notes p { margin: 4px 0; text-indent: 2em; }
-    .sign { display: flex; justify-content: flex-end; margin-top: 18px; page-break-inside: avoid; }
-    .sign-box { position: relative; width: 84mm; padding-top: 2mm; }
-    .sign-row { display: flex; align-items: baseline; margin: 6px 0; }
-    .sign-label { flex: 0 0 auto; white-space: nowrap; }
-    .sign-value { flex: 1; padding-left: 1mm; }
+    .sign { display: flex; justify-content: flex-end; margin-top: 40px; page-break-inside: avoid; }
+    .sign-box { position: relative; min-width: 62mm; }
+    .sign-box p { margin: 7px 0; }
     .provider-name { font-weight: 700; }
-    .provider-seal { position: absolute; z-index: 2; right: 4mm; top: -4mm; width: 32mm; height: 32mm; object-fit: contain; opacity: 0.9; transform: rotate(-6deg); pointer-events: none; }
+    .stamp-hint { color: #526579; }
+    .provider-seal { position: absolute; z-index: 2; right: 0; bottom: -4mm; width: 32mm; height: 32mm; object-fit: contain; opacity: 0.9; transform: rotate(-6deg); pointer-events: none; }
     @media screen { body { padding: 18px; background: #eef2f7; } .certificate { box-shadow: 0 10px 34px rgba(15, 23, 42, 0.12); } }
   </style>
 </head>
@@ -645,8 +647,9 @@ function buildInvoiceServiceConfirmationHtml(invoice, stampUrl = '') {
 
     <section class="sign">
       <div class="sign-box">
-        <div class="sign-row"><span class="sign-label">服务提供方（盖章）：</span><span class="sign-value provider-name">上海曜算智能科技有限公司</span></div>
-        <div class="sign-row"><span class="sign-label">日期：</span><span class="sign-value">${cell(issueDate)}</span></div>
+        <p class="provider-name">上海曜算智能科技有限公司</p>
+        <p>盖章：<span class="stamp-hint">见右下角公章</span></p>
+        <p>出具日期：${cell(issueDate)}</p>
         ${stampUrl ? `<img class="provider-seal" src="${cell(stampUrl)}" alt="公司公章" />` : ''}
       </div>
     </section>
