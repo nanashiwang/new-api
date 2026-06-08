@@ -589,13 +589,13 @@ function buildInvoiceServiceConfirmationHtml(invoice, stampUrl = '') {
     .center { text-align: center; }
     .notes { margin: 0; padding: 8px 10px; border: 1px solid #c8d4e2; background: #fafcff; page-break-inside: avoid; }
     .notes p { margin: 4px 0; text-indent: 2em; }
-    .sign { display: flex; justify-content: flex-end; margin-top: 12px; page-break-inside: avoid; }
-    .sign-box { width: 78mm; min-height: 38mm; }
-    .sign-row { display: flex; align-items: flex-start; margin: 6px 0; }
-    .sign-label { flex: 0 0 36mm; }
-    .seal-field { position: relative; flex: 1; min-height: 28mm; }
-    .provider-name { position: relative; z-index: 1; display: inline-block; padding-top: 5mm; font-weight: 700; line-height: 1.5; }
-    .provider-seal { position: absolute; z-index: 2; left: 50%; top: 13mm; width: 30mm; height: 30mm; object-fit: contain; opacity: 0.94; transform: translate(-50%, -50%) rotate(-8deg); }
+    .sign { display: flex; justify-content: flex-end; margin-top: 18px; page-break-inside: avoid; }
+    .sign-box { position: relative; width: 84mm; padding-top: 2mm; }
+    .sign-row { display: flex; align-items: baseline; margin: 6px 0; }
+    .sign-label { flex: 0 0 auto; white-space: nowrap; }
+    .sign-value { flex: 1; padding-left: 1mm; }
+    .provider-name { font-weight: 700; }
+    .provider-seal { position: absolute; z-index: 2; right: 4mm; top: -4mm; width: 32mm; height: 32mm; object-fit: contain; opacity: 0.9; transform: rotate(-6deg); pointer-events: none; }
     @media screen { body { padding: 18px; background: #eef2f7; } .certificate { box-shadow: 0 10px 34px rgba(15, 23, 42, 0.12); } }
   </style>
 </head>
@@ -645,8 +645,9 @@ function buildInvoiceServiceConfirmationHtml(invoice, stampUrl = '') {
 
     <section class="sign">
       <div class="sign-box">
-        <div class="sign-row"><span class="sign-label">服务提供方（盖章）：</span><span class="seal-field"><span class="provider-name">上海曜算智能科技有限公司</span>${stampUrl ? `<img class="provider-seal" src="${cell(stampUrl)}" alt="公司公章" />` : ''}</span></div>
-        <div class="sign-row"><span class="sign-label">日期：</span><span>${cell(issueDate)}</span></div>
+        <div class="sign-row"><span class="sign-label">服务提供方（盖章）：</span><span class="sign-value provider-name">上海曜算智能科技有限公司</span></div>
+        <div class="sign-row"><span class="sign-label">日期：</span><span class="sign-value">${cell(issueDate)}</span></div>
+        ${stampUrl ? `<img class="provider-seal" src="${cell(stampUrl)}" alt="公司公章" />` : ''}
       </div>
     </section>
   </main>
