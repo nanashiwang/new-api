@@ -2246,7 +2246,7 @@ const TopupHistoryModal = ({
 
   const openInvoiceDetailBillPdfWindow = async (
     detail,
-    { targetWindow = null } = {},
+    { targetWindow = null, autoPrint = false } = {},
   ) => {
     const pdfWindow =
       targetWindow || window.open('', '_blank', 'width=960,height=720');
@@ -2254,25 +2254,26 @@ const TopupHistoryModal = ({
       return false;
     }
     pdfWindow.opener = null;
-    pdfWindow.document.open();
-    pdfWindow.document.write(
-      '<!doctype html><meta charset="utf-8"><title>明细账单</title><body style="font:14px sans-serif;padding:24px;">正在生成明细账单 PDF...</body>',
-    );
-    pdfWindow.document.close();
-    pdfWindow.focus();
 
     const stampUrl = await loadInvoiceStampDataUrl();
     const html = buildInvoicePrintHtml(detail, stampUrl);
-    const blob = await buildInvoiceDetailBillPdfBlob(html, stampUrl);
-    const pdfUrl = URL.createObjectURL(blob);
-    pdfWindow.location.replace(pdfUrl);
-    setTimeout(() => URL.revokeObjectURL(pdfUrl), 10 * 60 * 1000);
+    // 浏览器原生渲染（所见即所得，与页面预览完全一致）；需要 PDF 时走浏览器“打印→另存为 PDF”。
+    const doc = autoPrint
+      ? html.replace(
+          '</body>',
+          '<script>window.addEventListener("load",function(){setTimeout(function(){try{window.print();}catch(e){}},300);});<\/script></body>',
+        )
+      : html;
+    pdfWindow.document.open();
+    pdfWindow.document.write(doc);
+    pdfWindow.document.close();
+    pdfWindow.focus();
     return true;
   };
 
   const openInvoiceServiceConfirmationPdfWindow = async (
     detail,
-    { targetWindow = null } = {},
+    { targetWindow = null, autoPrint = false } = {},
   ) => {
     const pdfWindow =
       targetWindow || window.open('', '_blank', 'width=960,height=720');
@@ -2280,23 +2281,20 @@ const TopupHistoryModal = ({
       return false;
     }
     pdfWindow.opener = null;
-    pdfWindow.document.open();
-    pdfWindow.document.write(
-      '<!doctype html><meta charset="utf-8"><title>服务产品清单</title><body style="font:14px sans-serif;padding:24px;">正在生成服务产品清单 PDF...</body>',
-    );
-    pdfWindow.document.close();
-    pdfWindow.focus();
 
     const stampUrl = await loadInvoiceStampDataUrl();
     const html = buildInvoiceServiceConfirmationHtml(detail, stampUrl);
-    const blob = await buildInvoiceDetailBillPdfBlob(
-      html,
-      stampUrl,
-      '服务产品清单',
-    );
-    const pdfUrl = URL.createObjectURL(blob);
-    pdfWindow.location.replace(pdfUrl);
-    setTimeout(() => URL.revokeObjectURL(pdfUrl), 10 * 60 * 1000);
+    // 浏览器原生渲染（所见即所得，与页面预览完全一致）；需要 PDF 时走浏览器“打印→另存为 PDF”。
+    const doc = autoPrint
+      ? html.replace(
+          '</body>',
+          '<script>window.addEventListener("load",function(){setTimeout(function(){try{window.print();}catch(e){}},300);});<\/script></body>',
+        )
+      : html;
+    pdfWindow.document.open();
+    pdfWindow.document.write(doc);
+    pdfWindow.document.close();
+    pdfWindow.focus();
     return true;
   };
 
@@ -2305,7 +2303,11 @@ const TopupHistoryModal = ({
       return;
     }
     try {
-      if (!(await openInvoiceDetailBillPdfWindow(invoiceDetail))) {
+      if (
+        !(await openInvoiceDetailBillPdfWindow(invoiceDetail, {
+          autoPrint: true,
+        }))
+      ) {
         Toast.error({ content: t('浏览器阻止了打印窗口') });
       }
     } catch (error) {
@@ -2318,7 +2320,11 @@ const TopupHistoryModal = ({
       return;
     }
     try {
-      if (!(await openInvoiceServiceConfirmationPdfWindow(invoiceDetail))) {
+      if (
+        !(await openInvoiceServiceConfirmationPdfWindow(invoiceDetail, {
+          autoPrint: true,
+        }))
+      ) {
         Toast.error({ content: t('浏览器阻止了服务产品清单窗口') });
       }
     } catch (error) {
