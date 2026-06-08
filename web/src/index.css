@@ -756,6 +756,137 @@ html.dark .home-shell {
   -webkit-text-fill-color: transparent;
 }
 
+/* 首页内容板块：核心优势 / 三步接入 / CTA */
+.home-section {
+  padding: 64px 24px;
+}
+.home-section--alt {
+  background: var(--home-fill);
+}
+.home-section-inner {
+  max-width: 1080px;
+  margin: 0 auto;
+}
+.home-section-title {
+  text-align: center;
+  font-size: 30px;
+  font-weight: 800;
+  color: var(--home-text-0);
+  margin-bottom: 40px;
+}
+.home-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 20px;
+}
+.home-feature-card {
+  padding: 26px 20px;
+  border: 1px solid var(--home-border);
+  border-radius: 16px;
+  background: var(--home-bg);
+  transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+}
+.home-feature-card:hover {
+  transform: translateY(-4px);
+  border-color: #38bdf8;
+  box-shadow: 0 12px 30px rgba(37, 99, 235, 0.15);
+}
+.home-feature-icon {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  color: #fff;
+  background: linear-gradient(135deg, #3b82f6, #06b6d4);
+  margin-bottom: 16px;
+}
+.home-feature-card h3 {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--home-text-0);
+  margin-bottom: 8px;
+}
+.home-feature-card p {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--home-text-1);
+}
+.home-steps-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+}
+.home-step {
+  text-align: center;
+  padding: 24px;
+}
+.home-step-no {
+  width: 46px;
+  height: 46px;
+  margin: 0 auto 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 20px;
+  font-weight: 800;
+  color: #fff;
+  background: linear-gradient(135deg, #3b82f6, #06b6d4);
+}
+.home-step h3 {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--home-text-0);
+  margin-bottom: 8px;
+}
+.home-step p {
+  font-size: 14px;
+  color: var(--home-text-1);
+}
+.home-cta {
+  padding: 72px 24px;
+  text-align: center;
+  background: linear-gradient(135deg, #0d2348, #081a36);
+}
+.home-cta h2 {
+  font-size: 32px;
+  font-weight: 800;
+  color: #f8fafc;
+  margin-bottom: 12px;
+}
+.home-cta p {
+  font-size: 16px;
+  color: #9fb3d1;
+  margin-bottom: 28px;
+}
+.home-cta-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 36px;
+  border-radius: 9999px;
+  font-weight: 600;
+  font-size: 16px;
+  color: #fff;
+  text-decoration: none;
+  background: linear-gradient(135deg, #3b82f6, #06b6d4);
+  box-shadow: 0 10px 28px rgba(37, 99, 235, 0.4);
+  transition: transform 0.2s;
+}
+.home-cta-btn:hover {
+  transform: translateY(-2px);
+}
+@media (max-width: 900px) {
+  .home-feature-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .home-steps-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .home-text-primary {
   color: var(--home-text-0);
 }
@@ -899,6 +1030,29 @@ html.dark .home-shell {
   transition:
     color 160ms ease,
     background-color 160ms ease;
+}
+
+/* 首页顶栏：深蓝科技风（融入深色 Hero），文字改白以保证对比清晰 */
+.public-header--hero {
+  background: rgba(9, 19, 44, 0.78);
+  border-bottom: 1px solid rgba(125, 211, 252, 0.16);
+}
+.public-header--hero span,
+.public-header--hero .public-nav-link {
+  color: #e6eefc;
+}
+.public-header--hero .public-nav-link:hover {
+  color: #7dd3fc;
+  background-color: rgba(255, 255, 255, 0.08);
+}
+.public-header--hero .public-icon-button,
+.public-header--hero .public-login-link,
+.public-header--hero .public-user-link {
+  color: #e6eefc;
+  background: rgba(255, 255, 255, 0.1);
+}
+.public-header--hero .public-register-link {
+  background: linear-gradient(135deg, #3b82f6, #06b6d4);
 }
 
 .public-nav-link:hover {

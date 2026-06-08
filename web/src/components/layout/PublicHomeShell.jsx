@@ -160,7 +160,7 @@ const PublicHomeShell = () => {
     <div className='public-shell min-h-screen bg-[var(--semi-color-bg-0,#fff)] text-[var(--semi-color-text-0,#111827)]'>
       <GlobalTopProgress />
       {!customLanding && (
-        <header className='public-header fixed top-0 left-0 right-0 z-50 bg-white/75 dark:bg-zinc-900/75 backdrop-blur-lg'>
+        <header className='public-header public-header--hero fixed top-0 left-0 right-0 z-50 backdrop-blur-lg'>
         <div className='flex items-center justify-between h-16 px-2'>
           <Link to='/' className='group flex items-center gap-2 min-w-0'>
             <img

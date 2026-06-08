@@ -334,6 +334,72 @@ const Home = ({ onLandingChange } = {}) => {
               </div>
             </div>
           </div>
+
+          <section className='home-section'>
+            <div className='home-section-inner'>
+              <h2 className='home-section-title'>
+                {t('为什么选择山海衡 AI')}
+              </h2>
+              <div className='home-feature-grid'>
+                {[
+                  [
+                    '聚合 40+ 大模型',
+                    'OpenAI、Claude、Gemini、DeepSeek、Qwen… 一个统一 API 全部调用，无需多处对接。',
+                    <Layers size={24} />,
+                  ],
+                  [
+                    '更优的价格',
+                    '批量议价、按量计费、缓存命中优惠，成本更低、账单更透明。',
+                    <Coins size={24} />,
+                  ],
+                  [
+                    '稳定高可用',
+                    '多节点容灾、智能路由、自动重试，保障调用稳定不中断。',
+                    <Zap size={24} />,
+                  ],
+                  [
+                    '安全可控',
+                    '密钥隔离、用量管控、调用日志与账单全程可查，合规放心。',
+                    <ShieldCheck size={24} />,
+                  ],
+                ].map(([title, desc, icon]) => (
+                  <div className='home-feature-card' key={title}>
+                    <div className='home-feature-icon'>{icon}</div>
+                    <h3>{t(title)}</h3>
+                    <p>{t(desc)}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          <section className='home-section home-section--alt'>
+            <div className='home-section-inner'>
+              <h2 className='home-section-title'>{t('三步快速接入')}</h2>
+              <div className='home-steps-grid'>
+                {[
+                  ['1', '注册并获取密钥', '登录控制台，创建专属 API Key。'],
+                  ['2', '替换模型基址', '把原有 Base URL 换成本平台地址。'],
+                  ['3', '立即开始调用', '沿用原有 SDK 与参数，直接调用 40+ 模型。'],
+                ].map(([n, title, desc]) => (
+                  <div className='home-step' key={n}>
+                    <div className='home-step-no'>{n}</div>
+                    <h3>{t(title)}</h3>
+                    <p>{t(desc)}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          <section className='home-cta'>
+            <h2>{t('一衡调山海，万模皆可达')}</h2>
+            <p>{t('现在就接入，开启统一的大模型调用体验')}</p>
+            <Link to='/console' className='home-cta-btn'>
+              {t('立即开始')}
+              <ArrowRight size={18} />
+            </Link>
+          </section>
         </div>
       ) : (
         <div className='overflow-x-hidden w-full'>
