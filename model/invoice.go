@@ -6,7 +6,10 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
@@ -29,6 +32,7 @@ var (
 	ErrInvoiceRequestNotFound        = errors.New("发票申请不存在")
 	ErrInvoiceRequestAlreadyReviewed = errors.New("发票申请已审核")
 	ErrInvoiceOrderUnavailable       = errors.New("订单不可申请发票")
+	ErrInsufficientQuotaForInvoiceFee = errors.New("余额不足，无法支付发票手续费")
 )
 
 type InvoiceRequest struct {
@@ -49,6 +53,8 @@ type InvoiceRequest struct {
 	Status                  string  `json:"status" gorm:"type:varchar(16);index;not null;default:'pending'"`
 	TotalMoney              float64 `json:"total_money" gorm:"type:decimal(20,6);not null;default:0"`
 	TotalQuota              int64   `json:"total_quota" gorm:"type:bigint;not null;default:0"`
+	ServiceFeeRate          float64 `json:"service_fee_rate" gorm:"type:decimal(10,6);not null;default:0"`
+	ServiceFeeQuota         int64   `json:"service_fee_quota" gorm:"type:bigint;not null;default:0"`
 	InvoiceNo               string  `json:"invoice_no" gorm:"type:varchar(128);not null;default:''"`
 	InvoiceUrl              string  `json:"invoice_url" gorm:"type:text"`
 	InvoiceFileName         string  `json:"invoice_file_name" gorm:"type:varchar(255);not null;default:''"`
@@ -185,6 +191,23 @@ func CreateInvoiceRequest(userID int, input CreateInvoiceRequestInput) (*Invoice
 			totalQuota += item.Amount
 		}
 
+		// 计算发票手续费额度：开票金额(totalMoney)为人民币(payMoney 同源)，
+		// 先按充值汇率 Price 换回美元，再 × QuotaPerUnit 得到额度，保证与充值口径一致。
+		var feeRate float64
+		var feeQuota int64
+		if rate := common.InvoiceServiceFeeRate; rate > 0 && totalMoney > 0 {
+			if price := operation_setting.Price; price > 0 {
+				dFee := decimal.NewFromFloat(totalMoney).
+					Mul(decimal.NewFromFloat(rate)).
+					Mul(decimal.NewFromFloat(common.QuotaPerUnit)).
+					Div(decimal.NewFromFloat(price))
+				if q := dFee.IntPart(); q > 0 {
+					feeRate = rate
+					feeQuota = q
+				}
+			}
+		}
+
 		request = InvoiceRequest{
 			UserId:                  userID,
 			InvoiceType:             input.InvoiceType,
@@ -202,6 +225,8 @@ func CreateInvoiceRequest(userID int, input CreateInvoiceRequestInput) (*Invoice
 			Status:                  InvoiceStatusPending,
 			TotalMoney:              totalMoney,
 			TotalQuota:              totalQuota,
+			ServiceFeeRate:          feeRate,
+			ServiceFeeQuota:         feeQuota,
 			CreatedAt:               common.GetTimestamp(),
 		}
 		if err := tx.Create(&request).Error; err != nil {
@@ -214,10 +239,34 @@ func CreateInvoiceRequest(userID int, input CreateInvoiceRequestInput) (*Invoice
 			return err
 		}
 		request.Items = items
+
+		// 申请发票时扣除手续费：事务内行锁校验余额并扣减，保证与申请创建原子
+		if feeQuota > 0 {
+			var feeUser User
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Select("id", "quota").First(&feeUser, "id = ?", userID).Error; err != nil {
+				return err
+			}
+			if int64(feeUser.Quota) < feeQuota {
+				return ErrInsufficientQuotaForInvoiceFee
+			}
+			if err := tx.Model(&User{}).Where("id = ?", userID).
+				Update("quota", gorm.Expr("quota - ?", feeQuota)).Error; err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
+	}
+	if request.ServiceFeeQuota > 0 {
+		if cacheErr := syncUserCacheByID(userID); cacheErr != nil {
+			common.SysLog("failed to sync user cache after invoice fee deduction: " + cacheErr.Error())
+		}
+		RecordLog(userID, LogTypeManage, fmt.Sprintf(
+			"申请发票（ID %d）扣除手续费 %d 额度（费率 %.4f，开票金额 %.2f 元）",
+			request.Id, request.ServiceFeeQuota, request.ServiceFeeRate, request.TotalMoney))
 	}
 	return &request, nil
 }
@@ -711,10 +760,24 @@ func reviewInvoiceRequest(id int, reviewerUserID int, targetStatus string, input
 			request.InvoiceSendStatus = input.InvoiceSendStatus
 			request.InvoiceSendError = ""
 		}
+		// 驳回时退还此前申请扣除的手续费（仅 pending→rejected 触发，RowsAffected 检查保证幂等）
+		if targetStatus == InvoiceStatusRejected && request.ServiceFeeQuota > 0 {
+			if err := tx.Model(&User{}).Where("id = ?", request.UserId).
+				Update("quota", gorm.Expr("quota + ?", request.ServiceFeeQuota)).Error; err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
+	}
+	if targetStatus == InvoiceStatusRejected && request.ServiceFeeQuota > 0 {
+		if cacheErr := syncUserCacheByID(request.UserId); cacheErr != nil {
+			common.SysLog("failed to sync user cache after invoice fee refund: " + cacheErr.Error())
+		}
+		RecordLog(request.UserId, LogTypeRefund, fmt.Sprintf(
+			"发票申请（ID %d）被驳回，退还手续费 %d 额度", request.Id, request.ServiceFeeQuota))
 	}
 	return &request, nil
 }

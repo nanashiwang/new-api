@@ -119,6 +119,10 @@ var InviterRechargeCommissionRate = 0.05
 // InviterCommissionDailyCap 邀请人单日返佣上限。
 // 0 表示不限制；大于 0 时超出上限部分会被跳过或截断（见返佣风控逻辑）。
 var InviterCommissionDailyCap = 0
+
+// InvoiceServiceFeeRate 发票申请手续费费率，按发票开票金额(元)计算。
+// 取值建议 [0,1]：0.01 表示 1%，0 表示不收取手续费。
+var InvoiceServiceFeeRate = 0.01
 var ChannelDisableThreshold = 5.0
 var AutomaticDisableChannelEnabled = false
 var AutomaticEnableChannelEnabled = false

@@ -39,6 +39,7 @@ const OperationSetting = () => {
     InviterCommissionEnabled: false,
     InviterRechargeCommissionRate: 0,
     InviterCommissionDailyCap: 0,
+    InvoiceServiceFeeRate: 0,
     'quota_setting.enable_free_model_pre_consume': true,
 
     /* 通用设置 */

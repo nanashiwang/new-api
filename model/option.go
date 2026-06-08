@@ -143,6 +143,7 @@ func InitOptionMap() {
 	common.OptionMap["InviterCommissionEnabled"] = strconv.FormatBool(common.InviterCommissionEnabled)
 	common.OptionMap["InviterRechargeCommissionRate"] = strconv.FormatFloat(common.InviterRechargeCommissionRate, 'f', -1, 64)
 	common.OptionMap["InviterCommissionDailyCap"] = strconv.Itoa(common.InviterCommissionDailyCap)
+	common.OptionMap["InvoiceServiceFeeRate"] = strconv.FormatFloat(common.InvoiceServiceFeeRate, 'f', -1, 64)
 	common.OptionMap["QuotaRemindThreshold"] = strconv.Itoa(common.QuotaRemindThreshold)
 	common.OptionMap["PreConsumedQuota"] = strconv.Itoa(common.PreConsumedQuota)
 	common.OptionMap["QuotaStabilityEnabled"] = strconv.FormatBool(common.QuotaStabilityEnabled)
@@ -522,6 +523,9 @@ func updateOptionMap(key string, value string) (err error) {
 	case "InviterCommissionDailyCap":
 		// 单日上限单位为额度，0 表示不限制。
 		common.InviterCommissionDailyCap, _ = strconv.Atoi(value)
+	case "InvoiceServiceFeeRate":
+		// 发票手续费费率，使用小数表达（例如 0.01 表示 1%）。
+		common.InvoiceServiceFeeRate, _ = strconv.ParseFloat(value, 64)
 	case "QuotaRemindThreshold":
 		common.QuotaRemindThreshold, _ = strconv.Atoi(value)
 	case "PreConsumedQuota":

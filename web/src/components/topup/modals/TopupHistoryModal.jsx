@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useContext } from 'react';
 import {
   Avatar,
   Badge,
@@ -53,6 +53,8 @@ import {
   timestamp2string,
 } from '../../../helpers';
 import { isAdmin } from '../../../helpers/utils';
+import { getQuotaPerUnit } from '../../../helpers/quota';
+import { UserContext } from '../../../context/User';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 import PaymentRiskCaseDetailModal from './PaymentRiskCaseDetailModal';
 
@@ -998,6 +1000,7 @@ const TopupHistoryModal = ({
   t,
   initialTab = 'records',
 }) => {
+  const [userState] = useContext(UserContext);
   const [loading, setLoading] = useState(false);
   const [topups, setTopups] = useState([]);
   const [total, setTotal] = useState(0);
@@ -1837,6 +1840,42 @@ const TopupHistoryModal = ({
     );
   }, [selectedInvoiceOrders]);
 
+  // 发票申请手续费：开票金额(money)为人民币，按充值汇率 price 换回美元再 × 每元额度，
+  // 与后端口径一致：feeQuota = money × rate × QuotaPerUnit / price，截断取整。
+  const invoiceServiceFeeRate = useMemo(() => {
+    try {
+      const status = JSON.parse(localStorage.getItem('status') || '{}');
+      const rate = Number(status?.invoice_service_fee_rate || 0);
+      return Number.isFinite(rate) && rate > 0 ? rate : 0;
+    } catch {
+      return 0;
+    }
+  }, [visible]);
+  const invoicePrice = useMemo(() => {
+    try {
+      const status = JSON.parse(localStorage.getItem('status') || '{}');
+      const p = Number(status?.price || 0);
+      return Number.isFinite(p) && p > 0 ? p : 0;
+    } catch {
+      return 0;
+    }
+  }, [visible]);
+  const estimatedInvoiceFeeQuota = useMemo(() => {
+    if (
+      invoiceServiceFeeRate <= 0 ||
+      invoicePrice <= 0 ||
+      selectedInvoiceSummary.money <= 0
+    )
+      return 0;
+    return Math.trunc(
+      (selectedInvoiceSummary.money * invoiceServiceFeeRate * getQuotaPerUnit()) /
+        invoicePrice,
+    );
+  }, [invoiceServiceFeeRate, invoicePrice, selectedInvoiceSummary]);
+  const userWalletQuota = Number(userState?.user?.quota || 0);
+  const invoiceFeeInsufficient =
+    estimatedInvoiceFeeQuota > 0 && userWalletQuota < estimatedInvoiceFeeQuota;
+
   const submitInvoiceRequest = async () => {
     const form = {
       invoiceType: invoiceForm.invoiceType || 'normal',
@@ -1877,44 +1916,74 @@ const TopupHistoryModal = ({
       Toast.error({ content: t('接收邮箱不能为空') });
       return;
     }
-
-    setInvoiceSubmitting(true);
-    try {
-      const res = await API.post('/api/user/invoices', {
-        invoice_type: form.invoiceType,
-        title_type: form.titleType,
-        title: form.title,
-        tax_number: form.taxNumber,
-        registered_address: form.registeredAddress,
-        registered_phone: form.registeredPhone,
-        bank_name: form.bankName,
-        bank_account: form.bankAccount,
-        email: form.email,
-        phone: form.phone,
-        remark: form.remark,
-        need_service_confirmation: Boolean(invoiceForm.needServiceConfirmation),
-        orders: selectedInvoiceOrders.map((item) => ({
-          order_type: resolveOrderType(item),
-          id: item.id,
-        })),
-      });
-      const { success, message, data } = res.data || {};
-      if (!success) {
-        Toast.error({ content: t(message || '提交发票申请失败') });
-        return;
-      }
-      Toast.success({ content: t('发票申请已提交') });
-      closeInvoiceApplyModal();
-      if (data?.id) {
-        setInvoiceDetail(data);
-        setInvoiceDetailVisible(true);
-      }
-      await Promise.all([refreshInvoices(), refreshRecords()]);
-    } catch (error) {
-      Toast.error({ content: t('提交发票申请失败') });
-    } finally {
-      setInvoiceSubmitting(false);
+    if (invoiceFeeInsufficient) {
+      Toast.error({ content: t('余额不足，无法支付发票手续费') });
+      return;
     }
+
+    const doSubmit = async () => {
+      setInvoiceSubmitting(true);
+      try {
+        const res = await API.post('/api/user/invoices', {
+          invoice_type: form.invoiceType,
+          title_type: form.titleType,
+          title: form.title,
+          tax_number: form.taxNumber,
+          registered_address: form.registeredAddress,
+          registered_phone: form.registeredPhone,
+          bank_name: form.bankName,
+          bank_account: form.bankAccount,
+          email: form.email,
+          phone: form.phone,
+          remark: form.remark,
+          need_service_confirmation: Boolean(invoiceForm.needServiceConfirmation),
+          orders: selectedInvoiceOrders.map((item) => ({
+            order_type: resolveOrderType(item),
+            id: item.id,
+          })),
+        });
+        const { success, message, data } = res.data || {};
+        if (!success) {
+          Toast.error({ content: t(message || '提交发票申请失败') });
+          return;
+        }
+        Toast.success({ content: t('发票申请已提交') });
+        closeInvoiceApplyModal();
+        if (data?.id) {
+          setInvoiceDetail(data);
+          setInvoiceDetailVisible(true);
+        }
+        await Promise.all([refreshInvoices(), refreshRecords()]);
+      } catch (error) {
+        Toast.error({ content: t('提交发票申请失败') });
+      } finally {
+        setInvoiceSubmitting(false);
+      }
+    };
+
+    // 有手续费时先二次确认，明确告知将从钱包额度扣除多少，用户点确定后才真正提交扣费
+    if (estimatedInvoiceFeeQuota > 0) {
+      Modal.confirm({
+        title: t('确认提交发票申请'),
+        content: (
+          <div>
+            {t('本次申请将从你的钱包额度扣除手续费')}{' '}
+            <Text strong type='warning'>
+              {renderQuota(estimatedInvoiceFeeQuota)}
+            </Text>
+            （{t('开票金额')} {formatMoney(selectedInvoiceSummary.money)} ×{' '}
+            {(invoiceServiceFeeRate * 100).toFixed(2)}%）。
+            <br />
+            {t('若申请被驳回，手续费将原额退还。')}
+          </div>
+        ),
+        okText: t('确认并提交'),
+        cancelText: t('取消'),
+        onOk: doSubmit,
+      });
+      return;
+    }
+    doSubmit();
   };
 
   const openInvoiceReviewModal = (record, action) => {
@@ -4142,6 +4211,17 @@ const TopupHistoryModal = ({
                 : '-',
             )}
             {renderInvoiceDetailValue(
+              '手续费',
+              Number(detail?.service_fee_quota || 0) > 0 ? (
+                <Text type='warning'>
+                  {renderQuota(detail.service_fee_quota)}
+                  {detail?.status === 'rejected' ? `（${t('已退还')}）` : ''}
+                </Text>
+              ) : (
+                '-'
+              ),
+            )}
+            {renderInvoiceDetailValue(
               '服务确认单',
               detail?.need_service_confirmation ? '需要随发票发送' : '不需要',
             )}
@@ -4593,6 +4673,17 @@ const TopupHistoryModal = ({
               {selectedInvoiceSummary.quota > 0 ? (
                 <Text type='tertiary'>
                   {t('额度')} {renderQuota(selectedInvoiceSummary.quota)}
+                </Text>
+              ) : null}
+              {estimatedInvoiceFeeQuota > 0 ? (
+                <Text type={invoiceFeeInsufficient ? 'danger' : 'warning'}>
+                  {t('预计手续费')} {renderQuota(estimatedInvoiceFeeQuota)}
+                </Text>
+              ) : null}
+              {invoiceFeeInsufficient ? (
+                <Text type='danger'>
+                  {t('余额不足，无法支付发票手续费')}（{t('当前余额')}{' '}
+                  {renderQuota(userWalletQuota)}）
                 </Text>
               ) : null}
             </Space>

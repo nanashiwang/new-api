@@ -39,6 +39,7 @@ export default function SettingsCreditLimit(props) {
     InviterCommissionEnabled: false,
     InviterRechargeCommissionRate: '',
     InviterCommissionDailyCap: '',
+    InvoiceServiceFeeRate: '',
     'quota_setting.enable_free_model_pre_consume': true,
   });
   const refForm = useRef();
@@ -48,6 +49,12 @@ export default function SettingsCreditLimit(props) {
   );
   const inviterCommissionPercent = Number.isFinite(inviterCommissionRate)
     ? (inviterCommissionRate * 100).toLocaleString(undefined, {
+        maximumFractionDigits: 2,
+      })
+    : '0';
+  const invoiceFeeRate = Number.parseFloat(inputs.InvoiceServiceFeeRate);
+  const invoiceFeePercent = Number.isFinite(invoiceFeeRate)
+    ? (invoiceFeeRate * 100).toLocaleString(undefined, {
         maximumFractionDigits: 2,
       })
     : '0';
@@ -209,6 +216,25 @@ export default function SettingsCreditLimit(props) {
                     setInputs({
                       ...inputs,
                       InviterCommissionDailyCap: String(value),
+                    })
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={6}>
+                <Form.InputNumber
+                  label={t('发票申请手续费费率')}
+                  field={'InvoiceServiceFeeRate'}
+                  step={0.01}
+                  min={0}
+                  max={1}
+                  extraText={t('按发票开票金额计算，申请时从钱包额度扣除，当前比例 {{ratePercent}}%', {
+                    ratePercent: invoiceFeePercent,
+                  })}
+                  placeholder={t('例如：0.01')}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      InvoiceServiceFeeRate: String(value),
                     })
                   }
                 />
