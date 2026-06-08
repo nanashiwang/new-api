@@ -483,7 +483,7 @@ function buildInvoicePrintHtml(invoice, stampUrl = '') {
     h2 { margin: 0 0 8px; font: 700 16px/1.2 "PingFang SC", "Microsoft YaHei", sans-serif; color: #1f3447; }
     table { width: 100%; border-collapse: collapse; table-layout: fixed; margin-left: 20px; width: calc(100% - 40px); }
     th { background: #22364b; color: #fff; font-weight: 700; }
-    th, td { border: 1px solid #cfd8e3; padding: 5px 7px; vertical-align: middle; word-break: break-all; }
+    th, td { border: 1px solid #cfd8e3; padding: 6px 7px; vertical-align: middle; word-break: break-all; }
     tbody tr:nth-child(even) { background: #f7f9fb; }
     .center { text-align: center; }
     .money { text-align: right; white-space: nowrap; }
