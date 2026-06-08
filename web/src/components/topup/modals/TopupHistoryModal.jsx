@@ -485,7 +485,7 @@ function buildInvoicePrintHtml(invoice, stampUrl = '') {
     h2 { margin: 0 0 8px; font: 700 16px/1.2 "PingFang SC", "Microsoft YaHei", sans-serif; color: #1f3447; }
     table { width: 100%; border-collapse: collapse; table-layout: fixed; margin-left: 20px; width: calc(100% - 40px); }
     th { background: #22364b; color: #fff; font-weight: 700; }
-    th, td { border: 1px solid #cfd8e3; padding: 6px 7px; vertical-align: top; word-break: break-all; }
+    th, td { border: 1px solid #cfd8e3; padding: 6px 7px; vertical-align: middle; word-break: break-all; }
     tbody tr:nth-child(even) { background: #f7f9fb; }
     .center { text-align: center; }
     .money { text-align: right; white-space: nowrap; }
@@ -580,11 +580,11 @@ function buildInvoiceServiceConfirmationHtml(invoice, stampUrl = '') {
     .meta-table th { width: 24mm; background: #edf3f8; color: #1f2d3d; text-align: left; font-weight: 700; }
     .meta-table td { background: #fff; color: #1f2d3d; }
     /* 表格单元格统一顶部对齐 + 所有列同一套 padding：序号/金额与多行说明的首行齐平，短内容不浮在行中央。 */
-    .meta-table th, .meta-table td { padding: 6px 8px; vertical-align: top; line-height: 1.3; }
+    .meta-table th, .meta-table td { padding: 6px 8px; vertical-align: middle; line-height: 1.3; }
     h2 { margin: 10px 0 5px; padding-left: 7px; border-left: 4px solid #1f4e79; font: 700 14px/1.25 "PingFang SC", "Microsoft YaHei", sans-serif; color: #1f3447; }
     table { width: 100%; margin: 0 0 8px; border-collapse: collapse; table-layout: fixed; page-break-inside: avoid; }
     th { background: #22364b; color: #fff; font-weight: 700; text-align: center; }
-    th, td { border: 1px solid #c8d4e2; padding: 6px 7px; vertical-align: top; word-break: break-word; line-height: 1.34; }
+    th, td { border: 1px solid #c8d4e2; padding: 6px 7px; vertical-align: middle; word-break: break-word; line-height: 1.34; }
     th { line-height: 1.2; }
     .center { text-align: center; }
     .notes { margin: 0; padding: 8px 10px; border: 1px solid #c8d4e2; background: #fafcff; page-break-inside: avoid; }
