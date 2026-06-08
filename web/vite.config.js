@@ -68,6 +68,10 @@ const manualChunks = (id) => {
     return 'tools';
   }
 
+  if (nodeModuleId(id, 'lucide-react')) {
+    return 'icons';
+  }
+
   if (nodeModuleId(id, 'marked')) {
     return 'marked';
   }

@@ -345,22 +345,22 @@ const Home = ({ onLandingChange } = {}) => {
                   [
                     '聚合 40+ 大模型',
                     'OpenAI、Claude、Gemini、DeepSeek、Qwen… 一个统一 API 全部调用，无需多处对接。',
-                    <Layers size={24} />,
+                    '🔗',
                   ],
                   [
                     '更优的价格',
                     '批量议价、按量计费、缓存命中优惠，成本更低、账单更透明。',
-                    <Coins size={24} />,
+                    '💰',
                   ],
                   [
                     '稳定高可用',
                     '多节点容灾、智能路由、自动重试，保障调用稳定不中断。',
-                    <Zap size={24} />,
+                    '⚡',
                   ],
                   [
                     '安全可控',
                     '密钥隔离、用量管控、调用日志与账单全程可查，合规放心。',
-                    <ShieldCheck size={24} />,
+                    '🛡️',
                   ],
                 ].map(([title, desc, icon]) => (
                   <div className='home-feature-card' key={title}>
@@ -396,8 +396,7 @@ const Home = ({ onLandingChange } = {}) => {
             <h2>{t('一衡调山海，万模皆可达')}</h2>
             <p>{t('现在就接入，开启统一的大模型调用体验')}</p>
             <Link to='/console' className='home-cta-btn'>
-              {t('立即开始')}
-              <ArrowRight size={18} />
+              {t('立即开始')} →
             </Link>
           </section>
         </div>
