@@ -1,0 +1,17 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="shanhaiheng-bg" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1e3a8a"/>
+      <stop offset="0.55" stop-color="#2563eb"/>
+      <stop offset="1" stop-color="#06b6d4"/>
+    </linearGradient>
+    <linearGradient id="shanhaiheng-peak" x1="60" y1="34" x2="60" y2="80" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#bae6fd"/>
+    </linearGradient>
+  </defs>
+  <rect width="120" height="120" rx="28" fill="url(#shanhaiheng-bg)"/>
+  <path d="M20 82 L42 46 L60 67 L78 42 L100 82 Z" fill="url(#shanhaiheng-peak)" opacity="0.96"/>
+  <path d="M20 90 Q34 84 48 90 T76 90 T104 90" stroke="#7dd3fc" stroke-width="3.4" stroke-linecap="round" fill="none"/>
+  <path d="M20 99 Q34 93 48 99 T76 99 T104 99" stroke="#38bdf8" stroke-width="3.4" stroke-linecap="round" fill="none" opacity="0.75"/>
+</svg>

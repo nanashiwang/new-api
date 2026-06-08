@@ -697,7 +697,63 @@ html.dark .home-shell {
 }
 
 .home-hero {
-  border-bottom: 1px solid var(--home-border);
+  position: relative;
+  overflow: hidden;
+  /* 首页 Hero 固定深蓝科技风：局部覆盖配色变量，内部 home-text/border/fill/primary 自动适配深底 */
+  --home-text-0: #f8fafc;
+  --home-text-1: #cbd5e1;
+  --home-text-2: #9fb3d1;
+  --home-border: rgba(125, 211, 252, 0.24);
+  --home-fill: rgba(255, 255, 255, 0.06);
+  --home-primary: #38bdf8;
+  --home-primary-hover: #0ea5e9;
+  background:
+    radial-gradient(900px 480px at 18% 16%, rgba(56, 189, 248, 0.2), transparent 60%),
+    radial-gradient(820px 520px at 84% 30%, rgba(99, 102, 241, 0.22), transparent 60%),
+    linear-gradient(165deg, #0a1430 0%, #0d2348 48%, #081a36 100%);
+  border-bottom: 1px solid rgba(125, 211, 252, 0.18);
+}
+
+.home-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(125, 211, 252, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(125, 211, 252, 0.07) 1px, transparent 1px);
+  background-size: 46px 46px;
+  -webkit-mask-image: radial-gradient(circle at 50% 32%, #000, transparent 72%);
+  mask-image: radial-gradient(circle at 50% 32%, #000, transparent 72%);
+}
+
+.home-hero .home-action-primary {
+  background: linear-gradient(135deg, #3b82f6, #06b6d4);
+  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.4);
+}
+
+.home-hero-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.home-hero-brand img {
+  width: 56px;
+  height: 56px;
+  filter: drop-shadow(0 6px 20px rgba(56, 189, 248, 0.45));
+}
+
+.home-hero-brand span {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  background: linear-gradient(90deg, #fff, #bae6fd);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .home-text-primary {

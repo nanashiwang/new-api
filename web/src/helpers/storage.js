@@ -44,7 +44,7 @@ export function getSystemName() {
 }
 
 export function getLogo() {
-  return localStorage.getItem('logo') || '/logo.png';
+  return localStorage.getItem('logo') || '/logo.svg';
 }
 
 export function getUserIdFromLocalStorage() {
