@@ -23,17 +23,27 @@ import {
   AlertCircle,
   ArrowRight,
   BookOpen,
+  ChevronLeft,
+  ChevronRight,
   Check,
+  Copy,
   ExternalLink,
   FileText,
   Github,
+  Grid2X2,
   KeyRound,
+  Layers,
   Loader2,
   Lock,
   Mail,
+  RotateCcw,
   Search,
   ShieldCheck,
+  SlidersHorizontal,
+  Table2,
+  Tags,
   User,
+  X,
 } from 'lucide-react';
 import usageMarkdown from '../../../docs/NAN_USAGE.md?raw';
 import clientsMarkdown from '../../../docs/NAN_CLIENTS.md?raw';
@@ -341,7 +351,71 @@ function formatUsdPrice(value, digits = 6) {
   return `$${formatCompactNumber(value, digits)}`;
 }
 
-function getBestGroupRatio(model, groupRatio) {
+const PRICING_PAGE_SIZE = 20;
+const FILTER_ALL = 'all';
+const QUOTA_TYPES = [
+  { value: 'all', label: '全部模型' },
+  { value: 'token', label: '按量计费' },
+  { value: 'request', label: '按次计费' },
+];
+const SORT_OPTIONS = [
+  { value: 'name', label: '名称' },
+  { value: 'price-low', label: '价格从低到高' },
+  { value: 'price-high', label: '价格从高到低' },
+];
+const ENDPOINT_LABELS = {
+  openai: 'Chat',
+  'openai-response': 'Response',
+  anthropic: 'Anthropic',
+  gemini: 'Gemini',
+  'jina-rerank': 'Rerank',
+  'image-generation': 'Image',
+  embeddings: 'Embeddings',
+  'openai-video': 'Video',
+};
+
+function parseTags(value) {
+  if (!value) return [];
+  return String(value)
+    .split(/[,;|]+/)
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+}
+
+function isImageSource(value) {
+  return typeof value === 'string' && /^(https?:)?\/\//.test(value);
+}
+
+function getModelInitial(modelName) {
+  return (modelName || '?').trim().slice(0, 1).toUpperCase() || '?';
+}
+
+function getEndpointLabel(endpoint, endpointMap = {}) {
+  return (
+    ENDPOINT_LABELS[endpoint] ||
+    endpointMap?.[endpoint]?.path ||
+    endpoint ||
+    'Endpoint'
+  );
+}
+
+function countBy(models, predicate) {
+  return models.reduce((count, model) => count + (predicate(model) ? 1 : 0), 0);
+}
+
+function formatGroupRatio(ratio) {
+  const number = Number(ratio);
+  if (!Number.isFinite(number)) return '';
+  return `x${formatCompactNumber(number, 3)}`;
+}
+
+function getBestGroupRatio(model, groupRatio, selectedGroup = FILTER_ALL) {
+  if (selectedGroup !== FILTER_ALL) {
+    const selectedRatio = Number(groupRatio?.[selectedGroup]);
+    return Number.isFinite(selectedRatio) && selectedRatio > 0
+      ? selectedRatio
+      : 1;
+  }
   const groups = Array.isArray(model.enable_groups) ? model.enable_groups : [];
   const candidates = groups
     .map((group) => Number(groupRatio?.[group]))
@@ -355,36 +429,141 @@ function getBestGroupRatio(model, groupRatio) {
   return Math.min(...candidates);
 }
 
-function getModelPrices(model, groupRatio) {
-  const ratio = getBestGroupRatio(model, groupRatio);
+function displayMoney(value, showRechargePrice, priceRate, digits = 6) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return showRechargePrice ? '¥-' : '$-';
+  if (!showRechargePrice) return formatUsdPrice(number, digits);
+  return `¥${formatCompactNumber(number * priceRate, digits)}`;
+}
+
+function getModelPrices(
+  model,
+  groupRatio,
+  selectedGroup = FILTER_ALL,
+  tokenUnit = 'M',
+  showRechargePrice = false,
+  priceRate = 1,
+) {
+  const ratio = getBestGroupRatio(model, groupRatio, selectedGroup);
   if (model.quota_type === 1) {
     return {
       type: '按次',
-      primary: `${formatUsdPrice(Number(model.model_price || 0) * ratio)} / 次`,
+      primary: `${displayMoney(
+        Number(model.model_price || 0) * ratio,
+        showRechargePrice,
+        priceRate,
+      )} / 次`,
       secondary: `分组倍率 ${formatCompactNumber(ratio, 3)}`,
+      rows: [
+        {
+          label: '按次',
+          value: displayMoney(
+            Number(model.model_price || 0) * ratio,
+            showRechargePrice,
+            priceRate,
+          ),
+        },
+      ],
     };
   }
-  const input = Number(model.model_ratio || 0) * 2 * ratio;
+  const divisor = tokenUnit === 'K' ? 1000 : 1;
+  const input = (Number(model.model_ratio || 0) * 2 * ratio) / divisor;
   const output = input * Number(model.completion_ratio || 0);
+  const rows = [
+    {
+      label: '输入',
+      value: displayMoney(input, showRechargePrice, priceRate),
+    },
+    {
+      label: '输出',
+      value: displayMoney(output, showRechargePrice, priceRate),
+    },
+  ];
+  if (model.supports_cache_read && Number(model.cache_ratio) > 0) {
+    rows.push({
+      label: '缓存',
+      value: displayMoney(
+        input * Number(model.cache_ratio),
+        showRechargePrice,
+        priceRate,
+      ),
+    });
+  }
   return {
-    type: 'Token',
-    primary: `${formatUsdPrice(input)} / 1M 输入`,
-    secondary: `${formatUsdPrice(output)} / 1M 输出`,
+    type: '按量',
+    primary: `${displayMoney(
+      input,
+      showRechargePrice,
+      priceRate,
+    )} / 1${tokenUnit} 输入`,
+    secondary: `${displayMoney(
+      output,
+      showRechargePrice,
+      priceRate,
+    )} / 1${tokenUnit} 输出`,
+    rows,
   };
+}
+
+function getComparablePrice(model, groupRatio, selectedGroup) {
+  const ratio = getBestGroupRatio(model, groupRatio, selectedGroup);
+  if (model.quota_type === 1) return Number(model.model_price || 0) * ratio;
+  return Number(model.model_ratio || 0) * 2 * ratio;
+}
+
+function PricingFilterSection({ title, options, value, onChange }) {
+  if (!options.length) return null;
+  return (
+    <section className='pricing-filter-section'>
+      <h3>{title}</h3>
+      <div className='pricing-filter-chips'>
+        {options.map((option) => (
+          <button
+            type='button'
+            key={option.value}
+            className={`pricing-filter-chip ${
+              value === option.value ? 'active' : ''
+            }`}
+            onClick={() => onChange(option.value)}
+            title={option.label}
+          >
+            <span>{option.label}</span>
+            {option.suffix && <em>{option.suffix}</em>}
+            {option.count != null && <strong>{option.count}</strong>}
+          </button>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 function PricingPage({ status, user }) {
   const [models, setModels] = useState([]);
+  const [vendors, setVendors] = useState([]);
   const [groupRatio, setGroupRatio] = useState({});
+  const [usableGroup, setUsableGroup] = useState({});
+  const [endpointMap, setEndpointMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
-  const [vendor, setVendor] = useState('all');
-  const [quotaType, setQuotaType] = useState('all');
+  const [vendor, setVendor] = useState(FILTER_ALL);
+  const [group, setGroup] = useState(FILTER_ALL);
+  const [quotaType, setQuotaType] = useState(FILTER_ALL);
+  const [endpointType, setEndpointType] = useState(FILTER_ALL);
+  const [tag, setTag] = useState(FILTER_ALL);
+  const [sortBy, setSortBy] = useState('name');
+  const [viewMode, setViewMode] = useState('card');
+  const [tokenUnit, setTokenUnit] = useState('M');
+  const [showRechargePrice, setShowRechargePrice] = useState(false);
+  const [page, setPage] = useState(1);
+  const [selectedModel, setSelectedModel] = useState(null);
+  const [copiedModel, setCopiedModel] = useState('');
+  const priceRate = Number(status.price || 1);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setError('');
     axios
       .get('/api/pricing')
       .then((res) => {
@@ -397,14 +576,23 @@ function PricingPage({ status, user }) {
         (res.data.vendors || []).forEach((item) => {
           vendorMap[item.id] = item;
         });
+        setVendors(res.data.vendors || []);
         setGroupRatio(res.data.group_ratio || {});
+        setUsableGroup(res.data.usable_group || {});
+        setEndpointMap(res.data.supported_endpoint || {});
         setModels(
           (res.data.data || [])
             .map((model) => ({
               ...model,
-              vendor_name: vendorMap[model.vendor_id]?.name || '未分组',
+              vendor_name: vendorMap[model.vendor_id]?.name || '未知供应商',
+              vendor_icon: vendorMap[model.vendor_id]?.icon || '',
+              vendor_description: vendorMap[model.vendor_id]?.description || '',
             }))
-            .sort((a, b) => a.model_name.localeCompare(b.model_name)),
+            .sort((a, b) => {
+              const aGpt = a.model_name?.startsWith('gpt') ? 0 : 1;
+              const bGpt = b.model_name?.startsWith('gpt') ? 0 : 1;
+              return aGpt - bGpt || a.model_name.localeCompare(b.model_name);
+            }),
         );
       })
       .catch(() => setError('价格加载失败，请稍后重试'))
@@ -416,145 +604,729 @@ function PricingPage({ status, user }) {
     };
   }, []);
 
-  const vendorOptions = useMemo(
-    () =>
-      Array.from(new Set(models.map((model) => model.vendor_name))).sort(
-        (a, b) => a.localeCompare(b),
-      ),
-    [models],
+  const availableGroups = useMemo(() => {
+    const modelGroups = new Set();
+    models.forEach((model) => {
+      (model.enable_groups || []).forEach((item) => modelGroups.add(item));
+    });
+    const groups = [
+      ...new Set([
+        ...Object.keys(usableGroup || {}),
+        ...Object.keys(groupRatio || {}),
+        ...modelGroups,
+      ]),
+    ];
+    return groups
+      .filter((item) => item && item !== 'auto' && modelGroups.has(item))
+      .sort((a, b) => a.localeCompare(b));
+  }, [groupRatio, models, usableGroup]);
+
+  const availableEndpoints = useMemo(() => {
+    const endpointSet = new Set(Object.keys(endpointMap || {}));
+    models.forEach((model) => {
+      (model.supported_endpoint_types || []).forEach((item) =>
+        endpointSet.add(item),
+      );
+    });
+    return [...endpointSet].filter(Boolean).sort((a, b) => a.localeCompare(b));
+  }, [endpointMap, models]);
+
+  const availableTags = useMemo(() => {
+    const tagSet = new Set();
+    models.forEach((model) => {
+      parseTags(model.tags).forEach((item) => tagSet.add(item));
+    });
+    return [...tagSet].sort((a, b) => a.localeCompare(b));
+  }, [models]);
+
+  const vendorOptions = useMemo(() => {
+    const present = new Set(models.map((model) => model.vendor_name));
+    const fromApi = vendors
+      .filter((item) => present.has(item.name))
+      .map((item) => item.name);
+    const unknown = [...present].filter((item) => !fromApi.includes(item));
+    return [...fromApi, ...unknown].sort((a, b) => a.localeCompare(b));
+  }, [models, vendors]);
+
+  const filterOptions = useMemo(
+    () => ({
+      vendor: [
+        { value: FILTER_ALL, label: '全部供应商', count: models.length },
+        ...vendorOptions.map((item) => ({
+          value: item,
+          label: item,
+          count: countBy(models, (model) => model.vendor_name === item),
+        })),
+      ],
+      group: [
+        { value: FILTER_ALL, label: '全部分组' },
+        ...availableGroups.map((item) => ({
+          value: item,
+          label: item,
+          suffix: formatGroupRatio(groupRatio?.[item]),
+        })),
+      ],
+      quota: QUOTA_TYPES.map((item) => ({
+        ...item,
+        count:
+          item.value === FILTER_ALL
+            ? models.length
+            : countBy(models, (model) =>
+                item.value === 'token'
+                  ? model.quota_type === 0
+                  : model.quota_type === 1,
+              ),
+      })),
+      endpoint: [
+        { value: FILTER_ALL, label: '全部端点', count: models.length },
+        ...availableEndpoints.map((item) => ({
+          value: item,
+          label: getEndpointLabel(item, endpointMap),
+          count: countBy(models, (model) =>
+            (model.supported_endpoint_types || []).includes(item),
+          ),
+        })),
+      ],
+      tag: [
+        { value: FILTER_ALL, label: '全部标签', count: models.length },
+        ...availableTags.map((item) => ({
+          value: item,
+          label: item,
+          count: countBy(models, (model) =>
+            parseTags(model.tags)
+              .map((tagItem) => tagItem.toLowerCase())
+              .includes(item.toLowerCase()),
+          ),
+        })),
+      ],
+    }),
+    [
+      availableEndpoints,
+      availableGroups,
+      availableTags,
+      endpointMap,
+      groupRatio,
+      models,
+      vendorOptions,
+    ],
   );
 
   const filteredModels = useMemo(() => {
     const keyword = query.trim().toLowerCase();
-    return models.filter((model) => {
-      if (vendor !== 'all' && model.vendor_name !== vendor) return false;
-      if (quotaType !== 'all' && String(model.quota_type) !== quotaType) {
+    const result = models.filter((model) => {
+      if (vendor !== FILTER_ALL && model.vendor_name !== vendor) return false;
+      if (
+        group !== FILTER_ALL &&
+        !(model.enable_groups || []).includes(group)
+      ) {
+        return false;
+      }
+      if (quotaType === 'token' && model.quota_type !== 0) return false;
+      if (quotaType === 'request' && model.quota_type !== 1) return false;
+      if (
+        endpointType !== FILTER_ALL &&
+        !(model.supported_endpoint_types || []).includes(endpointType)
+      ) {
+        return false;
+      }
+      if (
+        tag !== FILTER_ALL &&
+        !parseTags(model.tags)
+          .map((item) => item.toLowerCase())
+          .includes(tag.toLowerCase())
+      ) {
         return false;
       }
       if (!keyword) return true;
-      return [model.model_name, model.description, model.tags, model.vendor_name]
+      return [
+        model.model_name,
+        model.description,
+        model.tags,
+        model.vendor_name,
+        ...(model.supported_endpoint_types || []),
+      ]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(keyword));
     });
-  }, [models, query, quotaType, vendor]);
+    return result.sort((a, b) => {
+      if (sortBy === 'price-low' || sortBy === 'price-high') {
+        const diff =
+          getComparablePrice(a, groupRatio, group) -
+          getComparablePrice(b, groupRatio, group);
+        return sortBy === 'price-low' ? diff : -diff;
+      }
+      return a.model_name.localeCompare(b.model_name);
+    });
+  }, [
+    endpointType,
+    group,
+    groupRatio,
+    models,
+    query,
+    quotaType,
+    sortBy,
+    tag,
+    vendor,
+  ]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [endpointType, group, query, quotaType, sortBy, tag, vendor, viewMode]);
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredModels.length / PRICING_PAGE_SIZE),
+  );
+  const currentPage = Math.min(page, totalPages);
+  const pagedModels = filteredModels.slice(
+    (currentPage - 1) * PRICING_PAGE_SIZE,
+    currentPage * PRICING_PAGE_SIZE,
+  );
+
+  const hasActiveFilters =
+    vendor !== FILTER_ALL ||
+    group !== FILTER_ALL ||
+    quotaType !== FILTER_ALL ||
+    endpointType !== FILTER_ALL ||
+    tag !== FILTER_ALL;
+  const activeFilterCount = [
+    vendor,
+    group,
+    quotaType,
+    endpointType,
+    tag,
+  ].filter((item) => item !== FILTER_ALL).length;
+
+  const clearFilters = () => {
+    setVendor(FILTER_ALL);
+    setGroup(FILTER_ALL);
+    setQuotaType(FILTER_ALL);
+    setEndpointType(FILTER_ALL);
+    setTag(FILTER_ALL);
+  };
+
+  const copyModelName = async (modelName) => {
+    try {
+      await navigator.clipboard.writeText(modelName);
+      setCopiedModel(modelName);
+      window.setTimeout(() => setCopiedModel(''), 1200);
+    } catch {
+      setError('复制失败，请手动复制模型名称');
+    }
+  };
+
+  const renderModelIcon = (model) => {
+    const source = isImageSource(model.icon) ? model.icon : model.vendor_icon;
+    if (isImageSource(source)) {
+      return <img src={source} alt='' />;
+    }
+    return <span>{getModelInitial(model.model_name)}</span>;
+  };
+
+  const renderPriceRows = (model) => {
+    const price = getModelPrices(
+      model,
+      groupRatio,
+      group,
+      tokenUnit,
+      showRechargePrice,
+      priceRate,
+    );
+    if (model.billing_mode === 'tiered_expr' && model.billing_expr) {
+      return (
+        <div className='pricing-price-list'>
+          <div className='pricing-price-row'>
+            <span>动态计费</span>
+            <strong>按表达式</strong>
+          </div>
+          <code>{model.billing_expr}</code>
+        </div>
+      );
+    }
+    return (
+      <div className='pricing-price-list'>
+        {price.rows.map((item) => (
+          <div className='pricing-price-row' key={item.label}>
+            <span>{item.label}</span>
+            <strong>
+              {item.value}
+              {model.quota_type === 0 ? ` / 1${tokenUnit}` : ''}
+            </strong>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const renderModelCard = (model) => {
+    const tags = parseTags(model.tags);
+    const groups = model.enable_groups || [];
+    const endpoints = model.supported_endpoint_types || [];
+    const hiddenCount =
+      Math.max(groups.length - 1, 0) +
+      Math.max(tags.length - 2, 0) +
+      Math.max(endpoints.length - 2, 0);
+    return (
+      <article className='pricing-model-card' key={model.model_name}>
+        <div className='pricing-card-head'>
+          <button
+            type='button'
+            className='pricing-card-main'
+            onClick={() => setSelectedModel(model)}
+          >
+            <span className='pricing-model-icon'>{renderModelIcon(model)}</span>
+            <span className='pricing-card-title'>
+              <strong>{model.model_name}</strong>
+              <em>{model.vendor_name}</em>
+            </span>
+          </button>
+          <div className='pricing-card-actions'>
+            <button
+              type='button'
+              onClick={() => setSelectedModel(model)}
+              className='pricing-text-button'
+            >
+              详情
+              <ChevronRight size={14} />
+            </button>
+            <button
+              type='button'
+              className='pricing-icon-button'
+              onClick={() => copyModelName(model.model_name)}
+              title='复制模型名称'
+            >
+              {copiedModel === model.model_name ? (
+                <Check size={15} />
+              ) : (
+                <Copy size={15} />
+              )}
+            </button>
+          </div>
+        </div>
+
+        {renderPriceRows(model)}
+
+        <p className='pricing-card-desc'>
+          {model.description || '暂无模型描述'}
+        </p>
+
+        <div className='pricing-card-foot'>
+          <div className='pricing-meta-row'>
+            {groups[0] && <span>{groups[0]} 分组</span>}
+            <span>
+              {model.quota_type === 0 ? 'Token-based' : 'Per Request'}
+            </span>
+          </div>
+          <div className='pricing-tag-row'>
+            {endpoints.slice(0, 2).map((item) => (
+              <span className='pricing-chip' key={item}>
+                {getEndpointLabel(item, endpointMap)}
+              </span>
+            ))}
+            {tags.slice(0, 2).map((item) => (
+              <span className='pricing-chip pricing-chip--muted' key={item}>
+                {item}
+              </span>
+            ))}
+            <span className='pricing-chip pricing-chip--muted'>
+              1{tokenUnit}
+            </span>
+            {hiddenCount > 0 && (
+              <span className='pricing-chip pricing-chip--muted'>
+                +{hiddenCount}
+              </span>
+            )}
+          </div>
+        </div>
+      </article>
+    );
+  };
 
   return (
     <PublicFrame status={status} user={user} className='pricing-page'>
-      <main className='public-main'>
-        <PageHero
-          eyebrow='Model Pricing'
-          title='模型广场'
-          description='快速查看当前可用模型、供应商和公开计费参考。登录后会按你的账号分组展示更精确的可用范围。'
-          actions={
-            <a className='public-primary-action' href='/console/token'>
-              创建密钥
-              <ArrowRight size={16} />
-            </a>
-          }
-        />
-
-        <section className='pricing-toolbar'>
-          <label className='public-search'>
+      <main className='public-main pricing-main'>
+        <section className='pricing-intro'>
+          <p className='public-eyebrow'>Model Square</p>
+          <h1>模型广场</h1>
+          <p>当前站点已启用 {models.length} 个模型</p>
+          <span>
+            浏览供应商、分组、端点和标签，快速比较价格并选择合适模型。
+          </span>
+          <label className='pricing-search-hero'>
             <Search size={18} />
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder='搜索模型、供应商或标签'
+              placeholder='搜索模型名称、供应商、端点或标签'
             />
+            {query && (
+              <button
+                type='button'
+                onClick={() => setQuery('')}
+                aria-label='清空搜索'
+              >
+                <X size={16} />
+              </button>
+            )}
           </label>
-          <select value={vendor} onChange={(event) => setVendor(event.target.value)}>
-            <option value='all'>全部供应商</option>
-            {vendorOptions.map((item) => (
-              <option value={item} key={item}>
-                {item}
-              </option>
-            ))}
-          </select>
-          <select
-            value={quotaType}
-            onChange={(event) => setQuotaType(event.target.value)}
-          >
-            <option value='all'>全部计费</option>
-            <option value='0'>Token</option>
-            <option value='1'>按次</option>
-          </select>
-          <div className='pricing-count'>
-            {loading ? '加载中' : `${filteredModels.length} 个模型`}
-          </div>
         </section>
 
         {error && <Message type='error'>{error}</Message>}
-        <section className='pricing-table-wrap'>
-          <table className='pricing-table'>
-            <thead>
-              <tr>
-                <th>模型</th>
-                <th>供应商</th>
-                <th>计费</th>
-                <th>价格参考</th>
-                <th>可用分组</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan='5' className='public-empty-cell'>
-                    <Loader2 size={18} className='spin' />
-                    正在加载模型价格
-                  </td>
-                </tr>
-              ) : filteredModels.length === 0 ? (
-                <tr>
-                  <td colSpan='5' className='public-empty-cell'>
-                    没有匹配的模型
-                  </td>
-                </tr>
-              ) : (
-                filteredModels.map((model) => {
-                  const price = getModelPrices(model, groupRatio);
-                  return (
-                    <tr key={model.model_name}>
-                      <td>
-                        <div className='pricing-model-name'>
-                          {model.icon && <img src={model.icon} alt='' />}
-                          <div>
-                            <strong>{model.model_name}</strong>
-                            {model.description && <span>{model.description}</span>}
-                          </div>
-                        </div>
-                      </td>
-                      <td>{model.vendor_name}</td>
-                      <td>
-                        <span className='public-pill'>{price.type}</span>
-                      </td>
-                      <td>
-                        <div className='pricing-price'>
-                          <strong>{price.primary}</strong>
-                          <span>{price.secondary}</span>
-                        </div>
-                      </td>
-                      <td>
-                        <div className='pricing-groups'>
-                          {(model.enable_groups || []).slice(0, 4).map((group) => (
-                            <span key={group}>{group}</span>
-                          ))}
-                          {(model.enable_groups || []).length > 4 && (
-                            <span>+{model.enable_groups.length - 4}</span>
-                          )}
-                        </div>
-                      </td>
+
+        <div className='pricing-layout-grid'>
+          <aside className='pricing-sidebar'>
+            <div className='pricing-filter-head'>
+              <div>
+                <strong>筛选</strong>
+                <span>按供应商、分组、类型和标签收窄模型</span>
+              </div>
+              <button
+                type='button'
+                className='pricing-filter-reset'
+                onClick={clearFilters}
+                disabled={!hasActiveFilters}
+              >
+                <RotateCcw size={14} />
+                重置
+              </button>
+            </div>
+            <PricingFilterSection
+              title='供应商'
+              options={filterOptions.vendor}
+              value={vendor}
+              onChange={setVendor}
+            />
+            <PricingFilterSection
+              title='分组'
+              options={filterOptions.group}
+              value={group}
+              onChange={setGroup}
+            />
+            <PricingFilterSection
+              title='计费'
+              options={filterOptions.quota}
+              value={quotaType}
+              onChange={setQuotaType}
+            />
+            <PricingFilterSection
+              title='端点'
+              options={filterOptions.endpoint}
+              value={endpointType}
+              onChange={setEndpointType}
+            />
+            <PricingFilterSection
+              title='标签'
+              options={filterOptions.tag}
+              value={tag}
+              onChange={setTag}
+            />
+          </aside>
+
+          <section className='pricing-content'>
+            <div className='pricing-toolbar'>
+              <div className='pricing-count'>
+                <strong>{loading ? '...' : filteredModels.length}</strong>
+                <span>
+                  {activeFilterCount > 0
+                    ? ` / ${models.length} 个模型`
+                    : ' 个模型'}
+                </span>
+              </div>
+              <div className='pricing-toolbar-actions'>
+                <select
+                  value={sortBy}
+                  onChange={(event) => setSortBy(event.target.value)}
+                >
+                  {SORT_OPTIONS.map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+                <div className='pricing-segment' aria-label='价格模式'>
+                  <button
+                    type='button'
+                    className={!showRechargePrice ? 'active' : ''}
+                    onClick={() => setShowRechargePrice(false)}
+                  >
+                    标准
+                  </button>
+                  <button
+                    type='button'
+                    className={showRechargePrice ? 'active' : ''}
+                    onClick={() => setShowRechargePrice(true)}
+                  >
+                    充值
+                  </button>
+                </div>
+                <div className='pricing-segment' aria-label='Token单位'>
+                  {['M', 'K'].map((item) => (
+                    <button
+                      type='button'
+                      key={item}
+                      className={tokenUnit === item ? 'active' : ''}
+                      onClick={() => setTokenUnit(item)}
+                    >
+                      /1{item}
+                    </button>
+                  ))}
+                </div>
+                <div
+                  className='pricing-segment pricing-view-tabs'
+                  aria-label='视图'
+                >
+                  <button
+                    type='button'
+                    className={viewMode === 'card' ? 'active' : ''}
+                    onClick={() => setViewMode('card')}
+                    title='卡片视图'
+                  >
+                    <Grid2X2 size={15} />
+                  </button>
+                  <button
+                    type='button'
+                    className={viewMode === 'table' ? 'active' : ''}
+                    onClick={() => setViewMode('table')}
+                    title='表格视图'
+                  >
+                    <Table2 size={15} />
+                  </button>
+                </div>
+                <a className='pricing-key-link' href='/console/token'>
+                  创建密钥
+                  <ArrowRight size={14} />
+                </a>
+              </div>
+            </div>
+
+            {loading ? (
+              <div className='pricing-empty-card'>
+                <Loader2 size={18} className='spin' />
+                正在加载模型价格
+              </div>
+            ) : filteredModels.length === 0 ? (
+              <div className='pricing-empty-card'>
+                没有匹配的模型
+                {(query || hasActiveFilters) && (
+                  <button
+                    type='button'
+                    onClick={() => {
+                      setQuery('');
+                      clearFilters();
+                    }}
+                  >
+                    清空筛选
+                  </button>
+                )}
+              </div>
+            ) : viewMode === 'card' ? (
+              <div className='pricing-card-grid'>
+                {pagedModels.map((model) => renderModelCard(model))}
+              </div>
+            ) : (
+              <section className='pricing-table-wrap'>
+                <table className='pricing-table'>
+                  <thead>
+                    <tr>
+                      <th>模型</th>
+                      <th>供应商</th>
+                      <th>计费</th>
+                      <th>端点</th>
+                      <th>价格参考</th>
+                      <th>可用分组</th>
                     </tr>
-                  );
-                })
+                  </thead>
+                  <tbody>
+                    {pagedModels.map((model) => {
+                      const price = getModelPrices(
+                        model,
+                        groupRatio,
+                        group,
+                        tokenUnit,
+                        showRechargePrice,
+                        priceRate,
+                      );
+                      return (
+                        <tr
+                          key={model.model_name}
+                          onClick={() => setSelectedModel(model)}
+                        >
+                          <td>
+                            <div className='pricing-model-name'>
+                              <span className='pricing-model-icon'>
+                                {renderModelIcon(model)}
+                              </span>
+                              <div>
+                                <strong>{model.model_name}</strong>
+                                {model.description && (
+                                  <span>{model.description}</span>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                          <td>{model.vendor_name}</td>
+                          <td>
+                            <span className='public-pill'>{price.type}</span>
+                          </td>
+                          <td>
+                            <div className='pricing-tag-row'>
+                              {(model.supported_endpoint_types || [])
+                                .slice(0, 3)
+                                .map((item) => (
+                                  <span className='pricing-chip' key={item}>
+                                    {getEndpointLabel(item, endpointMap)}
+                                  </span>
+                                ))}
+                            </div>
+                          </td>
+                          <td>
+                            <div className='pricing-price'>
+                              <strong>{price.primary}</strong>
+                              <span>{price.secondary}</span>
+                            </div>
+                          </td>
+                          <td>
+                            <div className='pricing-groups'>
+                              {(model.enable_groups || [])
+                                .slice(0, 4)
+                                .map((item) => (
+                                  <span key={item}>{item}</span>
+                                ))}
+                              {(model.enable_groups || []).length > 4 && (
+                                <span>+{model.enable_groups.length - 4}</span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </section>
+            )}
+
+            {!loading && filteredModels.length > PRICING_PAGE_SIZE && (
+              <div className='pricing-pagination'>
+                <span>
+                  第 {currentPage} / {totalPages} 页
+                </span>
+                <div>
+                  <button
+                    type='button'
+                    onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                    disabled={currentPage <= 1}
+                  >
+                    <ChevronLeft size={15} />
+                    上一页
+                  </button>
+                  <button
+                    type='button'
+                    onClick={() =>
+                      setPage((prev) => Math.min(totalPages, prev + 1))
+                    }
+                    disabled={currentPage >= totalPages}
+                  >
+                    下一页
+                    <ChevronRight size={15} />
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
+        </div>
+
+        {selectedModel && (
+          <div
+            className='pricing-detail-backdrop'
+            role='presentation'
+            onClick={() => setSelectedModel(null)}
+          >
+            <aside
+              className='pricing-detail-panel'
+              role='dialog'
+              aria-modal='true'
+              aria-label='模型详情'
+              onClick={(event) => event.stopPropagation()}
+            >
+              <header>
+                <div className='pricing-detail-title'>
+                  <span className='pricing-model-icon'>
+                    {renderModelIcon(selectedModel)}
+                  </span>
+                  <div>
+                    <h2>{selectedModel.model_name}</h2>
+                    <p>{selectedModel.vendor_name}</p>
+                  </div>
+                </div>
+                <button
+                  type='button'
+                  className='pricing-icon-button'
+                  onClick={() => setSelectedModel(null)}
+                  aria-label='关闭'
+                >
+                  <X size={16} />
+                </button>
+              </header>
+              <p className='pricing-detail-desc'>
+                {selectedModel.description || '暂无模型描述'}
+              </p>
+              {renderPriceRows(selectedModel)}
+              <section className='pricing-detail-section'>
+                <h3>
+                  <Layers size={15} />
+                  可用分组
+                </h3>
+                <div className='pricing-tag-row'>
+                  {(selectedModel.enable_groups || []).map((item) => (
+                    <span className='pricing-chip' key={item}>
+                      {item}
+                      {groupRatio?.[item]
+                        ? ` ${formatGroupRatio(groupRatio[item])}`
+                        : ''}
+                    </span>
+                  ))}
+                </div>
+              </section>
+              <section className='pricing-detail-section'>
+                <h3>
+                  <SlidersHorizontal size={15} />
+                  支持端点
+                </h3>
+                <div className='pricing-tag-row'>
+                  {(selectedModel.supported_endpoint_types || []).map(
+                    (item) => (
+                      <span className='pricing-chip' key={item}>
+                        {getEndpointLabel(item, endpointMap)}
+                      </span>
+                    ),
+                  )}
+                </div>
+              </section>
+              {parseTags(selectedModel.tags).length > 0 && (
+                <section className='pricing-detail-section'>
+                  <h3>
+                    <Tags size={15} />
+                    标签
+                  </h3>
+                  <div className='pricing-tag-row'>
+                    {parseTags(selectedModel.tags).map((item) => (
+                      <span
+                        className='pricing-chip pricing-chip--muted'
+                        key={item}
+                      >
+                        {item}
+                      </span>
+                    ))}
+                  </div>
+                </section>
               )}
-            </tbody>
-          </table>
-        </section>
+            </aside>
+          </div>
+        )}
       </main>
     </PublicFrame>
   );
 }
-
 function AboutFallback() {
   const currentYear = new Date().getFullYear();
   return (
@@ -563,11 +1335,19 @@ function AboutFallback() {
       <h2>管理员暂时未设置任何关于内容</h2>
       <p>可在设置页面设置关于内容，支持 HTML 和 Markdown。</p>
       <p>
-        <a href='https://github.com/QuantumNous/new-api' target='_blank' rel='noreferrer'>
+        <a
+          href='https://github.com/QuantumNous/new-api'
+          target='_blank'
+          rel='noreferrer'
+        >
           New API
         </a>{' '}
         © {currentYear}{' '}
-        <a href='https://github.com/QuantumNous' target='_blank' rel='noreferrer'>
+        <a
+          href='https://github.com/QuantumNous'
+          target='_blank'
+          rel='noreferrer'
+        >
           QuantumNous
         </a>{' '}
         | 基于{' '}
@@ -849,7 +1629,10 @@ async function startOAuth(provider) {
   if (provider.type === 'oidc') {
     const url = new URL(provider.authUrl);
     url.searchParams.set('client_id', provider.clientId);
-    url.searchParams.set('redirect_uri', `${window.location.origin}/oauth/oidc`);
+    url.searchParams.set(
+      'redirect_uri',
+      `${window.location.origin}/oauth/oidc`,
+    );
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('scope', 'openid profile email');
     url.searchParams.set('state', state);
@@ -956,7 +1739,10 @@ function AuthShell({ status, user, setUser, mode }) {
 
   useEffect(() => {
     if (countdown <= 0) return undefined;
-    const timer = window.setTimeout(() => setCountdown((prev) => prev - 1), 1000);
+    const timer = window.setTimeout(
+      () => setCountdown((prev) => prev - 1),
+      1000,
+    );
     return () => window.clearTimeout(timer);
   }, [countdown]);
 
@@ -1015,7 +1801,9 @@ function AuthShell({ status, user, setUser, mode }) {
         scopes: provider.scopes,
       });
     });
-    return providers.filter((provider) => provider.clientId || provider.authUrl);
+    return providers.filter(
+      (provider) => provider.clientId || provider.authUrl,
+    );
   }, [status]);
 
   const setField = (key, value) => {
@@ -1202,7 +1990,10 @@ function AuthShell({ status, user, setUser, mode }) {
         publicKey: prepareCredentialRequestOptions(beginRes.data.data),
       });
       const payload = buildAssertionResult(assertion);
-      const finishRes = await axios.post('/api/user/passkey/login/finish', payload);
+      const finishRes = await axios.post(
+        '/api/user/passkey/login/finish',
+        payload,
+      );
       if (finishRes.data?.success) {
         storeUserAndRedirect(finishRes.data.data);
       } else {
@@ -1211,7 +2002,9 @@ function AuthShell({ status, user, setUser, mode }) {
     } catch (error) {
       showMessage(
         'error',
-        error?.name === 'AbortError' ? '已取消 Passkey 登录' : 'Passkey 登录失败',
+        error?.name === 'AbortError'
+          ? '已取消 Passkey 登录'
+          : 'Passkey 登录失败',
       );
     } finally {
       setLoading(false);
@@ -1268,7 +2061,13 @@ function AuthShell({ status, user, setUser, mode }) {
 
           <form
             className='auth-card'
-            onSubmit={twoFactor ? handleTwoFactor : isRegister ? handleRegister : handleLogin}
+            onSubmit={
+              twoFactor
+                ? handleTwoFactor
+                : isRegister
+                  ? handleRegister
+                  : handleLogin
+            }
           >
             <div className='auth-card-head'>
               <h2>{title}</h2>
@@ -1286,7 +2085,9 @@ function AuthShell({ status, user, setUser, mode }) {
                     <input
                       autoComplete='username'
                       value={form.username}
-                      onChange={(event) => setField('username', event.target.value)}
+                      onChange={(event) =>
+                        setField('username', event.target.value)
+                      }
                       placeholder='请输入用户名'
                     />
                   </div>
@@ -1301,7 +2102,9 @@ function AuthShell({ status, user, setUser, mode }) {
                         type='email'
                         autoComplete='email'
                         value={form.email}
-                        onChange={(event) => setField('email', event.target.value)}
+                        onChange={(event) =>
+                          setField('email', event.target.value)
+                        }
                         placeholder='用于接收验证码'
                       />
                     </div>
@@ -1314,9 +2117,13 @@ function AuthShell({ status, user, setUser, mode }) {
                     <Lock size={17} />
                     <input
                       type='password'
-                      autoComplete={isRegister ? 'new-password' : 'current-password'}
+                      autoComplete={
+                        isRegister ? 'new-password' : 'current-password'
+                      }
                       value={form.password}
-                      onChange={(event) => setField('password', event.target.value)}
+                      onChange={(event) =>
+                        setField('password', event.target.value)
+                      }
                       placeholder='请输入密码'
                     />
                   </div>
@@ -1396,8 +2203,12 @@ function AuthShell({ status, user, setUser, mode }) {
                 />
                 <span>
                   我已阅读并同意
-                  {status.user_agreement_enabled && <a href='/user-agreement'> 用户协议</a>}
-                  {status.privacy_policy_enabled && <a href='/privacy-policy'> 隐私政策</a>}
+                  {status.user_agreement_enabled && (
+                    <a href='/user-agreement'> 用户协议</a>
+                  )}
+                  {status.privacy_policy_enabled && (
+                    <a href='/privacy-policy'> 隐私政策</a>
+                  )}
                 </span>
               </label>
             )}
@@ -1504,12 +2315,7 @@ export default function PublicPages({
   if (page === 'docs') return <DocsPage status={status} user={user} />;
   if (page === 'login' || page === 'register') {
     return (
-      <AuthShell
-        status={status}
-        user={user}
-        setUser={setUser}
-        mode={page}
-      />
+      <AuthShell status={status} user={user} setUser={setUser} mode={page} />
     );
   }
   return null;
