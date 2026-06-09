@@ -163,6 +163,7 @@ func Register(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}
+	user.Email = common.NormalizeEmailAddress(user.Email)
 	if err := common.Validate.Struct(&user); err != nil {
 		common.ApiErrorI18n(c, i18n.MsgUserInputInvalid, map[string]any{"Error": common.TranslateValidationErrors(err)})
 		return
@@ -1419,6 +1420,7 @@ func EmailBind(c *gin.Context) {
 		email = req.Email
 		code = req.Code
 	}
+	email = common.NormalizeEmailAddress(email)
 	if !common.VerifyCodeWithKey(email, code, common.EmailVerificationPurpose) {
 		common.ApiErrorI18n(c, i18n.MsgUserVerificationCodeError)
 		return

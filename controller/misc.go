@@ -586,7 +586,7 @@ func GetHomePageContent(c *gin.Context) {
 }
 
 func SendEmailVerification(c *gin.Context) {
-	email := c.Query("email")
+	email := common.NormalizeEmailAddress(c.Query("email"))
 	if err := common.Validate.Var(email, "required,email"); err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -605,14 +605,7 @@ func SendEmailVerification(c *gin.Context) {
 	localPart := parts[0]
 	domainPart := parts[1]
 	if common.EmailDomainRestrictionEnabled {
-		allowed := false
-		for _, domain := range common.EmailDomainWhitelist {
-			if domainPart == domain {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
+		if !common.EmailDomainInWhitelist(domainPart, common.EmailDomainWhitelist) {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "The administrator has enabled the email domain name whitelist, and your email address is not allowed due to special symbols or it's not in the whitelist.",
@@ -658,7 +651,7 @@ func SendEmailVerification(c *gin.Context) {
 }
 
 func SendPasswordResetEmail(c *gin.Context) {
-	email := c.Query("email")
+	email := common.NormalizeEmailAddress(c.Query("email"))
 	if err := common.Validate.Var(email, "required,email"); err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -701,6 +694,7 @@ type PasswordResetRequest struct {
 func ResetPassword(c *gin.Context) {
 	var req PasswordResetRequest
 	err := common.DecodeJson(c.Request.Body, &req)
+	req.Email = common.NormalizeEmailAddress(req.Email)
 	if req.Email == "" || req.Token == "" {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
