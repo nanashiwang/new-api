@@ -43,6 +43,7 @@ RUN go mod download
 
 COPY . .
 COPY --from=builder /build/dist ./web/dist
+COPY --from=builder /build/default/dist ./web/default/dist
 RUN BUILD_VERSION="${APP_VERSION:-$(cat VERSION 2>/dev/null)}"; \
     if [ -z "$BUILD_VERSION" ]; then BUILD_VERSION="dev"; fi; \
     go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=${BUILD_VERSION}' -X 'github.com/QuantumNous/new-api/common.BuildCommit=${BUILD_COMMIT}' -X 'github.com/QuantumNous/new-api/common.BuildRepository=${BUILD_REPOSITORY}' -X 'github.com/QuantumNous/new-api/common.BuildBranch=${BUILD_BRANCH}'" -o new-api

@@ -41,6 +41,12 @@ var buildFS embed.FS
 //go:embed web/dist/index.html
 var indexPage []byte
 
+//go:embed web/default/dist
+var defaultBuildFS embed.FS
+
+//go:embed web/default/dist/index.html
+var defaultIndexPage []byte
+
 func main() {
 	startTime := time.Now()
 
@@ -198,7 +204,7 @@ func main() {
 	service.LoadPrerendered(buildFS)
 
 	// 设置路由
-	router.SetRouter(server, buildFS, indexPage)
+	router.SetRouter(server, buildFS, indexPage, defaultBuildFS, defaultIndexPage)
 	var port = os.Getenv("PORT")
 	if port == "" {
 		port = strconv.Itoa(*common.Port)
@@ -259,6 +265,7 @@ func InjectUmamiAnalytics() {
 	analyticsInjectBuilder.WriteString("<!--Umami QuantumNous-->\n")
 	analyticsInject := analyticsInjectBuilder.String()
 	indexPage = bytes.ReplaceAll(indexPage, []byte("<!--umami-->\n"), []byte(analyticsInject))
+	defaultIndexPage = bytes.ReplaceAll(defaultIndexPage, []byte("<!--umami-->\n"), []byte(analyticsInject))
 }
 
 func InjectGoogleAnalytics() {
@@ -281,6 +288,7 @@ func InjectGoogleAnalytics() {
 	analyticsInjectBuilder.WriteString("<!--Google Analytics QuantumNous-->\n")
 	analyticsInject := analyticsInjectBuilder.String()
 	indexPage = bytes.ReplaceAll(indexPage, []byte("<!--Google Analytics-->\n"), []byte(analyticsInject))
+	defaultIndexPage = bytes.ReplaceAll(defaultIndexPage, []byte("<!--Google Analytics-->\n"), []byte(analyticsInject))
 }
 
 func InitResources() error {

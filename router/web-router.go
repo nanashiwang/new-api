@@ -14,14 +14,16 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func SetWebRouter(router *gin.Engine, buildFS embed.FS, indexPage []byte) {
+func SetWebRouter(router *gin.Engine, buildFS embed.FS, indexPage []byte, defaultBuildFS embed.FS, defaultIndexPage []byte) {
 	router.Use(gzip.Gzip(gzip.DefaultCompression))
 	router.Use(middleware.GlobalWebRateLimit())
 	router.Use(middleware.Cache())
 	if imagePlaygroundIndex, err := buildFS.ReadFile("web/dist/image-playground/index.html"); err == nil {
 		registerImagePlaygroundIndexRoutes(router, imagePlaygroundIndex)
 	}
+	registerDefaultHomeIndexRoutes(router, defaultIndexPage)
 	registerPrerenderedIndexRoutes(router, indexPage)
+	router.Use(static.Serve("/default", common.EmbedFolder(defaultBuildFS, "web/default/dist")))
 	router.Use(static.Serve("/", common.EmbedFolder(buildFS, "web/dist")))
 	router.NoRoute(func(c *gin.Context) {
 		c.Set(middleware.RouteTagKey, "web")
@@ -34,6 +36,16 @@ func SetWebRouter(router *gin.Engine, buildFS embed.FS, indexPage []byte) {
 		}
 		serveWebIndex(c, indexPage)
 	})
+}
+
+func registerDefaultHomeIndexRoutes(router *gin.Engine, indexPage []byte) {
+	serve := func(c *gin.Context) {
+		c.Set(middleware.RouteTagKey, "web")
+		c.Header("Cache-Control", "no-cache")
+		c.Data(http.StatusOK, "text/html; charset=utf-8", indexPage)
+	}
+	router.GET("/", serve)
+	router.HEAD("/", serve)
 }
 
 func registerPrerenderedIndexRoutes(router *gin.Engine, indexPage []byte) {
