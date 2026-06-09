@@ -55,6 +55,7 @@ import opencodeMarkdown from '../../../docs/NAN_CLIENT_OPENCODE.md?raw';
 import openclawMarkdown from '../../../docs/NAN_CLIENT_OPENCLAW.md?raw';
 import ccSwitchMarkdown from '../../../docs/NAN_CLIENT_CCSWITCH.md?raw';
 import troubleshootingMarkdown from '../../../docs/NAN_TROUBLESHOOTING.md?raw';
+import UpstreamPricingPage from './pricingPage.jsx';
 
 const defaultStatus = {
   system_name: 'New API',
@@ -2310,7 +2311,9 @@ export default function PublicPages({
 }) {
   const status = { ...defaultStatus, ...rawStatus };
 
-  if (page === 'pricing') return <PricingPage status={status} user={user} />;
+  if (page === 'pricing') {
+    return <UpstreamPricingPage status={status} user={user} />;
+  }
   if (page === 'about') return <AboutPage status={status} user={user} />;
   if (page === 'docs') return <DocsPage status={status} user={user} />;
   if (page === 'login' || page === 'register') {
