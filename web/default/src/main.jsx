@@ -20,27 +20,43 @@ For commercial licensing, please contact support@quantumnous.com
 import React, { useEffect, useMemo, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import axios from 'axios';
-import {
-  ArrowRight,
-  BookOpen,
-  Check,
-  Copy,
-  Gauge,
-  KeyRound,
-  Network,
-  ShieldCheck,
-  Sparkles,
-  WalletCards,
-} from 'lucide-react';
+import { Check, Copy, Sparkles, FileText, Github, Play, X } from 'lucide-react';
 import './styles.css';
 
 const STATUS_KEY = 'status';
 const USER_KEY = 'user';
 const HOME_CONTENT_KEY = 'home_page_content';
+const API_ENDPOINTS = [
+  '/v1/chat/completions',
+  '/v1/responses',
+  '/v1/responses/compact',
+  '/v1/messages',
+  '/v1beta/models',
+  '/v1/embeddings',
+  '/v1/rerank',
+  '/v1/images/generations',
+  '/v1/images/edits',
+  '/v1/images/variations',
+  '/v1/audio/speech',
+  '/v1/audio/transcriptions',
+  '/v1/audio/translations',
+];
+
+const providerBadges = [
+  'OpenAI',
+  'Claude',
+  'Gemini',
+  'Grok',
+  'DeepSeek',
+  'Qwen',
+  'Azure',
+  'Midjourney',
+  '30+',
+];
 
 const defaultStatus = {
   system_name: 'New API',
-  logo: '/logo.png',
+  logo: '/logo.svg',
   server_address: window.location.origin,
   docs_link: '',
   self_use_mode_enabled: false,
@@ -124,18 +140,32 @@ function isRawHtml(value) {
   ].some((prefix) => trimmed.startsWith(prefix));
 }
 
+async function renderMarkupContent(value) {
+  if (!value || isRemoteUrl(value) || isRawHtml(value)) return value || '';
+  const { marked } = await import('marked');
+  return marked.parse(value);
+}
+
 function App() {
   const cachedStatus = readJson(STATUS_KEY) || {};
   const cachedUser = readJson(USER_KEY);
   const [status, setStatus] = useState({ ...defaultStatus, ...cachedStatus });
   const [user, setUser] = useState(cachedUser);
-  const [homeContent, setHomeContent] = useState(readString(HOME_CONTENT_KEY));
+  const [homeContent, setHomeContent] = useState('');
   const [notice, setNotice] = useState('');
   const [noticeOpen, setNoticeOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [endpointIndex, setEndpointIndex] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
+    const cachedHomeContent = readString(HOME_CONTENT_KEY);
+
+    if (cachedHomeContent) {
+      renderMarkupContent(cachedHomeContent).then((content) => {
+        if (!cancelled) setHomeContent(content);
+      });
+    }
 
     axios
       .get('/api/status')
@@ -156,13 +186,16 @@ function App() {
       .get('/api/home_page_content')
       .then((res) => {
         if (cancelled || !res.data?.success) return;
-        const nextContent = res.data.data || '';
-        setHomeContent(nextContent);
-        if (nextContent) {
-          localStorage.setItem(HOME_CONTENT_KEY, nextContent);
-        } else {
-          localStorage.removeItem(HOME_CONTENT_KEY);
-        }
+        const rawContent = res.data.data || '';
+        return renderMarkupContent(rawContent).then((nextContent) => {
+          if (cancelled) return;
+          setHomeContent(nextContent);
+          if (rawContent) {
+            localStorage.setItem(HOME_CONTENT_KEY, nextContent);
+          } else {
+            localStorage.removeItem(HOME_CONTENT_KEY);
+          }
+        });
       })
       .catch(() => {});
 
@@ -195,14 +228,22 @@ function App() {
         .get('/api/notice')
         .then((res) => {
           const content = res.data?.data?.trim();
-          if (res.data?.success && content) {
-            setNotice(content);
+          if (!res.data?.success || !content) return undefined;
+          return renderMarkupContent(content).then((html) => {
+            setNotice(html);
             setNoticeOpen(true);
-          }
+          });
         })
         .catch(() => {});
     }, 4500);
     return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setEndpointIndex((prev) => (prev + 1) % API_ENDPOINTS.length);
+    }, 3000);
+    return () => window.clearInterval(timer);
   }, []);
 
   const navLinks = useMemo(() => {
@@ -230,6 +271,8 @@ function App() {
   }, [status, user]);
 
   const serverAddress = status.server_address || window.location.origin;
+  const docsLink = status.docs_link || localStorage.getItem('docs_link') || '';
+  const currentEndpoint = API_ENDPOINTS[endpointIndex] || API_ENDPOINTS[0];
   const showRegister = !status.self_use_mode_enabled;
 
   const copyServerAddress = async () => {
@@ -240,6 +283,11 @@ function App() {
     } catch {
       setCopied(false);
     }
+  };
+
+  const closeNoticeToday = () => {
+    localStorage.setItem('notice_close_date', new Date().toDateString());
+    setNoticeOpen(false);
   };
 
   if (homeContent) {
@@ -255,7 +303,7 @@ function App() {
           <div
             className='custom-content'
             dangerouslySetInnerHTML={{
-              __html: isRawHtml(homeContent) ? homeContent : homeContent,
+              __html: homeContent,
             }}
           />
         )}
@@ -264,11 +312,11 @@ function App() {
   }
 
   return (
-    <div className='default-home'>
-      <header className='topbar'>
+    <div className='default-home home-shell'>
+      <header className='topbar public-header--hero'>
         <a className='brand' href='/'>
-          <img src={status.logo || '/logo.png'} alt='' />
-          <span>{status.system_name || 'New API'}</span>
+          <img src={status.logo || '/logo.svg'} alt='' />
+          <span>{status.system_name || '山海衡 AI'}</span>
         </a>
         <nav>
           {navLinks.map((link) => (
@@ -304,149 +352,214 @@ function App() {
       </header>
 
       <main>
-        <section className='hero'>
-          <div className='hero-copy'>
+        <section className='home-hero'>
+          <div className='blur-ball blur-ball-indigo' />
+          <div className='blur-ball blur-ball-teal' />
+          <div className='home-hero-inner'>
+            <div className='home-hero-brand'>
+              <img src={status.logo || '/logo.svg'} alt='' />
+              <span>{status.system_name || '山海衡 AI'}</span>
+            </div>
             <div className='eyebrow'>
               <Sparkles size={16} />
               AI Application Infrastructure
             </div>
             <h1>
-              统一的大模型
-              <span>接口网关</span>
+              统一的
+              <span className='shine-text'>大模型接口网关</span>
             </h1>
-            <p>
-              聚合 OpenAI、Claude、Gemini、DeepSeek、Qwen、Azure、Midjourney
-              等渠道， 提供统一协议、智能调度、计费统计和稳定的 API Key 管理。
+            <p className='home-slogan'>一衡调山海，万模皆可达</p>
+            <p className='home-desc'>
+              聚合万模，平衡调度，一口稳定接入，只需将模型基址替换为：
             </p>
-            <div className='cta-row'>
-              <a className='primary' href={user ? '/console' : '/register'}>
-                {user ? '进入控制台' : '开始使用'}
-                <ArrowRight size={18} />
-              </a>
-              <a className='secondary' href='/pricing'>
-                查看模型广场
-              </a>
-              {(status.docs_link || localStorage.getItem('docs_link')) && (
-                <a
-                  className='secondary icon-link'
-                  href={status.docs_link || localStorage.getItem('docs_link')}
-                >
-                  <BookOpen size={17} />
-                  文档
-                </a>
-              )}
-            </div>
-            <div className='endpoint'>
-              <span>Base URL</span>
-              <code>{serverAddress}</code>
+            <div className='home-endpoint-control'>
+              <input
+                readOnly
+                value={serverAddress}
+                className='home-endpoint-input'
+                aria-label='Base URL'
+              />
+              <select
+                className='home-endpoint-select'
+                value={currentEndpoint}
+                onChange={(event) => {
+                  const nextIndex = API_ENDPOINTS.findIndex(
+                    (item) => item === event.target.value,
+                  );
+                  if (nextIndex >= 0) setEndpointIndex(nextIndex);
+                }}
+                aria-label='API endpoint'
+              >
+                {API_ENDPOINTS.map((endpoint) => (
+                  <option key={endpoint} value={endpoint}>
+                    {endpoint}
+                  </option>
+                ))}
+              </select>
               <button
                 type='button'
+                className='home-copy-button'
                 onClick={copyServerAddress}
                 aria-label='复制 API 地址'
               >
-                {copied ? <Check size={16} /> : <Copy size={16} />}
+                {copied ? <Check size={18} /> : <Copy size={18} />}
               </button>
             </div>
-          </div>
-
-          <div className='terminal-card' aria-label='API 示例'>
-            <div className='terminal-head'>
-              <span />
-              <span />
-              <span />
+            <div className='home-action-row'>
+              <a
+                className='home-action-button home-action-primary'
+                href='/console'
+              >
+                <Play size={18} />
+                获取密钥
+              </a>
+              {status.demo_site_enabled && status.version ? (
+                <a
+                  className='home-action-button home-action-secondary'
+                  href='https://github.com/QuantumNous/new-api'
+                  target='_blank'
+                  rel='noreferrer'
+                >
+                  <Github size={18} />
+                  {status.version}
+                </a>
+              ) : (
+                docsLink && (
+                  <a
+                    className='home-action-button home-action-secondary'
+                    href={docsLink}
+                  >
+                    <FileText size={18} />
+                    文档
+                  </a>
+                )
+              )}
             </div>
-            <pre>{`curl ${serverAddress}/v1/chat/completions \\
-  -H "Authorization: Bearer $NEW_API_KEY" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "model": "gpt-4.1",
-    "messages": [
-      {"role": "user", "content": "Hello"}
-    ]
-  }'`}</pre>
+            <div className='home-provider-block'>
+              <span>支持众多的大模型供应商</span>
+              <div className='home-provider-badges'>
+                {providerBadges.map((provider) => (
+                  <span className='home-provider-badge' key={provider}>
+                    {provider}
+                  </span>
+                ))}
+              </div>
+            </div>
           </div>
         </section>
 
-        <section className='stats-grid'>
-          <Stat icon={<Network />} value='40+' label='上游渠道' />
-          <Stat icon={<KeyRound />} value='统一 Key' label='OpenAI 兼容协议' />
-          <Stat
-            icon={<WalletCards />}
-            value='透明计费'
-            label='用量与余额统计'
-          />
-          <Stat
-            icon={<ShieldCheck />}
-            value='稳定调度'
-            label='限流与故障切换'
-          />
+        <section className='home-section'>
+          <div className='home-section-inner'>
+            <h2 className='home-section-title'>为什么选择山海衡 AI</h2>
+            <div className='home-feature-grid'>
+              {[
+                [
+                  '聚合 40+ 大模型',
+                  'OpenAI、Claude、Gemini、DeepSeek、Qwen... 一个统一 API 全部调用，无需多处对接。',
+                  '🔗',
+                ],
+                [
+                  '更优的价格',
+                  '批量议价、按量计费、缓存命中优惠，成本更低、账单更透明。',
+                  '💰',
+                ],
+                [
+                  '稳定高可用',
+                  '多节点容灾、智能路由、自动重试，保障调用稳定不中断。',
+                  '⚡',
+                ],
+                [
+                  '安全可控',
+                  '密钥隔离、用量管控、调用日志与账单全程可查，合规放心。',
+                  '🛡️',
+                ],
+              ].map(([title, desc, icon]) => (
+                <article className='home-feature-card' key={title}>
+                  <div className='home-feature-icon'>{icon}</div>
+                  <h3>{title}</h3>
+                  <p>{desc}</p>
+                </article>
+              ))}
+            </div>
+          </div>
         </section>
 
-        <section className='feature-grid'>
-          <Feature
-            icon={<Gauge />}
-            title='更轻的首屏'
-            text='首页不再挂载完整控制台壳，优先用本地缓存渲染，再后台刷新状态。'
-          />
-          <Feature
-            icon={<Network />}
-            title='多渠道聚合'
-            text='统一接入主流模型供应商和图像、视频、任务类接口。'
-          />
-          <Feature
-            icon={<WalletCards />}
-            title='运营可视化'
-            text='保留旧控制台现有发票、收益看板、用量分析等本地定制能力。'
-          />
+        <section className='home-section home-section--alt'>
+          <div className='home-section-inner'>
+            <h2 className='home-section-title'>三步快速接入</h2>
+            <div className='home-steps-grid'>
+              {[
+                ['1', '注册并获取密钥', '登录控制台，创建专属 API Key。'],
+                ['2', '替换模型基址', '把原有 Base URL 换成本平台地址。'],
+                [
+                  '3',
+                  '立即开始调用',
+                  '沿用原有 SDK 与参数，直接调用 40+ 模型。',
+                ],
+              ].map(([n, title, desc]) => (
+                <article className='home-step' key={n}>
+                  <div className='home-step-no'>{n}</div>
+                  <h3>{title}</h3>
+                  <p>{desc}</p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className='home-cta'>
+          <h2>一衡调山海，万模皆可达</h2>
+          <p>现在就接入，开启统一的大模型调用体验</p>
+          <a href='/console' className='home-cta-btn'>
+            立即开始
+            <span>→</span>
+          </a>
         </section>
       </main>
 
       {noticeOpen && (
-        <div className='notice-backdrop' role='presentation'>
-          <div
-            className='notice-dialog'
+        <div className='public-notice-backdrop' role='presentation'>
+          <section
+            className='public-notice-modal'
             role='dialog'
             aria-modal='true'
-            aria-label='系统公告'
+            aria-labelledby='public-notice-title'
           >
-            <h2>系统公告</h2>
-            <div>{notice}</div>
-            <button
-              type='button'
-              onClick={() => {
-                localStorage.setItem(
-                  'notice_close_date',
-                  new Date().toDateString(),
-                );
-                setNoticeOpen(false);
-              }}
-            >
-              我知道了
-            </button>
-          </div>
+            <header className='public-notice-header'>
+              <h2 id='public-notice-title'>系统公告</h2>
+              <button
+                type='button'
+                className='public-notice-close'
+                aria-label='关闭公告'
+                onClick={() => setNoticeOpen(false)}
+              >
+                <X size={18} />
+              </button>
+            </header>
+            <div
+              className='public-notice-content'
+              dangerouslySetInnerHTML={{ __html: notice }}
+            />
+            <footer className='public-notice-footer'>
+              <button
+                type='button'
+                className='public-notice-ghost'
+                onClick={closeNoticeToday}
+              >
+                今日关闭
+              </button>
+              <button
+                type='button'
+                className='public-notice-primary'
+                onClick={() => setNoticeOpen(false)}
+              >
+                关闭公告
+              </button>
+            </footer>
+          </section>
         </div>
       )}
     </div>
-  );
-}
-
-function Stat(props) {
-  return (
-    <article className='stat'>
-      <div className='stat-icon'>{props.icon}</div>
-      <strong>{props.value}</strong>
-      <span>{props.label}</span>
-    </article>
-  );
-}
-
-function Feature(props) {
-  return (
-    <article className='feature'>
-      <div className='feature-icon'>{props.icon}</div>
-      <h2>{props.title}</h2>
-      <p>{props.text}</p>
-    </article>
   );
 }
 
