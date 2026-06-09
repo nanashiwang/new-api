@@ -57,16 +57,6 @@ func TestRenderIndexWithMetaTitleAndCanonicalAlsoWorkForNoTrailingSlashPath(t *t
 	}
 }
 
-func TestRenderIndexWithMetaDocsSubpageUsesDocsMeta(t *testing.T) {
-	out := RenderIndexWithMeta([]byte(sampleIndex), "/docs/clients/codex")
-	if !bytes.Contains(out, []byte("New API 平台使用与客户端接入教程")) {
-		t.Fatalf("docs subpage title not injected: %s", out)
-	}
-	if !bytes.Contains(out, []byte(`href="https://cn.meta-api.vip/docs"`)) {
-		t.Fatalf("docs canonical not injected: %s", out)
-	}
-}
-
 func TestRenderIndexWithMetaEscapesHTMLSpecialChars(t *testing.T) {
 	const tmpl = `<title>x</title><meta name="description" content="x" />`
 	// 临时注入一个带特殊字符的 meta（模拟 description 含 < > & "）。

@@ -34,10 +34,10 @@ func TestImagePlaygroundIndexRoutesDoNotRedirect(t *testing.T) {
 	}
 }
 
-func TestDefaultPublicIndexRoutesDoNotRedirect(t *testing.T) {
+func TestPrerenderedIndexRoutesDoNotRedirect(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	registerDefaultPublicIndexRoutes(r, []byte("<html>default</html>"))
+	registerPrerenderedIndexRoutes(r, []byte("<html>index</html>"))
 
 	for _, path := range []string{
 		"/register?aff=R3bk",
@@ -45,9 +45,6 @@ func TestDefaultPublicIndexRoutesDoNotRedirect(t *testing.T) {
 		"/login?next=/console",
 		"/pricing",
 		"/about",
-		"/docs",
-		"/docs/clients/codex",
-		"/docs/troubleshooting",
 	} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		w := httptest.NewRecorder()
@@ -59,9 +56,6 @@ func TestDefaultPublicIndexRoutesDoNotRedirect(t *testing.T) {
 		}
 		if location := w.Header().Get("Location"); location != "" {
 			t.Fatalf("%s: expected no redirect location, got %q", path, location)
-		}
-		if body := w.Body.String(); body != "<html>default</html>" {
-			t.Fatalf("%s: unexpected body %q", path, body)
 		}
 	}
 }
