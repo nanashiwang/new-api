@@ -21,13 +21,16 @@ func SetWebRouter(router *gin.Engine, buildFS embed.FS, indexPage []byte, defaul
 	if imagePlaygroundIndex, err := buildFS.ReadFile("web/dist/image-playground/index.html"); err == nil {
 		registerImagePlaygroundIndexRoutes(router, imagePlaygroundIndex)
 	}
-	registerDefaultHomeIndexRoutes(router, defaultIndexPage)
-	registerPrerenderedIndexRoutes(router, indexPage)
+	registerDefaultPublicIndexRoutes(router, defaultIndexPage)
 	router.Use(static.Serve("/default", common.EmbedFolder(defaultBuildFS, "web/default/dist")))
 	router.Use(static.Serve("/", common.EmbedFolder(buildFS, "web/dist")))
 	router.NoRoute(func(c *gin.Context) {
 		c.Set(middleware.RouteTagKey, "web")
 		if redirectMalformedFullwidthQuery(c) {
+			return
+		}
+		if shouldServeDefaultPublicFallback(c.Request.URL.Path) {
+			serveDefaultIndex(c, defaultIndexPage)
 			return
 		}
 		if strings.HasPrefix(c.Request.RequestURI, "/v1") || strings.HasPrefix(c.Request.RequestURI, "/api") || strings.HasPrefix(c.Request.RequestURI, "/assets") {
@@ -38,25 +41,62 @@ func SetWebRouter(router *gin.Engine, buildFS embed.FS, indexPage []byte, defaul
 	})
 }
 
-func registerDefaultHomeIndexRoutes(router *gin.Engine, indexPage []byte) {
-	serve := func(c *gin.Context) {
-		c.Set(middleware.RouteTagKey, "web")
-		c.Header("Cache-Control", "no-cache")
-		c.Data(http.StatusOK, "text/html; charset=utf-8", indexPage)
+func registerDefaultPublicIndexRoutes(router *gin.Engine, indexPage []byte) {
+	for _, path := range []string{
+		"/",
+		"/login",
+		"/login/",
+		"/register",
+		"/register/",
+		"/pricing",
+		"/pricing/",
+		"/about",
+		"/about/",
+		"/docs",
+		"/docs/",
+		"/docs/clients",
+		"/docs/clients/",
+		"/docs/clients/codex",
+		"/docs/clients/codex/",
+		"/docs/clients/claude-code",
+		"/docs/clients/claude-code/",
+		"/docs/clients/claude-code-openai",
+		"/docs/clients/claude-code-openai/",
+		"/docs/clients/gemini",
+		"/docs/clients/gemini/",
+		"/docs/clients/opencode",
+		"/docs/clients/opencode/",
+		"/docs/clients/openclaw",
+		"/docs/clients/openclaw/",
+		"/docs/clients/ccswitch",
+		"/docs/clients/ccswitch/",
+		"/docs/troubleshooting",
+		"/docs/troubleshooting/",
+	} {
+		router.GET(path, func(c *gin.Context) {
+			serveDefaultIndex(c, indexPage)
+		})
+		router.HEAD(path, func(c *gin.Context) {
+			serveDefaultIndex(c, indexPage)
+		})
 	}
-	router.GET("/", serve)
-	router.HEAD("/", serve)
 }
 
-func registerPrerenderedIndexRoutes(router *gin.Engine, indexPage []byte) {
-	serve := func(c *gin.Context) {
-		c.Set(middleware.RouteTagKey, "web")
-		serveWebIndex(c, indexPage)
+func serveDefaultIndex(c *gin.Context, indexPage []byte) {
+	c.Set(middleware.RouteTagKey, "web")
+	html := service.RenderIndexWithMeta(indexPage, c.Request.URL.Path)
+	c.Header("Cache-Control", "no-cache")
+	c.Data(http.StatusOK, "text/html; charset=utf-8", html)
+}
+
+func shouldServeDefaultPublicFallback(path string) bool {
+	if path == "/docs" || path == "/docs/" {
+		return true
 	}
-	for _, path := range []string{"/login", "/login/", "/register", "/register/", "/pricing", "/pricing/", "/about", "/about/"} {
-		router.GET(path, serve)
-		router.HEAD(path, serve)
+	if strings.HasPrefix(path, "/docs/images/") {
+		return false
 	}
+	return strings.HasPrefix(path, "/docs/")
 }
 
 func serveWebIndex(c *gin.Context, indexPage []byte) {

@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import axios from 'axios';
 import { Check, Copy, Sparkles, FileText, Github, Play, X } from 'lucide-react';
@@ -26,6 +26,7 @@ import './styles.css';
 const STATUS_KEY = 'status';
 const USER_KEY = 'user';
 const HOME_CONTENT_KEY = 'home_page_content';
+const PublicPages = lazy(() => import('./publicPages.jsx'));
 const API_ENDPOINTS = [
   '/v1/chat/completions',
   '/v1/responses',
@@ -117,6 +118,20 @@ function requiresAuth(moduleValue) {
   );
 }
 
+function normalizePathname(pathname) {
+  return pathname.replace(/\/+$/, '') || '/';
+}
+
+function getPublicPageKind(pathname) {
+  const path = normalizePathname(pathname);
+  if (path === '/pricing') return 'pricing';
+  if (path === '/about') return 'about';
+  if (path === '/login') return 'login';
+  if (path === '/register') return 'register';
+  if (path === '/docs' || path.startsWith('/docs/')) return 'docs';
+  return '';
+}
+
 function isRemoteUrl(value) {
   try {
     const url = new URL(value);
@@ -147,6 +162,8 @@ async function renderMarkupContent(value) {
 }
 
 function App() {
+  const publicPageKind = getPublicPageKind(window.location.pathname);
+  const isHomeRoute = normalizePathname(window.location.pathname) === '/';
   const cachedStatus = readJson(STATUS_KEY) || {};
   const cachedUser = readJson(USER_KEY);
   const [status, setStatus] = useState({ ...defaultStatus, ...cachedStatus });
@@ -158,6 +175,7 @@ function App() {
   const [endpointIndex, setEndpointIndex] = useState(0);
 
   useEffect(() => {
+    if (!isHomeRoute) return undefined;
     let cancelled = false;
     const cachedHomeContent = readString(HOME_CONTENT_KEY);
 
@@ -202,7 +220,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isHomeRoute]);
 
   useEffect(() => {
     if (!cachedUser) return;
@@ -261,10 +279,10 @@ function App() {
         href: requiresAuth(modules.pricing) && !user ? '/login' : '/pricing',
       },
       isEnabled(modules.docs) &&
-        docsLink && {
+        {
           label: '文档',
-          href: docsLink,
-          external: isRemoteUrl(docsLink),
+          href: docsLink || '/docs',
+          external: Boolean(docsLink) && isRemoteUrl(docsLink),
         },
       isEnabled(modules.about) && { label: '关于', href: '/about' },
     ].filter(Boolean);
@@ -290,7 +308,24 @@ function App() {
     setNoticeOpen(false);
   };
 
-  if (homeContent) {
+  if (publicPageKind) {
+    return (
+      <Suspense
+        fallback={
+          <div className='default-home public-loading'>正在加载...</div>
+        }
+      >
+        <PublicPages
+          page={publicPageKind}
+          status={status}
+          user={user}
+          setUser={setUser}
+        />
+      </Suspense>
+    );
+  }
+
+  if (isHomeRoute && homeContent) {
     return (
       <div className='default-home custom-page'>
         {isRemoteUrl(homeContent) ? (

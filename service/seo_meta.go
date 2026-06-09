@@ -68,6 +68,18 @@ var routeMetaMap = map[string]routeMeta{
 		Canonical:   seoSiteOrigin + "/about",
 		OGURL:       seoSiteOrigin + "/about",
 	},
+	"/docs": {
+		Title:       "文档 · New API 平台使用与客户端接入教程",
+		Description: "查看 New API 平台教程、客户端接入指南与常见报错排查，快速完成 Codex、Claude Code、Gemini CLI、OpenCode 等客户端配置。",
+		Canonical:   seoSiteOrigin + "/docs",
+		OGURL:       seoSiteOrigin + "/docs",
+	},
+	"/docs/": {
+		Title:       "文档 · New API 平台使用与客户端接入教程",
+		Description: "查看 New API 平台教程、客户端接入指南与常见报错排查，快速完成 Codex、Claude Code、Gemini CLI、OpenCode 等客户端配置。",
+		Canonical:   seoSiteOrigin + "/docs",
+		OGURL:       seoSiteOrigin + "/docs",
+	},
 	"/image-playground":  imagePlaygroundMeta,
 	"/image-playground/": imagePlaygroundMeta,
 }
@@ -75,6 +87,9 @@ var routeMetaMap = map[string]routeMeta{
 // GetRouteMeta 暴露给测试与未来需要预渲染时使用。
 func GetRouteMeta(path string) (routeMeta, bool) {
 	m, ok := routeMetaMap[path]
+	if !ok && strings.HasPrefix(path, "/docs/") && !strings.HasPrefix(path, "/docs/images/") {
+		m, ok = routeMetaMap["/docs"]
+	}
 	return m, ok
 }
 
@@ -92,6 +107,9 @@ func GetRouteMeta(path string) (routeMeta, bool) {
 // 如果模板里没有对应的字段（旧的 image-playground/index.html 没 og:url），则跳过，不报错。
 func RenderIndexWithMeta(template []byte, path string) []byte {
 	meta, ok := routeMetaMap[path]
+	if !ok && strings.HasPrefix(path, "/docs/") && !strings.HasPrefix(path, "/docs/images/") {
+		meta, ok = routeMetaMap["/docs"]
+	}
 	if !ok {
 		return template
 	}
