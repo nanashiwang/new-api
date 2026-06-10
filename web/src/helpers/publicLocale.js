@@ -48,6 +48,33 @@ const en = {
   系统公告: 'System Notice',
   今日关闭: 'Close Today',
   关闭公告: 'Close Notice',
+  // 首页内容板块
+  '为什么选择山海衡 AI': 'Why Choose Us',
+  '聚合 40+ 大模型': 'Aggregate 40+ Models',
+  'OpenAI、Claude、Gemini、DeepSeek、Qwen… 一个统一 API 全部调用，无需多处对接。':
+    'OpenAI, Claude, Gemini, DeepSeek, Qwen… call them all through one unified API, no multiple integrations needed.',
+  更优的价格: 'Better Pricing',
+  '批量议价、按量计费、缓存命中优惠，成本更低、账单更透明。':
+    'Bulk pricing, pay-as-you-go, cache-hit discounts — lower costs and clearer bills.',
+  稳定高可用: 'Highly Available',
+  '多节点容灾、智能路由、自动重试，保障调用稳定不中断。':
+    'Multi-node failover, smart routing and auto-retry keep your calls stable and uninterrupted.',
+  安全可控: 'Secure & Controllable',
+  '密钥隔离、用量管控、调用日志与账单全程可查，合规放心。':
+    'Key isolation, usage control, and fully auditable logs and bills — compliant and worry-free.',
+  三步快速接入: 'Get Started in Three Steps',
+  注册并获取密钥: 'Register & Get a Key',
+  '登录控制台，创建专属 API Key。':
+    'Sign in to the console and create your own API key.',
+  替换模型基址: 'Replace the Base URL',
+  '把原有 Base URL 换成本平台地址。':
+    'Swap your existing Base URL for this platform’s address.',
+  立即开始调用: 'Start Calling',
+  '沿用原有 SDK 与参数，直接调用 40+ 模型。':
+    'Keep your existing SDK and parameters, and call 40+ models right away.',
+  '现在就接入，开启统一的大模型调用体验':
+    'Integrate now and unlock a unified LLM experience.',
+  立即开始: 'Get Started',
 };
 
 // 公开首页仅内置 zh / en 两套词条：先走与控制台一致的归一化（localeNormalize），

@@ -25,8 +25,28 @@ import { API_ENDPOINTS } from '../../constants/common.constant';
 import { StatusContext } from '../../context/Status';
 import { useActualTheme } from '../../context/Theme';
 import { usePublicTranslation } from '../../helpers/publicLocale';
-import { Github, Play, FileText, Copy } from 'lucide-react';
+import {
+  Github,
+  Play,
+  FileText,
+  Copy,
+  Link2,
+  Wallet,
+  Zap,
+  ShieldCheck,
+} from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
+import {
+  OpenAI,
+  Claude,
+  Gemini,
+  Grok,
+  DeepSeek,
+  Qwen,
+  Mistral,
+  Midjourney,
+} from '@lobehub/icons';
+import InkMountains from './InkMountains';
 
 const PublicNoticeModal = lazy(
   () => import('../../components/layout/PublicNoticeModal'),
@@ -57,16 +77,37 @@ const getCachedHomePageContent = () => {
     return '';
   }
 };
-const providerBadges = [
-  'OpenAI',
-  'Claude',
-  'Gemini',
-  'Grok',
-  'DeepSeek',
-  'Qwen',
-  'Azure',
-  'Midjourney',
-  '30+',
+// 模型 logo「群岛散落」：hero 底部一排官方 logo，半透明融入宣纸。
+// 用 @lobehub/icons 官方 logomark；EditModelModal 等处已用同一库。
+const providerModels = [
+  ['OpenAI', OpenAI],
+  ['Claude', Claude],
+  ['Gemini', Gemini],
+  ['Grok', Grok],
+  ['DeepSeek', DeepSeek],
+  ['Qwen', Qwen],
+  ['Mistral', Mistral],
+  ['Midjourney', Midjourney],
+];
+
+// 核心优势：水墨墨框内的线性图标 + 文案
+const featureItems = [
+  [
+    '聚合 40+ 大模型',
+    'OpenAI、Claude、Gemini、DeepSeek、Qwen… 一个统一 API 全部调用，无需多处对接。',
+    Link2,
+  ],
+  [
+    '更优的价格',
+    '批量议价、按量计费、缓存命中优惠，成本更低、账单更透明。',
+    Wallet,
+  ],
+  ['稳定高可用', '多节点容灾、智能路由、自动重试，保障调用稳定不中断。', Zap],
+  [
+    '安全可控',
+    '密钥隔离、用量管控、调用日志与账单全程可查，合规放心。',
+    ShieldCheck,
+  ],
 ];
 
 const Home = ({ onLandingChange } = {}) => {
@@ -106,7 +147,11 @@ const Home = ({ onLandingChange } = {}) => {
       const { success, message, data } = res.data;
       if (success) {
         let content = data || '';
-        if (content && !isRemoteHomePage(content) && !isRawHtmlContent(content)) {
+        if (
+          content &&
+          !isRemoteHomePage(content) &&
+          !isRawHtmlContent(content)
+        ) {
           const { marked } = await import('marked');
           content = marked.parse(content);
         }
@@ -219,10 +264,8 @@ const Home = ({ onLandingChange } = {}) => {
       {useDefaultHome ? (
         <div className='home-shell w-full overflow-x-hidden'>
           <div className='home-hero w-full min-h-[500px] md:min-h-[600px] lg:min-h-[700px] relative overflow-x-hidden'>
-            <div className='blur-ball blur-ball-indigo' />
-            <div className='blur-ball blur-ball-teal' />
             <div className='flex items-center justify-center h-full px-4 py-20 md:py-24 lg:py-32 mt-10'>
-              <div className='flex flex-col items-center justify-center text-center max-w-4xl mx-auto'>
+              <div className='relative z-10 flex flex-col items-center justify-center text-center max-w-4xl mx-auto'>
                 <div className='flex flex-col items-center justify-center mb-6 md:mb-8'>
                   <div className='home-hero-brand'>
                     <img src='/logo.svg' alt='logo' />
@@ -237,13 +280,20 @@ const Home = ({ onLandingChange } = {}) => {
                       {t('统一的')}
                       <br />
                       <span className='shine-text'>{t('大模型接口网关')}</span>
+                      {isChinese && (
+                        <span className='home-seal' aria-hidden='true'>
+                          衡
+                        </span>
+                      )}
                     </>
                   </h1>
                   <p className='text-xl md:text-2xl lg:text-3xl font-semibold home-text-primary mt-4 md:mt-6'>
                     {t('一衡调山海，万模皆可达')}
                   </p>
                   <p className='text-base md:text-lg lg:text-xl home-text-secondary mt-3 md:mt-4 max-w-xl'>
-                    {t('聚合万模，平衡调度，一口稳定接入，只需将模型基址替换为：')}
+                    {t(
+                      '聚合万模，平衡调度，一口稳定接入，只需将模型基址替换为：',
+                    )}
                   </p>
                   <div className='flex flex-col md:flex-row items-center justify-center gap-4 w-full mt-4 md:mt-6 max-w-md'>
                     <div className='home-endpoint-control'>
@@ -323,48 +373,32 @@ const Home = ({ onLandingChange } = {}) => {
                       {t('支持众多的大模型供应商')}
                     </span>
                   </div>
-                  <div className='home-provider-badges'>
-                    {providerBadges.map((provider) => (
-                      <span className='home-provider-badge' key={provider}>
-                        {provider}
+                  <div className='home-island-models'>
+                    {providerModels.map(([name, Icon]) => (
+                      <span
+                        className='home-island-model'
+                        key={name}
+                        title={name}
+                      >
+                        <Icon size={26} />
                       </span>
                     ))}
                   </div>
                 </div>
               </div>
             </div>
+            <InkMountains />
           </div>
 
           <section className='home-section'>
             <div className='home-section-inner'>
-              <h2 className='home-section-title'>
-                {t('为什么选择山海衡 AI')}
-              </h2>
+              <h2 className='home-section-title'>{t('为什么选择山海衡 AI')}</h2>
               <div className='home-feature-grid'>
-                {[
-                  [
-                    '聚合 40+ 大模型',
-                    'OpenAI、Claude、Gemini、DeepSeek、Qwen… 一个统一 API 全部调用，无需多处对接。',
-                    '🔗',
-                  ],
-                  [
-                    '更优的价格',
-                    '批量议价、按量计费、缓存命中优惠，成本更低、账单更透明。',
-                    '💰',
-                  ],
-                  [
-                    '稳定高可用',
-                    '多节点容灾、智能路由、自动重试，保障调用稳定不中断。',
-                    '⚡',
-                  ],
-                  [
-                    '安全可控',
-                    '密钥隔离、用量管控、调用日志与账单全程可查，合规放心。',
-                    '🛡️',
-                  ],
-                ].map(([title, desc, icon]) => (
+                {featureItems.map(([title, desc, Icon]) => (
                   <div className='home-feature-card' key={title}>
-                    <div className='home-feature-icon'>{icon}</div>
+                    <div className='home-feature-icon'>
+                      <Icon size={22} strokeWidth={1.6} />
+                    </div>
                     <h3>{t(title)}</h3>
                     <p>{t(desc)}</p>
                   </div>
@@ -380,7 +414,11 @@ const Home = ({ onLandingChange } = {}) => {
                 {[
                   ['1', '注册并获取密钥', '登录控制台，创建专属 API Key。'],
                   ['2', '替换模型基址', '把原有 Base URL 换成本平台地址。'],
-                  ['3', '立即开始调用', '沿用原有 SDK 与参数，直接调用 40+ 模型。'],
+                  [
+                    '3',
+                    '立即开始调用',
+                    '沿用原有 SDK 与参数，直接调用 40+ 模型。',
+                  ],
                 ].map(([n, title, desc]) => (
                   <div className='home-step' key={n}>
                     <div className='home-step-no'>{n}</div>
