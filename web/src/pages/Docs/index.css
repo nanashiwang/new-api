@@ -1,142 +1,249 @@
+/* 文档页：与首页一致的深蓝科技风入口 + 清爽易读的内容区 */
 .nan-docs-page {
   min-height: calc(100vh - 64px);
-  padding: 88px 24px 40px;
+  padding: 88px 24px 56px;
   background:
-    radial-gradient(
-      circle at top left,
-      rgba(46, 118, 255, 0.12),
-      transparent 28rem
-    ),
+    radial-gradient(700px 360px at 12% 0%, rgba(56, 189, 248, 0.1), transparent 60%),
+    radial-gradient(640px 360px at 88% 4%, rgba(99, 102, 241, 0.1), transparent 60%),
     linear-gradient(180deg, var(--semi-color-bg-0), var(--semi-color-bg-1));
 }
 
+/* Hero：深蓝渐变 + 网格光纹 + 白字（呼应首页 Hero） */
 .nan-docs-hero {
+  position: relative;
+  overflow: hidden;
   max-width: 1200px;
-  margin: 0 auto 20px;
-  padding: 24px;
+  margin: 0 auto 24px;
+  padding: 32px 28px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  border: 1px solid var(--semi-color-border);
-  border-radius: 20px;
-  background: var(--semi-color-bg-0);
-  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.08);
+  border-radius: 22px;
+  color: #f8fafc;
+  background:
+    radial-gradient(600px 300px at 16% 10%, rgba(56, 189, 248, 0.22), transparent 60%),
+    linear-gradient(150deg, #0a1430 0%, #0d2348 55%, #081a36 100%);
+  box-shadow: 0 18px 48px rgba(13, 35, 72, 0.35);
+}
+.nan-docs-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(125, 211, 252, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(125, 211, 252, 0.06) 1px, transparent 1px);
+  background-size: 40px 40px;
+  -webkit-mask-image: radial-gradient(circle at 28% 30%, #000, transparent 75%);
+  mask-image: radial-gradient(circle at 28% 30%, #000, transparent 75%);
+}
+.nan-docs-hero > * {
+  position: relative;
+  z-index: 1;
 }
 
 .nan-docs-eyebrow {
   display: inline-block;
-  margin-bottom: 8px;
-  color: var(--semi-color-primary);
+  margin-bottom: 12px;
+  padding: 3px 12px;
+  border-radius: 9999px;
+  color: #7dd3fc !important;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  font-size: 12px;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
+  background: rgba(125, 211, 252, 0.12);
+  border: 1px solid rgba(125, 211, 252, 0.3);
 }
 
 .nan-docs-title {
-  margin: 0 0 8px !important;
+  margin: 0 0 10px !important;
+  color: #f8fafc !important;
 }
 
+/* Hero 内副标题与按钮转为深底配色 */
+.nan-docs-hero .semi-typography-tertiary {
+  color: #9fb3d1 !important;
+}
+.nan-docs-hero .semi-button {
+  color: #e6eefc !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+  border: 1px solid rgba(125, 211, 252, 0.3) !important;
+  border-radius: 9999px !important;
+}
+.nan-docs-hero .semi-button:hover {
+  background: rgba(125, 211, 252, 0.18) !important;
+}
+
+/* 布局：左侧导航 + 右侧内容 */
 .nan-docs-layout {
   max-width: 1200px;
   margin: 0 auto;
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
-  gap: 20px;
+  grid-template-columns: 248px minmax(0, 1fr);
+  gap: 24px;
   align-items: start;
 }
 
+/* 侧边栏 */
 .nan-docs-sidebar {
   position: sticky;
   top: 88px;
-  padding: 14px;
+  padding: 16px 12px;
   border: 1px solid var(--semi-color-border);
   border-radius: 18px;
   background: var(--semi-color-bg-0);
+  box-shadow: 0 6px 24px rgba(15, 23, 42, 0.05);
 }
-
 .nan-docs-nav-group + .nan-docs-nav-group {
-  margin-top: 14px;
-  padding-top: 14px;
+  margin-top: 16px;
+  padding-top: 16px;
   border-top: 1px solid var(--semi-color-border);
 }
-
 .nan-docs-nav-group-title {
   display: block;
-  margin: 0 0 8px 8px;
-  color: var(--semi-color-text-2);
-  font-size: 12px;
-  font-weight: 700;
+  margin: 0 0 10px 10px;
+  color: var(--semi-color-text-2) !important;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
-
 .nan-docs-nav-button {
   justify-content: flex-start !important;
   text-align: left;
+  border-radius: 10px !important;
+  transition:
+    transform 0.16s ease,
+    background-color 0.16s ease;
+}
+/* 当前项：蓝青渐变高亮 */
+.nan-docs-nav-button.semi-button-primary {
+  background: linear-gradient(135deg, #3b82f6, #06b6d4) !important;
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.32);
+}
+.nan-docs-nav-button:not(.semi-button-primary):hover {
+  background: var(--semi-color-fill-0) !important;
+  transform: translateX(2px);
 }
 
+/* 内容卡片 */
 .nan-docs-content {
   min-width: 0;
 }
-
 .nan-docs-card {
+  border: 1px solid var(--semi-color-border) !important;
   border-radius: 18px !important;
   overflow: hidden;
+  box-shadow: 0 12px 36px rgba(15, 23, 42, 0.06) !important;
+}
+.nan-docs-card .semi-card-body {
+  padding: 32px 36px;
+}
+.nan-docs-card-header {
+  margin: -32px -36px 24px;
+  padding: 24px 36px 20px;
+  border-bottom: 1px solid var(--semi-color-border);
+  background: linear-gradient(180deg, var(--semi-color-fill-0), transparent);
+}
+.nan-docs-card-header .semi-typography-heading {
+  position: relative;
+  padding-left: 14px;
+}
+.nan-docs-card-header .semi-typography-heading::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 4px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #3b82f6, #06b6d4);
 }
 
-.nan-docs-card-header {
-  margin-bottom: 18px;
-  padding-bottom: 16px;
+/* Markdown 正文排版增强 */
+.nan-docs-card .markdown-body {
+  line-height: 1.78;
+}
+.nan-docs-card .markdown-body h2 {
+  margin-top: 34px;
+  padding-bottom: 8px;
   border-bottom: 1px solid var(--semi-color-border);
 }
-
-.nan-docs-card .semi-card-body {
-  padding: 28px;
+.nan-docs-card .markdown-body h3 {
+  margin-top: 24px;
 }
-
+.nan-docs-card .markdown-body a {
+  color: #0ea5e9;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(14, 165, 233, 0.32);
+  transition: border-color 0.15s ease;
+}
+.nan-docs-card .markdown-body a:hover {
+  border-bottom-color: #0ea5e9;
+}
 .nan-docs-card .markdown-body table {
   display: block;
   width: 100%;
   overflow-x: auto;
+  border-collapse: collapse;
 }
-
+.nan-docs-card .markdown-body th {
+  background: var(--semi-color-fill-1);
+}
+.nan-docs-card .markdown-body tbody tr:nth-child(even) {
+  background: var(--semi-color-fill-0);
+}
 .nan-docs-card .markdown-body pre {
   overflow-x: auto;
+  border-radius: 12px;
+}
+.nan-docs-card .markdown-body blockquote {
+  margin: 16px 0;
+  padding: 8px 16px;
+  border-left: 3px solid #06b6d4;
+  border-radius: 0 8px 8px 0;
+  background: var(--semi-color-fill-0);
+}
+.nan-docs-card .markdown-body :not(pre) > code {
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 0.92em;
+  background: var(--semi-color-fill-1);
 }
 
 @media (max-width: 900px) {
   .nan-docs-page {
     padding: 76px 12px 28px;
   }
-
   .nan-docs-hero {
-    padding: 18px;
+    padding: 22px 18px;
     flex-direction: column;
     align-items: flex-start;
   }
-
   .nan-docs-layout {
     grid-template-columns: 1fr;
   }
-
   .nan-docs-sidebar {
     position: static;
   }
-
   .nan-docs-nav-group + .nan-docs-nav-group {
-    margin-top: 10px;
-    padding-top: 10px;
+    margin-top: 12px;
+    padding-top: 12px;
   }
-
   .nan-docs-sidebar .semi-space {
     flex-direction: row !important;
     flex-wrap: wrap;
   }
-
   .nan-docs-nav-button {
     width: auto !important;
   }
-
   .nan-docs-card .semi-card-body {
-    padding: 18px;
+    padding: 20px;
+  }
+  .nan-docs-card-header {
+    margin: -20px -20px 18px;
+    padding: 18px 20px 16px;
   }
 }
