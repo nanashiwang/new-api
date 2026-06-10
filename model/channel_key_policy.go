@@ -13,6 +13,7 @@ import (
 const (
 	multiKeyCooldownKeyPrefix  = "mk:cooldown"
 	multiKeyCooldownFailPrefix = "mk:cooldown:fails"
+	multiKeyPoolNotifiedPrefix = "mk:pool_exhausted_notified"
 	multiKeyStickyKeyPrefix    = "mk:sticky"
 
 	// multiKeyCooldownMaxSeconds 指数退避冷却的封顶时长（2 小时）。
@@ -23,6 +24,10 @@ const (
 	// 计数就不会过期；恢复正常（或长时间无流量）后计数自然消失，下次
 	// 失败重新从基础时长起步。
 	multiKeyCooldownFailCounterTTL = 2 * multiKeyCooldownMaxSeconds * time.Second
+
+	// 整池耗尽通知的去重窗口：同一渠道 6 小时内最多通知一次；
+	// 渠道恢复成功调用后立即清除标记，下次耗尽会再次通知。
+	multiKeyPoolNotifiedTTL = 6 * time.Hour
 )
 
 func buildMultiKeyCooldownKey(channelId int, keyIndex int) string {
@@ -111,6 +116,30 @@ func ResetMultiKeyCooldownBackoff(channelId int, keyIndex int) error {
 		return nil
 	}
 	return common.RedisDel(buildMultiKeyCooldownFailKey(channelId, keyIndex))
+}
+
+// TryMarkChannelPoolExhaustedNotified 抢占整池耗尽的通知权（SETNX）。
+// 返回 true 表示本次抢到、应当发送通知；6 小时窗口内的后续调用返回 false。
+func TryMarkChannelPoolExhaustedNotified(channelId int) bool {
+	if !common.RedisEnabled || channelId <= 0 {
+		return false
+	}
+	ok, err := common.RDB.SetNX(
+		context.Background(),
+		fmt.Sprintf("%s:%d", multiKeyPoolNotifiedPrefix, channelId),
+		"1",
+		multiKeyPoolNotifiedTTL,
+	).Result()
+	return err == nil && ok
+}
+
+// ClearChannelPoolExhaustedNotified 渠道恢复成功调用后清除通知标记，
+// 使下一次整池耗尽能再次触发通知。
+func ClearChannelPoolExhaustedNotified(channelId int) error {
+	if !common.RedisEnabled || channelId <= 0 {
+		return nil
+	}
+	return common.RedisDel(fmt.Sprintf("%s:%d", multiKeyPoolNotifiedPrefix, channelId))
 }
 
 func ClearMultiKeyCooldown(channelId int, keyIndex int) error {

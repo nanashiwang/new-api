@@ -226,13 +226,14 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		if newAPIError == nil {
-			// 调用成功：异步清掉该 Key 的连续失败计数，
+			// 调用成功：异步清掉该 Key 的连续失败计数与整池耗尽通知标记，
 			// 避免历史失败抬高健康 Key 下次冷却的起点。
 			if common.QuotaStabilityEnabled && channel.ChannelInfo.IsMultiKey {
 				if keyIndex, ok := common.GetContextKeyType[int](c, constant.ContextKeyChannelMultiKeyIndex); ok && keyIndex >= 0 {
 					channelId := channel.Id
 					gopool.Go(func() {
 						_ = model.ResetMultiKeyCooldownBackoff(channelId, keyIndex)
+						_ = model.ClearChannelPoolExhaustedNotified(channelId)
 					})
 				}
 			}
@@ -394,6 +395,11 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 			} else {
 				logger.LogInfo(c, fmt.Sprintf("multi-key cooldown set: channel=%d key_index=%d ttl=%ds", channelError.ChannelId, keyIndex, appliedSeconds))
 			}
+			// 整池耗尽检测：异步核对该渠道是否已无可用 Key，是则通知管理员（6h 去重）。
+			cooldownChannelId := channelError.ChannelId
+			gopool.Go(func() {
+				service.NotifyChannelPoolExhausted(cooldownChannelId)
+			})
 		}
 	}
 	// 不要在异步协程里从 context 重新读取渠道信息，避免不一致。

@@ -47,6 +47,8 @@ export default function SettingsMonitoring(props) {
     'monitor_setting.auto_test_channel_minutes': 10,
     'monitor_setting.pre_disable_wait_enabled': false,
     'monitor_setting.pre_disable_wait_minutes': 10,
+    'monitor_setting.pool_exhausted_notify_enabled': false,
+    'monitor_setting.pool_exhausted_notify_emails': '',
   });
   const refForm = useRef();
   const [inputsRow, setInputsRow] = useState(inputs);
@@ -120,7 +122,8 @@ export default function SettingsMonitoring(props) {
           key === 'AutomaticDisableChannelEnabled' ||
           key === 'AutomaticEnableChannelEnabled' ||
           key === 'monitor_setting.auto_test_channel_enabled' ||
-          key === 'monitor_setting.pre_disable_wait_enabled'
+          key === 'monitor_setting.pre_disable_wait_enabled' ||
+          key === 'monitor_setting.pool_exhausted_notify_enabled'
         ) {
           currentInputs[key] = toBoolean(props.options[key]);
         } else if (
@@ -294,6 +297,46 @@ export default function SettingsMonitoring(props) {
                     setInputs({
                       ...inputs,
                       AutomaticEnableChannelEnabled: value,
+                    })
+                  }
+                />
+              </Col>
+            </Row>
+            <Row gutter={16}>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Switch
+                  field={'monitor_setting.pool_exhausted_notify_enabled'}
+                  label={t('账号池耗尽时通知管理员')}
+                  size='default'
+                  checkedText='｜'
+                  uncheckedText='〇'
+                  extraText={t(
+                    '多Key渠道的全部Key进入冷却或禁用时发送提醒（同一渠道6小时内最多一次）',
+                  )}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      'monitor_setting.pool_exhausted_notify_enabled': value,
+                    })
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={16} lg={16} xl={16}>
+                <Form.TextArea
+                  label={t('账号池耗尽通知邮箱')}
+                  placeholder={'admin1@example.com, admin2@example.com'}
+                  extraText={t(
+                    '支持多个邮箱，使用逗号、分号或换行分隔；留空则使用超级管理员的通知方式',
+                  )}
+                  field={'monitor_setting.pool_exhausted_notify_emails'}
+                  disabled={
+                    !inputs['monitor_setting.pool_exhausted_notify_enabled']
+                  }
+                  autosize={{ minRows: 1, maxRows: 4 }}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      'monitor_setting.pool_exhausted_notify_emails': value,
                     })
                   }
                 />

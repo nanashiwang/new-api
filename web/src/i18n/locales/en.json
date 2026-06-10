@@ -5174,5 +5174,9 @@
     "X 也可以小于 1，当折扣用。想做\"只给输出加价\"或\"额外加固定费用\"，请直接写完整计费公式。": ""
   },
   "?????? 0 ??? 7 ????": "Week (resets every 7 days from enabled date at 00:00)",
-  "?????? 0 ???????": "Month (resets monthly from enabled date at 00:00)"
+  "?????? 0 ???????": "Month (resets monthly from enabled date at 00:00)",
+  "账号池耗尽时通知管理员": "Notify admin when key pool exhausted",
+  "多Key渠道的全部Key进入冷却或禁用时发送提醒（同一渠道6小时内最多一次）": "Send an alert when all keys of a multi-key channel are in cooldown or disabled (at most once per channel within 6 hours)",
+  "账号池耗尽通知邮箱": "Pool exhausted notification emails",
+  "支持多个邮箱，使用逗号、分号或换行分隔；留空则使用超级管理员的通知方式": "Multiple emails supported, separated by comma, semicolon or newline; leave empty to use the root user's notification method"
 }
