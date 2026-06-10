@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { lazy, Suspense } from 'react';
+import React, { lazy, Suspense, useEffect } from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, useLocation } from 'react-router-dom';
 import { UserProvider } from './context/User';
@@ -25,8 +25,30 @@ import { StatusProvider } from './context/Status';
 import { ThemeProvider } from './context/Theme';
 import './index.css';
 import PublicHomeShell from './components/layout/PublicHomeShell';
+import GlobalTopProgress from './components/common/ui/GlobalTopProgress';
+import { beginGlobalLoading, endGlobalLoading } from './helpers/globalLoading';
 
-const AppShell = lazy(() => import('./components/layout/AppShell'));
+// AppShell chunk 与初始语言包一起等待就绪后再渲染：
+// 非中文用户若不等语言包，t() 会先返回中文 key 再切换目标语言，造成语言闪变。
+const AppShell = lazy(() =>
+  Promise.all([
+    import('./components/layout/AppShell'),
+    import('./i18n/i18n').then((module) => module.initialLocaleReady),
+  ]).then(([module]) => module),
+);
+
+// 懒加载等待期间显示顶部进度条，替代纯白屏。
+const ShellFallback = () => {
+  useEffect(() => {
+    beginGlobalLoading();
+    return () => endGlobalLoading();
+  }, []);
+  return (
+    <div className='fixed inset-0'>
+      <GlobalTopProgress />
+    </div>
+  );
+};
 
 // 欢迎信息（二次开发者未经允许不准将此移除）
 // Welcome message (Do not remove this without permission from the original developer)
@@ -44,7 +66,7 @@ const ShellRouter = () => {
     return <PublicHomeShell />;
   }
   return (
-    <Suspense fallback={<div className='fixed inset-0' />}>
+    <Suspense fallback={<ShellFallback />}>
       <AppShell />
     </Suspense>
   );

@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { useEffect, useState } from 'react';
+import { normalizeLocale } from './localeNormalize';
 
 const LANGUAGE_STORAGE_KEY = 'i18nextLng';
 const LANGUAGE_CHANGE_EVENT = 'public-language-change';
@@ -49,13 +50,11 @@ const en = {
   关闭公告: 'Close Notice',
 };
 
+// 公开首页仅内置 zh / en 两套词条：先走与控制台一致的归一化（localeNormalize），
+// 再把非中文语言收敛到 en，保证与 i18next 检测结果方向一致、跨页不跳变。
 export const normalizePublicLanguage = (language) => {
-  if (!language) return 'zh-CN';
-  if (language.startsWith('zh-TW') || language.startsWith('zh-HK')) {
-    return 'zh-TW';
-  }
-  if (language.startsWith('zh')) return 'zh-CN';
-  return 'en';
+  const normalized = normalizeLocale(language);
+  return normalized.startsWith('zh') ? normalized : 'en';
 };
 
 export const getPublicLanguage = () => {

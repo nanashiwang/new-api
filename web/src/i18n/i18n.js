@@ -20,6 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import LanguageDetector from 'i18next-browser-languagedetector';
+import { normalizeLocale } from '../helpers/localeNormalize';
 
 const localeLoaders = {
   'zh-CN': () => import('./locales/zh-CN.json'),
@@ -31,16 +32,8 @@ const localeLoaders = {
   vi: () => import('./locales/vi.json'),
 };
 
-const normalizeLanguage = (lng) => {
-  if (!lng) return 'zh-CN';
-  if (lng.startsWith('zh-TW') || lng.startsWith('zh-HK')) return 'zh-TW';
-  if (lng.startsWith('zh')) return 'zh-CN';
-  const shortLng = lng.split('-')[0];
-  return localeLoaders[lng] ? lng : localeLoaders[shortLng] ? shortLng : 'zh-CN';
-};
-
 const loadLocale = async (lng) => {
-  const normalizedLng = normalizeLanguage(lng);
+  const normalizedLng = normalizeLocale(lng);
   if (i18n.hasResourceBundle(normalizedLng, 'translation')) {
     return normalizedLng;
   }
@@ -93,13 +86,19 @@ i18n.changeLanguage = async (lng, callback) => {
   return changeLanguage(normalizedLng, callback);
 };
 
-initPromise.then(() => {
-  const normalizedLng = normalizeLanguage(i18n.language);
+// 初始语言就绪信号：AppShell 在此 promise 完成后才渲染（见 src/index.jsx）。
+// zh-CN 是翻译 key 的源语言，t() 直接返回 key 即为正确文案，
+// 语言包留到空闲时补齐，不阻塞首屏；
+// 其他语言必须等语言包下载完成，否则会先闪中文 key 再切换目标语言。
+export const initialLocaleReady = initPromise.then(() => {
+  const normalizedLng = normalizeLocale(i18n.language);
   if (normalizedLng === 'zh-CN') {
     loadLocaleWhenIdle(normalizedLng);
-  } else {
-    i18n.changeLanguage(normalizedLng);
+    return;
   }
+  return i18n.changeLanguage(normalizedLng).catch((error) => {
+    console.error('Failed to load locale:', error);
+  });
 });
 
 export default i18n;
