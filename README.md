@@ -15,6 +15,13 @@
 </p>
 
 <p align="center">
+  🌊 <strong>在线服务：<a href="https://cn.meta-api.vip">山海衡 AI · 大模型 API 中转网关</a></strong><br>
+  OpenAI / Claude / Gemini / DeepSeek / Qwen 等 40+ 模型统一接入，
+  支持 <a href="https://cn.meta-api.vip/docs/clients/claude-code">Claude Code</a>、<a href="https://cn.meta-api.vip/docs/clients/codex">Codex</a>、<a href="https://cn.meta-api.vip/docs/clients/gemini">Gemini CLI</a> 接入教程 ·
+  <a href="https://cn.meta-api.vip/pricing">模型价格</a> · <a href="https://cn.meta-api.vip/docs">使用文档</a>
+</p>
+
+<p align="center">
   <a href="https://raw.githubusercontent.com/Calcium-Ion/new-api/main/LICENSE">
     <img src="https://img.shields.io/github/license/Calcium-Ion/new-api?color=brightgreen" alt="license">
   </a><!--
