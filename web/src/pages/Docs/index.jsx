@@ -136,7 +136,9 @@ const DOC_LINK_REPLACEMENTS = [
   [/\.\/NAN_CLIENT_OPENCLAW\.md/g, '/docs/clients/openclaw'],
   [/\.\/NAN_CLIENT_CCSWITCH\.md/g, '/docs/clients/ccswitch'],
   [/\.\/NAN_TROUBLESHOOTING\.md/g, '/docs/troubleshooting'],
-  [/\.\/images\//g, '/docs/images/'],
+  // 图片放 /docs-images/（不能叫 /docs/images/：dist 里出现 docs 目录会让
+  // 静态文件服务把 /docs 当目录发 301，与 SPA 路由打架导致重定向死循环）
+  [/\.\/images\//g, '/docs-images/'],
 ];
 
 const NAV_GROUPS = DOCS.reduce((groups, doc) => {
