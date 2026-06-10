@@ -226,6 +226,16 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		if newAPIError == nil {
+			// 调用成功：异步清掉该 Key 的连续失败计数，
+			// 避免历史失败抬高健康 Key 下次冷却的起点。
+			if common.QuotaStabilityEnabled && channel.ChannelInfo.IsMultiKey {
+				if keyIndex, ok := common.GetContextKeyType[int](c, constant.ContextKeyChannelMultiKeyIndex); ok && keyIndex >= 0 {
+					channelId := channel.Id
+					gopool.Go(func() {
+						_ = model.ResetMultiKeyCooldownBackoff(channelId, keyIndex)
+					})
+				}
+			}
 			return
 		}
 
@@ -377,10 +387,12 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 			if reason == "" {
 				reason = "quota_related_error"
 			}
-			if cooldownErr := model.SetMultiKeyCooldown(channelError.ChannelId, keyIndex, reason, common.MultiKeyCooldownSeconds); cooldownErr != nil {
+			// 指数退避：连续额度失败的 Key 冷却时长翻倍递增（封顶 2h），
+			// 避免余额耗尽的死 Key 每个基础周期就复活拿用户请求当探针。
+			if appliedSeconds, cooldownErr := model.SetMultiKeyCooldownWithBackoff(channelError.ChannelId, keyIndex, reason); cooldownErr != nil {
 				common.SysError(fmt.Sprintf("set multi-key cooldown failed: channel=%d key_index=%d err=%v", channelError.ChannelId, keyIndex, cooldownErr))
 			} else {
-				logger.LogInfo(c, fmt.Sprintf("multi-key cooldown set: channel=%d key_index=%d ttl=%ds", channelError.ChannelId, keyIndex, common.MultiKeyCooldownSeconds))
+				logger.LogInfo(c, fmt.Sprintf("multi-key cooldown set: channel=%d key_index=%d ttl=%ds", channelError.ChannelId, keyIndex, appliedSeconds))
 			}
 		}
 	}
