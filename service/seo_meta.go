@@ -36,40 +36,119 @@ var imagePlaygroundMeta = routeMeta{
 }
 
 // routeMetaMap 公开路由 → 元数据映射。
-// key 必须是请求的 URL.Path 精确字符串（注意结尾斜杠是否存在）。
+// key 必须是请求的 URL.Path 精确字符串（init 会自动补一份带尾斜杠的别名）。
+// 文案策略：品牌词「山海衡 AI」打头 + 长尾场景词（Claude Code / Codex / Gemini CLI 接入），
+// 避开「AI 中转网关」这类头部大词；开源项目 new-api 的署名保留在 description 中。
 var routeMetaMap = map[string]routeMeta{
 	"/": {
-		Title:       "New API · AI 多渠道聚合中转网关 | OpenAI / Claude / Gemini 一站式代理",
-		Description: "New API 是开源的 AI 大模型聚合中转网关，统一对接 OpenAI、Claude、Gemini、DeepSeek、Qwen、Azure、Midjourney 等 30+ 渠道，提供多账户调度、计费统计、Web 管理台。Docker 一键部署。",
+		Title:       "山海衡 AI · 大模型 API 中转网关 | Claude Code / Codex / Gemini CLI 稳定接入",
+		Description: "山海衡 AI 是基于开源 new-api 构建的大模型 API 中转网关：一个 API Key 调用 OpenAI、Claude、Gemini、DeepSeek、Qwen 等 40+ 模型，支持 Claude Code、Codex CLI、Gemini CLI 一键接入，按量透明计费，多节点高可用。",
 		Canonical:   seoSiteOrigin + "/",
 		OGURL:       seoSiteOrigin + "/",
 	},
 	"/login": {
-		Title:       "登录 · New API AI 中转网关",
-		Description: "登录 New API 控制台，管理你的 AI API Key、查看用量与计费、配置多账户调度策略。",
+		Title:       "登录 · 山海衡 AI 控制台",
+		Description: "登录山海衡 AI 控制台，管理你的 API Key、查看用量与计费、配置模型调用策略。",
 		Canonical:   seoSiteOrigin + "/login",
 		OGURL:       seoSiteOrigin + "/login",
 	},
 	"/register": {
-		Title:       "注册 · New API AI 中转网关",
-		Description: "注册 New API 账户，立即获取统一 AI API Key，一套密钥调用 OpenAI / Claude / Gemini 等 30+ 渠道。",
+		Title:       "注册 · 山海衡 AI | 获取统一 API Key 调用 40+ 大模型",
+		Description: "注册山海衡 AI 账户，立即获取统一 API Key，一套密钥调用 OpenAI / Claude / Gemini / DeepSeek 等 40+ 模型。",
 		Canonical:   seoSiteOrigin + "/register",
 		OGURL:       seoSiteOrigin + "/register",
 	},
 	"/pricing": {
-		Title:       "模型价格 · OpenAI / Claude / Gemini 中转报价 | New API",
-		Description: "New API 提供 OpenAI、Claude、Gemini、DeepSeek、Qwen、gpt-image 等模型的中转价格与计费倍率，所有模型按 Token / 调用次数透明计费。",
+		Title:       "模型价格 · Claude / GPT / Gemini API 中转价格 | 山海衡 AI",
+		Description: "山海衡 AI 提供 Claude、GPT、Gemini、DeepSeek、Qwen、gpt-image 等模型的中转价格与计费倍率，按 Token / 调用次数透明计费，支持缓存命中优惠。",
 		Canonical:   seoSiteOrigin + "/pricing",
 		OGURL:       seoSiteOrigin + "/pricing",
 	},
 	"/about": {
-		Title:       "关于 · New API AI 中转网关",
-		Description: "了解 New API 项目背景、技术架构、运维状态与服务条款。",
+		Title:       "关于 · 山海衡 AI",
+		Description: "了解山海衡 AI 平台背景、技术架构（基于开源 new-api）、运维状态与服务条款。",
 		Canonical:   seoSiteOrigin + "/about",
 		OGURL:       seoSiteOrigin + "/about",
 	},
 	"/image-playground":  imagePlaygroundMeta,
 	"/image-playground/": imagePlaygroundMeta,
+	// —— 站内文档：长尾词主战场（与 web/src/pages/Docs 的路由一一对应）——
+	"/docs": {
+		Title:       "使用文档 · 三分钟接入 40+ 大模型 | 山海衡 AI",
+		Description: "山海衡 AI 平台使用文档：注册、获取 API Key、替换 Base URL 三步接入，覆盖 Claude Code、Codex、Gemini CLI、OpenCode 等客户端配置教程与常见问题排查。",
+		Canonical:   seoSiteOrigin + "/docs",
+		OGURL:       seoSiteOrigin + "/docs",
+	},
+	"/docs/clients": {
+		Title:       "客户端接入指南 · Claude Code / Codex / Gemini CLI / OpenCode | 山海衡 AI",
+		Description: "各编程客户端接入山海衡 AI 的配置指南：Claude Code、Codex CLI、Gemini CLI、OpenCode、OpenClaw、CC Switch，含密钥配置与环境变量示例。",
+		Canonical:   seoSiteOrigin + "/docs/clients",
+		OGURL:       seoSiteOrigin + "/docs/clients",
+	},
+	"/docs/clients/claude-code": {
+		Title:       "Claude Code 中转接入教程 · 稳定使用 Claude 模型 | 山海衡 AI",
+		Description: "Claude Code 接入山海衡 AI 中转的完整教程：配置 ANTHROPIC_BASE_URL 与 API Key，几分钟即可在国内网络稳定使用 Claude 模型编程。",
+		Canonical:   seoSiteOrigin + "/docs/clients/claude-code",
+		OGURL:       seoSiteOrigin + "/docs/clients/claude-code",
+	},
+	"/docs/clients/claude-code-openai": {
+		Title:       "Claude Code 调用 OpenAI 模型教程 | 山海衡 AI",
+		Description: "在 Claude Code 中通过山海衡 AI 调用 OpenAI（GPT）系列模型的配置方法与注意事项。",
+		Canonical:   seoSiteOrigin + "/docs/clients/claude-code-openai",
+		OGURL:       seoSiteOrigin + "/docs/clients/claude-code-openai",
+	},
+	"/docs/clients/codex": {
+		Title:       "Codex CLI 中转接入教程 · OpenAI Codex 稳定使用 | 山海衡 AI",
+		Description: "OpenAI Codex CLI 接入山海衡 AI 中转的完整教程：配置 base_url 与 API Key，国内网络稳定使用 Codex 编程模型。",
+		Canonical:   seoSiteOrigin + "/docs/clients/codex",
+		OGURL:       seoSiteOrigin + "/docs/clients/codex",
+	},
+	"/docs/clients/gemini": {
+		Title:       "Gemini CLI 接入教程 · 稳定调用 Gemini API | 山海衡 AI",
+		Description: "Gemini CLI 接入山海衡 AI 中转的配置教程：设置 GOOGLE_GEMINI_BASE_URL 与 API Key，稳定调用 Gemini 系列模型。",
+		Canonical:   seoSiteOrigin + "/docs/clients/gemini",
+		OGURL:       seoSiteOrigin + "/docs/clients/gemini",
+	},
+	"/docs/clients/opencode": {
+		Title:       "OpenCode 接入教程 | 山海衡 AI",
+		Description: "OpenCode 客户端接入山海衡 AI 的 provider 配置教程与模型选择建议。",
+		Canonical:   seoSiteOrigin + "/docs/clients/opencode",
+		OGURL:       seoSiteOrigin + "/docs/clients/opencode",
+	},
+	"/docs/clients/openclaw": {
+		Title:       "OpenClaw 接入教程 | 山海衡 AI",
+		Description: "OpenClaw 客户端接入山海衡 AI 的配置教程，含密钥与模型映射示例。",
+		Canonical:   seoSiteOrigin + "/docs/clients/openclaw",
+		OGURL:       seoSiteOrigin + "/docs/clients/openclaw",
+	},
+	"/docs/clients/ccswitch": {
+		Title:       "CC Switch 多服务商切换教程 | 山海衡 AI",
+		Description: "使用 CC Switch 在 Claude Code 中一键切换山海衡 AI 等多个服务商的配置教程。",
+		Canonical:   seoSiteOrigin + "/docs/clients/ccswitch",
+		OGURL:       seoSiteOrigin + "/docs/clients/ccswitch",
+	},
+	"/docs/troubleshooting": {
+		Title:       "常见问题排查 · API 调用报错处理 | 山海衡 AI",
+		Description: "山海衡 AI 常见问题排查指南：401/403/429 报错、超时、模型不可用等问题的原因与解决方法。",
+		Canonical:   seoSiteOrigin + "/docs/troubleshooting",
+		OGURL:       seoSiteOrigin + "/docs/troubleshooting",
+	},
+}
+
+// init 为所有不带尾斜杠的路由补一份带尾斜杠的别名（如 /docs → /docs/），
+// 因为 RenderIndexWithMeta 按 URL.Path 精确匹配，两种写法都应命中同一份 meta。
+func init() {
+	aliases := make(map[string]routeMeta, len(routeMetaMap))
+	for p, m := range routeMetaMap {
+		if p != "/" && !strings.HasSuffix(p, "/") {
+			aliases[p+"/"] = m
+		}
+	}
+	for p, m := range aliases {
+		if _, exists := routeMetaMap[p]; !exists {
+			routeMetaMap[p] = m
+		}
+	}
 }
 
 // GetRouteMeta 暴露给测试与未来需要预渲染时使用。
