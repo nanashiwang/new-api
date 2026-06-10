@@ -199,8 +199,12 @@ func SaveUserBalanceSnapshot(now time.Time) (*UserBalanceSnapshot, error) {
 
 func queryUserBalanceAggregate() (userBalanceAggregateRow, error) {
 	var aggregate userBalanceAggregateRow
-	err := DB.Model(&User{}).Where("balance_trend_disabled = ?", false).Select(`
-		COALESCE(SUM(quota), 0) AS total_quota,
+	// 余额走势统计口径：已禁用用户（status != 启用）不计入；余额为负者按 0 处理，
+	// 故 total_quota 取正余额之和，避免负余额拉低总额走势。
+	err := DB.Model(&User{}).
+		Where("balance_trend_disabled = ? AND status = ?", false, common.UserStatusEnabled).
+		Select(`
+		COALESCE(SUM(CASE WHEN quota > 0 THEN quota ELSE 0 END), 0) AS total_quota,
 		COALESCE(SUM(CASE WHEN quota > 0 THEN quota ELSE 0 END), 0) AS total_positive_quota,
 		COUNT(*) AS user_count,
 		COALESCE(SUM(CASE WHEN quota > 0 THEN 1 ELSE 0 END), 0) AS positive_user_count,
@@ -213,7 +217,7 @@ func queryUserBalanceTopUsers(limit int) ([]UserBalanceSnapshotUser, error) {
 	users := make([]UserBalanceSnapshotUser, 0, limit)
 	err := DB.Model(&User{}).
 		Select("id, username, display_name, quota").
-		Where("balance_trend_disabled = ? AND quota > 0", false).
+		Where("balance_trend_disabled = ? AND status = ? AND quota > 0", false, common.UserStatusEnabled).
 		Order("quota desc").
 		Order("id asc").
 		Limit(limit).
@@ -225,7 +229,7 @@ func queryUserBalanceNegativeUsers(limit int) ([]UserBalanceSnapshotUser, error)
 	users := make([]UserBalanceSnapshotUser, 0, limit)
 	err := DB.Model(&User{}).
 		Select("id, username, display_name, quota").
-		Where("balance_trend_disabled = ? AND quota < 0", false).
+		Where("balance_trend_disabled = ? AND status = ? AND quota < 0", false, common.UserStatusEnabled).
 		Order("quota asc").
 		Order("id asc").
 		Limit(limit).
