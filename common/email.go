@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"mime"
 	"mime/quotedprintable"
+	"net"
 	"net/mail"
 	"net/smtp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -147,54 +150,115 @@ func wrapBase64(data string) string {
 	return builder.String()
 }
 
+// SMTP 发送的重试与超时参数。
+// 背景：宿主机上游网络偶发 UDP 丢包，DNS 可能解析超时、或只返回 AAAA
+// 而本机无 IPv6 出口（dial network is unreachable），导致用户收不到验证码。
+// 策略：拨号限时 + 前两次强制 IPv4 + 网络类错误自动重试（最后一次回退双栈，
+// 兼容仅 IPv6 的 SMTP 服务器）。
+const (
+	smtpMaxAttempts = 3
+	smtpDialTimeout = 10 * time.Second
+)
+
 func sendSMTPMessage(receiver string, message []byte) error {
-	auth := getSMTPAuth()
-	addr := fmt.Sprintf("%s:%d", SMTPServer, SMTPPort)
-	to := strings.Split(receiver, ";")
 	var err error
+	for attempt := 1; attempt <= smtpMaxAttempts; attempt++ {
+		network := "tcp4"
+		if attempt == smtpMaxAttempts {
+			network = "tcp" // 最后一次回退双栈，兼容仅 IPv6 的服务器
+		}
+		err = sendSMTPMessageOnce(network, receiver, message)
+		if err == nil {
+			return nil
+		}
+		if !isRetryableSMTPError(err) || attempt == smtpMaxAttempts {
+			break
+		}
+		SysLog(fmt.Sprintf("smtp send attempt %d/%d failed, retrying: %v", attempt, smtpMaxAttempts, err))
+		time.Sleep(time.Duration(attempt) * 2 * time.Second)
+	}
+	SysError(fmt.Sprintf("failed to send email to %s: %v", receiver, err))
+	return err
+}
+
+// isRetryableSMTPError 仅对网络/解析类瞬时错误重试；
+// SMTP 协议层错误（认证失败、收件人被拒等）重试无意义且可能触发风控。
+func isRetryableSMTPError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	s := err.Error()
+	return strings.Contains(s, "connection reset") ||
+		strings.Contains(s, "broken pipe") ||
+		strings.Contains(s, "unexpected EOF")
+}
+
+func sendSMTPMessageOnce(network string, receiver string, message []byte) error {
+	auth := getSMTPAuth()
+	addr := net.JoinHostPort(SMTPServer, strconv.Itoa(SMTPPort))
+	dialer := &net.Dialer{Timeout: smtpDialTimeout}
+
+	var client *smtp.Client
 	if SMTPPort == 465 || SMTPSSLEnabled {
 		tlsConfig := &tls.Config{
 			InsecureSkipVerify: true,
 			ServerName:         SMTPServer,
 		}
-		conn, err := tls.Dial("tcp", fmt.Sprintf("%s:%d", SMTPServer, SMTPPort), tlsConfig)
+		conn, err := tls.DialWithDialer(dialer, network, addr, tlsConfig)
 		if err != nil {
 			return err
 		}
-		client, err := smtp.NewClient(conn, SMTPServer)
+		client, err = smtp.NewClient(conn, SMTPServer)
 		if err != nil {
-			return err
-		}
-		defer client.Close()
-		if err = client.Auth(auth); err != nil {
-			return err
-		}
-		if err = client.Mail(SMTPFrom); err != nil {
-			return err
-		}
-		receiverEmails := strings.Split(receiver, ";")
-		for _, receiver := range receiverEmails {
-			if err = client.Rcpt(receiver); err != nil {
-				return err
-			}
-		}
-		w, err := client.Data()
-		if err != nil {
-			return err
-		}
-		_, err = w.Write(message)
-		if err != nil {
-			return err
-		}
-		err = w.Close()
-		if err != nil {
+			conn.Close()
 			return err
 		}
 	} else {
-		err = smtp.SendMail(addr, auth, SMTPFrom, to, message)
+		conn, err := dialer.Dial(network, addr)
+		if err != nil {
+			return err
+		}
+		client, err = smtp.NewClient(conn, SMTPServer)
+		if err != nil {
+			conn.Close()
+			return err
+		}
+		// 587 等明文端口：服务器支持时升级 STARTTLS（与 smtp.SendMail 行为一致）。
+		if ok, _ := client.Extension("STARTTLS"); ok {
+			if err = client.StartTLS(&tls.Config{ServerName: SMTPServer}); err != nil {
+				client.Close()
+				return err
+			}
+		}
 	}
+	defer client.Close()
+
+	if ok, _ := client.Extension("AUTH"); ok {
+		if err := client.Auth(auth); err != nil {
+			return err
+		}
+	}
+	if err := client.Mail(SMTPFrom); err != nil {
+		return err
+	}
+	for _, to := range strings.Split(receiver, ";") {
+		if err := client.Rcpt(to); err != nil {
+			return err
+		}
+	}
+	w, err := client.Data()
 	if err != nil {
-		SysError(fmt.Sprintf("failed to send email to %s: %v", receiver, err))
+		return err
 	}
-	return err
+	if _, err = w.Write(message); err != nil {
+		return err
+	}
+	if err = w.Close(); err != nil {
+		return err
+	}
+	return client.Quit()
 }
