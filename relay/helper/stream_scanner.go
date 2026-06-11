@@ -3,6 +3,7 @@ package helper
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -315,6 +316,16 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 
 		if err := scanner.Err(); err != nil {
 			if err != io.EOF {
+				// 客户端主动断开会取消请求 context，把正在读上游的 scanner 打断，
+				// 此时 err 为 context canceled——这不是上游故障，归类为 client_gone
+				// 并降为 INFO，避免误报 scanner_error 异常。
+				if c.Request.Context().Err() != nil || errors.Is(err, context.Canceled) {
+					logger.LogInfo(c, "scanner stopped by canceled context: "+err.Error())
+					if info != nil && info.StreamStatus != nil {
+						info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, err)
+					}
+					return
+				}
 				logger.LogError(c, "scanner error: "+err.Error())
 				if info != nil && info.StreamStatus != nil {
 					info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, err)
