@@ -458,7 +458,7 @@ const PersonalSetting = () => {
     );
     const { success, message } = res.data;
     if (success) {
-      showSuccess(t('验证码发送成功，请检查邮箱！'));
+      showSuccess(t('验证码发送成功，请检查邮箱（未收到请翻垃圾箱或广告邮件）'));
     } else {
       showError(message);
     }

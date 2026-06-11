@@ -90,7 +90,7 @@ const PasswordResetForm = () => {
     );
     const { success, message } = res.data;
     if (success) {
-      showSuccess(t('重置邮件发送成功，请检查邮箱！'));
+      showSuccess(t('重置邮件发送成功，请检查邮箱（未收到请翻垃圾箱或广告邮件）'));
       setInputs({ ...inputs, email: '' });
     } else {
       showError(message);
