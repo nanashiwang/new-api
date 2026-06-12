@@ -26,7 +26,7 @@ func TestRenderIndexWithMetaUnknownPathReturnsOriginal(t *testing.T) {
 
 func TestRenderIndexWithMetaRootInjectsTitleAndCanonical(t *testing.T) {
 	out := RenderIndexWithMeta([]byte(sampleIndex), "/")
-	if !bytes.Contains(out, []byte("山海衡 AI · 大模型 API 中转网关")) {
+	if !bytes.Contains(out, []byte("元衡 API：一口接入多模型，智能调度更稳定")) {
 		t.Fatalf("title not injected: %s", out)
 	}
 	if !bytes.Contains(out, []byte(`href="https://cn.meta-api.vip/"`)) {

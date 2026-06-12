@@ -24,6 +24,7 @@ import { useIsMobile } from '../../hooks/common/useIsMobile';
 import { API_ENDPOINTS } from '../../constants/common.constant';
 import { StatusContext } from '../../context/Status';
 import { useActualTheme } from '../../context/Theme';
+import { getLogo, getSystemName } from '../../helpers/storage';
 import { usePublicTranslation } from '../../helpers/publicLocale';
 import {
   Github,
@@ -132,6 +133,8 @@ const Home = ({ onLandingChange } = {}) => {
   const [endpointIndex, setEndpointIndex] = useState(0);
   const useDefaultHome = homePageContent === '';
   const currentEndpoint = endpointItems[endpointIndex]?.value || '';
+  const brandName = getSystemName();
+  const brandLogo = getLogo();
 
   const displayHomePageContent = async () => {
     const cachedContent = getCachedHomePageContent();
@@ -268,18 +271,16 @@ const Home = ({ onLandingChange } = {}) => {
               <div className='relative z-10 flex flex-col items-center justify-center text-center max-w-4xl mx-auto'>
                 <div className='flex flex-col items-center justify-center mb-6 md:mb-8'>
                   <div className='home-hero-brand'>
-                    <img src='/logo.svg' alt='logo' />
-                    <span>
-                      {statusState?.status?.system_name || '山海衡 AI'}
-                    </span>
+                    <img src={brandLogo} alt='logo' />
+                    <span>{brandName}</span>
                   </div>
                   <h1
                     className={`text-4xl md:text-5xl lg:text-6xl xl:text-7xl font-bold home-text-primary leading-tight ${isChinese ? 'tracking-wide md:tracking-wider' : ''}`}
                   >
                     <>
-                      {t('统一的')}
+                      {t('元衡 API：一口接入多模型，')}
                       <br />
-                      <span className='shine-text'>{t('大模型接口网关')}</span>
+                      <span className='shine-text'>{t('智能调度更稳定')}</span>
                       {isChinese && (
                         <span className='home-seal' aria-hidden='true'>
                           衡
@@ -288,11 +289,11 @@ const Home = ({ onLandingChange } = {}) => {
                     </>
                   </h1>
                   <p className='text-xl md:text-2xl lg:text-3xl font-semibold home-text-primary mt-4 md:mt-6'>
-                    {t('一衡调山海，万模皆可达')}
+                    {t('元起万模，衡定全局')}
                   </p>
                   <p className='text-base md:text-lg lg:text-xl home-text-secondary mt-3 md:mt-4 max-w-xl'>
                     {t(
-                      '聚合万模，平衡调度，一口稳定接入，只需将模型基址替换为：',
+                      '一口接入多模型，智能调度更稳定，只需将模型基址替换为：',
                     )}
                   </p>
                   <div className='flex flex-col md:flex-row items-center justify-center gap-4 w-full mt-4 md:mt-6 max-w-md'>
@@ -392,7 +393,7 @@ const Home = ({ onLandingChange } = {}) => {
 
           <section className='home-section'>
             <div className='home-section-inner'>
-              <h2 className='home-section-title'>{t('为什么选择山海衡 AI')}</h2>
+              <h2 className='home-section-title'>{t('为什么选择元衡 API')}</h2>
               <div className='home-feature-grid'>
                 {featureItems.map(([title, desc, Icon]) => (
                   <div className='home-feature-card' key={title}>
@@ -431,7 +432,7 @@ const Home = ({ onLandingChange } = {}) => {
           </section>
 
           <section className='home-cta'>
-            <h2>{t('一衡调山海，万模皆可达')}</h2>
+            <h2>{t('元起万模，衡定全局')}</h2>
             <p>{t('现在就接入，开启统一的大模型调用体验')}</p>
             <Link to='/console' className='home-cta-btn'>
               {t('立即开始')} →

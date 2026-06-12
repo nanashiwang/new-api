@@ -19,6 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 
 import { TABLE_COMPACT_MODES_KEY } from '../constants/common.constant';
 
+const DEFAULT_SYSTEM_NAME = '元衡 API';
+const DEFAULT_LOGO = '/logo.png';
+const LEGACY_SYSTEM_NAMES = new Set(['New API', '山海衡 AI']);
+
 export function getStoredUser() {
   const raw = localStorage.getItem('user');
   if (!raw) return null;
@@ -40,11 +44,19 @@ export function isRoot() {
 }
 
 export function getSystemName() {
-  return localStorage.getItem('system_name') || 'New API';
+  const systemName = localStorage.getItem('system_name')?.trim();
+  if (!systemName || LEGACY_SYSTEM_NAMES.has(systemName)) {
+    return DEFAULT_SYSTEM_NAME;
+  }
+  return systemName;
 }
 
 export function getLogo() {
-  return localStorage.getItem('logo') || '/logo.svg';
+  const logo = localStorage.getItem('logo')?.trim();
+  if (!logo || logo === '/logo.svg') {
+    return DEFAULT_LOGO;
+  }
+  return logo;
 }
 
 export function getUserIdFromLocalStorage() {

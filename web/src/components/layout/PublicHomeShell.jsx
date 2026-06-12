@@ -131,11 +131,10 @@ const PublicHomeShell = () => {
         if (res.data?.success) {
           statusDispatch({ type: 'set', payload: res.data.data });
           setStatusData(res.data.data);
-          if (res.data.data.system_name)
-            document.title = res.data.data.system_name;
+          if (res.data.data.system_name) document.title = getSystemName();
           if (res.data.data.logo) {
             const linkElement = document.querySelector("link[rel~='icon']");
-            if (linkElement) linkElement.href = res.data.data.logo;
+            if (linkElement) linkElement.href = getLogo();
           }
         }
       } catch (error) {

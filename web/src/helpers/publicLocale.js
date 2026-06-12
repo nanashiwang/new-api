@@ -40,8 +40,15 @@ const en = {
   '更好的价格，更好的稳定性，只需要将模型基址替换为：':
     'Better prices and better stability. Just replace the model base URL with:',
   '一衡调山海，万模皆可达': 'Balance the vast — every model within reach.',
+  '元起万模，衡定全局':
+    'One origin for every model, one balance for the whole system.',
+  '元衡 API：一口接入多模型，':
+    'Yuanheng API: one integration for many models,',
+  智能调度更稳定: 'smarter routing, steadier delivery',
   '聚合万模，平衡调度，一口稳定接入，只需将模型基址替换为：':
     'Aggregate every model, balance every request, one stable integration. Just replace the model base URL with:',
+  '一口接入多模型，智能调度更稳定，只需将模型基址替换为：':
+    'One integration for many models, with smarter and steadier routing. Just replace the model base URL with:',
   已复制到剪切板: 'Copied',
   获取密钥: 'Get Key',
   支持众多的大模型供应商: 'Supporting various LLM providers',
@@ -49,7 +56,7 @@ const en = {
   今日关闭: 'Close Today',
   关闭公告: 'Close Notice',
   // 首页内容板块
-  '为什么选择山海衡 AI': 'Why Choose Us',
+  '为什么选择元衡 API': 'Why Choose Yuanheng API',
   '聚合 40+ 大模型': 'Aggregate 40+ Models',
   'OpenAI、Claude、Gemini、DeepSeek、Qwen… 一个统一 API 全部调用，无需多处对接。':
     'OpenAI, Claude, Gemini, DeepSeek, Qwen… call them all through one unified API, no multiple integrations needed.',

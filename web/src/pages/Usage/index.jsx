@@ -37,6 +37,7 @@ import ThemeToggle from '../../components/layout/headerbar/ThemeToggle';
 import LanguageSelector from '../../components/layout/headerbar/LanguageSelector';
 import CardTable from '../../components/common/ui/CardTable';
 import { useLatestRequestGuard } from '../../hooks/common/useLatestRequestGuard';
+import { getLogo, getSystemName } from '../../helpers/storage';
 import './usage.css';
 
 const { Title, Text } = Typography;
@@ -476,8 +477,8 @@ export default function Usage() {
   }, [statusState?.status?.HeaderNavModules]);
 
   const currentLang = useMemo(() => normalizeLanguage(i18n), [i18n]);
-  const systemName = statusState?.status?.system_name || 'New API';
-  const logo = statusState?.status?.logo || '';
+  const systemName = getSystemName();
+  const logo = getLogo();
   const queryModeConfig = useMemo(
     () => QUERY_MODES.find((item) => item.key === queryMode) || QUERY_MODES[0],
     [queryMode],

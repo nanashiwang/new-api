@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  🌊 <strong>在线服务：<a href="https://cn.meta-api.vip">山海衡 AI · 大模型 API 中转网关</a></strong><br>
+  🌊 <strong>在线服务：<a href="https://cn.meta-api.vip">元衡 API · 一口接入多模型，智能调度更稳定</a></strong><br>
   OpenAI / Claude / Gemini / DeepSeek / Qwen 等 40+ 模型统一接入，
   支持 <a href="https://cn.meta-api.vip/docs/clients/claude-code">Claude Code</a>、<a href="https://cn.meta-api.vip/docs/clients/codex">Codex</a>、<a href="https://cn.meta-api.vip/docs/clients/gemini">Gemini CLI</a> 接入教程 ·
   <a href="https://cn.meta-api.vip/pricing">模型价格</a> · <a href="https://cn.meta-api.vip/docs">使用文档</a>
