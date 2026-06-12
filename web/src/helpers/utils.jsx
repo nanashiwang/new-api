@@ -54,7 +54,23 @@ export function getSystemName() {
 
 export function getLogo() {
   let logo = localStorage.getItem('logo');
-  if (!logo || logo.trim() === '/logo.svg') return '/logo.png';
+  const normalizedLogo = logo?.trim();
+  const currentOrigin =
+    typeof window !== 'undefined' ? window.location.origin : '';
+  if (
+    !normalizedLogo ||
+    [
+      '/logo.png',
+      '/logo.svg',
+      currentOrigin && `${currentOrigin}/logo.png`,
+      currentOrigin && `${currentOrigin}/logo.svg`,
+      'https://cn.meta-api.vip/logo.png',
+      'https://cn.meta-api.vip/logo.svg',
+    ]
+      .filter(Boolean)
+      .includes(normalizedLogo)
+  )
+    return '/yuanheng-logo.png';
   return logo;
 }
 

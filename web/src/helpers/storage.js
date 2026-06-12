@@ -20,8 +20,20 @@ For commercial licensing, please contact support@quantumnous.com
 import { TABLE_COMPACT_MODES_KEY } from '../constants/common.constant';
 
 const DEFAULT_SYSTEM_NAME = '元衡 API';
-const DEFAULT_LOGO = '/logo.png';
+const DEFAULT_LOGO = '/yuanheng-logo.png';
 const LEGACY_SYSTEM_NAMES = new Set(['New API', '山海衡 AI']);
+const LEGACY_LOGO_PATHS = new Set(['/logo.png', '/logo.svg']);
+
+function isLegacyLogo(logo) {
+  if (LEGACY_LOGO_PATHS.has(logo)) return true;
+  const currentOrigin =
+    typeof window !== 'undefined' ? window.location.origin : '';
+  return (
+    (currentOrigin && LEGACY_LOGO_PATHS.has(logo.replace(currentOrigin, ''))) ||
+    logo === 'https://cn.meta-api.vip/logo.png' ||
+    logo === 'https://cn.meta-api.vip/logo.svg'
+  );
+}
 
 export function getStoredUser() {
   const raw = localStorage.getItem('user');
@@ -53,7 +65,7 @@ export function getSystemName() {
 
 export function getLogo() {
   const logo = localStorage.getItem('logo')?.trim();
-  if (!logo || logo === '/logo.svg') {
+  if (!logo || isLegacyLogo(logo)) {
     return DEFAULT_LOGO;
   }
   return logo;
