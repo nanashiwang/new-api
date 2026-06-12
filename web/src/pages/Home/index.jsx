@@ -60,6 +60,13 @@ const getCachedHomePageContent = () => {
   }
 };
 
+const getPublicHomeServerAddress = (serverAddress) => {
+  const normalizedServerAddress = serverAddress.replace(/\/$/, '');
+  return normalizedServerAddress === 'https://nan.meta-api.vip'
+    ? 'https://cn.meta-api.vip'
+    : normalizedServerAddress;
+};
+
 const Home = ({ onLandingChange } = {}) => {
   const { t, language } = usePublicTranslation();
   const navigate = useNavigate();
@@ -76,6 +83,7 @@ const Home = ({ onLandingChange } = {}) => {
   const docsLink = statusState?.status?.docs_link || '';
   const serverAddress =
     statusState?.status?.server_address || `${window.location.origin}`;
+  const publicHomeServerAddress = getPublicHomeServerAddress(serverAddress);
   const endpointItems = API_ENDPOINTS.map((e) => ({ value: e }));
   const [endpointIndex, setEndpointIndex] = useState(0);
   const useDefaultHome = homePageContent === '';
@@ -133,8 +141,7 @@ const Home = ({ onLandingChange } = {}) => {
   };
 
   const handleCopyEndpoint = async () => {
-    const normalizedServerAddress = serverAddress.replace(/\/$/, '');
-    await copy(`${normalizedServerAddress}${currentEndpoint}`);
+    await copy(`${publicHomeServerAddress}${currentEndpoint}`);
   };
 
   const handleOpenDocs = () => {
@@ -220,7 +227,7 @@ const Home = ({ onLandingChange } = {}) => {
           endpointItems={endpointItems}
           handleCopyEndpoint={handleCopyEndpoint}
           handleOpenDocs={docsLink ? handleOpenDocs : null}
-          serverAddress={serverAddress}
+          serverAddress={publicHomeServerAddress}
           setEndpointIndex={setEndpointIndex}
           t={t}
         />
