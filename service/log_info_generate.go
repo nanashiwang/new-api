@@ -90,6 +90,13 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 		}
 		other["stream_status"] = streamStatus
 	}
+	if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesAutoContinue) {
+		other["responses_auto_continue"] = map[string]interface{}{
+			"from_channel": common.GetContextKeyInt(ctx, constant.ContextKeyResponsesAutoContinueFromChannel),
+			"to_channel":   common.GetContextKeyInt(ctx, constant.ContextKeyResponsesAutoContinueToChannel),
+			"end_reason":   common.GetContextKeyString(ctx, constant.ContextKeyResponsesAutoContinueEndReason),
+		}
+	}
 
 	other["admin_info"] = adminInfo
 	appendRequestPath(ctx, relayInfo, other)

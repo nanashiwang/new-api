@@ -6,14 +6,20 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
+var responsesStreamTokenEncoderOnce sync.Once
+
 func newResponsesStreamTestContext() (*gin.Context, *httptest.ResponseRecorder) {
+	responsesStreamTokenEncoderOnce.Do(service.InitTokenEncoders)
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -82,7 +88,7 @@ func TestOaiResponsesStreamHandler_FailsWhenMissingCompletedWithoutOutputAfterEO
 	require.Contains(t, responseBody, "event: response.failed")
 	require.Contains(t, responseBody, `"id":"resp_1"`)
 	require.Contains(t, responseBody, `"status":"failed"`)
-	require.Contains(t, responseBody, `"stream end: eof"`)
+	require.Contains(t, responseBody, `stream end: eof`)
 	require.NotContains(t, responseBody, "event: response.completed")
 }
 
@@ -139,7 +145,7 @@ func TestOaiResponsesStreamHandler_FailsWhenMissingCompletedWithoutOutputAfterSc
 	responseBody := recorder.Body.String()
 	require.Contains(t, responseBody, "event: response.failed")
 	require.Contains(t, responseBody, `"status":"failed"`)
-	require.Contains(t, responseBody, `"stream end: scanner_error"`)
+	require.Contains(t, responseBody, `stream end: scanner_error`)
 	require.NotContains(t, responseBody, "event: response.completed")
 }
 
@@ -170,6 +176,72 @@ func TestOaiResponsesStreamHandler_SynthesizesCompletedWhenOutputExistsAfterScan
 	require.Contains(t, responseBody, "partial output")
 	require.Contains(t, responseBody, "event: response.completed")
 	require.NotContains(t, responseBody, "event: response.failed")
+}
+
+func TestOaiResponsesStreamHandler_AutoContinuesBeforeSyntheticCompleted(t *testing.T) {
+	t.Parallel()
+	setResponsesStreamTestTimeout(t)
+
+	c, recorder := newResponsesStreamTestContext()
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "gpt-5.5",
+		},
+	}
+
+	body := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.5","created_at":1700000000}}`,
+		`data: {"type":"response.output_text.delta","delta":"partial output"}`,
+	}, "\n") + "\n"
+
+	called := false
+	usage, err := OaiResponsesStreamHandlerWithOptions(c, info, newResponsesStreamHTTPResponseWithReadError(body, errors.New("upstream read timeout")), &ResponsesStreamHandlerOptions{
+		AutoContinue: func(streamCtx ResponsesStreamAutoContinueContext) (*dto.Usage, bool) {
+			called = true
+			require.Equal(t, "partial output", streamCtx.OutputText)
+			return &dto.Usage{PromptTokens: 5, CompletionTokens: 6, TotalTokens: 11}, true
+		},
+	})
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.True(t, called)
+	require.GreaterOrEqual(t, usage.CompletionTokens, 6)
+
+	responseBody := recorder.Body.String()
+	require.Contains(t, responseBody, "partial output")
+	require.NotContains(t, responseBody, "event: response.completed")
+	require.NotContains(t, responseBody, "event: response.failed")
+}
+
+func TestOaiResponsesStreamHandler_ContinuationOutputOnlyFiltersLifecycleEvents(t *testing.T) {
+	t.Parallel()
+	setResponsesStreamTestTimeout(t)
+
+	c, recorder := newResponsesStreamTestContext()
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "gpt-5.5",
+		},
+	}
+
+	body := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_2","model":"gpt-5.5","created_at":1700000001}}`,
+		`data: {"type":"response.output_item.added","item":{"type":"message","id":"msg_1","role":"assistant"}}`,
+		`data: {"type":"response.output_text.delta","delta":"continued"}`,
+		`data: {"type":"response.completed","response":{"id":"resp_2","model":"gpt-5.5","created_at":1700000001,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"continued"}]}],"usage":{"input_tokens":5,"output_tokens":1,"total_tokens":6}}}`,
+	}, "\n")
+
+	usage, err := OaiResponsesStreamHandlerWithOptions(c, info, newResponsesStreamHTTPResponse(body), &ResponsesStreamHandlerOptions{
+		ContinuationOutputOnly: true,
+	})
+	require.Nil(t, err)
+	require.Equal(t, 6, usage.TotalTokens)
+
+	responseBody := recorder.Body.String()
+	require.NotContains(t, responseBody, "event: response.created")
+	require.NotContains(t, responseBody, "event: response.output_item.added")
+	require.Contains(t, responseBody, "continued")
+	require.Contains(t, responseBody, "event: response.completed")
 }
 
 func TestOaiResponsesStreamHandler_DoesNotDuplicateCompleted(t *testing.T) {

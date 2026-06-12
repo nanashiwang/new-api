@@ -65,6 +65,11 @@ const (
 
 	ContextKeySystemPromptOverride ContextKey = "system_prompt_override"
 
+	ContextKeyResponsesAutoContinue            ContextKey = "responses_auto_continue"
+	ContextKeyResponsesAutoContinueFromChannel ContextKey = "responses_auto_continue_from_channel"
+	ContextKeyResponsesAutoContinueToChannel   ContextKey = "responses_auto_continue_to_channel"
+	ContextKeyResponsesAutoContinueEndReason   ContextKey = "responses_auto_continue_end_reason"
+
 	// ContextKeyFileSourcesToCleanup stores file sources that need cleanup when request ends
 	ContextKeyFileSourcesToCleanup ContextKey = "file_sources_to_cleanup"
 

@@ -87,6 +87,27 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 }
 
 func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
+	return OaiResponsesStreamHandlerWithOptions(c, info, resp, nil)
+}
+
+type ResponsesStreamAutoContinueContext struct {
+	Usage              *dto.Usage
+	OutputText         string
+	ResponseID         string
+	ResponseModel      string
+	ResponseCreatedAt  int
+	HasEffectiveOutput bool
+	EndReason          relaycommon.StreamEndReason
+	EndError           error
+}
+
+type ResponsesStreamHandlerOptions struct {
+	AutoContinue            func(ResponsesStreamAutoContinueContext) (*dto.Usage, bool)
+	ContinuationOutputOnly  bool
+	DisableAutoContinuation bool
+}
+
+func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response, opts *ResponsesStreamHandlerOptions) (*dto.Usage, *types.NewAPIError) {
 	if resp == nil || resp.Body == nil {
 		logger.LogError(c, "invalid response or response body")
 		return nil, types.NewError(fmt.Errorf("invalid response"), types.ErrorCodeBadResponse)
@@ -102,6 +123,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	responseID := ""
 	responseModel := ""
 	responseCreatedAt := 0
+	hasNonTextOutput := false
 
 	helper.StreamScannerHandler(c, resp, info, func(data string) bool {
 
@@ -110,9 +132,14 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		if err := common.UnmarshalJsonStr(data, &streamResponse); err == nil {
 			delayCompletedEvent := streamResponse.Type == "response.completed"
 			if !delayCompletedEvent {
-				sendResponsesStreamData(c, streamResponse, data)
+				if shouldSendResponsesStreamData(streamResponse, opts) {
+					sendResponsesStreamData(c, streamResponse, data)
+				}
 				if isEffectiveResponsesStreamOutput(streamResponse) {
 					hasEffectiveOutput = true
+				}
+				if isNonTextResponsesStreamOutput(streamResponse) {
+					hasNonTextOutput = true
 				}
 			}
 			if streamResponse.Response != nil {
@@ -131,6 +158,9 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 			if delayCompletedEvent && isEffectiveResponsesStreamOutput(streamResponse) {
 				hasEffectiveOutput = true
+			}
+			if delayCompletedEvent && isNonTextResponsesStreamOutput(streamResponse) {
+				hasNonTextOutput = true
 			}
 			switch streamResponse.Type {
 			case "response.completed":
@@ -165,7 +195,9 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 					scheduleResponsesStreamCooldown(c, reason)
 					sendSyntheticResponsesFailed(c, info, usage, reason, responseID, responseModel, responseCreatedAt)
 				} else {
-					sendResponsesStreamData(c, streamResponse, data)
+					if shouldSendResponsesStreamData(streamResponse, opts) {
+						sendResponsesStreamData(c, streamResponse, data)
+					}
 				}
 			case "response.output_text.delta":
 				// 处理输出文本
@@ -217,6 +249,22 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		if info != nil && info.IsChannelTest {
 			return usage, types.NewOpenAIError(errors.New(reason), types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 		}
+		if shouldAutoContinueResponsesStream(c, info, opts, terminalWithoutCompleted, hasEffectiveOutput, hasNonTextOutput, responseTextBuilder.String()) {
+			continuedUsage, continued := opts.AutoContinue(ResponsesStreamAutoContinueContext{
+				Usage:              usage,
+				OutputText:         responseTextBuilder.String(),
+				ResponseID:         responseID,
+				ResponseModel:      responseModel,
+				ResponseCreatedAt:  responseCreatedAt,
+				HasEffectiveOutput: hasEffectiveOutput,
+				EndReason:          info.StreamStatus.EndReason,
+				EndError:           info.StreamStatus.EndError,
+			})
+			if continued {
+				mergeResponsesStreamUsage(usage, continuedUsage)
+				return usage, nil
+			}
+		}
 		if !terminalWithoutCompleted {
 			if shouldFailMissingResponsesCompleted(hasEffectiveOutput) {
 				sendSyntheticResponsesFailed(c, info, usage, reason, responseID, responseModel, responseCreatedAt)
@@ -227,6 +275,62 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	}
 
 	return usage, nil
+}
+
+func shouldSendResponsesStreamData(streamResponse dto.ResponsesStreamResponse, opts *ResponsesStreamHandlerOptions) bool {
+	if opts == nil || !opts.ContinuationOutputOnly {
+		return true
+	}
+	switch streamResponse.Type {
+	case "response.output_text.delta", "response.completed", "response.failed", "response.incomplete", "error":
+		return true
+	default:
+		return false
+	}
+}
+
+func shouldAutoContinueResponsesStream(c *gin.Context, info *relaycommon.RelayInfo, opts *ResponsesStreamHandlerOptions, terminalWithoutCompleted bool, hasEffectiveOutput bool, hasNonTextOutput bool, outputText string) bool {
+	if c == nil || c.Request == nil || c.Request.Context().Err() != nil {
+		return false
+	}
+	if info == nil || info.StreamStatus == nil || opts == nil || opts.AutoContinue == nil || opts.DisableAutoContinuation {
+		return false
+	}
+	if terminalWithoutCompleted || !hasEffectiveOutput || hasNonTextOutput {
+		return false
+	}
+	return strings.TrimSpace(outputText) != ""
+}
+
+func mergeResponsesStreamUsage(dst *dto.Usage, src *dto.Usage) {
+	if dst == nil || src == nil {
+		return
+	}
+	dst.PromptTokens += src.PromptTokens
+	dst.CompletionTokens += src.CompletionTokens
+	dst.TotalTokens += src.TotalTokens
+	dst.WebSearchRequests += src.WebSearchRequests
+	dst.PromptTokensDetails.CachedTokens += src.PromptTokensDetails.CachedTokens
+	dst.PromptTokensDetails.CachedCreationTokens += src.PromptTokensDetails.CachedCreationTokens
+	dst.PromptTokensDetails.ImageTokens += src.PromptTokensDetails.ImageTokens
+	dst.PromptTokensDetails.AudioTokens += src.PromptTokensDetails.AudioTokens
+	if dst.TotalTokens == 0 {
+		dst.TotalTokens = dst.PromptTokens + dst.CompletionTokens
+	}
+}
+
+func isNonTextResponsesStreamOutput(streamResponse dto.ResponsesStreamResponse) bool {
+	if streamResponse.Item != nil {
+		return isNonTextResponsesOutput(*streamResponse.Item)
+	}
+	if streamResponse.Response != nil {
+		for _, output := range streamResponse.Response.Output {
+			if isNonTextResponsesOutput(output) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func isEffectiveResponsesStreamOutput(streamResponse dto.ResponsesStreamResponse) bool {
@@ -260,6 +364,15 @@ func isEffectiveResponsesOutput(output dto.ResponsesOutput) bool {
 		}
 	}
 	return false
+}
+
+func isNonTextResponsesOutput(output dto.ResponsesOutput) bool {
+	switch output.Type {
+	case "", "message":
+		return false
+	default:
+		return true
+	}
 }
 
 func shouldFailMissingResponsesCompleted(hasEffectiveOutput bool) bool {
