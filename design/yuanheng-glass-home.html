@@ -1,0 +1,1335 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>元衡 API · 玻璃态首页方案</title>
+    <style>
+      :root {
+        --ink: #07111f;
+        --ink-soft: rgba(7, 17, 31, 0.68);
+        --muted: rgba(7, 17, 31, 0.56);
+        --paper: #f6fbff;
+        --glass: rgba(255, 255, 255, 0.58);
+        --glass-strong: rgba(255, 255, 255, 0.76);
+        --stroke: rgba(255, 255, 255, 0.74);
+        --stroke-dark: rgba(19, 64, 126, 0.13);
+        --blue: #1469ff;
+        --blue-deep: #0b2c72;
+        --cyan: #10d8d0;
+        --aqua: #76f4ff;
+        --orange: #ff7a4f;
+        --red: #e8433b;
+        --violet: #6674ff;
+        --shadow: 0 22px 70px rgba(17, 59, 129, 0.16);
+        --shadow-strong: 0 34px 120px rgba(14, 53, 118, 0.26);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        color: var(--ink);
+        font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei UI", sans-serif;
+        background:
+          radial-gradient(circle at 12% 12%, rgba(20, 105, 255, 0.23), transparent 26rem),
+          radial-gradient(circle at 82% 8%, rgba(16, 216, 208, 0.27), transparent 28rem),
+          radial-gradient(circle at 64% 74%, rgba(255, 122, 79, 0.18), transparent 28rem),
+          linear-gradient(135deg, #f8fbff 0%, #eef8ff 42%, #fff7ef 100%);
+        overflow-x: hidden;
+      }
+
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        z-index: -3;
+        pointer-events: none;
+        background-image:
+          linear-gradient(rgba(12, 57, 121, 0.055) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(12, 57, 121, 0.055) 1px, transparent 1px);
+        background-size: 42px 42px;
+        mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.9), transparent 84%);
+      }
+
+      body::after {
+        content: "";
+        position: fixed;
+        inset: 0;
+        z-index: -2;
+        pointer-events: none;
+        background:
+          conic-gradient(from 140deg at 72% 26%, transparent, rgba(118, 244, 255, 0.16), transparent 24%),
+          conic-gradient(from 20deg at 8% 48%, transparent, rgba(20, 105, 255, 0.13), transparent 24%);
+        filter: blur(34px);
+        opacity: 0.9;
+      }
+
+      a {
+        color: inherit;
+      }
+
+      .ambient {
+        position: fixed;
+        z-index: -1;
+        border-radius: 999px;
+        filter: blur(8px);
+        opacity: 0.72;
+        pointer-events: none;
+        animation: drift 13s ease-in-out infinite;
+      }
+
+      .ambient.one {
+        width: 19rem;
+        height: 19rem;
+        left: -6rem;
+        top: 8rem;
+        background: linear-gradient(135deg, rgba(20, 105, 255, 0.24), rgba(118, 244, 255, 0.18));
+      }
+
+      .ambient.two {
+        width: 23rem;
+        height: 23rem;
+        right: -9rem;
+        top: 4rem;
+        background: linear-gradient(135deg, rgba(16, 216, 208, 0.25), rgba(255, 255, 255, 0.08));
+        animation-delay: -5s;
+      }
+
+      .ambient.three {
+        width: 17rem;
+        height: 17rem;
+        left: 54%;
+        bottom: -7rem;
+        background: linear-gradient(135deg, rgba(232, 67, 59, 0.14), rgba(20, 105, 255, 0.16));
+        animation-delay: -9s;
+      }
+
+      .shell {
+        width: min(1200px, calc(100vw - 36px));
+        margin: 0 auto;
+        position: relative;
+      }
+
+      .nav {
+        position: sticky;
+        top: 16px;
+        z-index: 20;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: 16px;
+        padding: 11px 13px;
+        border: 1px solid var(--stroke);
+        border-radius: 28px;
+        background: rgba(255, 255, 255, 0.56);
+        box-shadow: 0 18px 52px rgba(20, 105, 255, 0.12);
+        backdrop-filter: blur(24px) saturate(160%);
+        -webkit-backdrop-filter: blur(24px) saturate(160%);
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        flex: 0 0 auto;
+        text-decoration: none;
+        font-size: 16px;
+        font-weight: 950;
+        letter-spacing: 0.03em;
+      }
+
+      .brand img,
+      .brand-mark {
+        width: 40px;
+        height: 40px;
+        border-radius: 14px;
+        object-fit: contain;
+        background: rgba(255, 255, 255, 0.72);
+        box-shadow: inset 0 1px rgba(255, 255, 255, 0.92), 0 14px 30px rgba(20, 105, 255, 0.18);
+      }
+
+      .nav-links {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        min-width: 0;
+        padding: 5px;
+        border: 1px solid rgba(255, 255, 255, 0.55);
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.34);
+      }
+
+      .nav-links a {
+        display: inline-flex;
+        align-items: center;
+        min-height: 34px;
+        padding: 0 12px;
+        border-radius: 15px;
+        color: rgba(7, 17, 31, 0.72);
+        text-decoration: none;
+        white-space: nowrap;
+        font-size: 13px;
+        font-weight: 850;
+        transition: 0.22s ease;
+      }
+
+      .nav-links a:hover,
+      .nav-links a.active {
+        color: var(--ink);
+        background: rgba(255, 255, 255, 0.78);
+        box-shadow: 0 10px 24px rgba(20, 105, 255, 0.1);
+      }
+
+      .nav-actions {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        flex: 0 0 auto;
+      }
+
+      .pill,
+      .cta {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 9px;
+        min-height: 44px;
+        border: 0;
+        border-radius: 999px;
+        padding: 0 17px;
+        text-decoration: none;
+        font: inherit;
+        font-size: 14px;
+        font-weight: 950;
+        cursor: pointer;
+      }
+
+      .pill {
+        color: var(--ink);
+        background: rgba(255, 255, 255, 0.62);
+        box-shadow: inset 0 1px rgba(255, 255, 255, 0.9), 0 12px 32px rgba(20, 105, 255, 0.1);
+      }
+
+      .pill.primary,
+      .cta.primary {
+        color: white;
+        background: linear-gradient(135deg, var(--blue) 0%, #09c8cf 100%);
+        box-shadow: 0 18px 44px rgba(20, 105, 255, 0.3);
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.03fr) minmax(380px, 0.97fr);
+        gap: 52px;
+        align-items: center;
+        min-height: 770px;
+        padding: 82px 0 50px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 12px;
+        border: 1px solid rgba(255, 255, 255, 0.72);
+        border-radius: 999px;
+        color: rgba(7, 17, 31, 0.76);
+        background: rgba(255, 255, 255, 0.52);
+        box-shadow: 0 14px 36px rgba(20, 105, 255, 0.09);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        font-size: 12px;
+        font-weight: 950;
+        letter-spacing: 0.09em;
+      }
+
+      .eyebrow i {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, var(--blue), var(--cyan));
+        box-shadow: 0 0 0 6px rgba(20, 105, 255, 0.1);
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin-top: 0;
+      }
+
+      h1 {
+        margin-bottom: 0;
+        margin-top: 24px;
+        font-family: "Songti SC", "STSong", "Noto Serif SC", "PingFang SC", serif;
+        font-size: clamp(48px, 6.65vw, 84px);
+        line-height: 0.98;
+        letter-spacing: -0.065em;
+        font-weight: 950;
+      }
+
+      .shine {
+        display: inline-block;
+        margin-top: 7px;
+        background: linear-gradient(100deg, #10213f 0%, #1469ff 42%, #0ccbd0 76%, #10213f 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+
+      .slogan {
+        margin: 22px 0 0;
+        color: #13346e;
+        font-size: clamp(22px, 2.2vw, 31px);
+        line-height: 1.2;
+        font-weight: 950;
+      }
+
+      .lead {
+        width: min(640px, 100%);
+        margin: 16px 0 0;
+        color: var(--muted);
+        font-size: 17px;
+        line-height: 1.9;
+        font-weight: 650;
+      }
+
+      .endpoint {
+        width: min(650px, 100%);
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        align-items: center;
+        gap: 8px;
+        margin-top: 28px;
+        padding: 10px;
+        border: 1px solid var(--stroke);
+        border-radius: 25px;
+        background: rgba(255, 255, 255, 0.58);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(24px) saturate(155%);
+        -webkit-backdrop-filter: blur(24px) saturate(155%);
+      }
+
+      .endpoint code,
+      .endpoint select {
+        border: 0;
+        outline: 0;
+        min-width: 0;
+        border-radius: 17px;
+        padding: 13px 14px;
+        color: rgba(7, 17, 31, 0.76);
+        background: rgba(244, 249, 255, 0.78);
+        font-family: "SF Mono", "Cascadia Code", Menlo, monospace;
+        font-size: 13px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .endpoint button {
+        width: 46px;
+        height: 46px;
+        border: 0;
+        border-radius: 17px;
+        color: white;
+        background: linear-gradient(135deg, var(--red), var(--orange));
+        box-shadow: 0 15px 30px rgba(232, 67, 59, 0.25);
+        font-size: 18px;
+        font-weight: 950;
+        cursor: pointer;
+      }
+
+      .hero-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px;
+        margin-top: 24px;
+      }
+
+      .cta.primary.alt {
+        background: linear-gradient(135deg, var(--red), var(--orange));
+        box-shadow: 0 18px 44px rgba(232, 67, 59, 0.24);
+      }
+
+      .cta.secondary {
+        color: var(--ink);
+        border: 1px solid var(--stroke);
+        background: rgba(255, 255, 255, 0.6);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
+      }
+
+      .proof {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        width: min(650px, 100%);
+        margin-top: 30px;
+      }
+
+      .proof-card {
+        min-height: 100px;
+        padding: 16px;
+        border: 1px solid var(--stroke);
+        border-radius: 23px;
+        background: rgba(255, 255, 255, 0.5);
+        box-shadow: 0 16px 40px rgba(20, 105, 255, 0.09);
+        backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
+      }
+
+      .proof-card strong {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 27px;
+        line-height: 1;
+        letter-spacing: -0.045em;
+      }
+
+      .proof-card span {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.55;
+        font-weight: 800;
+      }
+
+      .provider-cloud {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 26px;
+      }
+
+      .provider-chip,
+      .orbit-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.72);
+        color: rgba(7, 17, 31, 0.72);
+        background: rgba(255, 255, 255, 0.48);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        font-size: 13px;
+        font-weight: 900;
+      }
+
+      .provider-chip {
+        padding: 10px 12px;
+        border-radius: 16px;
+      }
+
+      .provider-chip::before,
+      .orbit-chip::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: 99px;
+        background: linear-gradient(135deg, var(--blue), var(--cyan));
+      }
+
+      .visual {
+        position: relative;
+        min-height: 585px;
+      }
+
+      .visual-card {
+        position: absolute;
+        inset: 28px 0 0 18px;
+        border: 1px solid var(--stroke);
+        border-radius: 46px;
+        background:
+          linear-gradient(145deg, rgba(255, 255, 255, 0.68), rgba(255, 255, 255, 0.34)),
+          radial-gradient(circle at 22% 20%, rgba(20, 105, 255, 0.2), transparent 17rem),
+          radial-gradient(circle at 84% 74%, rgba(16, 216, 208, 0.2), transparent 18rem);
+        box-shadow: var(--shadow-strong);
+        backdrop-filter: blur(30px) saturate(165%);
+        -webkit-backdrop-filter: blur(30px) saturate(165%);
+        overflow: hidden;
+      }
+
+      .visual-card::before {
+        content: "";
+        position: absolute;
+        inset: -1px;
+        background: linear-gradient(120deg, rgba(255, 255, 255, 0.75), transparent 32%, transparent 70%, rgba(255, 255, 255, 0.36));
+        opacity: 0.8;
+      }
+
+      .visual-card::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 48%;
+        width: 72%;
+        aspect-ratio: 1;
+        border: 1px solid rgba(20, 105, 255, 0.14);
+        border-radius: 50%;
+        translate: -50% -50%;
+        box-shadow:
+          0 0 0 58px rgba(20, 105, 255, 0.04),
+          0 0 0 116px rgba(16, 216, 208, 0.035);
+      }
+
+      .core {
+        position: absolute;
+        left: 50%;
+        top: 48%;
+        z-index: 2;
+        display: grid;
+        place-items: center;
+        width: min(286px, 62%);
+        aspect-ratio: 1;
+        border: 1px solid rgba(255, 255, 255, 0.78);
+        border-radius: 42px;
+        background: rgba(255, 255, 255, 0.62);
+        box-shadow: inset 0 1px rgba(255, 255, 255, 0.95), 0 34px 88px rgba(20, 105, 255, 0.22);
+        translate: -50% -50%;
+      }
+
+      .core img {
+        width: 82%;
+        height: 82%;
+        object-fit: contain;
+        filter: drop-shadow(0 22px 34px rgba(20, 105, 255, 0.18));
+      }
+
+      .orbit-chip {
+        position: absolute;
+        z-index: 3;
+        padding: 10px 12px;
+        border-radius: 999px;
+        box-shadow: 0 14px 36px rgba(20, 105, 255, 0.12);
+      }
+
+      .orbit-chip.c1 { left: 24px; top: 72px; }
+      .orbit-chip.c2 { right: 24px; top: 90px; }
+      .orbit-chip.c3 { left: -2px; top: 238px; }
+      .orbit-chip.c4 { right: -4px; top: 252px; }
+      .orbit-chip.c5 { left: 46px; bottom: 92px; }
+      .orbit-chip.c6 { right: 42px; bottom: 82px; }
+      .orbit-chip.c7 { left: 50%; bottom: 26px; translate: -50% 0; }
+
+      .route-panel,
+      .latency-panel {
+        position: absolute;
+        z-index: 4;
+        border: 1px solid rgba(255, 255, 255, 0.75);
+        border-radius: 24px;
+        background: rgba(255, 255, 255, 0.62);
+        box-shadow: 0 18px 48px rgba(20, 105, 255, 0.12);
+        backdrop-filter: blur(22px) saturate(150%);
+        -webkit-backdrop-filter: blur(22px) saturate(150%);
+      }
+
+      .route-panel {
+        left: 28px;
+        bottom: 24px;
+        width: 206px;
+        padding: 16px;
+      }
+
+      .latency-panel {
+        right: 26px;
+        top: 22px;
+        width: 190px;
+        padding: 16px;
+      }
+
+      .mini-label {
+        color: rgba(7, 17, 31, 0.48);
+        font-size: 11px;
+        font-weight: 950;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .route-line {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .route-line i {
+        width: 10px;
+        height: 10px;
+        flex: 0 0 auto;
+        border-radius: 50%;
+        background: var(--cyan);
+        box-shadow: 0 0 0 5px rgba(16, 216, 208, 0.12);
+      }
+
+      .route-line b {
+        font-size: 13px;
+      }
+
+      .latency-panel strong {
+        display: block;
+        margin-top: 7px;
+        font-size: 34px;
+        line-height: 1;
+        letter-spacing: -0.05em;
+      }
+
+      .latency-panel p {
+        margin: 8px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.6;
+        font-weight: 750;
+      }
+
+      .beam {
+        position: absolute;
+        z-index: 1;
+        height: 2px;
+        border-radius: 99px;
+        background: linear-gradient(90deg, transparent, rgba(20, 105, 255, 0.72), rgba(16, 216, 208, 0.9), transparent);
+        filter: drop-shadow(0 0 12px rgba(16, 216, 208, 0.5));
+        opacity: 0.72;
+        transform-origin: left center;
+      }
+
+      .beam.one { width: 270px; left: 128px; top: 200px; rotate: 18deg; }
+      .beam.two { width: 245px; right: 72px; top: 372px; rotate: -24deg; }
+      .beam.three { width: 180px; left: 176px; top: 404px; rotate: 48deg; opacity: 0.42; }
+
+      .section {
+        padding: 52px 0;
+      }
+
+      .section-head {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 28px;
+        margin-bottom: 24px;
+      }
+
+      .section-kicker {
+        display: inline-flex;
+        margin-bottom: 12px;
+        padding: 7px 10px;
+        border: 1px solid var(--stroke);
+        border-radius: 999px;
+        color: rgba(7, 17, 31, 0.58);
+        background: rgba(255, 255, 255, 0.48);
+        font-size: 12px;
+        font-weight: 950;
+        letter-spacing: 0.11em;
+      }
+
+      .section-head h2 {
+        margin: 0;
+        font-family: "Songti SC", "STSong", serif;
+        font-size: clamp(34px, 4vw, 52px);
+        line-height: 1;
+        letter-spacing: -0.05em;
+      }
+
+      .section-head p {
+        max-width: 520px;
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.85;
+        font-weight: 700;
+      }
+
+      .advantage-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .advantage-card {
+        position: relative;
+        min-height: 218px;
+        padding: 22px;
+        border: 1px solid var(--stroke);
+        border-radius: 30px;
+        background: var(--glass);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(23px) saturate(150%);
+        -webkit-backdrop-filter: blur(23px) saturate(150%);
+        overflow: hidden;
+      }
+
+      .advantage-card::after {
+        content: "";
+        position: absolute;
+        right: -44px;
+        bottom: -56px;
+        width: 128px;
+        height: 128px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(20, 105, 255, 0.14), transparent 64%);
+      }
+
+      .icon {
+        width: 47px;
+        height: 47px;
+        display: grid;
+        place-items: center;
+        border-radius: 17px;
+        color: white;
+        background: linear-gradient(135deg, var(--blue), var(--cyan));
+        box-shadow: 0 16px 36px rgba(20, 105, 255, 0.2);
+        font-weight: 950;
+      }
+
+      .advantage-card:nth-child(3n) .icon {
+        background: linear-gradient(135deg, var(--red), var(--orange));
+      }
+
+      .advantage-card:nth-child(4n) .icon {
+        background: linear-gradient(135deg, var(--blue-deep), var(--violet));
+      }
+
+      .advantage-card h3 {
+        position: relative;
+        margin: 28px 0 10px;
+        font-size: 19px;
+      }
+
+      .advantage-card p {
+        position: relative;
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.75;
+        font-size: 14px;
+        font-weight: 650;
+      }
+
+      .model-showcase {
+        display: grid;
+        grid-template-columns: 0.92fr 1.08fr;
+        gap: 18px;
+        align-items: stretch;
+      }
+
+      .showcase-panel,
+      .agent-panel,
+      .step,
+      .support-card {
+        border: 1px solid var(--stroke);
+        background: rgba(255, 255, 255, 0.55);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(22px) saturate(150%);
+        -webkit-backdrop-filter: blur(22px) saturate(150%);
+      }
+
+      .showcase-panel {
+        padding: 28px;
+        border-radius: 34px;
+      }
+
+      .showcase-panel h3 {
+        margin: 0;
+        font-size: 28px;
+        letter-spacing: -0.035em;
+      }
+
+      .showcase-panel p {
+        margin: 14px 0 0;
+        color: var(--muted);
+        line-height: 1.8;
+        font-weight: 700;
+      }
+
+      .model-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 24px;
+      }
+
+      .model-tags span {
+        display: inline-flex;
+        align-items: center;
+        min-height: 40px;
+        padding: 0 13px;
+        border: 1px solid rgba(255, 255, 255, 0.72);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.55);
+        color: rgba(7, 17, 31, 0.7);
+        font-weight: 900;
+        box-shadow: 0 12px 28px rgba(20, 105, 255, 0.08);
+      }
+
+      .agent-panel {
+        position: relative;
+        min-height: 300px;
+        padding: 24px;
+        border-radius: 34px;
+        overflow: hidden;
+      }
+
+      .agent-panel::before {
+        content: "";
+        position: absolute;
+        inset: 18px;
+        border: 1px dashed rgba(20, 105, 255, 0.18);
+        border-radius: 28px;
+      }
+
+      .terminal {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        gap: 12px;
+        font-family: "SF Mono", "Cascadia Code", Menlo, monospace;
+        font-size: 13px;
+      }
+
+      .terminal-line {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        min-height: 44px;
+        padding: 0 14px;
+        border: 1px solid rgba(255, 255, 255, 0.72);
+        border-radius: 16px;
+        background: rgba(248, 252, 255, 0.7);
+        color: rgba(7, 17, 31, 0.72);
+        box-shadow: 0 12px 28px rgba(20, 105, 255, 0.07);
+      }
+
+      .terminal-line b {
+        color: var(--blue-deep);
+      }
+
+      .terminal-line small {
+        color: #0c9f92;
+        font-weight: 950;
+      }
+
+      .steps {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .step {
+        position: relative;
+        min-height: 210px;
+        padding: 24px;
+        border-radius: 30px;
+        overflow: hidden;
+      }
+
+      .step::after {
+        content: attr(data-step);
+        position: absolute;
+        right: -6px;
+        top: -30px;
+        color: rgba(20, 105, 255, 0.08);
+        font-size: 116px;
+        line-height: 1;
+        font-weight: 1000;
+        letter-spacing: -0.08em;
+      }
+
+      .step b {
+        position: relative;
+        display: inline-flex;
+        width: 38px;
+        height: 38px;
+        align-items: center;
+        justify-content: center;
+        border-radius: 14px;
+        color: white;
+        background: #10213f;
+      }
+
+      .step h3 {
+        position: relative;
+        margin: 18px 0 8px;
+        font-size: 20px;
+      }
+
+      .step p {
+        position: relative;
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.75;
+        font-weight: 650;
+      }
+
+      .support {
+        padding-bottom: 80px;
+      }
+
+      .support-card {
+        position: relative;
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: 20px;
+        padding: clamp(28px, 5vw, 52px);
+        border-radius: 44px;
+        color: white;
+        background:
+          linear-gradient(135deg, rgba(12, 31, 66, 0.95), rgba(20, 105, 255, 0.86)),
+          radial-gradient(circle at 82% 18%, rgba(16, 216, 208, 0.38), transparent 20rem);
+        box-shadow: 0 34px 110px rgba(14, 53, 118, 0.3);
+        overflow: hidden;
+      }
+
+      .support-card::after {
+        content: "";
+        position: absolute;
+        right: -8rem;
+        top: -8rem;
+        width: 22rem;
+        height: 22rem;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.12);
+      }
+
+      .support-card h2 {
+        position: relative;
+        margin: 0;
+        font-family: "Songti SC", "STSong", serif;
+        font-size: clamp(38px, 5vw, 62px);
+        line-height: 1;
+        letter-spacing: -0.05em;
+      }
+
+      .support-card p {
+        position: relative;
+        width: min(620px, 100%);
+        margin: 16px 0 28px;
+        color: rgba(255, 255, 255, 0.78);
+        line-height: 1.85;
+        font-weight: 750;
+      }
+
+      .support-points {
+        position: relative;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        align-content: center;
+      }
+
+      .support-points span {
+        min-height: 76px;
+        padding: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        border-radius: 22px;
+        color: rgba(255, 255, 255, 0.86);
+        background: rgba(255, 255, 255, 0.12);
+        backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
+        font-weight: 850;
+      }
+
+      @keyframes drift {
+        0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+        50% { transform: translate3d(18px, -20px, 0) scale(1.04); }
+      }
+
+      @keyframes pulse {
+        0%, 100% { opacity: 0.72; transform: scale(1); }
+        50% { opacity: 1; transform: scale(1.035); }
+      }
+
+      .core,
+      .orbit-chip.c2,
+      .orbit-chip.c5 {
+        animation: pulse 4.8s ease-in-out infinite;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html { scroll-behavior: auto; }
+        *, *::before, *::after { animation: none !important; transition: none !important; }
+      }
+
+      @media (max-width: 1120px) {
+        .nav {
+          align-items: flex-start;
+          flex-wrap: wrap;
+        }
+
+        .nav-links {
+          order: 3;
+          width: 100%;
+          justify-content: flex-start;
+          overflow-x: auto;
+        }
+      }
+
+      @media (max-width: 980px) {
+        .hero,
+        .model-showcase,
+        .support-card {
+          grid-template-columns: 1fr;
+        }
+
+        .hero {
+          min-height: auto;
+          padding-top: 60px;
+        }
+
+        .visual {
+          min-height: 560px;
+        }
+
+        .advantage-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 680px) {
+        .shell {
+          width: min(100vw - 24px, 1200px);
+        }
+
+        .nav {
+          top: 10px;
+          border-radius: 23px;
+        }
+
+        .nav-actions .ghost {
+          display: none;
+        }
+
+        .hero {
+          gap: 28px;
+          padding-top: 46px;
+        }
+
+        h1 {
+          font-size: clamp(42px, 13vw, 58px);
+        }
+
+        .endpoint {
+          grid-template-columns: 1fr auto;
+        }
+
+        .endpoint select {
+          grid-column: 1 / -1;
+          order: 3;
+          width: 100%;
+        }
+
+        .proof,
+        .advantage-grid,
+        .steps,
+        .support-points {
+          grid-template-columns: 1fr;
+        }
+
+        .section-head {
+          display: block;
+        }
+
+        .section-head p {
+          margin-top: 12px;
+        }
+
+        .visual {
+          min-height: 500px;
+        }
+
+        .visual-card {
+          inset: 12px 0 0 0;
+          border-radius: 35px;
+        }
+
+        .core {
+          width: 218px;
+          border-radius: 31px;
+        }
+
+        .orbit-chip {
+          font-size: 12px;
+          padding: 9px 10px;
+        }
+
+        .orbit-chip.c1 { left: 12px; top: 58px; }
+        .orbit-chip.c2 { right: 10px; top: 72px; }
+        .orbit-chip.c3 { left: 10px; top: 210px; }
+        .orbit-chip.c4 { right: 10px; top: 224px; }
+        .orbit-chip.c5 { left: 16px; bottom: 108px; }
+        .orbit-chip.c6 { right: 16px; bottom: 96px; }
+        .orbit-chip.c7 { bottom: 28px; }
+
+        .route-panel,
+        .latency-panel {
+          display: none;
+        }
+
+        .provider-cloud,
+        .model-tags {
+          max-height: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <span class="ambient one"></span>
+    <span class="ambient two"></span>
+    <span class="ambient three"></span>
+
+    <header class="shell nav" id="top">
+      <a class="brand" href="#top" aria-label="元衡 API 首页">
+        <img src="../web/public/yuanheng-logo.png" alt="元衡 API logo" />
+        <span>元衡 API</span>
+      </a>
+      <nav class="nav-links" aria-label="主导航">
+        <a class="active" href="#top">首页</a>
+        <a href="/console">控制台</a>
+        <a href="/pricing">模型广场</a>
+        <a href="#affiliate">代理加盟</a>
+        <a href="#support">联系我们</a>
+        <a href="#openclaw">OpenClaw 一键部署</a>
+        <a href="/docs">API 文档</a>
+      </nav>
+      <div class="nav-actions">
+        <a class="pill ghost" href="/login">登录</a>
+        <a class="pill primary" href="/console">进入控制台</a>
+      </div>
+    </header>
+
+    <main class="shell">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="copy">
+          <div class="eyebrow"><i></i> 元起万模，衡定全局</div>
+          <h1 id="hero-title">
+            元衡 API：一口<br />接入多模型，
+            <span class="shine">智能调度更稳定</span>
+          </h1>
+          <p class="slogan">更强模型，更低价格，更易落地。</p>
+          <p class="lead">
+            统一接入 OpenAI、Claude、Gemini、DeepSeek、Qwen、Midjourney 等模型能力，
+            用智能路由、透明计费与高可用线路，把复杂供应商治理交给元衡 API。
+          </p>
+
+          <div class="endpoint" aria-label="接入地址">
+            <code id="base-url">https://cn.meta-api.vip</code>
+            <select id="endpoint-select" aria-label="API endpoint">
+              <option>/v1/responses</option>
+              <option>/v1/chat/completions</option>
+              <option>/v1/messages</option>
+              <option>/v1/images/generations</option>
+            </select>
+            <button id="copy-endpoint" title="复制完整地址" aria-label="复制完整地址">⧉</button>
+          </div>
+
+          <div class="hero-actions">
+            <a class="cta primary alt" href="/console">开启 AI 新体验</a>
+            <a class="cta secondary" href="/pricing">查看模型广场</a>
+          </div>
+
+          <div class="proof" aria-label="能力证明">
+            <div class="proof-card"><strong>500+</strong><span>主流与垂直模型已接入，覆盖文本、图像、多模态。</span></div>
+            <div class="proof-card"><strong>99.9%</strong><span>多线路容灾、失败重试、健康度调度保障可用性。</span></div>
+            <div class="proof-card"><strong>7×24</strong><span>服务支持与调用观测，适合长期商业运营。</span></div>
+          </div>
+
+          <div class="provider-cloud" aria-label="模型供应商">
+            <span class="provider-chip">OpenAI</span>
+            <span class="provider-chip">Claude</span>
+            <span class="provider-chip">Gemini</span>
+            <span class="provider-chip">DeepSeek</span>
+            <span class="provider-chip">Qwen</span>
+            <span class="provider-chip">xAI</span>
+            <span class="provider-chip">Midjourney</span>
+            <span class="provider-chip">Mistral</span>
+          </div>
+        </div>
+
+        <div class="visual" aria-hidden="true">
+          <div class="visual-card">
+            <span class="beam one"></span>
+            <span class="beam two"></span>
+            <span class="beam three"></span>
+            <div class="core">
+              <img src="../web/public/yuanheng-logo.png" alt="" />
+            </div>
+            <span class="orbit-chip c1">透明计费</span>
+            <span class="orbit-chip c2">超高并发</span>
+            <span class="orbit-chip c3">高稳定性</span>
+            <span class="orbit-chip c4">广泛支持</span>
+            <span class="orbit-chip c5">按量付费</span>
+            <span class="orbit-chip c6">专业运营</span>
+            <span class="orbit-chip c7">多模态理解</span>
+            <div class="route-panel">
+              <div class="mini-label">Smart Routing</div>
+              <div class="route-line"><i></i><b>Claude → 低延迟线路</b></div>
+              <div class="route-line"><i></i><b>GPT → 成本优先</b></div>
+              <div class="route-line"><i></i><b>Gemini → 自动重试</b></div>
+            </div>
+            <div class="latency-panel">
+              <div class="mini-label">Gateway Health</div>
+              <strong>Live</strong>
+              <p>渠道健康度、模型倍率、日志账单统一观测。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="features" class="section">
+        <div class="section-head">
+          <div>
+            <span class="section-kicker">ADVANTAGES</span>
+            <h2>我们的优势</h2>
+          </div>
+          <p>参考成熟 API 中转站的能力表达，但保留元衡 API 的玻璃态、调度层与可观测品牌方向。</p>
+        </div>
+        <div class="advantage-grid">
+          <article class="advantage-card">
+            <div class="icon">API</div>
+            <h3>企业级高速通道</h3>
+            <p>多供应商、多账号、多线路汇聚，优先保证请求稳定落地，适合高频调用场景。</p>
+          </article>
+          <article class="advantage-card">
+            <div class="icon">兼</div>
+            <h3>协议完全兼容</h3>
+            <p>兼容 OpenAI、Claude、Gemini 常见接口形态，现有 SDK 和客户端低成本迁移。</p>
+          </article>
+          <article class="advantage-card">
+            <div class="icon">衡</div>
+            <h3>智能负载均衡</h3>
+            <p>按模型、分组、倍率、渠道健康度与失败状态动态调度，减少单点波动。</p>
+          </article>
+          <article class="advantage-card">
+            <div class="icon">账</div>
+            <h3>透明计费</h3>
+            <p>Token、缓存、图片、按次任务统一折算，余额、日志与账单链路可追踪。</p>
+          </article>
+          <article class="advantage-card">
+            <div class="icon">域</div>
+            <h3>多节点容灾</h3>
+            <p>线路异常时自动切换与重试，结合渠道健康度降低超时、断流和上游波动影响。</p>
+          </article>
+          <article class="advantage-card">
+            <div class="icon">7×</div>
+            <h3>7×24 服务保障</h3>
+            <p>面向团队、代理和商业用户提供持续支持，关键问题可快速定位到模型、渠道或用户。</p>
+          </article>
+          <article class="advantage-card">
+            <div class="icon">M</div>
+            <h3>多模态覆盖</h3>
+            <p>文本、视觉、图片生成、Claude Code、Codex、Gemini CLI 等场景一站接入。</p>
+          </article>
+          <article class="advantage-card" id="affiliate">
+            <div class="icon">代</div>
+            <h3>代理与团队运营</h3>
+            <p>支持分组、密钥、额度、倍率与用量视图，方便代理加盟和团队级成本管理。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="openclaw" class="section">
+        <div class="section-head">
+          <div>
+            <span class="section-kicker">MODEL HUB</span>
+            <h2>一个入口，覆盖多种客户端</h2>
+          </div>
+          <p>把“模型多、接入快、可部署、可观测”放到同一屏表达，增强首页首屏后的转化路径。</p>
+        </div>
+        <div class="model-showcase">
+          <div class="showcase-panel">
+            <h3>500+ 模型能力池</h3>
+            <p>从通用对话、代码编程、长文本、图像生成到多模态理解，都可以通过统一 Base URL 与 API Key 接入。</p>
+            <div class="model-tags">
+              <span>GPT-5 / GPT-4o</span>
+              <span>Claude Sonnet</span>
+              <span>Gemini Pro</span>
+              <span>DeepSeek</span>
+              <span>Qwen</span>
+              <span>Midjourney</span>
+              <span>OpenClaw</span>
+              <span>Claude Code</span>
+            </div>
+          </div>
+          <div class="agent-panel">
+            <div class="terminal" aria-label="接入示例">
+              <div class="terminal-line"><b>Base URL</b><span>https://cn.meta-api.vip</span></div>
+              <div class="terminal-line"><b>Endpoint</b><span>/v1/responses</span></div>
+              <div class="terminal-line"><b>Client</b><span>Codex / Claude Code / Gemini CLI</span></div>
+              <div class="terminal-line"><b>Routing</b><small>healthy · balanced · observable</small></div>
+              <div class="terminal-line"><b>Billing</b><small>token · cache · image · per-call</small></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="steps" class="section">
+        <div class="section-head">
+          <div>
+            <span class="section-kicker">QUICK START</span>
+            <h2>三步快速接入</h2>
+          </div>
+          <p>不用改变你的 SDK 习惯，只替换 Base URL 和 Key，即可把多模型调用切到元衡 API。</p>
+        </div>
+        <div class="steps">
+          <article class="step" data-step="01">
+            <b>1</b>
+            <h3>注册并获取密钥</h3>
+            <p>登录控制台创建 API Key，按团队、用户或项目设置额度、可用模型和过期时间。</p>
+          </article>
+          <article class="step" data-step="02">
+            <b>2</b>
+            <h3>替换模型基址</h3>
+            <p>把原客户端的 Base URL 改成元衡 API 地址，保留原有 SDK、参数和调用结构。</p>
+          </article>
+          <article class="step" data-step="03">
+            <b>3</b>
+            <h3>稳定开始调用</h3>
+            <p>通过日志、账单、渠道状态和模型广场持续观测请求表现，按需切换策略。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="support" class="support">
+        <div class="support-card">
+          <div>
+            <h2>24/7/365 全天候支持</h2>
+            <p>从模型选型、客户端接入、代理运营到异常排查，元衡 API 都提供更清晰的控制台和更稳定的调用链路。</p>
+            <a class="cta primary alt" href="/console">立即进入控制台</a>
+          </div>
+          <div class="support-points" aria-label="服务支持">
+            <span>联系我们：接入、代理、企业合作快速响应</span>
+            <span>API 文档：OpenAI / Claude / Gemini 客户端教程</span>
+            <span>模型广场：价格、倍率、分组与可用范围清晰展示</span>
+            <span>运行观测：日志、用量、余额和失败链路可追踪</span>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const baseUrl = document.getElementById('base-url');
+      const endpointSelect = document.getElementById('endpoint-select');
+      const copyButton = document.getElementById('copy-endpoint');
+
+      copyButton.addEventListener('click', async () => {
+        const value = `${baseUrl.textContent}${endpointSelect.value}`;
+        try {
+          await navigator.clipboard.writeText(value);
+          copyButton.textContent = '✓';
+          setTimeout(() => { copyButton.textContent = '⧉'; }, 1200);
+        } catch (error) {
+          copyButton.textContent = '!';
+          setTimeout(() => { copyButton.textContent = '⧉'; }, 1200);
+        }
+      });
+    </script>
+  </body>
+</html>
