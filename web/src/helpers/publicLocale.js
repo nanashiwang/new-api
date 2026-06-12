@@ -45,6 +45,67 @@ const en = {
   '元衡 API：一口接入多模型，':
     'Yuanheng API: one integration for many models,',
   智能调度更稳定: 'smarter routing, steadier delivery',
+  '更强模型，更低价格，更易落地。':
+    'Stronger models, lower prices, easier deployment.',
+  '统一接入 OpenAI、Claude、Gemini、DeepSeek、Qwen、Midjourney 等主流模型，通过智能路由与负载均衡，为企业提供高可用、低延迟、透明计费的全托管 AI API 网关服务，助力业务快速集成与规模化落地。':
+    'Unify OpenAI, Claude, Gemini, DeepSeek, Qwen, Midjourney and more behind a managed AI API gateway with smart routing, high availability, low latency and transparent billing.',
+  复制完整地址: 'Copy full endpoint',
+  '开启 AI 新体验': 'Start a New AI Experience',
+  查看模型广场: 'View Model Marketplace',
+  已接入模型: 'Models integrated',
+  稳定性保障: 'Stability guarantee',
+  服务支持: 'Support',
+  运行正常: 'Healthy',
+  '近 24 小时': 'Last 24 hours',
+  稳定可用: 'Availability',
+  智能路由: 'Smart routing',
+  透明计费: 'Transparent billing',
+  策略状态: 'Strategy status',
+  我们的优势: 'Our Advantages',
+  '把模型多、接入快、可部署、可观测放到同一套控制平面，首页表达更接近企业级 API 网关。':
+    'Bring model coverage, fast integration, deployment and observability into one control plane for an enterprise-grade API gateway story.',
+  企业级高速通道: 'Enterprise-grade Fast Channels',
+  '多供应商、多账号、多线路汇聚，优先保证请求稳定落地，适合高频调用场景。':
+    'Aggregate multiple providers, accounts and routes to keep high-frequency requests stable.',
+  协议完全兼容: 'Protocol Compatible',
+  '兼容 OpenAI、Claude、Gemini 常见接口形态，现有 SDK 和客户端低成本迁移。':
+    'Compatible with common OpenAI, Claude and Gemini API shapes so existing SDKs and clients migrate easily.',
+  智能负载均衡: 'Smart Load Balancing',
+  '按模型、分组、倍率、渠道健康度与失败状态动态调度，减少单点波动。':
+    'Dynamically route by model, group, ratio, channel health and failures to reduce single-point volatility.',
+  'Token、缓存、图片、按次任务统一折算，余额、日志与账单链路可追踪。':
+    'Unify token, cache, image and per-call billing with traceable balance, logs and invoices.',
+  多节点容灾: 'Multi-node Failover',
+  '线路异常时自动切换与重试，结合渠道健康度降低超时、断流和上游波动影响。':
+    'Automatically switch and retry on route failures, reducing timeout, stream and upstream volatility.',
+  '7×24 服务保障': '24/7 Support',
+  '面向团队、代理和商业用户提供持续支持，关键问题可快速定位到模型、渠道或用户。':
+    'Continuous support for teams, agents and business users, with issues located by model, channel or user.',
+  多模态覆盖: 'Multimodal Coverage',
+  '文本、视觉、图片生成、Claude Code、Codex、Gemini CLI 等场景一站接入。':
+    'One-stop access for text, vision, image generation, Claude Code, Codex, Gemini CLI and more.',
+  代理与团队运营: 'Agent & Team Operations',
+  '支持分组、密钥、额度、倍率与用量视图，方便代理加盟和团队级成本管理。':
+    'Groups, keys, quotas, ratios and usage views support agent programs and team cost management.',
+  '一个入口，覆盖多种客户端': 'One Entry for Many Clients',
+  '统一 Base URL 与 API Key，覆盖 OpenAI-compatible、Claude、Gemini、Codex、Claude Code 等接入方式。':
+    'One Base URL and API key for OpenAI-compatible, Claude, Gemini, Codex, Claude Code and more.',
+  '500+ 模型能力池': '500+ Model Capability Pool',
+  '从通用对话、代码编程、长文本、图像生成到多模态理解，都可以通过统一入口接入。':
+    'Access chat, coding, long context, image generation and multimodal understanding through one endpoint.',
+  稳定开始调用: 'Start Stable Calls',
+  '登录控制台创建 API Key，按团队、用户或项目设置额度、可用模型和过期时间。':
+    'Create API keys in the console and configure quotas, models and expiration by team, user or project.',
+  '把原客户端的 Base URL 改成元衡 API 地址，保留原有 SDK、参数和调用结构。':
+    'Change the client Base URL to Yuanheng API while keeping your SDK, parameters and request shape.',
+  '通过日志、账单、渠道状态和模型广场持续观测请求表现，按需切换策略。':
+    'Observe requests through logs, billing, channel status and the model marketplace, then switch strategy as needed.',
+  全天候支持: 'Always-on Support',
+  我们时刻恭候您: 'We are ready whenever you need us',
+  '从模型选型、客户端接入、代理运营到异常排查，元衡 API 都提供更清晰的控制台和更稳定的调用链路。':
+    'From model selection and client integration to agent operations and incident diagnosis, Yuanheng API provides a clearer console and steadier call path.',
+  立即进入控制台: 'Enter Console',
+  '阅读 API 文档': 'Read API Docs',
   '聚合万模，平衡调度，一口稳定接入，只需将模型基址替换为：':
     'Aggregate every model, balance every request, one stable integration. Just replace the model base URL with:',
   '一口接入多模型，智能调度更稳定，只需将模型基址替换为：':

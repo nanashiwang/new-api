@@ -18,42 +18,22 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { lazy, Suspense, useContext, useEffect, useState } from 'react';
-import { API } from '../../helpers/apiCore';
-import { copy } from '../../helpers/clipboard';
-import { useIsMobile } from '../../hooks/common/useIsMobile';
+import { useNavigate } from 'react-router-dom';
 import { API_ENDPOINTS } from '../../constants/common.constant';
 import { StatusContext } from '../../context/Status';
 import { useActualTheme } from '../../context/Theme';
-import { getLogo, getSystemName } from '../../helpers/storage';
+import { API } from '../../helpers/apiCore';
+import { copy } from '../../helpers/clipboard';
 import { usePublicTranslation } from '../../helpers/publicLocale';
-import {
-  Github,
-  Play,
-  FileText,
-  Copy,
-  Link2,
-  Wallet,
-  Zap,
-  ShieldCheck,
-} from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
-import {
-  OpenAI,
-  Claude,
-  Gemini,
-  Grok,
-  DeepSeek,
-  Qwen,
-  Mistral,
-  Midjourney,
-} from '@lobehub/icons';
-import InkMountains from './InkMountains';
+import { getLogo, getSystemName } from '../../helpers/storage';
+import EnterpriseHome from './EnterpriseHome';
 
 const PublicNoticeModal = lazy(
   () => import('../../components/layout/PublicNoticeModal'),
 );
 
 const isRemoteHomePage = (content) => content.startsWith('https://');
+
 // 内容以 HTML 标签 / 注释 / DOCTYPE 起头时视为原生 HTML，跳过 markdown 解析；
 // 否则按 markdown 处理。理由：marked v4 会把缩进 4+ 空格的 HTML 段误识别为 indented
 // code block 输出 <pre><code>，让用户的格式化 HTML 渲染成代码。识别为 HTML 的内容
@@ -71,6 +51,7 @@ const isRawHtmlContent = (content) => {
     trimmed.startsWith('<header')
   );
 };
+
 const getCachedHomePageContent = () => {
   try {
     return localStorage.getItem('home_page_content') || '';
@@ -78,41 +59,9 @@ const getCachedHomePageContent = () => {
     return '';
   }
 };
-// 模型 logo「群岛散落」：hero 底部一排官方 logo，半透明融入宣纸。
-// 用 @lobehub/icons 官方 logomark；EditModelModal 等处已用同一库。
-const providerModels = [
-  ['OpenAI', OpenAI],
-  ['Claude', Claude],
-  ['Gemini', Gemini],
-  ['Grok', Grok],
-  ['DeepSeek', DeepSeek],
-  ['Qwen', Qwen],
-  ['Mistral', Mistral],
-  ['Midjourney', Midjourney],
-];
-
-// 核心优势：水墨墨框内的线性图标 + 文案
-const featureItems = [
-  [
-    '聚合 40+ 大模型',
-    'OpenAI、Claude、Gemini、DeepSeek、Qwen… 一个统一 API 全部调用，无需多处对接。',
-    Link2,
-  ],
-  [
-    '更优的价格',
-    '批量议价、按量计费、缓存命中优惠，成本更低、账单更透明。',
-    Wallet,
-  ],
-  ['稳定高可用', '多节点容灾、智能路由、自动重试，保障调用稳定不中断。', Zap],
-  [
-    '安全可控',
-    '密钥隔离、用量管控、调用日志与账单全程可查，合规放心。',
-    ShieldCheck,
-  ],
-];
 
 const Home = ({ onLandingChange } = {}) => {
-  const { t, language, isChinese } = usePublicTranslation();
+  const { t, language } = usePublicTranslation();
   const navigate = useNavigate();
   const [statusState] = useContext(StatusContext);
   const actualTheme = useActualTheme();
@@ -124,8 +73,6 @@ const Home = ({ onLandingChange } = {}) => {
   );
   const [noticeContent, setNoticeContent] = useState('');
   const [noticeVisible, setNoticeVisible] = useState(false);
-  const isMobile = useIsMobile();
-  const isDemoSiteMode = statusState?.status?.demo_site_enabled || false;
   const docsLink = statusState?.status?.docs_link || '';
   const serverAddress =
     statusState?.status?.server_address || `${window.location.origin}`;
@@ -185,8 +132,9 @@ const Home = ({ onLandingChange } = {}) => {
     }
   };
 
-  const handleCopyBaseURL = async () => {
-    await copy(serverAddress);
+  const handleCopyEndpoint = async () => {
+    const normalizedServerAddress = serverAddress.replace(/\/$/, '');
+    await copy(`${normalizedServerAddress}${currentEndpoint}`);
   };
 
   const handleOpenDocs = () => {
@@ -265,180 +213,17 @@ const Home = ({ onLandingChange } = {}) => {
         </Suspense>
       )}
       {useDefaultHome ? (
-        <div className='home-shell w-full overflow-x-hidden'>
-          <div className='home-hero w-full min-h-[500px] md:min-h-[600px] lg:min-h-[700px] relative overflow-x-hidden'>
-            <div className='flex items-center justify-center h-full px-4 py-20 md:py-24 lg:py-32 mt-10'>
-              <div className='relative z-10 flex flex-col items-center justify-center text-center max-w-4xl mx-auto'>
-                <div className='flex flex-col items-center justify-center mb-6 md:mb-8'>
-                  <div className='home-hero-brand'>
-                    <img src={brandLogo} alt='logo' />
-                    <span>{brandName}</span>
-                  </div>
-                  <h1
-                    className={`text-4xl md:text-5xl lg:text-6xl xl:text-7xl font-bold home-text-primary leading-tight ${isChinese ? 'tracking-wide md:tracking-wider' : ''}`}
-                  >
-                    <>
-                      {t('元衡 API：一口接入多模型，')}
-                      <br />
-                      <span className='shine-text'>{t('智能调度更稳定')}</span>
-                      {isChinese && (
-                        <span className='home-seal' aria-hidden='true'>
-                          衡
-                        </span>
-                      )}
-                    </>
-                  </h1>
-                  <p className='text-xl md:text-2xl lg:text-3xl font-semibold home-text-primary mt-4 md:mt-6'>
-                    {t('元起万模，衡定全局')}
-                  </p>
-                  <p className='text-base md:text-lg lg:text-xl home-text-secondary mt-3 md:mt-4 max-w-xl'>
-                    {t(
-                      '一口接入多模型，智能调度更稳定，只需将模型基址替换为：',
-                    )}
-                  </p>
-                  <div className='flex flex-col md:flex-row items-center justify-center gap-4 w-full mt-4 md:mt-6 max-w-md'>
-                    <div className='home-endpoint-control'>
-                      <input
-                        readOnly
-                        value={serverAddress}
-                        className='home-endpoint-input'
-                        aria-label='Base URL'
-                      />
-                      <select
-                        className='home-endpoint-select'
-                        value={currentEndpoint}
-                        onChange={(event) => {
-                          const nextIndex = endpointItems.findIndex(
-                            (item) => item.value === event.target.value,
-                          );
-                          if (nextIndex >= 0) setEndpointIndex(nextIndex);
-                        }}
-                        aria-label='API endpoint'
-                      >
-                        {endpointItems.map((item) => (
-                          <option key={item.value} value={item.value}>
-                            {item.value}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type='button'
-                        onClick={handleCopyBaseURL}
-                        className='home-copy-button'
-                        aria-label={t('已复制到剪切板')}
-                      >
-                        <Copy size={18} />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className='flex flex-row gap-4 justify-center items-center'>
-                  <Link to='/console'>
-                    <span className='home-action-button home-action-primary'>
-                      <Play size={isMobile ? 16 : 18} />
-                      {t('获取密钥')}
-                    </span>
-                  </Link>
-                  {isDemoSiteMode && statusState?.status?.version ? (
-                    <button
-                      type='button'
-                      className='home-action-button home-action-secondary'
-                      onClick={() =>
-                        window.open(
-                          'https://github.com/QuantumNous/new-api',
-                          '_blank',
-                        )
-                      }
-                    >
-                      <Github size={isMobile ? 16 : 18} />
-                      {statusState.status.version}
-                    </button>
-                  ) : (
-                    docsLink && (
-                      <button
-                        type='button'
-                        className='home-action-button home-action-secondary'
-                        onClick={handleOpenDocs}
-                      >
-                        <FileText size={isMobile ? 16 : 18} />
-                        {t('文档')}
-                      </button>
-                    )
-                  )}
-                </div>
-
-                <div className='mt-12 md:mt-16 lg:mt-20 w-full'>
-                  <div className='flex items-center mb-6 md:mb-8 justify-center'>
-                    <span className='home-text-tertiary text-lg md:text-xl lg:text-2xl font-light'>
-                      {t('支持众多的大模型供应商')}
-                    </span>
-                  </div>
-                  <div className='home-island-models'>
-                    {providerModels.map(([name, Icon]) => (
-                      <span
-                        className='home-island-model'
-                        key={name}
-                        title={name}
-                      >
-                        <Icon size={26} />
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-            <InkMountains />
-          </div>
-
-          <section className='home-section'>
-            <div className='home-section-inner'>
-              <h2 className='home-section-title'>{t('为什么选择元衡 API')}</h2>
-              <div className='home-feature-grid'>
-                {featureItems.map(([title, desc, Icon]) => (
-                  <div className='home-feature-card' key={title}>
-                    <div className='home-feature-icon'>
-                      <Icon size={22} strokeWidth={1.6} />
-                    </div>
-                    <h3>{t(title)}</h3>
-                    <p>{t(desc)}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
-
-          <section className='home-section home-section--alt'>
-            <div className='home-section-inner'>
-              <h2 className='home-section-title'>{t('三步快速接入')}</h2>
-              <div className='home-steps-grid'>
-                {[
-                  ['1', '注册并获取密钥', '登录控制台，创建专属 API Key。'],
-                  ['2', '替换模型基址', '把原有 Base URL 换成本平台地址。'],
-                  [
-                    '3',
-                    '立即开始调用',
-                    '沿用原有 SDK 与参数，直接调用 40+ 模型。',
-                  ],
-                ].map(([n, title, desc]) => (
-                  <div className='home-step' key={n}>
-                    <div className='home-step-no'>{n}</div>
-                    <h3>{t(title)}</h3>
-                    <p>{t(desc)}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
-
-          <section className='home-cta'>
-            <h2>{t('元起万模，衡定全局')}</h2>
-            <p>{t('现在就接入，开启统一的大模型调用体验')}</p>
-            <Link to='/console' className='home-cta-btn'>
-              {t('立即开始')} →
-            </Link>
-          </section>
-        </div>
+        <EnterpriseHome
+          brandName={brandName}
+          brandLogo={brandLogo}
+          currentEndpoint={currentEndpoint}
+          endpointItems={endpointItems}
+          handleCopyEndpoint={handleCopyEndpoint}
+          handleOpenDocs={docsLink ? handleOpenDocs : null}
+          serverAddress={serverAddress}
+          setEndpointIndex={setEndpointIndex}
+          t={t}
+        />
       ) : (
         <div className='overflow-x-hidden w-full'>
           {isRemoteHomePage(homePageContent) ? (
