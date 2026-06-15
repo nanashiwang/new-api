@@ -191,7 +191,7 @@ func TestEditChannelByTag_UpdatesAutoBanWhenProvided(t *testing.T) {
 		t.Fatalf("seed channels: %v", err)
 	}
 
-	if err := EditChannelByTag("target-tag", nil, nil, nil, nil, nil, nil, &autoBanOff, nil, nil); err != nil {
+	if err := EditChannelByTag("target-tag", nil, nil, nil, nil, nil, nil, &autoBanOff, nil, nil, nil); err != nil {
 		t.Fatalf("EditChannelByTag disable auto ban: %v", err)
 	}
 
@@ -213,7 +213,7 @@ func TestEditChannelByTag_UpdatesAutoBanWhenProvided(t *testing.T) {
 		}
 	}
 
-	if err := EditChannelByTag("target-tag", nil, nil, nil, nil, nil, nil, &autoBanOn, nil, nil); err != nil {
+	if err := EditChannelByTag("target-tag", nil, nil, nil, nil, nil, nil, &autoBanOn, nil, nil, nil); err != nil {
 		t.Fatalf("EditChannelByTag enable auto ban: %v", err)
 	}
 
@@ -242,7 +242,7 @@ func TestEditChannelByTag_LeavesAutoBanUnchangedWhenNil(t *testing.T) {
 	}
 
 	priority := int64(99)
-	if err := EditChannelByTag("target-tag", nil, nil, nil, nil, &priority, nil, nil, nil, nil); err != nil {
+	if err := EditChannelByTag("target-tag", nil, nil, nil, nil, &priority, nil, nil, nil, nil, nil); err != nil {
 		t.Fatalf("EditChannelByTag with nil auto ban: %v", err)
 	}
 
@@ -259,5 +259,57 @@ func TestEditChannelByTag_LeavesAutoBanUnchangedWhenNil(t *testing.T) {
 	}
 	if updated[0].Priority == nil || *updated[0].Priority != priority {
 		t.Fatalf("expected unrelated update to still apply, got %#v", updated[0].Priority)
+	}
+}
+
+func TestEditChannelByTag_UpdatesBaseURL(t *testing.T) {
+	db := setupChannelBatchTestDB(t)
+
+	oldBaseURL := "https://old.example.com"
+	otherBaseURL := "https://other.example.com"
+	channels := []Channel{
+		{Id: 41, Name: "tag-1", Key: "key-41", Tag: common.GetPointer[string]("target-tag"), BaseURL: &oldBaseURL},
+		{Id: 42, Name: "tag-2", Key: "key-42", Tag: common.GetPointer[string]("target-tag"), BaseURL: &oldBaseURL},
+		{Id: 43, Name: "other", Key: "key-43", Tag: common.GetPointer[string]("other-tag"), BaseURL: &otherBaseURL},
+	}
+	if err := db.Create(&channels).Error; err != nil {
+		t.Fatalf("seed channels: %v", err)
+	}
+
+	newBaseURL := "https://api.example.com/openai"
+	if err := EditChannelByTag("target-tag", nil, nil, nil, nil, nil, nil, nil, nil, nil, &newBaseURL); err != nil {
+		t.Fatalf("EditChannelByTag update base url: %v", err)
+	}
+
+	updated, err := GetChannelsByIds([]int{41, 42, 43})
+	if err != nil {
+		t.Fatalf("GetChannelsByIds: %v", err)
+	}
+	for _, channel := range updated {
+		switch channel.Id {
+		case 41, 42:
+			if channel.BaseURL == nil || *channel.BaseURL != newBaseURL {
+				t.Fatalf("expected channel %d base_url=%q, got %#v", channel.Id, newBaseURL, channel.BaseURL)
+			}
+		case 43:
+			if channel.BaseURL == nil || *channel.BaseURL != otherBaseURL {
+				t.Fatalf("expected other tag channel unchanged, got %#v", channel.BaseURL)
+			}
+		}
+	}
+
+	emptyBaseURL := ""
+	if err := EditChannelByTag("target-tag", nil, nil, nil, nil, nil, nil, nil, nil, nil, &emptyBaseURL); err != nil {
+		t.Fatalf("EditChannelByTag clear base url: %v", err)
+	}
+
+	updated, err = GetChannelsByIds([]int{41, 42})
+	if err != nil {
+		t.Fatalf("GetChannelsByIds after clear: %v", err)
+	}
+	for _, channel := range updated {
+		if channel.BaseURL == nil || *channel.BaseURL != "" {
+			t.Fatalf("expected channel %d base_url cleared, got %#v", channel.Id, channel.BaseURL)
+		}
 	}
 }

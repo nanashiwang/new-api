@@ -806,7 +806,7 @@ func AutoDisableChannelsByTagWithReason(tag, reason string, periodEnd int64) err
 	return UpdateAbilityStatusByTag(tag, false)
 }
 
-func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *string, group *string, priority *int64, weight *uint, autoBan *int, paramOverride *string, headerOverride *string) error {
+func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *string, group *string, priority *int64, weight *uint, autoBan *int, paramOverride *string, headerOverride *string, baseURL *string) error {
 	updateData := Channel{}
 	shouldReCreateAbilities := false
 	updatedTag := tag
@@ -840,6 +840,9 @@ func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *
 	}
 	if headerOverride != nil {
 		updateData.HeaderOverride = headerOverride
+	}
+	if baseURL != nil {
+		updateData.BaseURL = baseURL
 	}
 
 	err := DB.Model(&Channel{}).Where("tag = ?", tag).Updates(updateData).Error

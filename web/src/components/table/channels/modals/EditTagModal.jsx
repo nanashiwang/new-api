@@ -77,6 +77,7 @@ const EditTagModal = (props) => {
   const originInputs = {
     tag: '',
     new_tag: null,
+    base_url: null,
     auto_ban: null,
     model_mapping: null,
     groups: [],
@@ -95,6 +96,7 @@ const EditTagModal = (props) => {
   const [tagQuotaUsage, setTagQuotaUsage] = useState(null);
   const [modelMappingClearRequested, setModelMappingClearRequested] =
     useState(false);
+  const [baseUrlClearRequested, setBaseUrlClearRequested] = useState(false);
   const modelSearchMatchedCount = useMemo(() => {
     const keyword = modelSearchValue.trim();
     if (!keyword) {
@@ -120,6 +122,9 @@ const EditTagModal = (props) => {
   const handleInputChange = (name, value) => {
     if (name === 'model_mapping') {
       setModelMappingClearRequested(false);
+    }
+    if (name === 'base_url') {
+      setBaseUrlClearRequested(false);
     }
     setInputs((inputs) => ({ ...inputs, [name]: value }));
     if (formApiRef.current) {
@@ -196,6 +201,14 @@ const EditTagModal = (props) => {
     }
   };
 
+  const clearBaseURL = () => {
+    setBaseUrlClearRequested(true);
+    setInputs((inputs) => ({ ...inputs, base_url: '' }));
+    if (formApiRef.current) {
+      formApiRef.current.setValue('base_url', '');
+    }
+  };
+
   const fetchModels = async () => {
     try {
       let res = await API.get(`/api/channel/models`);
@@ -239,6 +252,15 @@ const EditTagModal = (props) => {
         return;
       }
       data.model_mapping = formVals.model_mapping;
+    }
+    if (baseUrlClearRequested) {
+      data.base_url = '';
+    } else if (
+      formVals.base_url !== undefined &&
+      formVals.base_url !== null &&
+      String(formVals.base_url).trim() !== ''
+    ) {
+      data.base_url = String(formVals.base_url).trim().replace(/\/+$/, '');
     }
     if (formVals.groups && formVals.groups.length > 0) {
       data.groups = formVals.groups.join(',');
@@ -311,6 +333,7 @@ const EditTagModal = (props) => {
     }
     if (
       data.model_mapping === undefined &&
+      data.base_url === undefined &&
       data.groups === undefined &&
       data.models === undefined &&
       data.new_tag === undefined &&
@@ -349,6 +372,7 @@ const EditTagModal = (props) => {
     try {
       const hasTagFields =
         data.model_mapping !== undefined ||
+        data.base_url !== undefined ||
         data.groups !== undefined ||
         data.models !== undefined ||
         data.new_tag !== undefined ||
@@ -383,6 +407,7 @@ const EditTagModal = (props) => {
       if (tagOk && policyOk) {
         showSuccess('标签更新成功！');
         setModelMappingClearRequested(false);
+        setBaseUrlClearRequested(false);
         refresh();
         handleClose();
       }
@@ -499,6 +524,7 @@ const EditTagModal = (props) => {
     fetchQuotaUsage().then();
     setModelSearchValue('');
     setModelMappingClearRequested(false);
+    setBaseUrlClearRequested(false);
     if (formApiRef.current) {
       formApiRef.current.setValues({
         ...getInitValues(),
@@ -647,6 +673,32 @@ const EditTagModal = (props) => {
                       '设置后会批量修改该标签下所有渠道的自动禁用开关，留空则不更改',
                     )}
                   />
+
+                  <Form.Input
+                    field='base_url'
+                    label={t('API地址')}
+                    placeholder={t('请输入 API 地址，留空则不更改')}
+                    onChange={(value) => handleInputChange('base_url', value)}
+                    extraText={
+                      <Space>
+                        <Text type='tertiary' size='small'>
+                          {t('设置后会批量修改该标签下所有渠道的 API 地址')}
+                        </Text>
+                        <Text
+                          className='!text-semi-color-primary cursor-pointer'
+                          onClick={clearBaseURL}
+                        >
+                          {t('清空API地址')}
+                        </Text>
+                        <Text
+                          className='!text-semi-color-primary cursor-pointer'
+                          onClick={() => handleInputChange('base_url', null)}
+                        >
+                          {t('不更改')}
+                        </Text>
+                      </Space>
+                    }
+                  />
                 </div>
               </Card>
 
@@ -702,10 +754,7 @@ const EditTagModal = (props) => {
                           min={0}
                           precision={2}
                           onNumberChange={(value) =>
-                            handleInputChange(
-                              'quota_policy_quota_limit',
-                              value,
-                            )
+                            handleInputChange('quota_policy_quota_limit', value)
                           }
                           style={{ width: '100%' }}
                         />
@@ -718,10 +767,7 @@ const EditTagModal = (props) => {
                           min={0}
                           precision={0}
                           onNumberChange={(value) =>
-                            handleInputChange(
-                              'quota_policy_count_limit',
-                              value,
-                            )
+                            handleInputChange('quota_policy_count_limit', value)
                           }
                           style={{ width: '100%' }}
                         />
@@ -1122,10 +1168,7 @@ const EditTagModal = (props) => {
                         ]}
                         style={{ width: '100%' }}
                         onChange={(value) =>
-                          handleInputChange(
-                            'client_restriction_clients',
-                            value,
-                          )
+                          handleInputChange('client_restriction_clients', value)
                         }
                       />
                     )}

@@ -827,6 +827,7 @@ func DeleteDisabledChannel(c *gin.Context) {
 type ChannelTag struct {
 	Tag                      string   `json:"tag"`
 	NewTag                   *string  `json:"new_tag"`
+	BaseURL                  *string  `json:"base_url"`
 	Priority                 *int64   `json:"priority"`
 	Weight                   *uint    `json:"weight"`
 	AutoBan                  *int     `json:"auto_ban"`
@@ -924,6 +925,10 @@ func EditTagChannels(c *gin.Context) {
 		}
 		channelTag.HeaderOverride = common.GetPointer[string](trimmed)
 	}
+	if channelTag.BaseURL != nil {
+		trimmed := strings.TrimRight(strings.TrimSpace(*channelTag.BaseURL), "/")
+		channelTag.BaseURL = common.GetPointer[string](trimmed)
+	}
 	if channelTag.AutoBan != nil && *channelTag.AutoBan != 0 && *channelTag.AutoBan != 1 {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -946,7 +951,7 @@ func EditTagChannels(c *gin.Context) {
 			return
 		}
 	}
-	err = model.EditChannelByTag(channelTag.Tag, channelTag.NewTag, channelTag.ModelMapping, channelTag.Models, channelTag.Groups, channelTag.Priority, channelTag.Weight, channelTag.AutoBan, channelTag.ParamOverride, channelTag.HeaderOverride)
+	err = model.EditChannelByTag(channelTag.Tag, channelTag.NewTag, channelTag.ModelMapping, channelTag.Models, channelTag.Groups, channelTag.Priority, channelTag.Weight, channelTag.AutoBan, channelTag.ParamOverride, channelTag.HeaderOverride, channelTag.BaseURL)
 	if err != nil {
 		common.ApiError(c, err)
 		return
