@@ -177,6 +177,60 @@ func TestIsRetryableSharedUpstreamPoolError_RateLimitPositive(t *testing.T) {
 	}
 }
 
+func TestIsCRSMemoryPressureError_CompactMessage(t *testing.T) {
+	err := types.NewOpenAIError(
+		errors.New("unexpected status 503 Service Unavailable:CRSis under memory pressure，please retry later"),
+		types.ErrorCodeBadResponseStatusCode,
+		503,
+	)
+
+	if !IsCRSMemoryPressureError(err) {
+		t.Fatalf("expected compact CRS memory pressure message to be detected")
+	}
+	if !IsRetryableSharedUpstreamPoolError(err) {
+		t.Fatalf("expected CRS memory pressure to be treated as shared upstream pool error")
+	}
+}
+
+func TestCRSMemoryPressureShortCircuitTripsTagAndBaseURL(t *testing.T) {
+	resetCRSShortCircuitForTest()
+	originRedisEnabled := common.RedisEnabled
+	common.RedisEnabled = false
+	t.Cleanup(func() {
+		common.RedisEnabled = originRedisEnabled
+		resetCRSShortCircuitForTest()
+	})
+
+	tag := "crs-site-a"
+	otherTag := "crs-site-b"
+	baseURL := "https://CRS.example.com/v1/"
+	normalizedBaseURL := "https://crs.example.com/v1"
+	otherBaseURL := "https://other.example.com/v1"
+	channel := &model.Channel{Id: 10, Status: common.ChannelStatusEnabled, Tag: &tag, BaseURL: &baseURL}
+	err := types.WithOpenAIError(types.OpenAIError{
+		Message: "CRS is under memory pressure, please retry later",
+		Type:    "upstream_error",
+		Code:    nil,
+	}, 503)
+
+	trips := ApplyCRSMemoryPressureShortCircuit(channel, err)
+	if len(trips) != 2 {
+		t.Fatalf("expected tag and base_url trips, got %+v", trips)
+	}
+	if !IsChannelUnavailableForRequest(channel) {
+		t.Fatalf("expected original channel to be short-circuited")
+	}
+	if !IsChannelUnavailableForRequest(&model.Channel{Id: 11, Status: common.ChannelStatusEnabled, Tag: &tag, BaseURL: &otherBaseURL}) {
+		t.Fatalf("expected same tag to be short-circuited")
+	}
+	if !IsChannelUnavailableForRequest(&model.Channel{Id: 12, Status: common.ChannelStatusEnabled, Tag: &otherTag, BaseURL: &normalizedBaseURL}) {
+		t.Fatalf("expected same base_url to be short-circuited")
+	}
+	if IsChannelUnavailableForRequest(&model.Channel{Id: 13, Status: common.ChannelStatusEnabled, Tag: &otherTag, BaseURL: &otherBaseURL}) {
+		t.Fatalf("did not expect unrelated channel to be short-circuited")
+	}
+}
+
 func TestApplyChannelFailureRetryExclusion_UsesTagGroup(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {

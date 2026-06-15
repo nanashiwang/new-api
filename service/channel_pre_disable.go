@@ -20,7 +20,7 @@ func IsChannelUnavailableForRequest(channel *model.Channel) bool {
 	if channel == nil {
 		return true
 	}
-	return channel.IsTemporarilyUnavailable()
+	return channel.IsTemporarilyUnavailable() || IsCRSShortCircuitOpenForChannel(channel)
 }
 
 func ShouldFallbackAfterSetupError(err *types.NewAPIError) bool {

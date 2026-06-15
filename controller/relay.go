@@ -254,6 +254,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			continue
 		}
 
+		logCRSMemoryPressureShortCircuit(c, channel, newAPIError)
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
 
 		// 同渠道多 Key 快速切换：配额耗尽时先在当前渠道内换一个 Key 重试。
@@ -375,6 +376,22 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 
 func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
 	return service.ShouldRetryChannelError(c, openaiErr, retryTimes)
+}
+
+func logCRSMemoryPressureShortCircuit(c *gin.Context, channel *model.Channel, err *types.NewAPIError) {
+	trips := service.ApplyCRSMemoryPressureShortCircuit(channel, err)
+	if len(trips) == 0 {
+		return
+	}
+	parts := make([]string, 0, len(trips))
+	for _, trip := range trips {
+		state := "existing"
+		if trip.Opened {
+			state = "opened"
+		}
+		parts = append(parts, fmt.Sprintf("%s=%s ttl=%ds %s", trip.Scope, trip.Key, trip.TTLSeconds, state))
+	}
+	logger.LogWarn(c, fmt.Sprintf("CRS memory pressure short-circuit: channel=%d %s", channel.Id, strings.Join(parts, "; ")))
 }
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) {
@@ -619,10 +636,12 @@ func RelayTask(c *gin.Context) {
 		lastTaskRelayErr = taskErr
 
 		if !taskErr.LocalError {
+			apiErr := types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode)
+			logCRSMemoryPressureShortCircuit(c, channel, apiErr)
 			processChannelError(c,
 				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
 					common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
-				types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode))
+				apiErr)
 		}
 
 		retryParam.ExcludeChannels = append(retryParam.ExcludeChannels, channel.Id)
