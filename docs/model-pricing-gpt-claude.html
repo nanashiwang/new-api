@@ -99,7 +99,7 @@
     th { position: sticky; top: 0; z-index: 1; background: rgba(246,239,227,.96); color: #596050; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
     tr:last-child td { border-bottom: 0; }
     .model strong { display: block; white-space: nowrap; font-size: 15px; }
-    .model small { color: var(--muted); }
+    .model small, .ratio-note { display: block; color: var(--muted); font-size: 12px; }
     .vendor, .chip, .ratio-pill { display: inline-flex; align-items: center; margin: 0 5px 6px 0; padding: 4px 9px; border-radius: 999px; font-size: 12px; white-space: nowrap; }
     .vendor.gpt { background: var(--teal-2); color: #075c56; }
     .vendor.claude { background: var(--orange-2); color: #8a3f1b; }
@@ -136,9 +136,9 @@
 <body>
   <main class="page">
     <section class="hero">
-      <span class="eyebrow">客户介绍版 · 当前线上人民币价格 · 2026-06-15 11:56</span>
+      <span class="eyebrow">客户介绍版 · 最低普通分组价 · 2026-06-15 13:45</span>
       <h1>GPT / Claude 模型人民币价格与选型指南</h1>
-      <p class="lead">面向客户沟通时，优先按“成本、质量、长上下文、图片生成”来选模型。表内价格已按 1 元人民币 = 5 美元额度折算；单位为人民币 / 100 万 tokens，图片模型按次计费。</p>
+      <p class="lead">面向客户沟通时，优先按“成本、质量、长上下文、图片生成”来选模型。表内价格不按高倍率分组计算，而是选取每个模型可用分组中的最低计价倍率；单位为人民币 / 100 万 tokens，图片模型按次计费。</p>
       <div class="hero-grid">
         <div class="metric"><strong>12</strong><span>当前整理模型</span></div>
         <div class="metric"><strong>11</strong><span>文本 / 多模态 token 计费</span></div>
@@ -156,7 +156,7 @@
       <div class="cards">
         <article class="card"><b>成本优先</b><p>选 <strong>gpt-5.4-mini</strong>。适合批量摘要、简单客服、分类和低成本文本任务。</p><span class="badge">输入 ¥0.48 / 输出 ¥2.88</span></article>
         <article class="card"><b>通用主力</b><p>选 <strong>gpt-5.4</strong>。适合大多数问答、写作、代码辅助、文件和视觉分析。</p><span class="badge">400K 上下文</span></article>
-        <article class="card"><b>质量优先</b><p>选 <strong>gpt-5.5</strong> 或 <strong>claude-sonnet-4-6</strong>。适合复杂推理、长任务和关键交付。</p><span class="badge">高质量推理</span></article>
+        <article class="card"><b>质量优先</b><p>选 <strong>gpt-5.5</strong> 或 <strong>claude-sonnet-4-6</strong>。适合复杂推理、长任务和关键交付。</p><span class="badge">最低普通分组价</span></article>
         <article class="card"><b>Claude 长文/代码</b><p>选 <strong>claude-sonnet-4-6</strong>。长上下文、文件理解、写作和代码审查更稳。</p><span class="badge">1M 上下文</span></article>
         <article class="card"><b>顶级复杂任务</b><p>选 <strong>claude-opus-4-6 / 4-7</strong>。适合架构设计、深度研究、复杂代码分析。</p><span class="badge">高阶 Claude</span></article>
         <article class="card"><b>图片生成</b><p>选 <strong>gpt-image-2</strong>。适合文生图、参考图生成、电商图和营销素材。</p><span class="badge">¥0.4 / 次</span></article>
@@ -167,7 +167,7 @@
       <div class="section-head">
         <div>
           <h2>文本模型价格</h2>
-          <p class="hint">输入、输出、缓存读、缓存写均为人民币 / 100 万 tokens。输出成本通常是客户最关心的部分。</p>
+          <p class="hint">输入、输出、缓存读、缓存写均为人民币 / 100 万 tokens；已使用每个模型当前可用的最低计价分组。</p>
         </div>
       </div>
       <div class="toolbar">
@@ -180,7 +180,7 @@
         <table id="textTable">
           <thead>
             <tr>
-              <th>模型</th><th>厂商</th><th>能力标签</th><th>线路冗余</th><th>可用分组</th><th>适用场景</th><th>输入</th><th>输出</th><th>缓存读</th><th>缓存写</th>
+              <th>模型</th><th>厂商</th><th>能力标签</th><th>线路冗余</th><th>计价分组</th><th>适用场景</th><th>输入</th><th>输出</th><th>缓存读</th><th>缓存写</th>
             </tr>
           </thead>
           <tbody>
@@ -191,7 +191,7 @@
           <td><span class="vendor gpt">GPT</span></td>
           <td><span class="muted">-</span></td>
           <td>50 条</td>
-          <td><span class="chip group">专属组</span><span class="chip group">SVIP</span><span class="chip group">VIP</span><span class="chip group">高配组</span></td>
+          <td><span class="chip group">专属组</span><span class="chip group">SVIP</span><span class="chip group">VIP</span><small class="ratio-note">x 1</small></td>
           <td class="scenario">低成本批量文本、轻量客服、摘要改写、简单代码与分类任务。</td>
     
           <td class="price">¥0.48</td>
@@ -205,7 +205,7 @@
           <td><span class="vendor gpt">GPT</span></td>
           <td><span class="chip ">推理</span><span class="chip ">工具调用</span><span class="chip ">文件</span><span class="chip ">视觉</span><span class="chip ">400K 上下文</span></td>
           <td>99 条</td>
-          <td><span class="chip group">VIP</span><span class="chip group">高配组</span><span class="chip group">专属组</span><span class="chip group">SVIP</span></td>
+          <td><span class="chip group">专属组</span><span class="chip group">SVIP</span><span class="chip group">VIP</span><small class="ratio-note">x 1</small></td>
           <td class="scenario">通用主力模型，适合日常问答、文档总结、代码辅助、多轮分析。</td>
     
           <td class="price">¥1.6</td>
@@ -219,7 +219,7 @@
           <td><span class="vendor gpt">GPT</span></td>
           <td><span class="muted">-</span></td>
           <td>100 条</td>
-          <td><span class="chip group">专属组</span><span class="chip group">SVIP</span><span class="chip group">VIP</span><span class="chip group">高配组</span></td>
+          <td><span class="chip group">专属组</span><span class="chip group">SVIP</span><span class="chip group">VIP</span><small class="ratio-note">x 1</small></td>
           <td class="scenario">高质量推理与复杂任务，适合关键方案、复杂代码、长链路工作流。</td>
     
           <td class="price">¥3.2</td>
@@ -233,13 +233,13 @@
           <td><span class="vendor claude">Claude</span></td>
           <td><span class="chip ">推理</span><span class="chip ">工具调用</span><span class="chip ">文件</span><span class="chip ">视觉</span><span class="chip ">200K 上下文</span></td>
           <td>40 条</td>
-          <td><span class="chip group">Claude 专线</span><span class="chip group">Claude AWS</span><span class="chip group">高配组</span></td>
+          <td><span class="chip group">Claude AWS</span><small class="ratio-note">x 1.05</small></td>
           <td class="scenario">Claude 轻量模型，适合快速摘要、分类、客服、文件/视觉初筛。</td>
     
-          <td class="price">¥1.2</td>
-          <td class="price primary">¥6</td>
-          <td class="price soft">¥0.12</td>
-          <td class="price soft">¥1.5</td>
+          <td class="price">¥1.26</td>
+          <td class="price primary">¥6.3</td>
+          <td class="price soft">¥0.126</td>
+          <td class="price soft">¥1.575</td>
         </tr>
         <tr data-vendor="claude" data-name="claude-sonnet-4-6">
           
@@ -247,13 +247,13 @@
           <td><span class="vendor claude">Claude</span></td>
           <td><span class="chip ">推理</span><span class="chip ">工具调用</span><span class="chip ">文件</span><span class="chip ">视觉</span><span class="chip ">1M 上下文</span></td>
           <td>45 条</td>
-          <td><span class="chip group">Claude 专线</span><span class="chip group">Claude AWS</span><span class="chip group">Kiro 专线</span><span class="chip group">高配组</span></td>
+          <td><span class="chip group">Kiro 专线</span><small class="ratio-note">x 0.7</small></td>
           <td class="scenario">Claude 主力模型，适合长上下文写作、代码审查、复杂文档分析。</td>
     
-          <td class="price">¥3.6</td>
-          <td class="price primary">¥18</td>
-          <td class="price soft">¥0.36</td>
-          <td class="price soft">¥4.5</td>
+          <td class="price">¥2.52</td>
+          <td class="price primary">¥12.6</td>
+          <td class="price soft">¥0.252</td>
+          <td class="price soft">¥3.15</td>
         </tr>
         <tr data-vendor="claude" data-name="claude-opus-4-6">
           
@@ -261,13 +261,13 @@
           <td><span class="vendor claude">Claude</span></td>
           <td><span class="chip ">推理</span><span class="chip ">工具调用</span><span class="chip ">文件</span><span class="chip ">视觉</span><span class="chip ">1M 上下文</span></td>
           <td>50 条</td>
-          <td><span class="chip group">Kiro 专线</span><span class="chip group">高配组</span><span class="chip group">Claude 专线</span><span class="chip group">Claude AWS</span></td>
+          <td><span class="chip group">Kiro 专线</span><small class="ratio-note">x 0.7</small></td>
           <td class="scenario">Claude 高阶推理，适合架构设计、复杂代码、深度研究和高质量交付。</td>
     
-          <td class="price">¥6</td>
-          <td class="price primary">¥30</td>
-          <td class="price soft">¥0.6</td>
-          <td class="price soft">¥7.5</td>
+          <td class="price">¥4.2</td>
+          <td class="price primary">¥21</td>
+          <td class="price soft">¥0.42</td>
+          <td class="price soft">¥5.25</td>
         </tr>
         <tr data-vendor="claude" data-name="claude-opus-4-7">
           
@@ -275,13 +275,13 @@
           <td><span class="vendor claude">Claude</span></td>
           <td><span class="muted">-</span></td>
           <td>50 条</td>
-          <td><span class="chip group">Claude 专线</span><span class="chip group">Claude AWS</span><span class="chip group">Kiro 专线</span><span class="chip group">高配组</span></td>
+          <td><span class="chip group">Kiro 专线</span><small class="ratio-note">x 0.7</small></td>
           <td class="scenario">Claude 高阶备用/增强线路，适合复杂推理、长文分析、代码架构。</td>
     
-          <td class="price">¥6</td>
-          <td class="price primary">¥30</td>
-          <td class="price soft">¥0.6</td>
-          <td class="price soft">¥7.5</td>
+          <td class="price">¥4.2</td>
+          <td class="price primary">¥21</td>
+          <td class="price soft">¥0.42</td>
+          <td class="price soft">¥5.25</td>
         </tr>
         <tr data-vendor="claude" data-name="claude-opus-4-8">
           
@@ -289,13 +289,13 @@
           <td><span class="vendor claude">Claude</span></td>
           <td><span class="muted">-</span></td>
           <td>45 条</td>
-          <td><span class="chip group">Claude AWS</span><span class="chip group">Kiro 专线</span><span class="chip group">高配组</span><span class="chip group">Claude 专线</span></td>
+          <td><span class="chip group">Kiro 专线</span><small class="ratio-note">x 0.7</small></td>
           <td class="scenario">Claude 高端输出路线，适合极高质量要求；输出成本较高。</td>
     
-          <td class="price">¥6</td>
-          <td class="price primary">¥30</td>
-          <td class="price soft">¥0.6</td>
-          <td class="price soft">¥7.5</td>
+          <td class="price">¥4.2</td>
+          <td class="price primary">¥21</td>
+          <td class="price soft">¥0.42</td>
+          <td class="price soft">¥5.25</td>
         </tr>
         <tr data-vendor="claude" data-name="claude-fable-5">
           
@@ -303,13 +303,13 @@
           <td><span class="vendor claude">Claude</span></td>
           <td><span class="muted">-</span></td>
           <td>30 条</td>
-          <td><span class="chip group">高配组</span><span class="chip group">Claude 专线</span></td>
+          <td><span class="chip group">Claude 专线</span><small class="ratio-note">x 1.6</small></td>
           <td class="scenario">高端 Claude 创作/复杂推理路线，适合高价值任务，输出成本最高。</td>
     
-          <td class="price">¥12</td>
-          <td class="price primary">¥60</td>
-          <td class="price soft">¥1.2</td>
-          <td class="price soft">¥14.5</td>
+          <td class="price">¥19.2</td>
+          <td class="price primary">¥96</td>
+          <td class="price soft">¥1.92</td>
+          <td class="price soft">¥23.2</td>
         </tr>
         <tr data-vendor="claude" data-name="claude-opus-4-5-20251101">
           
@@ -317,13 +317,13 @@
           <td><span class="vendor claude">Claude</span></td>
           <td><span class="muted">-</span></td>
           <td>10 条</td>
-          <td><span class="chip group">Claude AWS</span></td>
+          <td><span class="chip group">Claude AWS</span><small class="ratio-note">x 1.05</small></td>
           <td class="scenario">历史/备用 Claude AWS 线路，价格高，建议只在指定需求下使用。</td>
     
-          <td class="price">¥15</td>
-          <td class="price primary">¥75</td>
-          <td class="price soft">¥1.5</td>
-          <td class="price soft">¥18.75</td>
+          <td class="price">¥15.75</td>
+          <td class="price primary">¥78.75</td>
+          <td class="price soft">¥1.575</td>
+          <td class="price soft">¥19.6875</td>
         </tr>
         <tr data-vendor="claude" data-name="claude-sonnet-4-5-20250929">
           
@@ -331,13 +331,13 @@
           <td><span class="vendor claude">Claude</span></td>
           <td><span class="muted">-</span></td>
           <td>10 条</td>
-          <td><span class="chip group">Claude AWS</span></td>
+          <td><span class="chip group">Claude AWS</span><small class="ratio-note">x 1.05</small></td>
           <td class="scenario">历史/备用 Claude AWS 线路，价格高，建议只在兼容需求下使用。</td>
     
-          <td class="price">¥15</td>
-          <td class="price primary">¥75</td>
-          <td class="price soft">¥1.5</td>
-          <td class="price soft">¥18.75</td>
+          <td class="price">¥15.75</td>
+          <td class="price primary">¥78.75</td>
+          <td class="price soft">¥1.575</td>
+          <td class="price soft">¥19.6875</td>
         </tr>
           </tbody>
         </table>
@@ -348,13 +348,13 @@
       <div class="section-head">
         <div>
           <h2>图片模型价格</h2>
-          <p class="hint">图片模型当前按调用次数计费，不按 token 输入输出表展示。</p>
+          <p class="hint">图片模型当前按调用次数计费，已使用最低计价分组。</p>
         </div>
       </div>
       <div class="table-wrap">
         <table>
           <thead>
-            <tr><th>模型</th><th>厂商</th><th>能力标签</th><th>线路冗余</th><th>可用分组</th><th>适用场景</th><th>价格</th></tr>
+            <tr><th>模型</th><th>厂商</th><th>能力标签</th><th>线路冗余</th><th>计价分组</th><th>适用场景</th><th>价格</th></tr>
           </thead>
           <tbody>
         <tr data-vendor="gpt" data-name="gpt-image-2">
@@ -363,7 +363,7 @@
           <td><span class="vendor gpt">GPT</span></td>
           <td><span class="chip ">图片生成</span><span class="chip ">参考图</span><span class="chip ">按次计费</span></td>
           <td>110 条</td>
-          <td><span class="chip group">默认组</span><span class="chip group">专属组</span><span class="chip group">SVIP</span><span class="chip group">VIP</span><span class="chip group">高配组</span></td>
+          <td><span class="chip group">SVIP</span><span class="chip group">VIP</span><span class="chip group">默认组</span><span class="chip group">专属组</span><small class="ratio-note">x 1</small></td>
           <td class="scenario">图片生成与参考图再创作，适合营销图、电商图、海报、视觉草案。</td>
     
           <td class="price primary">¥0.4 / 次</td>
@@ -376,19 +376,19 @@
       <div class="note-box">
         <h3>报价口径</h3>
         <ul>
-          <li>表内为人民币基础价：先按模型倍率换算为美元额度价，再按 1 元人民币 = 5 美元额度折算。</li>
+          <li>表内为人民币基础价：先取线上模型基础价，再乘以该模型可用分组中的最低倍率。</li>
+          <li>页面已排除高倍率分组作为计价依据；如果某模型只有高倍率普通线路，则按该最低可用线路展示。</li>
+          <li>人民币换算固定按 1 元人民币 = 5 美元额度折算。</li>
           <li>缓存读通常更便宜；适合长上下文、多轮复用、重复文档分析。</li>
-          <li>实际结算会叠加用户所在分组倍率，最终以控制台账单为准。</li>
-          <li>历史/备用模型价格高或线路少，不建议作为默认主推。</li>
         </ul>
       </div>
       <div class="note-box">
-        <h3>当前分组倍率</h3>
-        <div class="ratio-list"><span class="ratio-pill">专属组 x 1</span><span class="ratio-pill">Claude 专线 x 1.6</span><span class="ratio-pill">Claude AWS x 1.05</span><span class="ratio-pill">Kiro 专线 x 0.7</span><span class="ratio-pill">SVIP x 1</span><span class="ratio-pill">VIP x 1</span><span class="ratio-pill">高配组 x 1.6</span></div>
+        <h3>本页使用的最低分组倍率</h3>
+        <div class="ratio-list"><span class="ratio-pill">默认组 x 1</span><span class="ratio-pill">专属组 x 1</span><span class="ratio-pill">VIP x 1</span><span class="ratio-pill">SVIP x 1</span><span class="ratio-pill">Claude AWS x 1.05</span><span class="ratio-pill">Kiro 专线 x 0.7</span><span class="ratio-pill">Claude 专线 x 1.6</span></div>
       </div>
     </section>
 
-    <p class="footer">数据来源：线上 /api/pricing 与当前可用线路导出；价格已按 1 元人民币 = 5 美元额度折算；生成时间：2026-06-15 11:56。</p>
+    <p class="footer">数据来源：线上 /api/pricing 与当前可用线路导出；价格已按最低可用分组和 1 元人民币 = 5 美元额度折算；生成时间：2026-06-15 13:45。</p>
   </main>
   <script>
     const tabs = [...document.querySelectorAll('.tab')];
