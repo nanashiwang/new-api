@@ -286,6 +286,10 @@ const Dashboard = () => {
             perfMetricsLoading={dashboardData.perfMetricsLoading}
             modelChannelStats={dashboardData.modelChannelStats}
             modelChannelStatsLoading={dashboardData.modelChannelStatsLoading}
+            modelChannelStatsDays={dashboardData.modelChannelStatsDays}
+            onModelChannelStatsDaysChange={
+              dashboardData.handleModelChannelStatsDaysChange
+            }
             userBalanceTrend={dashboardData.userBalanceTrend}
             userBalanceTrendLoading={dashboardData.userBalanceTrendLoading}
             userBalanceTrendDays={dashboardData.userBalanceTrendDays}

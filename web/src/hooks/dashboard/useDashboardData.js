@@ -73,6 +73,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const [modelChannelStats, setModelChannelStats] = useState(null);
   const [modelChannelStatsLoading, setModelChannelStatsLoading] =
     useState(false);
+  const [modelChannelStatsDays, setModelChannelStatsDays] = useState(1);
   const [userBalanceTrend, setUserBalanceTrend] = useState(null);
   const [userBalanceTrendLoading, setUserBalanceTrendLoading] = useState(false);
   const [userBalanceTrendDays, setUserBalanceTrendDays] = useState(7);
@@ -299,13 +300,14 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     }
   }, [inputs.start_timestamp, inputs.end_timestamp, perfMetricsRequestGuard]);
 
-  const loadModelChannelTagStats = useCallback(async () => {
+  const loadModelChannelTagStats = useCallback(async (daysOverride) => {
     if (!isAdminUser) return null;
     const requestId = modelChannelStatsRequestGuard.createRequestId();
     setModelChannelStatsLoading(true);
     try {
-      const start = Date.parse(inputs.start_timestamp) / 1000;
-      const end = Date.parse(inputs.end_timestamp) / 1000;
+      const days = Number(daysOverride || modelChannelStatsDays || 1);
+      const end = Math.floor(Date.now() / 1000);
+      const start = end - Math.min(Math.max(days, 1), 30) * 86400;
       const res = await API.get('/api/data/model-channel-tags', {
         params: {
           start_timestamp: start,
@@ -333,12 +335,19 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
       }
     }
   }, [
-    inputs.start_timestamp,
-    inputs.end_timestamp,
     inputs.username,
     isAdminUser,
+    modelChannelStatsDays,
     modelChannelStatsRequestGuard,
   ]);
+
+  const handleModelChannelStatsDaysChange = useCallback(
+    async (days) => {
+      setModelChannelStatsDays(days);
+      return loadModelChannelTagStats(days);
+    },
+    [loadModelChannelTagStats],
+  );
 
   const loadUserBalanceTrend = useCallback(async (daysOverride) => {
     if (!isAdminUser) return null;
@@ -474,6 +483,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     perfMetricsLoading,
     modelChannelStats,
     modelChannelStatsLoading,
+    modelChannelStatsDays,
     userBalanceTrend,
     userBalanceTrendLoading,
     userBalanceTrendDays,
@@ -513,6 +523,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     loadUptimeData,
     loadPerfMetricsSummary,
     loadModelChannelTagStats,
+    handleModelChannelStatsDaysChange,
     loadUserBalanceTrend,
     handleUserBalanceTrendDaysChange,
     getUserData,

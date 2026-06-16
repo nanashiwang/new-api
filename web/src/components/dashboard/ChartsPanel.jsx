@@ -19,12 +19,14 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import {
+  Button,
   Card,
   Tabs,
   TabPane,
   Table,
   Spin,
   Empty,
+  Space,
   Tag,
 } from '@douyinfe/semi-ui';
 import { PieChart } from 'lucide-react';
@@ -49,6 +51,23 @@ const ChartFallback = ({ t }) => (
 
 const formatPercent = (value) => `${(Number(value || 0) * 100).toFixed(1)}%`;
 
+const MODEL_CHANNEL_RANGE_OPTIONS = [
+  { label: '近24小时', value: 1 },
+  { label: '近7天', value: 7 },
+  { label: '近30天', value: 30 },
+];
+
+const formatDateTime = (timestamp) => {
+  const date = new Date(Number(timestamp || 0) * 1000);
+  if (Number.isNaN(date.getTime())) return '-';
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(
+    2,
+    '0',
+  )}-${String(date.getDate()).padStart(2, '0')} ${String(
+    date.getHours(),
+  ).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+};
+
 const ChartsPanel = ({
   activeChartTab,
   setActiveChartTab,
@@ -59,6 +78,8 @@ const ChartsPanel = ({
   perfMetricsLoading,
   modelChannelStats,
   modelChannelStatsLoading,
+  modelChannelStatsDays,
+  onModelChannelStatsDaysChange,
   userBalanceTrend,
   userBalanceTrendLoading,
   userBalanceTrendDays,
@@ -121,7 +142,7 @@ const ChartsPanel = ({
       title: {
         visible: true,
         text: t('各模型消耗金额占比'),
-        subtext: `${t('总计')}：${renderQuota(modelChannelStats?.total_quota || 0, 2)}`,
+        subtext: `${t('总计')}：${renderQuota(modelChannelStats?.total_quota || 0, 2)} · ${formatDateTime(modelChannelStats?.start_timestamp)} ~ ${formatDateTime(modelChannelStats?.end_timestamp)}`,
       },
       tooltip: {
         mark: {
@@ -175,7 +196,9 @@ const ChartsPanel = ({
       title: {
         visible: true,
         text: t('渠道标签占比'),
-        subtext: selectedModel || t('请选择模型'),
+        subtext: selectedModel
+          ? `${selectedModel} · ${formatDateTime(modelChannelStats?.start_timestamp)} ~ ${formatDateTime(modelChannelStats?.end_timestamp)}`
+          : t('请选择模型'),
       },
       tooltip: {
         mark: {
@@ -194,7 +217,13 @@ const ChartsPanel = ({
       },
       color: { type: 'ordinal', range: tagColors },
     };
-  }, [channelTagRows, selectedModel, t]);
+  }, [
+    channelTagRows,
+    modelChannelStats?.end_timestamp,
+    modelChannelStats?.start_timestamp,
+    selectedModel,
+    t,
+  ]);
 
   const perfMetricColumns = [
     {
@@ -288,8 +317,27 @@ const ChartsPanel = ({
           )}
           {isModelChannelTab && (
             <Spin spinning={modelChannelStatsLoading}>
-              {modelSpendRows.length > 0 ? (
-                <div className='space-y-3'>
+              <div className='space-y-3'>
+                <div className='flex flex-col gap-2 md:flex-row md:items-center md:justify-between'>
+                  <Space wrap>
+                    {MODEL_CHANNEL_RANGE_OPTIONS.map((item) => (
+                      <Button
+                        key={item.value}
+                        size='small'
+                        theme={
+                          modelChannelStatsDays === item.value
+                            ? 'solid'
+                            : 'light'
+                        }
+                        type='primary'
+                        onClick={() =>
+                          onModelChannelStatsDaysChange?.(item.value)
+                        }
+                      >
+                        {t(item.label)}
+                      </Button>
+                    ))}
+                  </Space>
                   <div className='flex flex-wrap gap-2'>
                     <Tag color='blue' shape='circle'>
                       {t('模型数量')} {modelSpendRows.length}
@@ -299,97 +347,101 @@ const ChartsPanel = ({
                       {renderNumber(modelChannelStats?.total_request || 0)}
                     </Tag>
                   </div>
-                  <div className='grid grid-cols-1 xl:grid-cols-2 gap-3'>
-                    <div className='h-64 rounded-xl border border-gray-100 bg-white p-2'>
-                      <VChart spec={modelShareSpec} option={CHART_CONFIG} />
-                    </div>
-                    <div className='h-64 rounded-xl border border-gray-100 bg-white p-2'>
-                      <VChart
-                        spec={channelTagShareSpec}
-                        option={CHART_CONFIG}
-                      />
-                    </div>
-                  </div>
-                  <div className='grid grid-cols-1 xl:grid-cols-2 gap-3'>
-                    <div className='rounded-xl border border-gray-100 bg-gray-50 p-3'>
-                      <div className='mb-2 text-sm font-semibold text-gray-700'>
-                        {t('模型消耗排行')}
-                      </div>
-                      <div className='space-y-2'>
-                        {modelSpendRows.map((item, index) => (
-                          <button
-                            key={item.model_name}
-                            type='button'
-                            onClick={() => setSelectedModel(item.model_name)}
-                            className={`w-full rounded-lg p-2 text-left transition-colors ${
-                              selectedModel === item.model_name
-                                ? 'bg-blue-50 ring-1 ring-blue-200'
-                                : 'bg-white hover:bg-gray-100'
-                            }`}
-                          >
-                            <div className='flex items-center justify-between gap-3'>
-                              <span className='truncate text-sm font-medium'>
-                                {index + 1}. {item.model_name}
-                              </span>
-                              <span className='text-sm font-semibold text-gray-900'>
-                                {renderQuota(item.quota, 2)}
-                              </span>
-                            </div>
-                            <div className='mt-2 h-1.5 rounded-full bg-gray-200'>
-                              <div
-                                className='h-1.5 rounded-full bg-blue-500'
-                                style={{ width: formatPercent(item.share) }}
-                              />
-                            </div>
-                            <div className='mt-1 text-xs text-gray-500'>
-                              {formatPercent(item.share)} · {t('请求数')}{' '}
-                              {renderNumber(item.request_count || 0)}
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className='rounded-xl border border-gray-100 bg-gray-50 p-3'>
-                      <div className='mb-2 text-sm font-semibold text-gray-700'>
-                        {selectedModel
-                          ? `${selectedModel} · ${t('渠道标签占比')}`
-                          : t('渠道标签占比')}
-                      </div>
-                      <div className='space-y-2'>
-                        {channelTagRows.map((item) => (
-                          <div
-                            key={`${item.model_name}-${item.tag}`}
-                            className='rounded-lg bg-white p-2'
-                          >
-                            <div className='flex items-center justify-between gap-3'>
-                              <span className='truncate text-sm font-medium'>
-                                {item.tag}
-                              </span>
-                              <span className='text-sm font-semibold text-gray-900'>
-                                {renderQuota(item.quota, 2)}
-                              </span>
-                            </div>
-                            <div className='mt-2 h-1.5 rounded-full bg-gray-200'>
-                              <div
-                                className='h-1.5 rounded-full bg-emerald-500'
-                                style={{ width: formatPercent(item.share) }}
-                              />
-                            </div>
-                            <div className='mt-1 text-xs text-gray-500'>
-                              {formatPercent(item.share)} · {t('请求数')}{' '}
-                              {renderNumber(item.request_count || 0)}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
                 </div>
-              ) : (
-                <div className='min-h-96 flex items-center justify-center'>
-                  <Empty title={t('暂无模型消耗数据')} />
-                </div>
-              )}
+                {modelSpendRows.length > 0 ? (
+                  <>
+                    <div className='grid grid-cols-1 xl:grid-cols-2 gap-3'>
+                      <div className='h-64 rounded-xl border border-gray-100 bg-white p-2'>
+                        <VChart spec={modelShareSpec} option={CHART_CONFIG} />
+                      </div>
+                      <div className='h-64 rounded-xl border border-gray-100 bg-white p-2'>
+                        <VChart
+                          spec={channelTagShareSpec}
+                          option={CHART_CONFIG}
+                        />
+                      </div>
+                    </div>
+                    <div className='grid grid-cols-1 xl:grid-cols-2 gap-3'>
+                      <div className='rounded-xl border border-gray-100 bg-gray-50 p-3'>
+                        <div className='mb-2 text-sm font-semibold text-gray-700'>
+                          {t('模型消耗排行')}
+                        </div>
+                        <div className='space-y-2'>
+                          {modelSpendRows.map((item, index) => (
+                            <button
+                              key={item.model_name}
+                              type='button'
+                              onClick={() => setSelectedModel(item.model_name)}
+                              className={`w-full rounded-lg p-2 text-left transition-colors ${
+                                selectedModel === item.model_name
+                                  ? 'bg-blue-50 ring-1 ring-blue-200'
+                                  : 'bg-white hover:bg-gray-100'
+                              }`}
+                            >
+                              <div className='flex items-center justify-between gap-3'>
+                                <span className='truncate text-sm font-medium'>
+                                  {index + 1}. {item.model_name}
+                                </span>
+                                <span className='text-sm font-semibold text-gray-900'>
+                                  {renderQuota(item.quota, 2)}
+                                </span>
+                              </div>
+                              <div className='mt-2 h-1.5 rounded-full bg-gray-200'>
+                                <div
+                                  className='h-1.5 rounded-full bg-blue-500'
+                                  style={{ width: formatPercent(item.share) }}
+                                />
+                              </div>
+                              <div className='mt-1 text-xs text-gray-500'>
+                                {formatPercent(item.share)} · {t('请求数')}{' '}
+                                {renderNumber(item.request_count || 0)}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className='rounded-xl border border-gray-100 bg-gray-50 p-3'>
+                        <div className='mb-2 text-sm font-semibold text-gray-700'>
+                          {selectedModel
+                            ? `${selectedModel} · ${t('渠道标签占比')}`
+                            : t('渠道标签占比')}
+                        </div>
+                        <div className='space-y-2'>
+                          {channelTagRows.map((item) => (
+                            <div
+                              key={`${item.model_name}-${item.tag}`}
+                              className='rounded-lg bg-white p-2'
+                            >
+                              <div className='flex items-center justify-between gap-3'>
+                                <span className='truncate text-sm font-medium'>
+                                  {item.tag}
+                                </span>
+                                <span className='text-sm font-semibold text-gray-900'>
+                                  {renderQuota(item.quota, 2)}
+                                </span>
+                              </div>
+                              <div className='mt-2 h-1.5 rounded-full bg-gray-200'>
+                                <div
+                                  className='h-1.5 rounded-full bg-emerald-500'
+                                  style={{ width: formatPercent(item.share) }}
+                                />
+                              </div>
+                              <div className='mt-1 text-xs text-gray-500'>
+                                {formatPercent(item.share)} · {t('请求数')}{' '}
+                                {renderNumber(item.request_count || 0)}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className='min-h-96 flex items-center justify-center'>
+                    <Empty title={t('暂无模型消耗数据')} />
+                  </div>
+                )}
+              </div>
             </Spin>
           )}
           {isUserBalanceTrendTab && (
