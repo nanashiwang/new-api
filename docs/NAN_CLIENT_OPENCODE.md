@@ -6,7 +6,7 @@
 
 1. 登录 `https://cn.meta-api.vip/`。
 2. 进入 `令牌管理` 创建令牌。
-3. Codex/OpenAI 模型建议使用 `default` / `vip` / `svip`，不要选 `claude`。
+3. Codex/OpenAI 模型建议使用 `vip` / `svip`，不要选 `claude`。
 4. 复制完整 API Key。
 
 ## 2. 安装环境

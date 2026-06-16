@@ -6,7 +6,7 @@
 
 1. 登录 `https://cn.meta-api.vip/`。
 2. 进入 `令牌管理` 创建令牌。
-3. Codex 建议使用 `default` / `vip` / `svip` / 土豪分组，不要选 `claude`。
+3. Codex 建议使用 `vip` / `svip` / 土豪分组，不要选 `claude`。
 4. 可用模型以 `https://cn.meta-api.vip/pricing` 为准。
 5. 复制完整 API Key。
 

@@ -30,7 +30,7 @@
 
 | 用途                | 分组建议                              |
 | ------------------- | ------------------------------------- |
-| Codex / OpenAI 模型 | `default` / `vip` / `svip` / 土豪分组 |
+| Codex / OpenAI 模型 | `vip` / `svip` / 土豪分组 |
 | Claude 模型         | `claude`                              |
 | Gemini 模型         | `gemini`                              |
 
