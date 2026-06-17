@@ -162,7 +162,8 @@ var SyncFrequency int // unit is second
 var BatchUpdateEnabled = false
 var BatchUpdateInterval int
 
-var RelayTimeout int // unit is second
+var RelayTimeout int         // unit is second
+var RelayIdleConnTimeout int // unit is second
 
 var RelayResponseHeaderTimeout int // unit is second
 

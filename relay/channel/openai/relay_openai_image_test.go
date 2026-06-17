@@ -44,3 +44,38 @@ func TestOpenaiHandlerWithUsagePassesThroughImageEventStream(t *testing.T) {
 
 	var _ *dto.Usage = usage
 }
+
+func TestOpenaiImageJSONAsStreamHandlerWrapsJSONResponse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type": []string{"application/json"},
+		},
+		Body: io.NopCloser(strings.NewReader(`{"created":1710000000,"data":[{"url":"https://example.com/a.png"}],"usage":{"input_tokens":12,"output_tokens":34}}`)),
+	}
+
+	usage, apiErr := OpenaiImageJSONAsStreamHandler(c, &relaycommon.RelayInfo{}, resp)
+	if apiErr != nil {
+		t.Fatalf("OpenaiImageJSONAsStreamHandler returned error: %v", apiErr)
+	}
+	if usage == nil {
+		t.Fatal("expected non-nil usage")
+	}
+	if usage.PromptTokens != 12 || usage.CompletionTokens != 34 || usage.TotalTokens != 46 {
+		t.Fatalf("unexpected usage: %#v", usage)
+	}
+
+	body := recorder.Body.String()
+	if !strings.Contains(body, "event: image_generation.completed") {
+		t.Fatalf("expected image event in body, got %q", body)
+	}
+	if !strings.Contains(body, "\"url\":\"https://example.com/a.png\"") {
+		t.Fatalf("expected image url in body, got %q", body)
+	}
+	if !strings.Contains(body, "data: [DONE]") {
+		t.Fatalf("expected DONE marker in body, got %q", body)
+	}
+}

@@ -553,3 +553,19 @@ func TestStreamScannerHandler_PingInterleavesWithSlowUpstream(t *testing.T) {
 	assert.GreaterOrEqual(t, pingCount, 3,
 		"expected at least 3 pings during 5s stream with 1s ping interval; got %d", pingCount)
 }
+
+func TestStreamScannerHandler_ReplacesPreInitializedStreamStatus(t *testing.T) {
+	t.Parallel()
+
+	body := buildSSEBody(3)
+	c, resp, info := setupStreamTest(t, strings.NewReader(body))
+	info.StreamStatus = relaycommon.NewStreamStatus()
+	info.StreamStatus.RecordError("stale error")
+
+	StreamScannerHandler(c, resp, info, func(data string) bool {
+		return true
+	})
+
+	assert.Equal(t, relaycommon.StreamEndReasonDone, info.StreamStatus.EndReason)
+	assert.Equal(t, 0, info.StreamStatus.TotalErrorCount())
+}

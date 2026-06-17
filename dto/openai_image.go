@@ -160,8 +160,14 @@ func (i *ImageRequest) GetTokenCountMeta() *types.TokenCountMeta {
 }
 
 func (i *ImageRequest) IsStream(c *gin.Context) bool {
-	if len(i.Stream) > 0 && strings.TrimSpace(string(i.Stream)) == "true" {
-		return true
+	if len(i.Stream) > 0 {
+		var stream bool
+		if err := common.Unmarshal(i.Stream, &stream); err == nil {
+			return stream
+		}
+		if strings.TrimSpace(string(i.Stream)) == "true" {
+			return true
+		}
 	}
 	if c == nil || c.Request == nil {
 		return false
