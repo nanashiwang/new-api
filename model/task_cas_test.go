@@ -33,7 +33,7 @@ func TestMain(m *testing.M) {
 	}
 	sqlDB.SetMaxOpenConns(1)
 
-	if err := db.AutoMigrate(&Task{}, &User{}, &Token{}, &Log{}, &Channel{}); err != nil {
+	if err := db.AutoMigrate(&Task{}, &User{}, &Token{}, &Log{}, &Channel{}, &UserOAuthBinding{}); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
 
@@ -48,6 +48,7 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM tokens")
 		DB.Exec("DELETE FROM logs")
 		DB.Exec("DELETE FROM channels")
+		DB.Exec("DELETE FROM user_oauth_bindings")
 	})
 }
 
@@ -56,6 +57,46 @@ func insertTask(t *testing.T, task *Task) {
 	task.CreatedAt = time.Now().Unix()
 	task.UpdatedAt = time.Now().Unix()
 	require.NoError(t, DB.Create(task).Error)
+}
+
+func TestHardDeleteUserByIdDeletesOAuthBindings(t *testing.T) {
+	truncateTables(t)
+
+	user := &User{Username: "oauth-hard-delete", Password: "password"}
+	require.NoError(t, DB.Create(user).Error)
+	require.NoError(t, CreateUserOAuthBinding(&UserOAuthBinding{
+		UserId:         user.Id,
+		ProviderId:     1001,
+		ProviderUserId: "provider-user-1",
+	}))
+
+	require.NoError(t, HardDeleteUserById(user.Id))
+
+	var bindingCount int64
+	require.NoError(t, DB.Model(&UserOAuthBinding{}).Where("user_id = ?", user.Id).Count(&bindingCount).Error)
+	assert.Equal(t, int64(0), bindingCount)
+
+	var userCount int64
+	require.NoError(t, DB.Unscoped().Model(&User{}).Where("id = ?", user.Id).Count(&userCount).Error)
+	assert.Equal(t, int64(0), userCount)
+}
+
+func TestUserHardDeleteDeletesOAuthBindings(t *testing.T) {
+	truncateTables(t)
+
+	user := &User{Username: "oauth-hard-delete-method", Password: "password"}
+	require.NoError(t, DB.Create(user).Error)
+	require.NoError(t, CreateUserOAuthBinding(&UserOAuthBinding{
+		UserId:         user.Id,
+		ProviderId:     1002,
+		ProviderUserId: "provider-user-2",
+	}))
+
+	require.NoError(t, user.HardDelete())
+
+	var bindingCount int64
+	require.NoError(t, DB.Model(&UserOAuthBinding{}).Where("user_id = ?", user.Id).Count(&bindingCount).Error)
+	assert.Equal(t, int64(0), bindingCount)
 }
 
 // ---------------------------------------------------------------------------

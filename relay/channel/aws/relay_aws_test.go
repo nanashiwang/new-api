@@ -34,7 +34,7 @@ func TestDoAwsClientRequest_AppliesRuntimeHeaderOverrideToAnthropicBeta(t *testi
 		},
 	}
 
-	requestBody := bytes.NewBufferString(`{"messages":[{"role":"user","content":"hello"}],"max_tokens":128}`)
+	requestBody := bytes.NewBufferString(`{"messages":[{"role":"user","content":"hello"}],"max_tokens":0,"top_p":0,"top_k":0,"context_management":{"edits":[{"type":"clear_tool_uses_20250919"}]}}`)
 	adaptor := &Adaptor{}
 
 	_, err := doAwsClientRequest(ctx, info, adaptor, requestBody)
@@ -48,5 +48,17 @@ func TestDoAwsClientRequest_AppliesRuntimeHeaderOverrideToAnthropicBeta(t *testi
 
 	anthropicBeta, exists := payload["anthropic_beta"]
 	require.True(t, exists)
-	require.Equal(t, []any{"computer-use-2025-01-24", "context-1m-2025-08-07"}, anthropicBeta)
+	require.Equal(t, []any{"computer-use-2025-01-24"}, anthropicBeta)
+
+	_, exists = payload["max_tokens"]
+	require.True(t, exists)
+	_, exists = payload["top_p"]
+	require.True(t, exists)
+	_, exists = payload["top_k"]
+	require.True(t, exists)
+	contextManagement, exists := payload["context_management"]
+	require.True(t, exists)
+	require.Equal(t, map[string]any{
+		"edits": []any{map[string]any{"type": "clear_tool_uses_20250919"}},
+	}, contextManagement)
 }

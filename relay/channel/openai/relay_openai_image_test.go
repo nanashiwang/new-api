@@ -45,6 +45,47 @@ func TestOpenaiHandlerWithUsagePassesThroughImageEventStream(t *testing.T) {
 	var _ *dto.Usage = usage
 }
 
+func TestOpenaiImageStreamHandlerUsesSharedScanner(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+	body := "data: {\"type\":\"image_generation.partial_image\",\"usage\":{\"input_tokens\":2,\"output_tokens\":3}}\n\ndata: [DONE]\n\n"
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type": []string{"text/event-stream; charset=utf-8"},
+		},
+		Body: io.NopCloser(strings.NewReader(body)),
+	}
+
+	info := &relaycommon.RelayInfo{}
+	usage, apiErr := OpenaiImageStreamHandler(c, info, resp)
+	if apiErr != nil {
+		t.Fatalf("OpenaiImageStreamHandler returned error: %v", apiErr)
+	}
+	if usage == nil {
+		t.Fatal("expected non-nil usage")
+	}
+	if usage.PromptTokens != 2 || usage.CompletionTokens != 3 || usage.TotalTokens != 5 {
+		t.Fatalf("unexpected usage: %#v", usage)
+	}
+
+	got := recorder.Body.String()
+	if !strings.Contains(got, "event: image_generation.partial_image") {
+		t.Fatalf("expected image event in body, got %q", got)
+	}
+	if !strings.Contains(got, "data: {\"type\":\"image_generation.partial_image\"") {
+		t.Fatalf("expected image data in body, got %q", got)
+	}
+	if !strings.Contains(got, "data: [DONE]") {
+		t.Fatalf("expected DONE marker in body, got %q", got)
+	}
+	if info.StreamStatus == nil || info.StreamStatus.EndReason != relaycommon.StreamEndReasonDone {
+		t.Fatalf("expected done stream status, got %#v", info.StreamStatus)
+	}
+}
+
 func TestOpenaiImageJSONAsStreamHandlerWrapsJSONResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()

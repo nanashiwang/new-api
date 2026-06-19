@@ -1,7 +1,6 @@
 package openai
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -627,93 +626,61 @@ func OpenaiImageStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp 
 	if !strings.Contains(contentType, "text/event-stream") {
 		return OpenaiImageJSONAsStreamHandler(c, info, resp)
 	}
-	defer service.CloseResponseBodyGracefully(resp)
 
 	usage := &dto.Usage{}
 	var lastStreamData []byte
 
-	helper.SetEventStreamHeaders(c)
-	if info != nil && info.StreamStatus == nil {
-		info.StreamStatus = relaycommon.NewStreamStatus()
-	}
+	helper.StreamScannerHandler(c, resp, info, func(data string) bool {
+		raw := common.StringToByteSlice(data)
+		lastStreamData = raw
 
-	reader := bufio.NewReader(resp.Body)
-	currentEvent := ""
-	var readErr error
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			readErr = err
-			if len(line) == 0 {
-				break
+		shouldContinue := true
+		if isOpenAIImageStreamErrorEvent(raw) {
+			if info != nil && info.StreamStatus != nil {
+				info.StreamStatus.RecordError(extractOpenAIImageStreamErrorMessage(raw))
+			}
+			shouldContinue = false
+		}
+
+		var usageResp dto.SimpleResponse
+		if err := common.Unmarshal(raw, &usageResp); err == nil {
+			normalizeOpenAIUsage(&usageResp.Usage)
+			if service.ValidUsage(&usageResp.Usage) {
+				usage = &usageResp.Usage
 			}
 		}
-		line = strings.TrimSuffix(line, "\n")
-		line = strings.TrimSuffix(line, "\r")
-		if strings.HasPrefix(line, "event:") {
-			currentEvent = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-		} else if strings.HasPrefix(line, "data:") {
-			data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-			if data == "[DONE]" {
-				if info != nil && info.StreamStatus != nil {
-					info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonDone, nil)
-				}
-			} else if data != "" {
-				if info != nil {
-					info.SetFirstResponseTime()
-					info.ReceivedResponseCount++
-				}
-				lastStreamData = common.StringToByteSlice(data)
-				if info != nil && info.StreamStatus != nil && isOpenAIImageStreamErrorEvent(currentEvent, lastStreamData) {
-					info.StreamStatus.RecordError(extractOpenAIImageStreamErrorMessage(lastStreamData))
-				}
-				var usageResp dto.SimpleResponse
-				if err := common.Unmarshal(lastStreamData, &usageResp); err == nil {
-					normalizeOpenAIUsage(&usageResp.Usage)
-					if service.ValidUsage(&usageResp.Usage) {
-						usage = &usageResp.Usage
-					}
-				}
-			}
-		}
-		if _, err := c.Writer.Write(append([]byte(line), '\n')); err != nil {
+
+		if err := writeOpenaiImageStreamChunk(c, raw); err != nil {
 			if info != nil && info.StreamStatus != nil {
 				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, err)
 			}
-			return usage, nil
+			return false
 		}
-		if line == "" {
-			if err := helper.FlushWriter(c); err != nil {
-				if info != nil && info.StreamStatus != nil {
-					info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, err)
-				}
-				return usage, nil
-			}
-			currentEvent = ""
-		}
-		if readErr != nil {
-			break
-		}
+
+		return shouldContinue
+	})
+
+	if info != nil && info.StreamStatus != nil && info.StreamStatus.EndReason == relaycommon.StreamEndReasonDone {
+		helper.Done(c)
 	}
-	if info != nil && info.StreamStatus != nil {
-		if readErr != nil && readErr != io.EOF {
-			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, readErr)
-		} else if info.StreamStatus.HasErrors() {
-			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonHandlerStop, fmt.Errorf("upstream image stream returned error event"))
-		} else if info.StreamStatus.EndReason == relaycommon.StreamEndReasonNone {
-			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonEOF, nil)
-		}
-	}
-	_ = helper.FlushWriter(c)
 
 	applyUsagePostProcessing(info, usage, lastStreamData)
 	return usage, nil
 }
 
-func isOpenAIImageStreamErrorEvent(eventName string, data []byte) bool {
-	if strings.EqualFold(strings.TrimSpace(eventName), "error") {
-		return true
+func writeOpenaiImageStreamChunk(c *gin.Context, data []byte) error {
+	var payload struct {
+		Type string `json:"type"`
 	}
+	_ = common.Unmarshal(data, &payload)
+	if eventName := strings.TrimSpace(payload.Type); eventName != "" {
+		c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", eventName)})
+	}
+	c.Render(-1, common.CustomEvent{Data: "data: " + string(data)})
+	return helper.FlushWriter(c)
+}
+
+func isOpenAIImageStreamErrorEvent(data []byte) bool {
 	if !json.Valid(data) {
 		return false
 	}

@@ -53,6 +53,47 @@ func TestHandleStreamResponseData_UsesBadRequestForInvalidRequestError(t *testin
 	assert.Equal(t, "invalid_request_error", err.ToOpenAIError().Type)
 }
 
+func TestRequestOpenAI2ClaudeMessageKeepsEmptyToolArguments(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	_ = recorder
+
+	req := dto.GeneralOpenAIRequest{
+		Model:     "claude-3-5-sonnet",
+		MaxTokens: 128,
+		Messages: []dto.Message{
+			{Role: "user", Content: "hello"},
+			{
+				Role:    "assistant",
+				Content: "",
+				ToolCalls: json.RawMessage(`[{
+					"id":"call_1",
+					"type":"function",
+					"function":{"name":"noop","arguments":""}
+				}]`),
+			},
+		},
+	}
+
+	claudeReq, err := RequestOpenAI2ClaudeMessage(ctx, req)
+	require.NoError(t, err)
+	require.Len(t, claudeReq.Messages, 2)
+
+	blocks, ok := claudeReq.Messages[1].Content.([]dto.ClaudeMediaMessage)
+	require.True(t, ok)
+	var toolUse *dto.ClaudeMediaMessage
+	for i := range blocks {
+		if blocks[i].Type == "tool_use" {
+			toolUse = &blocks[i]
+			break
+		}
+	}
+	require.NotNil(t, toolUse)
+	assert.Equal(t, "call_1", toolUse.Id)
+	assert.Equal(t, "noop", toolUse.Name)
+	assert.Equal(t, map[string]any{}, toolUse.Input)
+}
+
 func TestHandleStreamResponseData_UnknownClaudeErrorFallsBackToInternalServerError(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
