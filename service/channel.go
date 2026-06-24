@@ -187,8 +187,16 @@ func IsUpstreamModelTemporaryUnavailableError(err *types.NewAPIError) bool {
 	}
 
 	lowerMessage := normalizeUpstreamErrorMessage(err)
-	return strings.Contains(lowerMessage, "no available") &&
-		strings.Contains(lowerMessage, "support the requested model")
+	if strings.Contains(lowerMessage, "no available") &&
+		strings.Contains(lowerMessage, "support the requested model") {
+		return true
+	}
+
+	return strings.Contains(lowerMessage, "at capacity") ||
+		(strings.Contains(lowerMessage, "temporarily unavailable") &&
+			(strings.Contains(lowerMessage, "model") || strings.Contains(lowerMessage, "service"))) ||
+		(strings.Contains(lowerMessage, "try a different model") &&
+			(strings.Contains(lowerMessage, "selected model") || strings.Contains(lowerMessage, "capacity")))
 }
 
 func IsRequestedModelUnavailableError(err *types.NewAPIError) bool {

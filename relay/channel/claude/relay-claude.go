@@ -918,7 +918,7 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 }
 
 func resolveClaudeErrorStatusCode(claudeError *types.ClaudeError, fallbackStatus int) int {
-	if fallbackStatus >= 100 && fallbackStatus <= 599 {
+	if fallbackStatus >= 400 && fallbackStatus <= 599 {
 		return fallbackStatus
 	}
 	if claudeError == nil {
