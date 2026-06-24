@@ -28,11 +28,20 @@ ENV_FILE="$SCRIPT_DIR/reseller.env"
 if [ -f "$ENV_FILE" ]; then
 	log "reseller.env 已存在，跳过向导（如需重配：删除它后重跑 setup.sh）"
 else
-	DETECTED_NET="$(docker inspect new-api \
-		--format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}' 2>/dev/null | head -n1 || true)"
 	echo "（直接回车用 [] 内默认值）"
+	# 自动探测主站容器（名字含 new-api/newapi、排除副站 sub-）
+	DETECTED_MAIN="$(docker ps --format '{{.Names}}' | grep -iE 'new-?api' | grep -v 'sub-' | head -n1 || true)"
+	read -r -p "主站容器名 [${DETECTED_MAIN:-new-api}]: " MAIN_CONTAINER
+	MAIN_CONTAINER="${MAIN_CONTAINER:-${DETECTED_MAIN:-new-api}}"
+	DETECTED_NET="$(docker inspect "$MAIN_CONTAINER" \
+		--format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}' 2>/dev/null | head -n1 || true)"
+	DETECTED_IMG="$(docker inspect "$MAIN_CONTAINER" --format '{{.Config.Image}}' 2>/dev/null || true)"
 	read -r -p "主站 docker 网络名 [${DETECTED_NET:-newapi_default}]: " IN_NET
 	IN_NET="${IN_NET:-${DETECTED_NET:-newapi_default}}"
+	read -r -p "副站镜像（建议与主站一致）[${DETECTED_IMG:-calciumion/new-api:latest}]: " IN_IMG
+	IN_IMG="${IN_IMG:-${DETECTED_IMG:-calciumion/new-api:latest}}"
+	read -r -p "主站管理API地址(脚本从宿主访问) [http://127.0.0.1:3000]: " IN_APIURL
+	IN_APIURL="${IN_APIURL:-http://127.0.0.1:3000}"
 	read -r -p "你的根域名（如 example.com）: " IN_DOMAIN
 	[ -n "$IN_DOMAIN" ] || die "域名不能为空"
 	read -r -p "主站管理员账号（role>=10，勿用 root）: " IN_ADMIN
@@ -47,12 +56,12 @@ else
 	# 用 printf %q 写入，安全转义密码等特殊字符
 	{
 		echo "# reseller.env — 由 setup.sh 生成；chmod 600；切勿入库"
-		printf 'MAIN_API_URL=%q\n'           "http://127.0.0.1:3000"
-		printf 'MAIN_INTERNAL_URL=%q\n'      "http://new-api:3000"
+		printf 'MAIN_API_URL=%q\n'           "$IN_APIURL"
+		printf 'MAIN_INTERNAL_URL=%q\n'      "http://$MAIN_CONTAINER:3000"
 		printf 'MAIN_ADMIN_USER=%q\n'        "$IN_ADMIN"
 		printf 'MAIN_ADMIN_PASS=%q\n'        "$IN_PASS"
 		printf 'SHARED_NETWORK=%q\n'         "$IN_NET"
-		printf 'NEWAPI_IMAGE=%q\n'           "calciumion/new-api:latest"
+		printf 'NEWAPI_IMAGE=%q\n'           "$IN_IMG"
 		printf 'RESELLERS_DIR=%q\n'          "/opt/newapi-resellers"
 		printf 'PORT_RANGE_START=%q\n'       "3101"
 		printf 'PORT_RANGE_END=%q\n'         "3999"
