@@ -66,6 +66,19 @@ api() {
 	printf '%s' "$resp"
 }
 
+# api_tok <base> <access_token> <uid> <method> <path> [json]  → 用访问令牌调管理 API
+# 优势：① 绕过登录的 Turnstile 人机验证；② access_token 属于 root 账号即拥有 root 权限(/api/option)。
+api_tok() {
+	local base=$1 tok=$2 uid=$3 method=$4 path=$5 body=${6:-} resp
+	local args=(-sS -X "$method" "$base$path" -H "Authorization: Bearer $tok" -H "New-API-User: $uid")
+	[ -n "$body" ] && args+=(-H 'Content-Type: application/json' -d "$body")
+	resp=$(curl "${args[@]}") || die "请求失败：$method $path"
+	if [ "$(jq -r '.success // empty' <<<"$resp")" = "false" ]; then
+		die "API 返回失败：$method $path → $(jq -r '.message' <<<"$resp")"
+	fi
+	printf '%s' "$resp"
+}
+
 # 等待站点健康（GET /api/status 返回 success:true，见 controller/misc.go）
 wait_health() {
 	local url=$1 i

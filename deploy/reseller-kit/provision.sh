@@ -71,29 +71,33 @@ proxy_install "$SUBDOMAIN" "$SUBSITE_PORT"
 save_site_kv "$RESELLER_NAME" SUBDOMAIN "$SUBDOMAIN"
 
 # ============================================================================
-step "3/6 主站：登录 + 启用 auto 分组(1:1 原价模式)"
+step "3/6 主站：启用 auto 分组(1:1 原价模式)"
 # ============================================================================
-MAIN_JAR="$(mktemp)"; trap 'rm -f "$MAIN_JAR" "${WS_JAR:-}" "${SUB_JAR:-}"' EXIT
-MAIN_ID="$(api_login "$MAIN_API_URL" "$MAIN_JAR" "$MAIN_ADMIN_USER" "$MAIN_ADMIN_PASS")"
-log "主站管理员登录成功 (id=$MAIN_ID)"
+# 用 root 的 access_token 调管理 API：① 绕过登录的 Turnstile；② /api/option 需 root 权限。
+[ -n "${MAIN_ADMIN_TOKEN:-}" ] && [ -n "${MAIN_ADMIN_UID:-}" ] \
+	|| die "reseller.env 缺 MAIN_ADMIN_TOKEN / MAIN_ADMIN_UID（root 账号的访问令牌 + 用户id）"
+amain() { api_tok "$MAIN_API_URL" "$MAIN_ADMIN_TOKEN" "$MAIN_ADMIN_UID" "$@"; }
 
-OPTS="$(api "$MAIN_API_URL" "$MAIN_JAR" "$MAIN_ID" GET "/api/option/")"
+OPTS="$(amain GET "/api/option/")"
+# Turnstile：主站若开了登录人机验证(TurnstileCheckEnabled)，会挡脚本登录批发账户 → 临时关，结束恢复
+TS_WAS_ON="$(jq -r '(.data[]? | select(.key=="TurnstileCheckEnabled") | .value) // "false"' <<<"$OPTS")"
+turnstile_set() { amain PUT "/api/option/" "$(jq -nc --arg v "$1" '{key:"TurnstileCheckEnabled", value:$v}')" >/dev/null; }
+trap 'rm -f "${WS_JAR:-}" "${SUB_JAR:-}"; [ "${TS_WAS_ON:-}" = "true" ] && turnstile_set true 2>/dev/null || true' EXIT
+
 # (a) UserUsableGroups 确保含 "auto"——否则 auto 令牌会被拒(auth.go:345)。value 以字符串提交。
 CUR_UUG="$(jq -r '(.data[]? | select(.key=="UserUsableGroups") | .value) // "{}"' <<<"$OPTS")"
 NEW_UUG="$(jq -c '. + {"auto":"自动(按模型选分组, 1:1原价)"}' <<<"$CUR_UUG")"
-api "$MAIN_API_URL" "$MAIN_JAR" "$MAIN_ID" PUT "/api/option/" \
-	"$(jq -nc --arg v "$NEW_UUG" '{key:"UserUsableGroups", value:$v}')" >/dev/null
+amain PUT "/api/option/" "$(jq -nc --arg v "$NEW_UUG" '{key:"UserUsableGroups", value:$v}')" >/dev/null
 # (b) AutoGroups 并入要开放给代理商的分组(逗号→数组, 去重)——auto 只在这些分组里按模型选。
 CUR_AG="$(jq -r '(.data[]? | select(.key=="AutoGroups") | .value) // "[\"default\"]"' <<<"$OPTS")"
 NEW_AG="$(jq -c --arg g "$AUTO_GROUPS" '(. + ($g | split(",") | map(gsub("^ +| +$";"")))) | unique' <<<"$CUR_AG")"
-api "$MAIN_API_URL" "$MAIN_JAR" "$MAIN_ID" PUT "/api/option/" \
-	"$(jq -nc --arg v "$NEW_AG" '{key:"AutoGroups", value:$v}')" >/dev/null
+amain PUT "/api/option/" "$(jq -nc --arg v "$NEW_AG" '{key:"AutoGroups", value:$v}')" >/dev/null
 log "auto 已启用；开放分组并入 AutoGroups：$AUTO_GROUPS"
 
 # ============================================================================
 step "4/6 主站：建批发账户(标准客户组) + 设额度 + 建 auto 令牌"
 # ============================================================================
-get_uid() { api "$MAIN_API_URL" "$MAIN_JAR" "$MAIN_ID" GET "/api/user/search?keyword=$1" \
+get_uid() { amain GET "/api/user/search?keyword=$1" \
 	| jq -r --arg n "$1" '((.data.items // .data) // [])[]? | select(.username==$n) | .id' | head -n1; }
 
 WHOLESALE_UID="$(get_uid "$WHOLESALE_USER" || true)"
@@ -101,7 +105,7 @@ if [ -z "${WHOLESALE_UID:-}" ] || [ "$WHOLESALE_UID" = "null" ]; then
 	WHOLESALE_PASS="${WHOLESALE_PASS:-$(rand_secret | cut -c1-20)}"
 	save_site_kv "$RESELLER_NAME" WHOLESALE_PASS "$WHOLESALE_PASS"
 	# CreateUser 不支持直接设 role/quota/group（见契约），先建再 PUT
-	api "$MAIN_API_URL" "$MAIN_JAR" "$MAIN_ID" POST "/api/user/" \
+	amain POST "/api/user/" \
 		"$(jq -nc --arg u "$WHOLESALE_USER" --arg p "$WHOLESALE_PASS" --arg d "Reseller $RESELLER_NAME 批发账户" \
 			'{username:$u, password:$p, display_name:$d}')" >/dev/null
 	WHOLESALE_UID="$(get_uid "$WHOLESALE_USER")"
@@ -113,13 +117,14 @@ fi
 save_site_kv "$RESELLER_NAME" WHOLESALE_UID "$WHOLESALE_UID"
 
 # PUT 更新：放标准客户组 + 预付额度 + role=1（必须显式带 role，否则默认 0 降为游客）
-api "$MAIN_API_URL" "$MAIN_JAR" "$MAIN_ID" PUT "/api/user/" \
+amain PUT "/api/user/" \
 	"$(jq -nc --argjson id "$WHOLESALE_UID" --arg u "$WHOLESALE_USER" --arg d "Reseller $RESELLER_NAME 批发账户" \
 		--arg g "$RESELLER_BILLING_GROUP" --argjson q "$QUOTA" \
 		'{id:$id, username:$u, display_name:$d, group:$g, quota:$q, role:1}')" >/dev/null
 log "批发账户已设：group=$RESELLER_BILLING_GROUP(原价)  quota=$QUOTA"
 
-# 令牌创建需「以批发账户本人」登录（POST /api/token/ 走 UserAuth）
+# 令牌创建需「以批发账户本人」登录(POST /api/token/ 走 UserAuth)；登录受 Turnstile 管 → 临时关
+if [ "$TS_WAS_ON" = "true" ]; then turnstile_set false; log "已临时关闭 Turnstile(建令牌用)"; fi
 WS_JAR="$(mktemp)"
 WS_ID="$(api_login "$MAIN_API_URL" "$WS_JAR" "$WHOLESALE_USER" "$WHOLESALE_PASS")"
 TOKEN_NAME="reseller-${RESELLER_NAME}-wholesale"
@@ -148,6 +153,7 @@ fi
 WTOKEN_KEY="$(api "$MAIN_API_URL" "$WS_JAR" "$WS_ID" GET "/api/token/${TOKEN_ID}/key" | jq -r '.data // .key')"
 [ -n "$WTOKEN_KEY" ] && [ "$WTOKEN_KEY" != "null" ] || die "未取到批发令牌 key"
 save_site_kv "$RESELLER_NAME" WTOKEN_KEY "$WTOKEN_KEY"
+if [ "$TS_WAS_ON" = "true" ]; then turnstile_set true; log "已恢复 Turnstile"; fi
 
 # 副站回指渠道的模型列表：MODELS 指定则用之；为空则用批发令牌从主站 /v1/models 拉全量
 if [ -n "${MODELS:-}" ]; then

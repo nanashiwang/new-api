@@ -44,9 +44,10 @@ else
 	IN_APIURL="${IN_APIURL:-http://127.0.0.1:3000}"
 	read -r -p "你的根域名（如 example.com）: " IN_DOMAIN
 	[ -n "$IN_DOMAIN" ] || die "域名不能为空"
-	read -r -p "主站管理员账号（role>=10，勿用 root）: " IN_ADMIN
-	read -r -s -p "主站管理员密码: " IN_PASS; echo
-	[ -n "$IN_ADMIN" ] && [ -n "$IN_PASS" ] || die "管理员账号/密码不能为空"
+	echo "  提示：用 root 账号登录后台 → 个人设置 → 生成『系统访问令牌』，粘贴到这里（绕过登录验证码）。"
+	read -r -p "root 账号的访问令牌(access_token): " IN_TOKEN
+	read -r -p "root 账号的用户 id [1]: " IN_UID; IN_UID="${IN_UID:-1}"
+	[ -n "$IN_TOKEN" ] || die "访问令牌不能为空"
 	read -r -p "开放给代理商转售的模型（逗号分隔，留空=全部模型）: " IN_MODELS
 	read -r -p "开放给代理商的分组(逗号分隔,填你现有的分组) [vip,svip,claude,gemini,kiro]: " IN_GROUPS
 	IN_GROUPS="${IN_GROUPS:-vip,svip,claude,gemini,kiro}"
@@ -58,8 +59,8 @@ else
 		echo "# reseller.env — 由 setup.sh 生成；chmod 600；切勿入库"
 		printf 'MAIN_API_URL=%q\n'           "$IN_APIURL"
 		printf 'MAIN_INTERNAL_URL=%q\n'      "http://$MAIN_CONTAINER:3000"
-		printf 'MAIN_ADMIN_USER=%q\n'        "$IN_ADMIN"
-		printf 'MAIN_ADMIN_PASS=%q\n'        "$IN_PASS"
+		printf 'MAIN_ADMIN_TOKEN=%q\n'       "$IN_TOKEN"
+		printf 'MAIN_ADMIN_UID=%q\n'         "$IN_UID"
 		printf 'SHARED_NETWORK=%q\n'         "$IN_NET"
 		printf 'NEWAPI_IMAGE=%q\n'           "$IN_IMG"
 		printf 'RESELLERS_DIR=%q\n'          "/opt/newapi-resellers"

@@ -50,7 +50,7 @@ sudo newapi-reseller acme acme.你的域名 20
 ## 前置条件
 
 1. **主站**已用 docker compose 跑起来（`container_name: new-api`，宿主已映射 `3000`）。
-2. 一个**主站专用管理员账号**（role≥10，别用 root）。
+2. **root 账号的「系统访问令牌」**（后台 个人设置→生成）。脚本用它调管理 API——绕过登录 Turnstile + 满足 `/api/option` 的 root 权限。建批发令牌时会临时关一下 Turnstile 再恢复。
 3. 服务器有 nginx（或 Caddy）做反代；有 docker（compose v2）。
 4. `setup.sh` 会自动装 `jq curl gettext-base openssl`（Debian/Ubuntu）。
 
