@@ -169,9 +169,18 @@ else
 fi
 
 # ============================================================================
-step "5/6 副站：建「回指主站」渠道"
+step "5/6 副站：初始化(建 root) + 建「回指主站」渠道"
 # ============================================================================
-SUB_ROOT_PASS_CUR="${SUB_ROOT_PASS:-123456}"   # 首启默认 root/123456；改密后从 site.env 读
+# 本版本副站首启不自动建 root，需走 POST /api/setup 初始化(无需鉴权，密码≥8位)
+SUB_INIT="$(curl -sS "$SUBSITE_API/api/status" | jq -r '.data.setup // false')"
+if [ "$SUB_INIT" != "true" ]; then
+	SUB_ROOT_PASS="${SUB_ROOT_PASS:-$(rand_secret | cut -c1-16)}"
+	curl -sS -X POST "$SUBSITE_API/api/setup" -H 'Content-Type: application/json' \
+		-d "$(jq -nc --arg p "$SUB_ROOT_PASS" '{username:"root", password:$p, confirmPassword:$p, SelfUseModeEnabled:false, DemoSiteEnabled:false}')" >/dev/null
+	save_site_kv "$RESELLER_NAME" SUB_ROOT_PASS "$SUB_ROOT_PASS"
+	log "副站已初始化(root 已创建)"
+fi
+SUB_ROOT_PASS_CUR="${SUB_ROOT_PASS:?副站已初始化但 site.env 缺 SUB_ROOT_PASS}"
 SUB_JAR="$(mktemp)"
 SUB_ID="$(api_login "$SUBSITE_API" "$SUB_JAR" "root" "$SUB_ROOT_PASS_CUR")"
 CH_NAME="上游-主站(wholesale)"
@@ -187,19 +196,7 @@ if [ -z "${EXIST_CH:-}" ] || [ "$EXIST_CH" = "null" ]; then
 else
 	warn "副站已存在渠道「$CH_NAME」(id=$EXIST_CH)，跳过"
 fi
-
-# ============================================================================
-step "6/6 副站：修改默认 root 密码"
-# ============================================================================
-if [ "$SUB_ROOT_PASS_CUR" = "123456" ]; then
-	NEW_ROOT_PASS="$(rand_secret | cut -c1-20)"
-	api "$SUBSITE_API" "$SUB_JAR" "$SUB_ID" PUT "/api/user/self" \
-		"$(jq -nc --arg o "123456" --arg p "$NEW_ROOT_PASS" '{original_password:$o, password:$p}')" >/dev/null
-	save_site_kv "$RESELLER_NAME" SUB_ROOT_PASS "$NEW_ROOT_PASS"
-	log "副站 root 默认密码已修改"
-else
-	NEW_ROOT_PASS="$SUB_ROOT_PASS_CUR"; log "副站 root 密码此前已修改，跳过"
-fi
+NEW_ROOT_PASS="$SUB_ROOT_PASS_CUR"
 
 # ============================================================================
 cat <<EOF
