@@ -106,7 +106,7 @@ sudo newapi-reseller-rm <name> --retarget   # 退出迁移：子域名反代翻�
 ## 注意 / 红线
 
 - `CRYPTO_SECRET` 每副站唯一且**务必存档**（在 `${RESELLERS_DIR}/<name>/site.env`，加密库内批发 token）。
-- 批发令牌已设 `model_limits`，只放开 `MODELS` 内模型——防代理商白嫖未授权模型。
+- 批发令牌：`MODELS` 非空时设 `model_limits` 只放开这些模型；**`MODELS` 留空=全部**（关掉令牌限制，并自动从主站 `/v1/models` 拉全量给副站渠道）。
 - 副站默认 SQLite，零额外 DB 依赖；高并发副站改 Postgres（compose 模板内有注释）。
 - `reseller.env` / `site.env` 含机密，已被 `.gitignore` 排除，切勿入库。
 - 项目 Rule 5：脚本/模板/镜像/文档中的 **new-api** 与 **QuantumNous** 标识不可改删。

@@ -47,8 +47,7 @@ else
 	read -r -p "主站管理员账号（role>=10，勿用 root）: " IN_ADMIN
 	read -r -s -p "主站管理员密码: " IN_PASS; echo
 	[ -n "$IN_ADMIN" ] && [ -n "$IN_PASS" ] || die "管理员账号/密码不能为空"
-	read -r -p "开放给代理商转售的模型（逗号分隔）: " IN_MODELS
-	[ -n "$IN_MODELS" ] || die "模型列表不能为空"
+	read -r -p "开放给代理商转售的模型（逗号分隔，留空=全部模型）: " IN_MODELS
 	read -r -p "开放给代理商的分组(逗号分隔,填你现有的分组) [vip,svip,claude,gemini,kiro]: " IN_GROUPS
 	IN_GROUPS="${IN_GROUPS:-vip,svip,claude,gemini,kiro}"
 	read -r -p "默认预付额度(美元) [10]: " IN_USD; IN_USD="${IN_USD:-10}"

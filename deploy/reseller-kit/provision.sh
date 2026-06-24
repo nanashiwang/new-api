@@ -128,11 +128,12 @@ TOKEN_ID="$(api "$MAIN_API_URL" "$WS_JAR" "$WS_ID" GET "/api/token/?p=1&page_siz
 	| jq -r --arg n "$TOKEN_NAME" '((.data.items // .data) // [])[]? | select(.name==$n) | .id' | head -n1 || true)"
 if [ -z "${TOKEN_ID:-}" ] || [ "$TOKEN_ID" = "null" ]; then
 	# group="auto"：令牌按请求模型在 AUTO_GROUPS 内自动选分组、按各自原价计费(1:1)。
-	# 前提 step3 已把 "auto" 加入 UserUsableGroups、AUTO_GROUPS 并入 AutoGroups。
+	# MODELS 为空 → 不限制模型(全部)；非空 → 限定到 MODELS。
+	if [ -n "${MODELS:-}" ]; then TOK_LE=true; TOK_LM="$MODELS"; else TOK_LE=false; TOK_LM=""; fi
 	api "$MAIN_API_URL" "$WS_JAR" "$WS_ID" POST "/api/token/" \
-		"$(jq -nc --arg n "$TOKEN_NAME" --arg m "$MODELS" \
+		"$(jq -nc --arg n "$TOKEN_NAME" --argjson le "$TOK_LE" --arg m "$TOK_LM" \
 			'{name:$n, unlimited_quota:true, remain_quota:0, expired_time:-1,
-			  model_limits_enabled:true, model_limits:$m,
+			  model_limits_enabled:$le, model_limits:$m,
 			  channel_limits_enabled:false, channel_limits:"",
 			  allow_ips:"", group:"auto", cross_group_retry:true,
 			  max_concurrency:0, window_request_limit:0, window_seconds:0,
@@ -148,6 +149,16 @@ WTOKEN_KEY="$(api "$MAIN_API_URL" "$WS_JAR" "$WS_ID" GET "/api/token/${TOKEN_ID}
 [ -n "$WTOKEN_KEY" ] && [ "$WTOKEN_KEY" != "null" ] || die "未取到批发令牌 key"
 save_site_kv "$RESELLER_NAME" WTOKEN_KEY "$WTOKEN_KEY"
 
+# 副站回指渠道的模型列表：MODELS 指定则用之；为空则用批发令牌从主站 /v1/models 拉全量
+if [ -n "${MODELS:-}" ]; then
+	CHANNEL_MODELS="$MODELS"
+else
+	log "MODELS 为空 → 从主站 /v1/models 拉取该令牌可用的全部模型..."
+	CHANNEL_MODELS="$(curl -sS -H "Authorization: Bearer $WTOKEN_KEY" "$MAIN_API_URL/v1/models" | jq -r '[.data[]?.id] | join(",")')"
+	[ -n "$CHANNEL_MODELS" ] || die "拉取主站模型列表失败(确认 auto/AUTO_GROUPS 已生效)"
+	log "拉到 $(printf '%s' "$CHANNEL_MODELS" | tr ',' '\n' | grep -c .) 个模型"
+fi
+
 # ============================================================================
 step "5/6 副站：建「回指主站」渠道"
 # ============================================================================
@@ -160,7 +171,7 @@ EXIST_CH="$(api "$SUBSITE_API" "$SUB_JAR" "$SUB_ID" GET "/api/channel/?p=1&page_
 if [ -z "${EXIST_CH:-}" ] || [ "$EXIST_CH" = "null" ]; then
 	# type=1 (ChannelTypeOpenAI)；base_url=主站内网；models 逗号串；建渠道自动建 ability
 	api "$SUBSITE_API" "$SUB_JAR" "$SUB_ID" POST "/api/channel/" \
-		"$(jq -nc --arg n "$CH_NAME" --arg k "$WTOKEN_KEY" --arg b "$MAIN_INTERNAL_URL" --arg m "$MODELS" \
+		"$(jq -nc --arg n "$CH_NAME" --arg k "$WTOKEN_KEY" --arg b "$MAIN_INTERNAL_URL" --arg m "$CHANNEL_MODELS" \
 			'{mode:"single", channel:{name:$n, type:1, key:$k, base_url:$b, models:$m,
 			  group:"default", priority:100, weight:0, status:1}}')" >/dev/null
 	log "副站回指渠道已建：base_url=$MAIN_INTERNAL_URL"
@@ -194,7 +205,7 @@ $(_c '1;32')========== 开通完成 ==========$(_c 0)
 机密档案：      $(site_env_path "$RESELLER_NAME")  （含密钥/密码/批发token，chmod 600，妥善保管）
 
 下一步验证（跑通双向扣费）：
-  1. 在副站建一个普通用户+令牌，调一次 $MODELS 里的模型；
+  1. 在副站建一个普通用户+令牌，调一次模型（副站渠道已含 $(printf '%s' "$CHANNEL_MODELS" | tr ',' '\n' | grep -c .) 个模型）；
   2. 副站「日志」看到一笔零售消费；
   3. 主站「日志」按 user_id=$WHOLESALE_UID 看到一笔批发消费 → 闭环成立。
 EOF
