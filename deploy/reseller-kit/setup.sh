@@ -49,7 +49,8 @@ else
 	[ -n "$IN_ADMIN" ] && [ -n "$IN_PASS" ] || die "管理员账号/密码不能为空"
 	read -r -p "开放给代理商转售的模型（逗号分隔）: " IN_MODELS
 	[ -n "$IN_MODELS" ] || die "模型列表不能为空"
-	read -r -p "默认批发倍率 [0.7]: " IN_RATIO; IN_RATIO="${IN_RATIO:-0.7}"
+	read -r -p "开放给代理商的分组(逗号分隔,填你现有的分组) [vip,svip,claude,gemini,kiro]: " IN_GROUPS
+	IN_GROUPS="${IN_GROUPS:-vip,svip,claude,gemini,kiro}"
 	read -r -p "默认预付额度(美元) [10]: " IN_USD; IN_USD="${IN_USD:-10}"
 	read -r -p "nginx 站点目录 [/etc/nginx/conf.d]: " IN_NGX; IN_NGX="${IN_NGX:-/etc/nginx/conf.d}"
 
@@ -71,8 +72,8 @@ else
 		printf 'NGINX_RELOAD_CMD=%q\n'       "nginx -t && systemctl reload nginx"
 		printf 'TLS_CERT=%q\n'               "/etc/letsencrypt/live/$IN_DOMAIN/fullchain.pem"
 		printf 'TLS_KEY=%q\n'                "/etc/letsencrypt/live/$IN_DOMAIN/privkey.pem"
-		printf 'DEFAULT_WHOLESALE_GROUP=%q\n' "reseller_wholesale"
-		printf 'DEFAULT_WHOLESALE_RATIO=%q\n' "$IN_RATIO"
+		printf 'RESELLER_BILLING_GROUP=%q\n' "default"
+		printf 'AUTO_GROUPS=%q\n'            "$IN_GROUPS"
 		printf 'DEFAULT_PREPAID_USD=%q\n'    "$IN_USD"
 		printf 'MODELS=%q\n'                 "$IN_MODELS"
 	} > "$ENV_FILE"
@@ -92,14 +93,16 @@ DOMAIN_HINT="${SETUP_DOMAIN:-你的域名}"
 cat <<EOF
 
 $(_c '1;32')========== 安装完成 ==========$(_c 0)
-还差两件「一次性」事（只做一次，管所有代理商）：
-  1) 主站后台 → 渠道 → 给要开放的上游渠道「分组」加上 reseller_wholesale 并保存
-  2) 申请泛域名证书：sudo certbot certonly --dns-<你的DNS商> -d "*.${DOMAIN_HINT}" -d "${DOMAIN_HINT}"
+计费模式：1:1 复刻(原价)——代理商按你的原价用你现有分组，无需建折扣分组、无需改渠道；
+首次开通时脚本会自动启用 auto 分组、并把开放分组并入 AutoGroups。
+
+还差一件「一次性」事：申请泛域名证书
+   sudo certbot certonly --dns-<你的DNS商> -d "*.${DOMAIN_HINT}" -d "${DOMAIN_HINT}"
 
 然后，开通一个代理商就一行：
 
-   $(_c '1;36')sudo newapi-reseller <name> <subdomain> [批发倍率] [预付美元]$(_c 0)
-   例：sudo newapi-reseller acme acme.${DOMAIN_HINT} 0.7 20
+   $(_c '1;36')sudo newapi-reseller <name> <subdomain> [预付美元]$(_c 0)
+   例：sudo newapi-reseller acme acme.${DOMAIN_HINT} 20
 
 下线/退出：
    sudo newapi-reseller-rm <name> --stop      # 停用(保留数据,可恢复)

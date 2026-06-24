@@ -58,6 +58,8 @@ new-api 本就极擅长「接上游、做分组定价、转发计费」，方案
 
 ## 2. 三层定价与分润模型
 
+> ⚠️ 实现更新（2026-06）：本节最初设计的「扁平批发分组 reseller_wholesale + 统一折扣」在「不同模型挂不同分组、分组倍率不同」的真实站点会算错价（claude=1.6 等加价被绕过）。`deploy/reseller-kit` 已改为 **1:1 复刻原价**：批发账户放标准客户组、批发令牌 `group=auto`，按模型在 `AutoGroups` 内自动选分组、按各自原价计费；代理商靠副站零售加价获利。需给批发折扣时再用 `GroupGroupRatio`。详见 `deploy/reseller-kit/README.md`。
+
 三层价格全部复用现有公式 `model_ratio × group_ratio`（`service/quota.go` 已验证）：
 
 ```

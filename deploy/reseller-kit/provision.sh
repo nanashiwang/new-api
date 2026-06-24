@@ -3,14 +3,15 @@
 # provision.sh — 一键开通一个代理商副站（方案 C：副站独立实例 + 上游回指主站）
 # ----------------------------------------------------------------------------
 # 用法：
-#   ./provision.sh <name> <subdomain> [wholesale_ratio] [prepaid_usd]
+#   ./provision.sh <name> <subdomain> [prepaid_usd]
 # 例：
-#   ./provision.sh acme acme.example.com 0.7 20
+#   ./provision.sh acme acme.example.com 20
 #
+# 计费模式：1:1 复刻(auto+原价)——代理商按你的原价用你现有的分组，不另设折扣分组、不改渠道。
 # 做的事（宿主层 + app 层，全部基于已核实的真实 API 契约）：
 #   1. 起副站容器（独立库/独立密钥，仅绑 127.0.0.1）
-#   2. 配 Caddy 子域名（自动 HTTPS）
-#   3. 主站：确保批发分组倍率 → 建批发账户 → 设分组/额度 → 建 unlimited 批发令牌
+#   2. 配子域名反代（nginx/caddy）
+#   3. 主站：确保启用 auto 分组 → 建批发账户(放标准客户组) → 设额度 → 建 auto 令牌
 #   4. 副站：建「回指主站」渠道（key=批发令牌）→ 改默认 root 密码
 # ============================================================================
 set -euo pipefail
@@ -26,19 +27,18 @@ set -a; source "$SCRIPT_DIR/reseller.env"; set +a
 need docker jq curl envsubst openssl awk
 
 # ---------- 参数 ----------
-[ $# -ge 2 ] || die "用法：$0 <name> <subdomain> [wholesale_ratio] [prepaid_usd]"
+[ $# -ge 2 ] || die "用法：$0 <name> <subdomain> [预付美元]"
 RESELLER_NAME="$1"; SUBDOMAIN="$2"
-WHOLESALE_RATIO="${3:-$DEFAULT_WHOLESALE_RATIO}"
-PREPAID_USD="${4:-$DEFAULT_PREPAID_USD}"
+PREPAID_USD="${3:-$DEFAULT_PREPAID_USD}"
 validate_name "$RESELLER_NAME"; validate_subdomain "$SUBDOMAIN"
 
-WHOLESALE_GROUP="$DEFAULT_WHOLESALE_GROUP"
+RESELLER_BILLING_GROUP="${RESELLER_BILLING_GROUP:-default}"   # 批发账号计费分组=你的标准客户组 → 代理商付同价
 SUBSITE_CONTAINER="newapi-sub-${RESELLER_NAME}"
 SUBSITE_DATA_DIR="${RESELLERS_DIR}/${RESELLER_NAME}"
 WHOLESALE_USER="reseller_${RESELLER_NAME}"
 QUOTA="$(usd_to_quota "$PREPAID_USD")"
 
-log "开通代理商：name=$RESELLER_NAME  子域名=$SUBDOMAIN  批发倍率=$WHOLESALE_RATIO  预付=\$$PREPAID_USD ($QUOTA quota)"
+log "开通代理商：name=$RESELLER_NAME  子域名=$SUBDOMAIN  计费分组=$RESELLER_BILLING_GROUP(原价)  预付=\$$PREPAID_USD ($QUOTA quota)"
 load_site_env "$RESELLER_NAME"   # 再次运行时复用已有密钥/密码（幂等）
 
 # ============================================================================
@@ -71,24 +71,27 @@ proxy_install "$SUBDOMAIN" "$SUBSITE_PORT"
 save_site_kv "$RESELLER_NAME" SUBDOMAIN "$SUBDOMAIN"
 
 # ============================================================================
-step "3/6 主站：登录 + 确保批发分组倍率"
+step "3/6 主站：登录 + 启用 auto 分组(1:1 原价模式)"
 # ============================================================================
 MAIN_JAR="$(mktemp)"; trap 'rm -f "$MAIN_JAR" "${WS_JAR:-}" "${SUB_JAR:-}"' EXIT
 MAIN_ID="$(api_login "$MAIN_API_URL" "$MAIN_JAR" "$MAIN_ADMIN_USER" "$MAIN_ADMIN_PASS")"
 log "主站管理员登录成功 (id=$MAIN_ID)"
 
-# 读现有 GroupRatio（option key="GroupRatio"，见 model/option.go:166），合并加入批发分组，PUT 回写
-CUR_GR="$(api "$MAIN_API_URL" "$MAIN_JAR" "$MAIN_ID" GET "/api/option/" \
-	| jq -r '(.data[]? | select(.key=="GroupRatio") | .value) // "{\"default\":1}"')"
-NEW_GR="$(jq -c --arg g "$WHOLESALE_GROUP" --argjson r "$WHOLESALE_RATIO" '. + {($g): $r}' <<<"$CUR_GR")"
-# value 必须以「字符串」形式提交（controller 会原样存为 string；传对象会被 fmt 损坏）
+OPTS="$(api "$MAIN_API_URL" "$MAIN_JAR" "$MAIN_ID" GET "/api/option/")"
+# (a) UserUsableGroups 确保含 "auto"——否则 auto 令牌会被拒(auth.go:345)。value 以字符串提交。
+CUR_UUG="$(jq -r '(.data[]? | select(.key=="UserUsableGroups") | .value) // "{}"' <<<"$OPTS")"
+NEW_UUG="$(jq -c '. + {"auto":"自动(按模型选分组, 1:1原价)"}' <<<"$CUR_UUG")"
 api "$MAIN_API_URL" "$MAIN_JAR" "$MAIN_ID" PUT "/api/option/" \
-	"$(jq -nc --arg v "$NEW_GR" '{key:"GroupRatio", value:$v}')" >/dev/null
-log "批发分组倍率已确保：$WHOLESALE_GROUP=$WHOLESALE_RATIO"
-warn "【一次性前置】请确认 $WHOLESALE_GROUP 已加入主站上游渠道的「分组」，否则批发请求选不到渠道（见 README）。"
+	"$(jq -nc --arg v "$NEW_UUG" '{key:"UserUsableGroups", value:$v}')" >/dev/null
+# (b) AutoGroups 并入要开放给代理商的分组(逗号→数组, 去重)——auto 只在这些分组里按模型选。
+CUR_AG="$(jq -r '(.data[]? | select(.key=="AutoGroups") | .value) // "[\"default\"]"' <<<"$OPTS")"
+NEW_AG="$(jq -c --arg g "$AUTO_GROUPS" '(. + ($g | split(",") | map(gsub("^ +| +$";"")))) | unique' <<<"$CUR_AG")"
+api "$MAIN_API_URL" "$MAIN_JAR" "$MAIN_ID" PUT "/api/option/" \
+	"$(jq -nc --arg v "$NEW_AG" '{key:"AutoGroups", value:$v}')" >/dev/null
+log "auto 已启用；开放分组并入 AutoGroups：$AUTO_GROUPS"
 
 # ============================================================================
-step "4/6 主站：建批发账户 + 设分组/额度 + 建 unlimited 批发令牌"
+step "4/6 主站：建批发账户(标准客户组) + 设额度 + 建 auto 令牌"
 # ============================================================================
 get_uid() { api "$MAIN_API_URL" "$MAIN_JAR" "$MAIN_ID" GET "/api/user/search?keyword=$1" \
 	| jq -r --arg n "$1" '((.data.items // .data) // [])[]? | select(.username==$n) | .id' | head -n1; }
@@ -109,12 +112,12 @@ else
 fi
 save_site_kv "$RESELLER_NAME" WHOLESALE_UID "$WHOLESALE_UID"
 
-# PUT 更新：设批发分组 + 预付额度 + role=1（必须显式带 role，否则默认 0 降为游客）
+# PUT 更新：放标准客户组 + 预付额度 + role=1（必须显式带 role，否则默认 0 降为游客）
 api "$MAIN_API_URL" "$MAIN_JAR" "$MAIN_ID" PUT "/api/user/" \
 	"$(jq -nc --argjson id "$WHOLESALE_UID" --arg u "$WHOLESALE_USER" --arg d "Reseller $RESELLER_NAME 批发账户" \
-		--arg g "$WHOLESALE_GROUP" --argjson q "$QUOTA" \
+		--arg g "$RESELLER_BILLING_GROUP" --argjson q "$QUOTA" \
 		'{id:$id, username:$u, display_name:$d, group:$g, quota:$q, role:1}')" >/dev/null
-log "批发账户已设：group=$WHOLESALE_GROUP  quota=$QUOTA"
+log "批发账户已设：group=$RESELLER_BILLING_GROUP(原价)  quota=$QUOTA"
 
 # 令牌创建需「以批发账户本人」登录（POST /api/token/ 走 UserAuth）
 WS_JAR="$(mktemp)"
@@ -124,16 +127,14 @@ TOKEN_NAME="reseller-${RESELLER_NAME}-wholesale"
 TOKEN_ID="$(api "$MAIN_API_URL" "$WS_JAR" "$WS_ID" GET "/api/token/?p=1&page_size=100" \
 	| jq -r --arg n "$TOKEN_NAME" '((.data.items // .data) // [])[]? | select(.name==$n) | .id' | head -n1 || true)"
 if [ -z "${TOKEN_ID:-}" ] || [ "$TOKEN_ID" = "null" ]; then
-	# group=批发分组（与账户 group 一致）。空 group 会被拒（token.go:303 "令牌分组不能为空"）；
-	# 用户自身分组必在 usable groups 中（service/group.go:10 自动并入），故建令牌(token.go:303
-	# 的 group==userGroup 放行)与计费(auth.go:347 自身分组在 usable 里)两处校验都过；
-	# 且不污染其他主站用户的可用分组 → 不泄露批发折扣。
+	# group="auto"：令牌按请求模型在 AUTO_GROUPS 内自动选分组、按各自原价计费(1:1)。
+	# 前提 step3 已把 "auto" 加入 UserUsableGroups、AUTO_GROUPS 并入 AutoGroups。
 	api "$MAIN_API_URL" "$WS_JAR" "$WS_ID" POST "/api/token/" \
-		"$(jq -nc --arg n "$TOKEN_NAME" --arg m "$MODELS" --arg g "$WHOLESALE_GROUP" \
+		"$(jq -nc --arg n "$TOKEN_NAME" --arg m "$MODELS" \
 			'{name:$n, unlimited_quota:true, remain_quota:0, expired_time:-1,
 			  model_limits_enabled:true, model_limits:$m,
 			  channel_limits_enabled:false, channel_limits:"",
-			  allow_ips:"", group:$g, cross_group_retry:false,
+			  allow_ips:"", group:"auto", cross_group_retry:true,
 			  max_concurrency:0, window_request_limit:0, window_seconds:0,
 			  package_enabled:false, package_limit_quota:0, package_period:"none",
 			  package_period_mode:"relative", package_custom_seconds:0,
@@ -187,8 +188,8 @@ $(_c '1;32')========== 开通完成 ==========$(_c 0)
 代理商：        $RESELLER_NAME
 副站地址：      https://$SUBDOMAIN   （本地: $SUBSITE_API）
 副站 root 密码：$NEW_ROOT_PASS    ← 交付给代理商，登录后请再次自行修改
-批发账户：      $WHOLESALE_USER  (主站 id=$WHOLESALE_UID)
-批发分组/倍率： $WHOLESALE_GROUP = $WHOLESALE_RATIO
+批发账户：      $WHOLESALE_USER  (主站 id=$WHOLESALE_UID, 计费分组 $RESELLER_BILLING_GROUP=原价)
+开放分组(auto)：$AUTO_GROUPS
 预付批发额度：  \$$PREPAID_USD ($QUOTA quota)
 机密档案：      $(site_env_path "$RESELLER_NAME")  （含密钥/密码/批发token，chmod 600，妥善保管）
 

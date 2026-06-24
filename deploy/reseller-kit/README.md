@@ -12,27 +12,27 @@
 cd <你的 newapi 仓库>/deploy/reseller-kit
 sudo bash setup.sh
 
-# ② 一次性主站设置（只做一次，管所有代理商）
-#    a. 主站后台 → 渠道 → 给要开放的上游渠道「分组」加上 reseller_wholesale → 保存
-#    b. 申请泛域名证书： sudo certbot certonly --dns-<你的DNS商> -d "*.你的域名" -d "你的域名"
+# ② 一次性：申请泛域名证书（计费用 1:1 原价，无需改渠道/建分组）
+#    sudo certbot certonly --dns-<你的DNS商> -d "*.你的域名" -d "你的域名"
 
-# ③ 开通一个代理商 —— 就这一行 👇
-sudo newapi-reseller acme acme.你的域名 0.7 20
+# ③ 开通一个代理商 —— 就这一行 👇（首次会自动启用 auto 分组）
+sudo newapi-reseller acme acme.你的域名 20
 ```
 
-参数：`newapi-reseller <name> <subdomain> [批发倍率] [预付美元]`，后两个可省略（用向导里设的默认值）。
+参数：`newapi-reseller <name> <subdomain> [预付美元]`，最后一个可省略（用向导里设的默认值）。
 
 ---
 
 ## 它做什么
 
-一行命令开通一个代理商：起独立副站容器（独立库/独立密钥）→ 配 nginx 子域名 → 在主站建好「批发账户 + 批发分组折扣 + unlimited 批发令牌」→ 在副站建好「回指主站」渠道 → 改默认密码。
+一行命令开通一个代理商：起独立副站容器（独立库/独立密钥）→ 配 nginx 子域名 → 在主站建好「批发账户(放标准客户组) + auto 令牌」→ 在副站建好「回指主站」渠道 → 改默认密码。
 
-计费模型（三层价，全部复用现有 `model_ratio × group_ratio`）：
+计费模型（1:1 复刻原价，复用现有分组，不另设折扣分组）：
 
 ```
-下游用户 ─付费(零售价,副站定)→ 副站 ─批发令牌→ 主站 ─批发价=model_ratio×批发折扣→ 各原厂
-                                         主站从「批发账户钱包」扣额度，耗尽即背靠背断流
+下游用户 ─付费(零售价,副站自定)→ 副站 ─auto令牌→ 主站 ─按各模型所属分组的原价计费→ 各原厂
+                                          主站从「批发账户钱包」扣额度，耗尽即背靠背断流
+代理商利润 = 副站零售价 − 主站原价   （main 仍赚它本来的利润）
 ```
 
 ## 目录文件
@@ -54,14 +54,16 @@ sudo newapi-reseller acme acme.你的域名 0.7 20
 3. 服务器有 nginx（或 Caddy）做反代；有 docker（compose v2）。
 4. `setup.sh` 会自动装 `jq curl gettext-base openssl`（Debian/Ubuntu）。
 
-### ⚠️ 一次性主站设置（不做会「无可用渠道」）
+### 计费：1:1 复刻原价（无需改渠道）
 
-批发请求用「批发分组」去主站**选渠道**，所以该分组**必须挂到上游渠道**上：
+代理商按你的**原价**用你**现有的分组**，所以**不用**给渠道加分组、**不用**建折扣分组：
 
-- 主站后台 → **渠道** → 编辑要开放给代理商的每个上游渠道 → 「**分组**」里**追加** `reseller_wholesale`（保留原有 default 等）→ 保存。
-- 分组的折扣倍率（`group_ratio`）由脚本首次开通时自动写入，无需手动。
+- 批发账户放在 `RESELLER_BILLING_GROUP`（默认 `default`=你的标准客户组）→ 代理商付的就是该分组用户的同价。
+- 批发令牌 `group=auto` → 按请求模型在 `AUTO_GROUPS` 内**自动选对应分组、按各自原价计费**（claude 还是 claude 价、gpt 还是 gpt 价，结构原样保留）。
+- 首次开通时脚本**自动**把 `auto` 加入 `UserUsableGroups`、把 `AUTO_GROUPS` 并入 `AutoGroups`（在 `reseller.env` 里配 `AUTO_GROUPS`）。
+- 代理商靠**副站零售加价**赚钱；想给批发折扣，再单独用 `GroupGroupRatio`（见规划文档），本 kit 默认不打折。
 
-> 只给部分渠道加 → 代理商就只能转售这些渠道的模型（配合批发令牌的 `model_limits` 双保险）。
+> 用 `AUTO_GROUPS` 控制开放哪些分组、用批发令牌的 `model_limits`(=`MODELS`) 控制开放哪些模型，双保险。
 
 ## 验证「双向扣费」闭环（开通后必做）
 
@@ -93,9 +95,9 @@ sudo newapi-reseller-rm <name> --retarget   # 退出迁移：子域名反代翻�
 | 环节 | 真实依据 |
 |---|---|
 | 鉴权 | 登录拿 cookie + 每请求带 `New-API-User` 头（`middleware/auth.go:33`） |
-| 批发计费分组 | 令牌 `group=批发分组`（与账户 group 一致）；用户自身分组必在 usable groups（`service/group.go:10` 自动并入），建令牌与计费两处校验都过，且不泄露折扣给他人 |
+| 1:1 原价计费 | 批发令牌 `group=auto`，按模型在 `AutoGroups` 内自动选分组、按该分组原价计费（`service/group.go` `GetUserAutoGroup`/`GetUserGroupRatio`）；账户放标准客户组→付同价 |
 | 设额度/分组 | `PUT /api/user/` 且**必须带 role=1**（`controller/user.go:872`，否则降为游客） |
-| 批发分组倍率 | option key `"GroupRatio"`，先 GET 合并再 PUT（`model/option.go:166`） |
+| 启用 auto | 把 `auto` 并入 `UserUsableGroups`、开放分组并入 `AutoGroups`（option PUT，`model/option.go:124/168`） |
 | 建令牌 | `POST /api/token/` 需以批发账户本人登录；key 另调 `GET /api/token/{id}/key` |
 | 回指渠道 | `POST /api/channel/` type=1，base_url=主站内网，自动建 ability |
 | 副站建库/建 root | 容器首启 `migrateDB()` 自动建表 + 默认 `root/123456`（开通即改） |
