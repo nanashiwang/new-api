@@ -1,0 +1,38 @@
+# ============================================================================
+# 副站容器模板（由 provision.sh 用 envsubst 渲染，勿直接使用）
+# 渲染后输出到 ${RESELLERS_DIR}/<name>/docker-compose.yml
+# ----------------------------------------------------------------------------
+# 设计要点：
+#  - 数据库：默认 SQLite（不设 SQL_DSN → new-api 自动用 /data 下的 SQLite，零额外依赖）。
+#            如需 Postgres，取消注释 SQL_DSN 并预先建库。
+#  - 网络：加入主站所在的外部网络，以便用内网名 http://new-api:3000 回指主站。
+#  - 端口：仅绑定 127.0.0.1（不对公网暴露），供宿主脚本与反代访问。
+#  - 密钥：SESSION_SECRET / CRYPTO_SECRET 每站唯一（provision.sh 随机生成并写入 site.env）。
+# ============================================================================
+services:
+  ${SUBSITE_CONTAINER}:
+    image: ${NEWAPI_IMAGE}
+    container_name: ${SUBSITE_CONTAINER}
+    restart: always
+    command: --log-dir /app/logs
+    ports:
+      - "127.0.0.1:${SUBSITE_PORT}:3000"
+    volumes:
+      - ${SUBSITE_DATA_DIR}/data:/data
+      - ${SUBSITE_DATA_DIR}/logs:/app/logs
+    environment:
+      - SESSION_SECRET=${SESSION_SECRET}
+      - CRYPTO_SECRET=${CRYPTO_SECRET}
+      - TZ=${TZ}
+      - ERROR_LOG_ENABLED=true
+      # 默认 SQLite（自动建库建表）。改用 Postgres 时取消下一行注释并预先 CREATE DATABASE：
+      # - SQL_DSN=postgresql://reseller_${RESELLER_NAME}:CHANGE_ME@postgres:5432/reseller_${RESELLER_NAME}
+      # 副站独立内存缓存即可；如要用 Redis，给一个独立 db 号避免与主站串：
+      # - REDIS_CONN_STRING=redis://redis/3
+    networks:
+      - shared
+
+networks:
+  shared:
+    external: true
+    name: ${SHARED_NETWORK}

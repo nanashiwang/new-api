@@ -1,0 +1,4 @@
+# 机密：实际配置与每副站的密钥档案，绝不入库
+reseller.env
+*/site.env
+site.env
