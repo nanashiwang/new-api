@@ -50,14 +50,24 @@ func ApplyCRSMemoryPressureShortCircuit(channel *model.Channel, err *types.NewAP
 	if channel == nil || !IsCRSMemoryPressureError(err) {
 		return nil
 	}
+	return ApplyChannelScopedShortCircuit(channel, "CRS memory pressure")
+}
+
+func ApplyChannelScopedShortCircuit(channel *model.Channel, reason string) []CRSShortCircuitTrip {
+	if channel == nil {
+		return nil
+	}
 	ttl := crsShortCircuitTTL()
 	if ttl <= 0 {
 		return nil
 	}
+	if reason == "" {
+		reason = "temporary upstream instability"
+	}
 	scopes := crsCircuitScopes(channel)
 	trips := make([]CRSShortCircuitTrip, 0, len(scopes))
 	for _, scope := range scopes {
-		opened := setCRSCircuit(scope, ttl, fmt.Sprintf("channel=%d", channel.Id))
+		opened := setCRSCircuit(scope, ttl, fmt.Sprintf("channel=%d reason=%s", channel.Id, reason))
 		trips = append(trips, CRSShortCircuitTrip{
 			Scope:      scope.scope,
 			Key:        scope.key,

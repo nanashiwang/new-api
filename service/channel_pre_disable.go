@@ -71,3 +71,37 @@ func ScheduleCurrentChannelPreDisableWait(c *gin.Context, reason string) (bool, 
 	)
 	return SchedulePreDisableWait(*channelError, reason)
 }
+
+func ScheduleCurrentChannelScopedPreDisableWait(c *gin.Context, reason string) (bool, []CRSShortCircuitTrip, error) {
+	scheduled, err := ScheduleCurrentChannelPreDisableWait(c, reason)
+	if c == nil || !common.GetContextKeyBool(c, constant.ContextKeyChannelAutoBan) {
+		return scheduled, nil, err
+	}
+	channelId := common.GetContextKeyInt(c, constant.ContextKeyChannelId)
+	if channelId <= 0 {
+		return scheduled, nil, err
+	}
+	if reason == "" {
+		reason = "temporary upstream stream instability"
+	}
+	trips := ApplyChannelScopedShortCircuit(currentChannelForScopedShortCircuit(c, channelId), reason)
+	return scheduled || len(trips) > 0, trips, err
+}
+
+func currentChannelForScopedShortCircuit(c *gin.Context, channelId int) *model.Channel {
+	if channel, err := model.CacheGetChannel(channelId); err == nil && channel != nil {
+		return channel
+	}
+	autoBan := 0
+	if common.GetContextKeyBool(c, constant.ContextKeyChannelAutoBan) {
+		autoBan = 1
+	}
+	baseURL := common.GetContextKeyString(c, constant.ContextKeyChannelBaseUrl)
+	return &model.Channel{
+		Id:      channelId,
+		Type:    common.GetContextKeyInt(c, constant.ContextKeyChannelType),
+		Name:    common.GetContextKeyString(c, constant.ContextKeyChannelName),
+		BaseURL: &baseURL,
+		AutoBan: &autoBan,
+	}
+}

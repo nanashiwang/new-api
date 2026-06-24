@@ -384,14 +384,28 @@ func shouldFailEmptyResponsesCompleted(hasEffectiveOutput bool) bool {
 }
 
 func scheduleResponsesStreamCooldown(c *gin.Context, reason string) {
-	scheduled, err := service.ScheduleCurrentChannelPreDisableWait(c, reason)
+	scheduled, trips, err := service.ScheduleCurrentChannelScopedPreDisableWait(c, reason)
 	if err != nil {
 		logger.LogError(c, fmt.Sprintf("schedule responses stream cooldown failed: %v", err))
-		return
 	}
 	if scheduled {
-		logger.LogInfo(c, fmt.Sprintf("responses stream cooldown scheduled: %s", reason))
+		logger.LogInfo(c, fmt.Sprintf("responses stream cooldown scheduled: %s%s", reason, formatScopedCooldownTrips(trips)))
 	}
+}
+
+func formatScopedCooldownTrips(trips []service.CRSShortCircuitTrip) string {
+	if len(trips) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(trips))
+	for _, trip := range trips {
+		state := "existing"
+		if trip.Opened {
+			state = "opened"
+		}
+		parts = append(parts, fmt.Sprintf("%s=%s ttl=%ds %s", trip.Scope, trip.Key, trip.TTLSeconds, state))
+	}
+	return "; scopes: " + strings.Join(parts, "; ")
 }
 
 func sendSyntheticResponsesCompleted(c *gin.Context, info *relaycommon.RelayInfo, usage *dto.Usage, responseID, model string, createdAt int) {
