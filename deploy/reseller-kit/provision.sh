@@ -155,13 +155,16 @@ WTOKEN_KEY="$(api "$MAIN_API_URL" "$WS_JAR" "$WS_ID" GET "/api/token/${TOKEN_ID}
 save_site_kv "$RESELLER_NAME" WTOKEN_KEY "$WTOKEN_KEY"
 if [ "$TS_WAS_ON" = "true" ]; then turnstile_set true; log "已恢复 Turnstile"; fi
 
-# 副站回指渠道的模型列表：MODELS 指定则用之；为空则用批发令牌从主站 /v1/models 拉全量
+# 副站回指渠道的模型列表：MODELS 指定则用之；为空=全部(从主站 /api/pricing 取 AUTO_GROUPS 能用的模型)
 if [ -n "${MODELS:-}" ]; then
 	CHANNEL_MODELS="$MODELS"
 else
-	log "MODELS 为空 → 从主站 /v1/models 拉取该令牌可用的全部模型..."
-	CHANNEL_MODELS="$(curl -sS -H "Authorization: Bearer $WTOKEN_KEY" "$MAIN_API_URL/v1/models" | jq -r '[.data[]?.id] | join(",")')"
-	[ -n "$CHANNEL_MODELS" ] || die "拉取主站模型列表失败(确认 auto/AUTO_GROUPS 已生效)"
+	log "MODELS 为空 → 从主站 /api/pricing 取 AUTO_GROUPS 可用的全部模型..."
+	CHANNEL_MODELS="$(amain GET "/api/pricing" | jq -r --arg g "$AUTO_GROUPS" '
+		($g | split(",") | map(gsub("^ +| +$";""))) as $groups
+		| [ .data[]? | select((.enable_groups // []) | any(. as $m | $groups | index($m))) | .model_name ]
+		| unique | join(",")')"
+	[ -n "$CHANNEL_MODELS" ] || die "从 /api/pricing 拉取模型列表失败"
 	log "拉到 $(printf '%s' "$CHANNEL_MODELS" | tr ',' '\n' | grep -c .) 个模型"
 fi
 
