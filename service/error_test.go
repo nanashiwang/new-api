@@ -1,6 +1,10 @@
 package service
 
 import (
+	"context"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/types"
@@ -53,5 +57,38 @@ func TestResetStatusCode(t *testing.T) {
 			ResetStatusCode(newAPIError, tc.statusCodeConfig)
 			require.Equal(t, tc.expectedCode, newAPIError.StatusCode)
 		})
+	}
+}
+
+func TestRelayErrorHandlerAttachesUpstreamDiagnostics(t *testing.T) {
+	req, err := http.NewRequest(http.MethodPost, "https://crs.example.com/openai/v1/responses?api_key=secret", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.ContentLength = 1114684
+	resp := &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header: http.Header{
+			"X-Request-Id": []string{"2hr1mdrh0ni"},
+		},
+		Body:    io.NopCloser(strings.NewReader(`{"error":{"message":"bad payload","type":"upstream_error","code":null}}`)),
+		Request: req,
+	}
+
+	apiErr := RelayErrorHandler(context.Background(), resp, false)
+	if apiErr == nil || apiErr.Upstream == nil {
+		t.Fatalf("expected upstream diagnostics, got %#v", apiErr)
+	}
+	if apiErr.Upstream.RequestID != "2hr1mdrh0ni" {
+		t.Fatalf("request id = %q", apiErr.Upstream.RequestID)
+	}
+	if apiErr.Upstream.RequestLength != 1114684 {
+		t.Fatalf("request length = %d", apiErr.Upstream.RequestLength)
+	}
+	if strings.Contains(apiErr.Upstream.URL, "secret") {
+		t.Fatalf("upstream url leaked query: %s", apiErr.Upstream.URL)
+	}
+	if !strings.Contains(apiErr.UpstreamDiagnosticsLogString(), "2hr1mdrh0ni") {
+		t.Fatalf("diagnostics log missing request id: %s", apiErr.UpstreamDiagnosticsLogString())
 	}
 }

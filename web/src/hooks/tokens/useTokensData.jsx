@@ -278,6 +278,13 @@ export const useTokensData = (openFluentNotification) => {
     setShowKeys((prev) => ({ ...prev, [record.id]: true }));
   };
 
+  const getChatServerAddress = (serverAddress) => {
+    const normalizedServerAddress = serverAddress.replace(/\/$/, '');
+    return normalizedServerAddress === 'https://nan.meta-api.vip'
+      ? 'https://cn.meta-api.vip'
+      : normalizedServerAddress;
+  };
+
   // 打开聊天集成链接函数
   const onOpenLink = async (type, url, record) => {
     if (!url) return;
@@ -314,6 +321,7 @@ export const useTokensData = (openFluentNotification) => {
     if (serverAddress === '') {
       serverAddress = window.location.origin;
     }
+    serverAddress = getChatServerAddress(serverAddress);
     if (url.includes('{cherryConfig}') === true) {
       let cherryConfig = {
         id: 'new-api',

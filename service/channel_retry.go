@@ -140,7 +140,9 @@ func shouldExcludeRetryByTag(err *types.NewAPIError) bool {
 	if err == nil {
 		return false
 	}
-	return IsRetryableSharedUpstreamPoolError(err)
+	return IsRetryableSharedUpstreamPoolError(err) ||
+		IsChannelModelMismatchError(err) ||
+		IsUpstreamRequestTooLargeError(err)
 }
 
 func IsRetryableSharedUpstreamPoolError(err *types.NewAPIError) bool {
@@ -163,4 +165,17 @@ func IsUpstreamRateLimitError(err *types.NewAPIError) bool {
 	lowerMessage := normalizeUpstreamErrorMessage(err)
 	return strings.Contains(lowerMessage, "rate limit") ||
 		strings.Contains(lowerMessage, "too many requests")
+}
+
+func IsUpstreamRequestTooLargeError(err *types.NewAPIError) bool {
+	if err == nil || types.IsSkipRetryError(err) {
+		return false
+	}
+	if err.StatusCode == http.StatusRequestEntityTooLarge {
+		return true
+	}
+	lowerMessage := normalizeUpstreamErrorMessage(err)
+	return strings.Contains(lowerMessage, "request entity too large") ||
+		strings.Contains(lowerMessage, "payload too large") ||
+		strings.Contains(lowerMessage, "content too large")
 }

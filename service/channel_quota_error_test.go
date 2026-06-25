@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"slices"
 	"testing"
@@ -358,6 +359,122 @@ func TestApplyChannelFailureRetryExclusion_TemporaryModelUnavailableUsesTagGroup
 		t.Fatalf("expected two excluded channels, got %v", param.ExcludeChannels)
 	}
 	if !slices.Contains(param.ExcludeChannels, 7) || !slices.Contains(param.ExcludeChannels, 8) {
+		t.Fatalf("unexpected excluded channels: %v", param.ExcludeChannels)
+	}
+}
+
+func TestApplyChannelFailureRetryExclusion_ChannelMismatchUsesTagGroup(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+
+	originDB := model.DB
+	originLogDB := model.LOG_DB
+	originMemoryCacheEnabled := common.MemoryCacheEnabled
+	model.DB = db
+	model.LOG_DB = db
+	common.MemoryCacheEnabled = false
+	t.Cleanup(func() {
+		model.DB = originDB
+		model.LOG_DB = originLogDB
+		common.MemoryCacheEnabled = originMemoryCacheEnabled
+	})
+
+	if err := db.AutoMigrate(&model.Channel{}, &model.Ability{}); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+
+	tag := "shared-crs"
+	channels := []model.Channel{
+		{Id: 21, Name: "primary", Status: common.ChannelStatusEnabled, Tag: &tag},
+		{Id: 22, Name: "sibling", Status: common.ChannelStatusEnabled, Tag: &tag},
+	}
+	if err := db.Create(&channels).Error; err != nil {
+		t.Fatalf("seed channels: %v", err)
+	}
+	abilities := []model.Ability{
+		{Group: "vip", Model: "gpt-5.5", ChannelId: 21, Enabled: true},
+		{Group: "vip", Model: "gpt-5.5", ChannelId: 22, Enabled: true},
+	}
+	if err := db.Create(&abilities).Error; err != nil {
+		t.Fatalf("seed abilities: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	common.SetContextKey(ctx, constant.ContextKeyUsingGroup, "vip")
+	param := &RetryParam{
+		Ctx:        ctx,
+		TokenGroup: "vip",
+		ModelName:  "gpt-5.5",
+	}
+	retryErr := types.NewOpenAIError(errors.New("bad response status code 400, message: Stream must be set to true"), types.ErrorCodeBadResponseStatusCode, http.StatusBadRequest)
+
+	ApplyChannelFailureRetryExclusion(param, &channels[0], retryErr)
+
+	if len(param.ExcludeChannels) != 2 {
+		t.Fatalf("expected two excluded channels, got %v", param.ExcludeChannels)
+	}
+	if !slices.Contains(param.ExcludeChannels, 21) || !slices.Contains(param.ExcludeChannels, 22) {
+		t.Fatalf("unexpected excluded channels: %v", param.ExcludeChannels)
+	}
+}
+
+func TestApplyChannelFailureRetryExclusion_RequestTooLargeUsesTagGroup(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+
+	originDB := model.DB
+	originLogDB := model.LOG_DB
+	originMemoryCacheEnabled := common.MemoryCacheEnabled
+	model.DB = db
+	model.LOG_DB = db
+	common.MemoryCacheEnabled = false
+	t.Cleanup(func() {
+		model.DB = originDB
+		model.LOG_DB = originLogDB
+		common.MemoryCacheEnabled = originMemoryCacheEnabled
+	})
+
+	if err := db.AutoMigrate(&model.Channel{}, &model.Ability{}); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+
+	tag := "shared-crs"
+	channels := []model.Channel{
+		{Id: 31, Name: "primary", Status: common.ChannelStatusEnabled, Tag: &tag},
+		{Id: 32, Name: "sibling", Status: common.ChannelStatusEnabled, Tag: &tag},
+	}
+	if err := db.Create(&channels).Error; err != nil {
+		t.Fatalf("seed channels: %v", err)
+	}
+	abilities := []model.Ability{
+		{Group: "vip", Model: "gpt-5.5", ChannelId: 31, Enabled: true},
+		{Group: "vip", Model: "gpt-5.5", ChannelId: 32, Enabled: true},
+	}
+	if err := db.Create(&abilities).Error; err != nil {
+		t.Fatalf("seed abilities: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	common.SetContextKey(ctx, constant.ContextKeyUsingGroup, "vip")
+	param := &RetryParam{
+		Ctx:        ctx,
+		TokenGroup: "vip",
+		ModelName:  "gpt-5.5",
+	}
+	retryErr := types.NewOpenAIError(errors.New("bad response status code 413"), types.ErrorCodeBadResponseStatusCode, http.StatusRequestEntityTooLarge)
+
+	ApplyChannelFailureRetryExclusion(param, &channels[0], retryErr)
+
+	if len(param.ExcludeChannels) != 2 {
+		t.Fatalf("expected two excluded channels, got %v", param.ExcludeChannels)
+	}
+	if !slices.Contains(param.ExcludeChannels, 31) || !slices.Contains(param.ExcludeChannels, 32) {
 		t.Fatalf("unexpected excluded channels: %v", param.ExcludeChannels)
 	}
 }

@@ -810,7 +810,6 @@ const TopupHistoryModal = ({
     record: null,
   });
   const [invoiceReviewForm, setInvoiceReviewForm] = useState({
-    invoiceNo: '',
     invoiceUrl: '',
     invoiceSentTo: '',
     sendEmail: true,
@@ -1739,7 +1738,6 @@ const TopupHistoryModal = ({
   const openInvoiceReviewModal = (record, action) => {
     setInvoiceReviewState({ visible: true, action, record });
     setInvoiceReviewForm({
-      invoiceNo: record?.invoice_no || '',
       invoiceUrl: record?.invoice_url || '',
       invoiceSentTo: record?.invoice_sent_to || record?.email || '',
       sendEmail: true,
@@ -1755,7 +1753,6 @@ const TopupHistoryModal = ({
   const closeInvoiceReviewModal = () => {
     setInvoiceReviewState({ visible: false, action: null, record: null });
     setInvoiceReviewForm({
-      invoiceNo: '',
       invoiceUrl: '',
       invoiceSentTo: '',
       sendEmail: true,
@@ -1834,7 +1831,6 @@ const TopupHistoryModal = ({
       let payload;
       if (action === 'approve') {
         payload = new FormData();
-        payload.append('invoice_no', invoiceReviewForm.invoiceNo.trim());
         payload.append('invoice_url', invoiceReviewForm.invoiceUrl.trim());
         payload.append(
           'invoice_sent_to',
@@ -3255,13 +3251,14 @@ const TopupHistoryModal = ({
         width: 240,
         render: (_, record) => {
           const fileUrl = getInvoiceFileUrl(record);
+          const hasInvoiceInfo =
+            fileUrl ||
+            record?.invoice_url ||
+            record?.invoice_send_status ||
+            record?.invoice_send_error;
           return (
             <div className='flex flex-col gap-1'>
-              {record?.invoice_no ? (
-                <Text copyable>{record.invoice_no}</Text>
-              ) : (
-                <Text type='tertiary'>-</Text>
-              )}
+              {!hasInvoiceInfo ? <Text type='tertiary'>-</Text> : null}
               <Space wrap spacing={4}>
                 {fileUrl ? (
                   <a href={fileUrl} target='_blank' rel='noreferrer'>
@@ -4150,7 +4147,6 @@ const TopupHistoryModal = ({
               '审核时间',
               formatInvoiceTime(detail?.reviewed_at),
             )}
-            {renderInvoiceDetailValue('发票号/代码', detail?.invoice_no, true)}
             {renderInvoiceDetailValue('发票链接', detail?.invoice_url, true)}
             {renderInvoiceDetailValue(
               '发票 PDF',
@@ -4582,18 +4578,6 @@ const TopupHistoryModal = ({
         <div className='space-y-3'>
           {invoiceReviewState.action === 'approve' ? (
             <>
-              <Input
-                placeholder={t('发票号或发票代码（可选）')}
-                value={invoiceReviewForm.invoiceNo}
-                onChange={(value) =>
-                  setInvoiceReviewForm((prev) => ({
-                    ...prev,
-                    invoiceNo: value,
-                  }))
-                }
-                maxLength={128}
-                showClear
-              />
               <Input
                 placeholder={t('发票链接')}
                 value={invoiceReviewForm.invoiceUrl}

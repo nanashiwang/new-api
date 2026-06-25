@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -85,11 +86,18 @@ func ClaudeErrorWrapperLocal(err error, code string, statusCode int) *dto.Claude
 
 func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFail bool) (newApiErr *types.NewAPIError) {
 	newApiErr = types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
+	upstreamDiagnostics := buildUpstreamDiagnostics(resp, 0)
+	defer func() {
+		if newApiErr != nil && !upstreamDiagnostics.IsZero() {
+			newApiErr.Upstream = upstreamDiagnostics
+		}
+	}()
 
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return
 	}
+	upstreamDiagnostics.ResponseLength = int64(len(responseBody))
 	CloseResponseBodyGracefully(resp)
 	var errResponse dto.GeneralErrorResponse
 	buildErrWithBody := func(message string) error {
@@ -104,7 +112,11 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 		if showBodyWhenFail {
 			newApiErr.Err = buildErrWithBody("")
 		} else {
-			logger.LogError(ctx, fmt.Sprintf("bad response status code %d, body: %s", resp.StatusCode, string(responseBody)))
+			logMessage := fmt.Sprintf("bad response status code %d, body: %s", resp.StatusCode, string(responseBody))
+			if diagnostics := upstreamDiagnostics.LogString(); diagnostics != "" {
+				logMessage = fmt.Sprintf("%s, upstream={%s}", logMessage, diagnostics)
+			}
+			logger.LogError(ctx, logMessage)
 			newApiErr.Err = fmt.Errorf("bad response status code %d", resp.StatusCode)
 		}
 		return
@@ -126,6 +138,52 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 		newApiErr.Err = buildErrWithBody(newApiErr.Error())
 	}
 	return
+}
+
+func buildUpstreamDiagnostics(resp *http.Response, responseLength int64) *types.UpstreamDiagnostics {
+	if resp == nil {
+		return nil
+	}
+	diagnostics := &types.UpstreamDiagnostics{
+		ResponseLength: responseLength,
+	}
+	if requestID, header := getUpstreamRequestID(resp.Header); requestID != "" {
+		diagnostics.RequestID = requestID
+		diagnostics.RequestIDHeader = header
+	}
+	if resp.Request != nil {
+		diagnostics.RequestLength = resp.Request.ContentLength
+		if resp.Request.URL != nil {
+			diagnostics.URL = sanitizeUpstreamURL(resp.Request.URL)
+		}
+	}
+	return diagnostics
+}
+
+func getUpstreamRequestID(header http.Header) (string, string) {
+	for _, key := range []string{
+		"X-Request-ID",
+		"X-Request-Id",
+		"OpenAI-Request-ID",
+		"Openai-Request-Id",
+		"Request-Id",
+		"X-Correlation-ID",
+	} {
+		if value := strings.TrimSpace(header.Get(key)); value != "" {
+			return value, key
+		}
+	}
+	return "", ""
+}
+
+func sanitizeUpstreamURL(rawURL *url.URL) string {
+	if rawURL == nil {
+		return ""
+	}
+	copied := *rawURL
+	copied.RawQuery = ""
+	copied.Fragment = ""
+	return copied.String()
 }
 
 func ResetStatusCode(newApiErr *types.NewAPIError, statusCodeMappingStr string) {

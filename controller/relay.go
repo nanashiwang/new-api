@@ -248,9 +248,14 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			if _, ok := c.Get("specific_channel_id"); ok {
 				break
 			}
+			attachUpstreamDiagnosticsFromContext(c, newAPIError)
 			service.ApplyChannelFailureRetryExclusion(retryParam, channel, newAPIError)
 			retryParam.ResetRetryNextTry()
-			logger.LogInfo(c, fmt.Sprintf("跳过不兼容渠道并继续重试：channel=%d model=%s err=%s", channel.Id, relayInfo.OriginModelName, newAPIError.Error()))
+			errorMessage := newAPIError.Error()
+			if diagnostics := newAPIError.UpstreamDiagnosticsLogString(); diagnostics != "" {
+				errorMessage = fmt.Sprintf("%s, upstream={%s}", errorMessage, diagnostics)
+			}
+			logger.LogInfo(c, fmt.Sprintf("跳过不兼容渠道并继续重试：channel=%d model=%s err=%s", channel.Id, relayInfo.OriginModelName, errorMessage))
 			continue
 		}
 
@@ -395,7 +400,12 @@ func logCRSMemoryPressureShortCircuit(c *gin.Context, channel *model.Channel, er
 }
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) {
-	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, err.Error()))
+	attachUpstreamDiagnosticsFromContext(c, err)
+	errorMessage := err.Error()
+	if diagnostics := err.UpstreamDiagnosticsLogString(); diagnostics != "" {
+		errorMessage = fmt.Sprintf("%s, upstream={%s}", errorMessage, diagnostics)
+	}
+	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, errorMessage))
 	isQuotaRelated := service.IsQuotaRelatedError(err)
 	// 多 Key 且额度类错误：先给当前 key 打冷却，避免下一次又选到同一个 key。
 	if common.QuotaStabilityEnabled && channelError.IsMultiKey && isQuotaRelated {
@@ -454,6 +464,12 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		other["channel_id"] = channelId
 		other["channel_name"] = c.GetString("channel_name")
 		other["channel_type"] = c.GetInt("channel_type")
+		if c.Request != nil && c.Request.ContentLength > 0 {
+			other["client_request_length"] = c.Request.ContentLength
+		}
+		if err.Upstream != nil && !err.Upstream.IsZero() {
+			other["upstream"] = err.Upstream
+		}
 		adminInfo := make(map[string]interface{})
 		adminInfo["use_channel"] = c.GetStringSlice("use_channel")
 		isMultiKey := common.GetContextKeyBool(c, constant.ContextKeyChannelIsMultiKey)
@@ -471,6 +487,18 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		model.RecordErrorLog(c, userId, channelId, modelName, tokenName, err.MaskSensitiveErrorWithStatusCode(), tokenId, useTimeSeconds, false, userGroup, other)
 	}
 
+}
+
+func attachUpstreamDiagnosticsFromContext(c *gin.Context, err *types.NewAPIError) {
+	if c == nil || err == nil || err.Upstream == nil {
+		return
+	}
+	if err.Upstream.ConfiguredBaseURL == "" {
+		err.Upstream.ConfiguredBaseURL = common.GetContextKeyString(c, constant.ContextKeyChannelBaseUrl)
+	}
+	if err.Upstream.RequestLength <= 0 && c.Request != nil && c.Request.ContentLength > 0 {
+		err.Upstream.RequestLength = c.Request.ContentLength
+	}
 }
 
 func RelayMidjourney(c *gin.Context) {

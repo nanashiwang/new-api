@@ -96,6 +96,62 @@ type NewAPIError struct {
 	errorCode      ErrorCode
 	StatusCode     int
 	Metadata       json.RawMessage
+	Upstream       *UpstreamDiagnostics
+}
+
+type UpstreamDiagnostics struct {
+	RequestID         string `json:"request_id,omitempty"`
+	RequestIDHeader   string `json:"request_id_header,omitempty"`
+	RequestLength     int64  `json:"request_length,omitempty"`
+	ResponseLength    int64  `json:"response_length,omitempty"`
+	URL               string `json:"url,omitempty"`
+	ConfiguredBaseURL string `json:"configured_base_url,omitempty"`
+}
+
+func (d *UpstreamDiagnostics) IsZero() bool {
+	if d == nil {
+		return true
+	}
+	return d.RequestID == "" &&
+		d.RequestIDHeader == "" &&
+		d.RequestLength <= 0 &&
+		d.ResponseLength <= 0 &&
+		d.URL == "" &&
+		d.ConfiguredBaseURL == ""
+}
+
+func (d *UpstreamDiagnostics) LogString() string {
+	if d == nil || d.IsZero() {
+		return ""
+	}
+	parts := make([]string, 0, 6)
+	if d.RequestID != "" {
+		header := d.RequestIDHeader
+		if header == "" {
+			header = "request_id"
+		}
+		parts = append(parts, fmt.Sprintf("%s=%s", header, d.RequestID))
+	}
+	if d.ConfiguredBaseURL != "" {
+		parts = append(parts, fmt.Sprintf("upstream_base_url=%s", d.ConfiguredBaseURL))
+	}
+	if d.URL != "" {
+		parts = append(parts, fmt.Sprintf("upstream_url=%s", d.URL))
+	}
+	if d.RequestLength > 0 {
+		parts = append(parts, fmt.Sprintf("upstream_request_length=%d", d.RequestLength))
+	}
+	if d.ResponseLength > 0 {
+		parts = append(parts, fmt.Sprintf("upstream_response_length=%d", d.ResponseLength))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func (e *NewAPIError) UpstreamDiagnosticsLogString() string {
+	if e == nil {
+		return ""
+	}
+	return e.Upstream.LogString()
 }
 
 // Unwrap enables errors.Is / errors.As to work with NewAPIError by exposing the underlying error.
