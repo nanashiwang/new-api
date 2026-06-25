@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Avatar,
   Typography,
@@ -47,8 +47,12 @@ const InvitationCard = ({
   onOpenWithdrawal,
   openWithdrawalHistory,
   affLink,
+  affCode,
+  onSaveAffCode,
   handleAffLinkClick,
 }) => {
+  const [newCode, setNewCode] = useState('');
+  const [savingCode, setSavingCode] = useState(false);
   const hasAvailableReward =
     !!userState?.user?.aff_quota && userState?.user?.aff_quota > 0;
 
@@ -211,6 +215,32 @@ const InvitationCard = ({
                 className='!rounded-lg'
               >
                 {t('复制')}
+              </Button>
+            }
+          />
+          {/* 设置专属短邀请码：链接变 域名/i/<code>，好记好分享 */}
+          <Input
+            value={newCode}
+            onChange={(v) => setNewCode(v)}
+            className='!rounded-lg mt-2'
+            prefix={t('专属邀请码')}
+            placeholder={
+              affCode ? `${t('当前')}: ${affCode}` : t('4-32位字母数字，好记好分享')
+            }
+            suffix={
+              <Button
+                theme='solid'
+                loading={savingCode}
+                disabled={!newCode || newCode === affCode}
+                onClick={async () => {
+                  setSavingCode(true);
+                  const ok = await onSaveAffCode?.(newCode);
+                  setSavingCode(false);
+                  if (ok) setNewCode('');
+                }}
+                className='!rounded-lg'
+              >
+                {t('保存')}
               </Button>
             }
           />

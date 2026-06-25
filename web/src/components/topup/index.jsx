@@ -141,6 +141,7 @@ const TopUp = () => {
 
   // 邀请状态
   const [affLink, setAffLink] = useState('');
+  const [affCode, setAffCode] = useState('');
   const [openTransfer, setOpenTransfer] = useState(false);
   const [openWithdrawal, setOpenWithdrawal] = useState(false);
   const [withdrawalSubmitting, setWithdrawalSubmitting] = useState(false);
@@ -592,8 +593,22 @@ const TopUp = () => {
 
   const getAffLink = async () => {
     const res = await API.get('/api/user/aff');
-    if (res.data?.success)
-      setAffLink(`${window.location.origin}/register?aff=${res.data.data}`);
+    if (res.data?.success) {
+      setAffCode(res.data.data);
+      setAffLink(`${window.location.origin}/i/${res.data.data}`);
+    }
+  };
+
+  const saveAffCode = async (code) => {
+    const res = await API.put('/api/user/aff', { aff_code: code });
+    const { success, message } = res.data;
+    if (success) {
+      showSuccess(t('专属邀请码已更新'));
+      await getAffLink();
+    } else {
+      showError(message);
+    }
+    return success;
   };
 
   const handleAffLinkClick = async () => {
@@ -939,6 +954,8 @@ const TopUp = () => {
             onOpenWithdrawal={tryOpenWithdrawal}
             openWithdrawalHistory={() => openHistoryTab('my-withdrawals')}
             affLink={affLink}
+            affCode={affCode}
+            onSaveAffCode={saveAffCode}
             handleAffLinkClick={handleAffLinkClick}
           />
           <Card

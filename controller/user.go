@@ -693,6 +693,33 @@ func GetAffCode(c *gin.Context) {
 	return
 }
 
+// SetAffCode 设置当前用户的自定义短邀请码
+func SetAffCode(c *gin.Context) {
+	id := c.GetInt("id")
+	var req struct {
+		AffCode string `json:"aff_code"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := model.UpdateUserAffCode(id, req.AffCode); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    strings.TrimSpace(req.AffCode),
+	})
+}
+
+// InviteRedirect 短邀请链接 /i/:code → 302 跳转到 /register?aff=code
+func InviteRedirect(c *gin.Context) {
+	code := strings.TrimSpace(c.Param("code"))
+	c.Redirect(http.StatusFound, "/register?aff="+url.QueryEscape(code))
+}
+
 func GetSelf(c *gin.Context) {
 	id := c.GetInt("id")
 	userRole := c.GetInt("role")

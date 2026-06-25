@@ -1260,6 +1260,52 @@ func generateUniqueAffCode(db *gorm.DB) (string, error) {
 	return "", errors.New("生成邀请码失败，请重试")
 }
 
+// ---- 自定义短邀请码（单站邀请绑定）----
+
+const customAffCodeMinLength = 4
+const customAffCodeMaxLength = 32 // aff_code 字段为 varchar(32)
+
+// affCodeReservedWords 保留字：避免与前端路由 / 短链 /i/ 段冲突或冒充系统页面
+var affCodeReservedWords = map[string]bool{
+	"admin": true, "register": true, "login": true, "api": true, "i": true,
+	"console": true, "oauth": true, "pricing": true, "about": true, "docs": true,
+}
+
+// ValidateCustomAffCode 校验自定义邀请码：4~32 位、仅 [0-9a-zA-Z]、非保留字
+func ValidateCustomAffCode(code string) error {
+	code = strings.TrimSpace(code)
+	if len(code) < customAffCodeMinLength || len(code) > customAffCodeMaxLength {
+		return errors.New("邀请码长度需在 4~32 个字符之间")
+	}
+	for _, r := range code {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')) {
+			return errors.New("邀请码只能包含字母和数字")
+		}
+	}
+	if affCodeReservedWords[strings.ToLower(code)] {
+		return errors.New("该邀请码为保留字，请换一个")
+	}
+	return nil
+}
+
+// UpdateUserAffCode 设置用户自定义邀请码（全局唯一）。
+// 返佣全链路只认 inviter_id（GetUserIdByAffCode 精确匹配 aff_code），与码长度/格式无关。
+func UpdateUserAffCode(id int, code string) error {
+	code = strings.TrimSpace(code)
+	if err := ValidateCustomAffCode(code); err != nil {
+		return err
+	}
+	// 唯一性预检：Unscoped 含软删用户、排除自己；并由 aff_code 唯一索引兜底
+	var count int64
+	if err := DB.Unscoped().Model(&User{}).Where("aff_code = ? AND id <> ?", code, id).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return errors.New("该邀请码已被占用，请换一个")
+	}
+	return DB.Model(&User{}).Where("id = ?", id).Update("aff_code", code).Error
+}
+
 func DeleteUserById(id int) (err error) {
 	if id == 0 {
 		return errors.New("id 为空！")
