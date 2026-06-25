@@ -35,6 +35,7 @@ type createInvoiceRequestPayload struct {
 	Email                   string                  `json:"email"`
 	Phone                   string                  `json:"phone"`
 	Remark                  string                  `json:"remark"`
+	NeedDetailBill          *bool                   `json:"need_detail_bill"`
 	NeedServiceConfirmation bool                    `json:"need_service_confirmation"`
 	Orders                  []model.InvoiceOrderRef `json:"orders"`
 }
@@ -84,6 +85,10 @@ func CreateInvoiceRequest(c *gin.Context) {
 		return
 	}
 
+	needDetailBill := true
+	if req.NeedDetailBill != nil {
+		needDetailBill = *req.NeedDetailBill
+	}
 	invoiceRequest, err := model.CreateInvoiceRequest(c.GetInt("id"), model.CreateInvoiceRequestInput{
 		InvoiceType:             req.InvoiceType,
 		TitleType:               req.TitleType,
@@ -96,6 +101,7 @@ func CreateInvoiceRequest(c *gin.Context) {
 		Email:                   req.Email,
 		Phone:                   req.Phone,
 		Remark:                  req.Remark,
+		NeedDetailBill:          needDetailBill,
 		NeedServiceConfirmation: req.NeedServiceConfirmation,
 		Orders:                  req.Orders,
 	})
@@ -599,7 +605,6 @@ func sendInvoiceFileEmail(request *model.InvoiceRequest, extraAttachments ...*co
 
 func buildInvoiceEmailContent(request *model.InvoiceRequest) string {
 	title := html.EscapeString(request.Title)
-	invoiceNo := html.EscapeString(request.InvoiceNo)
 	totalMoney := fmt.Sprintf("%.2f", request.TotalMoney)
 	invoiceType := "普票"
 	titleLabel := "发票抬头"
@@ -610,8 +615,10 @@ func buildInvoiceEmailContent(request *model.InvoiceRequest) string {
 	content := fmt.Sprintf(`<p>您好，您的发票申请已审核通过，发票 PDF 见附件。</p>
 <p>发票类型：%s</p>
 <p>%s：%s</p>
-<p>发票号/代码：%s</p>
-<p>开票金额：¥%s</p>`, invoiceType, titleLabel, title, invoiceNo, totalMoney)
+<p>开票金额：¥%s</p>`, invoiceType, titleLabel, title, totalMoney)
+	if strings.TrimSpace(request.InvoiceNo) != "" {
+		content += fmt.Sprintf(`<p>发票号/代码：%s</p>`, html.EscapeString(request.InvoiceNo))
+	}
 	if request.InvoiceType == model.InvoiceTypeSpecial {
 		content += fmt.Sprintf(`<p>税号：%s</p>`, html.EscapeString(request.TaxNumber))
 		if strings.TrimSpace(request.RegisteredAddress) != "" {

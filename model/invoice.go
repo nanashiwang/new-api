@@ -29,9 +29,9 @@ const (
 )
 
 var (
-	ErrInvoiceRequestNotFound        = errors.New("发票申请不存在")
-	ErrInvoiceRequestAlreadyReviewed = errors.New("发票申请已审核")
-	ErrInvoiceOrderUnavailable       = errors.New("订单不可申请发票")
+	ErrInvoiceRequestNotFound         = errors.New("发票申请不存在")
+	ErrInvoiceRequestAlreadyReviewed  = errors.New("发票申请已审核")
+	ErrInvoiceOrderUnavailable        = errors.New("订单不可申请发票")
 	ErrInsufficientQuotaForInvoiceFee = errors.New("余额不足，无法支付发票手续费")
 )
 
@@ -49,6 +49,7 @@ type InvoiceRequest struct {
 	Email                   string  `json:"email" gorm:"type:varchar(128);not null;default:''"`
 	Phone                   string  `json:"phone" gorm:"type:varchar(32);not null;default:''"`
 	Remark                  string  `json:"remark" gorm:"type:text"`
+	NeedDetailBill          bool    `json:"need_detail_bill" gorm:"not null;default:true"`
 	NeedServiceConfirmation bool    `json:"need_service_confirmation" gorm:"not null;default:false"`
 	Status                  string  `json:"status" gorm:"type:varchar(16);index;not null;default:'pending'"`
 	TotalMoney              float64 `json:"total_money" gorm:"type:decimal(20,6);not null;default:0"`
@@ -107,6 +108,7 @@ type CreateInvoiceRequestInput struct {
 	Email                   string
 	Phone                   string
 	Remark                  string
+	NeedDetailBill          bool
 	NeedServiceConfirmation bool
 	Orders                  []InvoiceOrderRef
 }
@@ -221,6 +223,7 @@ func CreateInvoiceRequest(userID int, input CreateInvoiceRequestInput) (*Invoice
 			Email:                   input.Email,
 			Phone:                   input.Phone,
 			Remark:                  input.Remark,
+			NeedDetailBill:          input.NeedDetailBill,
 			NeedServiceConfirmation: input.NeedServiceConfirmation,
 			Status:                  InvoiceStatusPending,
 			TotalMoney:              totalMoney,
@@ -231,6 +234,13 @@ func CreateInvoiceRequest(userID int, input CreateInvoiceRequestInput) (*Invoice
 		}
 		if err := tx.Create(&request).Error; err != nil {
 			return err
+		}
+		if !input.NeedDetailBill {
+			// GORM 会跳过带 default 标签的 bool 零值，这里显式落库用户取消明细账单的选择。
+			if err := tx.Model(&InvoiceRequest{}).Where("id = ?", request.Id).Update("need_detail_bill", false).Error; err != nil {
+				return err
+			}
+			request.NeedDetailBill = false
 		}
 		for i := range items {
 			items[i].InvoiceRequestId = request.Id

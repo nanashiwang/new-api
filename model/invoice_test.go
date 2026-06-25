@@ -10,6 +10,11 @@ import (
 func setupInvoiceTestDB(t *testing.T) {
 	t.Helper()
 	setupPaymentRecordTestDB(t)
+	originInvoiceServiceFeeRate := common.InvoiceServiceFeeRate
+	common.InvoiceServiceFeeRate = 0
+	t.Cleanup(func() {
+		common.InvoiceServiceFeeRate = originInvoiceServiceFeeRate
+	})
 	require.NoError(t, DB.AutoMigrate(&InvoiceRequest{}, &InvoiceRequestItem{}))
 }
 
@@ -31,11 +36,12 @@ func createInvoiceTestSubscriptionTopUp(t *testing.T, userID int, tradeNo string
 
 func createInvoiceRequestInput(orderType string, orderID int) CreateInvoiceRequestInput {
 	return CreateInvoiceRequestInput{
-		TitleType: InvoiceTitleTypeCompany,
-		Title:     "测试公司",
-		TaxNumber: "TAX123456",
-		Email:     "invoice@example.com",
-		Phone:     "13800138000",
+		TitleType:      InvoiceTitleTypeCompany,
+		Title:          "测试公司",
+		TaxNumber:      "TAX123456",
+		Email:          "invoice@example.com",
+		Phone:          "13800138000",
+		NeedDetailBill: true,
 		Orders: []InvoiceOrderRef{{
 			OrderType: orderType,
 			Id:        orderID,
@@ -89,20 +95,23 @@ func TestCreateInvoiceRequest_OccupiesOrderAndRejectedReleasesIt(t *testing.T) {
 	require.Equal(t, topup.Id, records[0].Id)
 }
 
-func TestCreateInvoiceRequest_StoresServiceConfirmationOption(t *testing.T) {
+func TestCreateInvoiceRequest_StoresAttachmentOptions(t *testing.T) {
 	setupInvoiceTestDB(t)
 
 	user := createPaymentRecordTestUser(t, "alice")
 	topup := createPaymentRecordTopUp(t, user.Id, "T-INV-SERVICE", 100, common.TopUpStatusSuccess)
 	input := createInvoiceRequestInput(PaymentRecordTypeTopUp, topup.Id)
+	input.NeedDetailBill = false
 	input.NeedServiceConfirmation = true
 
 	request, err := CreateInvoiceRequest(user.Id, input)
 	require.NoError(t, err)
+	require.False(t, request.NeedDetailBill)
 	require.True(t, request.NeedServiceConfirmation)
 
 	detail, err := GetUserInvoiceRequestDetail(user.Id, request.Id)
 	require.NoError(t, err)
+	require.False(t, detail.NeedDetailBill)
 	require.True(t, detail.NeedServiceConfirmation)
 }
 
@@ -184,6 +193,25 @@ func TestApproveInvoiceRequest_KeepsOrderOccupiedAndPreventsSecondReview(t *test
 
 	_, err = RejectInvoiceRequest(request.Id, user.Id, "重复审核")
 	require.ErrorIs(t, err, ErrInvoiceRequestAlreadyReviewed)
+}
+
+func TestApproveInvoiceRequest_AllowsInvoiceFileWithoutInvoiceNo(t *testing.T) {
+	setupInvoiceTestDB(t)
+
+	user := createPaymentRecordTestUser(t, "alice")
+	topup := createPaymentRecordTopUp(t, user.Id, "T-INV-NO-NUMBER", 100, common.TopUpStatusSuccess)
+	request, err := CreateInvoiceRequest(user.Id, createInvoiceRequestInput(PaymentRecordTypeTopUp, topup.Id))
+	require.NoError(t, err)
+
+	approved, err := ApproveInvoiceRequest(request.Id, user.Id, InvoiceReviewInput{
+		InvoiceFileName: "invoice.pdf",
+		InvoiceFilePath: "/tmp/invoice.pdf",
+		InvoiceSentTo:   "invoice@example.com",
+	})
+	require.NoError(t, err)
+	require.Equal(t, InvoiceStatusInvoiced, approved.Status)
+	require.Empty(t, approved.InvoiceNo)
+	require.Equal(t, "invoice.pdf", approved.InvoiceFileName)
 }
 
 func TestInvoiceSellableTokenPurchaseCanBeRequested(t *testing.T) {

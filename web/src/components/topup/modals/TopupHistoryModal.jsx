@@ -201,6 +201,7 @@ const EMPTY_INVOICE_FORM = {
   email: '',
   phone: '',
   remark: '',
+  needDetailBill: true,
   needServiceConfirmation: false,
 };
 
@@ -655,7 +656,6 @@ function buildInvoiceServiceConfirmationHtml(invoice, stampUrl = '') {
 </body>
 </html>`;
 }
-
 
 function pickInvoiceStatus(current, next) {
   const priority = { invoiced: 3, pending: 2, rejected: 1 };
@@ -1613,7 +1613,9 @@ const TopupHistoryModal = ({
     )
       return 0;
     return Math.trunc(
-      (selectedInvoiceSummary.money * invoiceServiceFeeRate * getQuotaPerUnit()) /
+      (selectedInvoiceSummary.money *
+        invoiceServiceFeeRate *
+        getQuotaPerUnit()) /
         invoicePrice,
     );
   }, [invoiceServiceFeeRate, invoicePrice, selectedInvoiceSummary]);
@@ -1681,7 +1683,10 @@ const TopupHistoryModal = ({
           email: form.email,
           phone: form.phone,
           remark: form.remark,
-          need_service_confirmation: Boolean(invoiceForm.needServiceConfirmation),
+          need_detail_bill: Boolean(invoiceForm.needDetailBill),
+          need_service_confirmation: Boolean(
+            invoiceForm.needServiceConfirmation,
+          ),
           orders: selectedInvoiceOrders.map((item) => ({
             order_type: resolveOrderType(item),
             id: item.id,
@@ -1738,7 +1743,7 @@ const TopupHistoryModal = ({
       invoiceUrl: record?.invoice_url || '',
       invoiceSentTo: record?.invoice_sent_to || record?.email || '',
       sendEmail: true,
-      sendDetailBill: true,
+      sendDetailBill: record?.need_detail_bill !== false,
       sendServiceConfirmation: Boolean(record?.need_service_confirmation),
       adminRemark: '',
     });
@@ -1805,7 +1810,9 @@ const TopupHistoryModal = ({
       !invoiceReviewDetailBillFile
     ) {
       Toast.error({
-        content: t('请上传明细账单 PDF（在发票详情点【明细账单】打印并另存为 PDF 后上传）'),
+        content: t(
+          '请上传明细账单 PDF（可在当前弹窗点击【生成明细账单】打印并另存为 PDF）',
+        ),
       });
       return;
     }
@@ -1816,7 +1823,9 @@ const TopupHistoryModal = ({
       !invoiceReviewServiceConfirmationFile
     ) {
       Toast.error({
-        content: t('请上传服务确认单 PDF（在发票详情点【服务产品清单】打印并另存为 PDF 后上传）'),
+        content: t(
+          '请上传服务确认单 PDF（可在当前弹窗点击【生成服务确认单】打印并另存为 PDF）',
+        ),
       });
       return;
     }
@@ -1912,7 +1921,7 @@ const TopupHistoryModal = ({
     setInvoiceEmailState({
       visible: true,
       record,
-      sendDetailBill: true,
+      sendDetailBill: record?.need_detail_bill !== false,
       sendServiceConfirmation: Boolean(record?.need_service_confirmation),
       detailBillFile: null,
       serviceConfirmationFile: null,
@@ -1937,7 +1946,9 @@ const TopupHistoryModal = ({
     if (!id) return;
     if (invoiceEmailState.sendDetailBill && !invoiceEmailState.detailBillFile) {
       Toast.error({
-        content: t('请上传明细账单 PDF（在发票详情点【明细账单】打印并另存为 PDF 后上传）'),
+        content: t(
+          '请上传明细账单 PDF（可在当前弹窗点击【生成明细账单】打印并另存为 PDF）',
+        ),
       });
       return;
     }
@@ -1946,7 +1957,9 @@ const TopupHistoryModal = ({
       !invoiceEmailState.serviceConfirmationFile
     ) {
       Toast.error({
-        content: t('请上传服务确认单 PDF（在发票详情点【服务产品清单】打印并另存为 PDF 后上传）'),
+        content: t(
+          '请上传服务确认单 PDF（可在当前弹窗点击【生成服务确认单】打印并另存为 PDF）',
+        ),
       });
       return;
     }
@@ -2114,6 +2127,35 @@ const TopupHistoryModal = ({
     }
   };
 
+  const printInvoiceDetailBillForRecord = async (record) => {
+    const targetWindow = window.open('', '_blank', 'width=960,height=720');
+    if (!targetWindow) {
+      Toast.error({ content: t('浏览器阻止了明细账单窗口') });
+      return;
+    }
+    targetWindow.opener = null;
+    targetWindow.document.open();
+    targetWindow.document.write(
+      '<!doctype html><meta charset="utf-8"><title>明细账单</title><body style="font:14px sans-serif;padding:24px;">正在加载明细账单...</body>',
+    );
+    targetWindow.document.close();
+    try {
+      const detail = await loadInvoiceDetailData(record);
+      await openInvoiceDetailBillPdfWindow(detail, {
+        targetWindow,
+        autoPrint: true,
+      });
+    } catch (error) {
+      targetWindow.document.open();
+      targetWindow.document.write(
+        `<!doctype html><meta charset="utf-8"><title>明细账单</title><body style="font:14px sans-serif;padding:24px;color:#b91c1c;">${escapeHtml(
+          error?.message || '加载明细账单失败',
+        )}</body>`,
+      );
+      targetWindow.document.close();
+    }
+  };
+
   const viewInvoiceServiceConfirmation = async (record) => {
     const targetWindow = window.open('', '_blank', 'width=960,height=720');
     if (!targetWindow) {
@@ -2129,6 +2171,35 @@ const TopupHistoryModal = ({
     try {
       const detail = await loadInvoiceDetailData(record);
       await openInvoiceServiceConfirmationPdfWindow(detail, { targetWindow });
+    } catch (error) {
+      targetWindow.document.open();
+      targetWindow.document.write(
+        `<!doctype html><meta charset="utf-8"><title>服务产品清单</title><body style="font:14px sans-serif;padding:24px;color:#b91c1c;">${escapeHtml(
+          error?.message || '加载服务产品清单失败',
+        )}</body>`,
+      );
+      targetWindow.document.close();
+    }
+  };
+
+  const printInvoiceServiceConfirmationForRecord = async (record) => {
+    const targetWindow = window.open('', '_blank', 'width=960,height=720');
+    if (!targetWindow) {
+      Toast.error({ content: t('浏览器阻止了服务产品清单窗口') });
+      return;
+    }
+    targetWindow.opener = null;
+    targetWindow.document.open();
+    targetWindow.document.write(
+      '<!doctype html><meta charset="utf-8"><title>服务产品清单</title><body style="font:14px sans-serif;padding:24px;">正在加载服务产品清单...</body>',
+    );
+    targetWindow.document.close();
+    try {
+      const detail = await loadInvoiceDetailData(record);
+      await openInvoiceServiceConfirmationPdfWindow(detail, {
+        targetWindow,
+        autoPrint: true,
+      });
     } catch (error) {
       targetWindow.document.open();
       targetWindow.document.write(
@@ -3109,6 +3180,11 @@ const TopupHistoryModal = ({
                 {record?.title || '-'}
               </Text>
             </Space>
+            {record?.need_detail_bill !== false ? (
+              <Tag shape='circle' size='small' color='cyan'>
+                {t('已申请明细账单')}
+              </Tag>
+            ) : null}
             {record?.need_service_confirmation ? (
               <Tag shape='circle' size='small' color='purple'>
                 {t('已申请服务确认单')}
@@ -3985,6 +4061,10 @@ const TopupHistoryModal = ({
               ),
             )}
             {renderInvoiceDetailValue(
+              '明细账单',
+              detail?.need_detail_bill !== false ? '需要随发票发送' : '不需要',
+            )}
+            {renderInvoiceDetailValue(
               '服务确认单',
               detail?.need_service_confirmation ? '需要随发票发送' : '不需要',
             )}
@@ -4400,20 +4480,33 @@ const TopupHistoryModal = ({
               border: '1px solid var(--semi-color-border)',
             }}
           >
-            <Checkbox
-              checked={invoiceForm.needServiceConfirmation}
-              onChange={(event) =>
-                handleInvoiceFormChange(
-                  'needServiceConfirmation',
-                  event.target.checked,
-                )
-              }
-            >
-              {t('同时申请服务确认单')}
-            </Checkbox>
+            <div className='flex flex-col gap-2'>
+              <Checkbox
+                checked={invoiceForm.needDetailBill}
+                onChange={(event) =>
+                  handleInvoiceFormChange(
+                    'needDetailBill',
+                    event.target.checked,
+                  )
+                }
+              >
+                {t('同时申请明细账单')}
+              </Checkbox>
+              <Checkbox
+                checked={invoiceForm.needServiceConfirmation}
+                onChange={(event) =>
+                  handleInvoiceFormChange(
+                    'needServiceConfirmation',
+                    event.target.checked,
+                  )
+                }
+              >
+                {t('同时申请服务确认单')}
+              </Checkbox>
+            </div>
             <div className='mt-1'>
               <Text type='tertiary' size='small'>
-                {t('审核通过后可随发票邮件一并发送，用于确认 API 服务内容。')}
+                {t('审核通过后可按申请选项随发票邮件一并发送。')}
               </Text>
             </div>
           </Card>
@@ -4490,7 +4583,7 @@ const TopupHistoryModal = ({
           {invoiceReviewState.action === 'approve' ? (
             <>
               <Input
-                placeholder={t('发票号或发票代码')}
+                placeholder={t('发票号或发票代码（可选）')}
                 value={invoiceReviewForm.invoiceNo}
                 onChange={(value) =>
                   setInvoiceReviewForm((prev) => ({
@@ -4583,10 +4676,23 @@ const TopupHistoryModal = ({
                     border: '1px solid var(--semi-color-border)',
                   }}
                 >
-                  <div className='text-xs mb-2'>
-                    {t(
-                      '上传明细账单 PDF：先在发票详情点【明细账单】，用浏览器打印并“另存为 PDF”，再上传',
-                    )}
+                  <div className='mb-2 flex flex-wrap items-center justify-between gap-2'>
+                    <Text type='tertiary' size='small'>
+                      {t(
+                        '上传明细账单 PDF：可先生成打印并“另存为 PDF”，再上传',
+                      )}
+                    </Text>
+                    <Button
+                      size='small'
+                      theme='outline'
+                      onClick={() =>
+                        printInvoiceDetailBillForRecord(
+                          invoiceReviewState.record,
+                        )
+                      }
+                    >
+                      {t('生成明细账单')}
+                    </Button>
                   </div>
                   <input
                     type='file'
@@ -4631,10 +4737,23 @@ const TopupHistoryModal = ({
                     border: '1px solid var(--semi-color-border)',
                   }}
                 >
-                  <div className='text-xs mb-2'>
-                    {t(
-                      '上传服务确认单 PDF：先在发票详情点【服务产品清单】，用浏览器打印并“另存为 PDF”，再上传',
-                    )}
+                  <div className='mb-2 flex flex-wrap items-center justify-between gap-2'>
+                    <Text type='tertiary' size='small'>
+                      {t(
+                        '上传服务确认单 PDF：可先生成打印并“另存为 PDF”，再上传',
+                      )}
+                    </Text>
+                    <Button
+                      size='small'
+                      theme='outline'
+                      onClick={() =>
+                        printInvoiceServiceConfirmationForRecord(
+                          invoiceReviewState.record,
+                        )
+                      }
+                    >
+                      {t('生成服务确认单')}
+                    </Button>
                   </div>
                   <input
                     type='file'
@@ -4741,10 +4860,19 @@ const TopupHistoryModal = ({
                 border: '1px solid var(--semi-color-border)',
               }}
             >
-              <div className='text-xs mb-2'>
-                {t(
-                  '上传明细账单 PDF：先在发票详情点【明细账单】，用浏览器打印并“另存为 PDF”，再上传',
-                )}
+              <div className='mb-2 flex flex-wrap items-center justify-between gap-2'>
+                <Text type='tertiary' size='small'>
+                  {t('上传明细账单 PDF：可先生成打印并“另存为 PDF”，再上传')}
+                </Text>
+                <Button
+                  size='small'
+                  theme='outline'
+                  onClick={() =>
+                    printInvoiceDetailBillForRecord(invoiceEmailState.record)
+                  }
+                >
+                  {t('生成明细账单')}
+                </Button>
               </div>
               <input
                 type='file'
@@ -4788,10 +4916,21 @@ const TopupHistoryModal = ({
                 border: '1px solid var(--semi-color-border)',
               }}
             >
-              <div className='text-xs mb-2'>
-                {t(
-                  '上传服务确认单 PDF：先在发票详情点【服务产品清单】，用浏览器打印并“另存为 PDF”，再上传',
-                )}
+              <div className='mb-2 flex flex-wrap items-center justify-between gap-2'>
+                <Text type='tertiary' size='small'>
+                  {t('上传服务确认单 PDF：可先生成打印并“另存为 PDF”，再上传')}
+                </Text>
+                <Button
+                  size='small'
+                  theme='outline'
+                  onClick={() =>
+                    printInvoiceServiceConfirmationForRecord(
+                      invoiceEmailState.record,
+                    )
+                  }
+                >
+                  {t('生成服务确认单')}
+                </Button>
               </div>
               <input
                 type='file'
