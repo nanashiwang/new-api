@@ -183,6 +183,14 @@ fi
 SUB_ROOT_PASS_CUR="${SUB_ROOT_PASS:?副站已初始化但 site.env 缺 SUB_ROOT_PASS}"
 SUB_JAR="$(mktemp)"
 SUB_ID="$(api_login "$SUBSITE_API" "$SUB_JAR" "root" "$SUB_ROOT_PASS_CUR")"
+# 复刻主站模型定价到副站(否则副站不知按什么价向下游收费 → "倍率未配置")。
+# OPTS 来自 step3 主站 GET /api/option/；这些键是模型价格/倍率(非敏感, 会被返回)。
+for K in ModelRatio ModelPrice CacheRatio CreateCacheRatio CompletionRatio ImageRatio AudioRatio AudioCompletionRatio; do
+	V="$(jq -r --arg k "$K" '(.data[]? | select(.key==$k) | .value) // empty' <<<"$OPTS")"
+	[ -n "$V" ] && api "$SUBSITE_API" "$SUB_JAR" "$SUB_ID" PUT "/api/option/" \
+		"$(jq -nc --arg k "$K" --arg v "$V" '{key:$k, value:$v}')" >/dev/null
+done
+log "已复刻主站模型定价(ModelRatio/CompletionRatio/价格…)到副站"
 CH_NAME="上游-主站(wholesale)"
 EXIST_CH="$(api "$SUBSITE_API" "$SUB_JAR" "$SUB_ID" GET "/api/channel/?p=1&page_size=100" \
 	| jq -r --arg n "$CH_NAME" '((.data.items // .data) // [])[]? | select(.name==$n) | .id' | head -n1 || true)"

@@ -61,6 +61,7 @@ sudo newapi-reseller acme acme.你的域名 20
 - 批发账户放在 `RESELLER_BILLING_GROUP`（默认 `default`=你的标准客户组）→ 代理商付的就是该分组用户的同价。
 - 批发令牌 `group=auto` → 按请求模型在 `AUTO_GROUPS` 内**自动选对应分组、按各自原价计费**（claude 还是 claude 价、gpt 还是 gpt 价，结构原样保留）。
 - 首次开通时脚本**自动**把 `auto` 加入 `UserUsableGroups`、把 `AUTO_GROUPS` 并入 `AutoGroups`（在 `reseller.env` 里配 `AUTO_GROUPS`）。
+- 开通时把主站的 `ModelRatio/CompletionRatio/CacheRatio/ModelPrice…` **复制到副站**作为零售定价基线（否则副站会报「模型倍率未配置」）。
 - 代理商靠**副站零售加价**赚钱；想给批发折扣，再单独用 `GroupGroupRatio`（见规划文档），本 kit 默认不打折。
 
 > 用 `AUTO_GROUPS` 控制开放哪些分组、用批发令牌的 `model_limits`(=`MODELS`) 控制开放哪些模型，双保险。
