@@ -4157,7 +4157,7 @@ const TopupHistoryModal = ({
             <Tabs.TabPane tab={t('发票')} itemKey='invoices'>
               {renderInvoiceTable()}
             </Tabs.TabPane>
-            <Tabs.TabPane tab={t('提现订单')} itemKey='my-withdrawals'>
+            <Tabs.TabPane tab={t('我的提现记录')} itemKey='my-withdrawals'>
               {renderWithdrawalTable()}
             </Tabs.TabPane>
             <Tabs.TabPane tab={t('提现审核')} itemKey='withdrawals'>
