@@ -678,7 +678,7 @@ const TopUp = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
     const tab = searchParams.get('tab');
-    if (tab === 'withdrawals' || tab === 'my-withdrawals') {
+    if (['withdrawals', 'my-withdrawals', 'invoices'].includes(tab)) {
       openHistoryTab(tab);
       const next = new URLSearchParams(searchParams);
       next.delete('tab');
