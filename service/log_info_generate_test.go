@@ -1,10 +1,13 @@
 package service
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/gin-gonic/gin"
 )
@@ -51,5 +54,82 @@ func TestGenerateTextOtherInfoIncludesParamOverrideAuditAndStreamStatus(t *testi
 	}
 	if streamStatus["error_count"] != 1 {
 		t.Fatalf("unexpected error_count: %#v", streamStatus["error_count"])
+	}
+}
+
+func TestGenerateTextOtherInfoIncludesResponsesRequestDiagnostics(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+
+	start := time.Unix(100, 0)
+	info := &relaycommon.RelayInfo{
+		StartTime:         start,
+		FirstResponseTime: start.Add(250 * time.Millisecond),
+		IsStream:          true,
+		ChannelMeta:       &relaycommon.ChannelMeta{},
+		Request: &dto.OpenAIResponsesRequest{
+			Input:              []byte(`["new task"]`),
+			Instructions:       []byte(`"read workflow first"`),
+			PreviousResponseID: "resp_old",
+			PromptCacheKey:     []byte(`"trace-1"`),
+		},
+	}
+
+	other := GenerateTextOtherInfo(ctx, info, 1, 1, 1, 0, 1, 1, 1)
+
+	diagnostics, ok := other["responses_request_diagnostics"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected responses_request_diagnostics map, got %T", other["responses_request_diagnostics"])
+	}
+	if diagnostics["previous_response_id_present"] != true {
+		t.Fatalf("expected previous_response_id_present true, got %#v", diagnostics["previous_response_id_present"])
+	}
+	assertHash(t, diagnostics, "previous_response_id_hash", []byte("resp_old"))
+	assertHash(t, diagnostics, "input_hash", []byte(`["new task"]`))
+	assertHash(t, diagnostics, "instructions_hash", []byte(`"read workflow first"`))
+	assertHash(t, diagnostics, "prompt_cache_key_hash", []byte(`"trace-1"`))
+}
+
+func TestGenerateTextOtherInfoResponsesDiagnosticsOmitsAbsentFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/responses/compact", nil)
+
+	start := time.Unix(100, 0)
+	info := &relaycommon.RelayInfo{
+		StartTime:         start,
+		FirstResponseTime: start.Add(250 * time.Millisecond),
+		ChannelMeta:       &relaycommon.ChannelMeta{},
+		Request: &dto.OpenAIResponsesCompactionRequest{
+			Input: []byte(`null`),
+		},
+	}
+
+	other := GenerateTextOtherInfo(ctx, info, 1, 1, 1, 0, 1, 1, 1)
+
+	diagnostics, ok := other["responses_request_diagnostics"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected responses_request_diagnostics map, got %T", other["responses_request_diagnostics"])
+	}
+	if diagnostics["previous_response_id_present"] != false {
+		t.Fatalf("expected previous_response_id_present false, got %#v", diagnostics["previous_response_id_present"])
+	}
+	if _, ok := diagnostics["input_hash"]; ok {
+		t.Fatalf("expected input_hash omitted for null input")
+	}
+	if _, ok := diagnostics["prompt_cache_key_hash"]; ok {
+		t.Fatalf("expected prompt_cache_key_hash omitted for compact requests")
+	}
+}
+
+func assertHash(t *testing.T, diagnostics map[string]interface{}, key string, raw []byte) {
+	t.Helper()
+	sum := sha256.Sum256(raw)
+	expected := hex.EncodeToString(sum[:])
+	if diagnostics[key] != expected {
+		t.Fatalf("unexpected %s: got %#v want %s", key, diagnostics[key], expected)
 	}
 }

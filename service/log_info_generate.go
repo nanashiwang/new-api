@@ -1,7 +1,10 @@
 package service
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -31,6 +34,56 @@ func appendRequestPath(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, other
 		}
 		other["request_path"] = path
 	}
+}
+
+func appendResponsesRequestDiagnostics(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
+	if relayInfo == nil || other == nil || relayInfo.Request == nil {
+		return
+	}
+
+	diagnostics := map[string]interface{}{
+		"previous_response_id_present": false,
+	}
+	switch req := relayInfo.Request.(type) {
+	case *dto.OpenAIResponsesRequest:
+		appendPreviousResponseIDDiagnostic(diagnostics, req.PreviousResponseID)
+		appendRawDiagnosticHash(diagnostics, "input_hash", req.Input)
+		appendRawDiagnosticHash(diagnostics, "instructions_hash", req.Instructions)
+		appendRawDiagnosticHash(diagnostics, "prompt_cache_key_hash", req.PromptCacheKey)
+	case *dto.OpenAIResponsesCompactionRequest:
+		appendPreviousResponseIDDiagnostic(diagnostics, req.PreviousResponseID)
+		appendRawDiagnosticHash(diagnostics, "input_hash", req.Input)
+		appendRawDiagnosticHash(diagnostics, "instructions_hash", req.Instructions)
+	default:
+		return
+	}
+	other["responses_request_diagnostics"] = diagnostics
+}
+
+func appendPreviousResponseIDDiagnostic(diagnostics map[string]interface{}, previousResponseID string) {
+	previousResponseID = strings.TrimSpace(previousResponseID)
+	if previousResponseID == "" {
+		return
+	}
+	diagnostics["previous_response_id_present"] = true
+	diagnostics["previous_response_id_hash"] = diagnosticHashString(previousResponseID)
+}
+
+func appendRawDiagnosticHash(diagnostics map[string]interface{}, key string, raw []byte) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return
+	}
+	diagnostics[key] = diagnosticHashBytes(raw)
+}
+
+func diagnosticHashString(value string) string {
+	return diagnosticHashBytes([]byte(value))
+}
+
+func diagnosticHashBytes(value []byte) string {
+	sum := sha256.Sum256(value)
+	return hex.EncodeToString(sum[:])
 }
 
 func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, modelRatio, groupRatio, completionRatio float64,
@@ -99,6 +152,7 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	}
 
 	other["admin_info"] = adminInfo
+	appendResponsesRequestDiagnostics(relayInfo, other)
 	appendRequestPath(ctx, relayInfo, other)
 	appendRequestConversionChain(relayInfo, other)
 	appendBillingInfo(relayInfo, other)
