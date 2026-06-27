@@ -35,6 +35,7 @@ export default function SettingsCheckin(props) {
     'checkin_setting.enabled': false,
     'checkin_setting.min_quota': 1000,
     'checkin_setting.max_quota': 10000,
+    'checkin_setting.ip_daily_limit': 50,
   });
   const refForm = useRef();
   const [inputsRow, setInputsRow] = useState(inputs);
@@ -134,6 +135,18 @@ export default function SettingsCheckin(props) {
                   label={t('签到最大额度')}
                   placeholder={t('签到奖励的最大额度')}
                   onChange={handleFieldChange('checkin_setting.max_quota')}
+                  min={0}
+                  disabled={!inputs['checkin_setting.enabled']}
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  field={'checkin_setting.ip_daily_limit'}
+                  label={t('同一 IP 每日签到账号上限')}
+                  placeholder={t('填 0 表示不限制')}
+                  onChange={handleFieldChange(
+                    'checkin_setting.ip_daily_limit',
+                  )}
                   min={0}
                   disabled={!inputs['checkin_setting.enabled']}
                 />

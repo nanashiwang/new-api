@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -17,6 +18,7 @@ type Checkin struct {
 	CheckinDate  string `json:"checkin_date" gorm:"type:varchar(10);not null;uniqueIndex:idx_user_checkin_date"` // 格式: YYYY-MM-DD
 	QuotaAwarded int    `json:"quota_awarded" gorm:"not null"`
 	CreatedAt    int64  `json:"created_at" gorm:"bigint"`
+	Ip           string `json:"ip,omitempty" gorm:"type:varchar(64);index;default:''"`
 }
 
 // CheckinRecord 用于API返回的签到记录（不包含敏感字段）
@@ -52,10 +54,14 @@ func HasCheckedInToday(userId int) (bool, error) {
 // UserCheckin 执行用户签到
 // MySQL 和 PostgreSQL 使用事务保证原子性
 // SQLite 不支持嵌套事务，使用顺序操作 + 手动回滚
-func UserCheckin(userId int) (*Checkin, error) {
+func UserCheckin(userId int, clientIPs ...string) (*Checkin, error) {
 	setting := operation_setting.GetCheckinSetting()
 	if !setting.Enabled {
 		return nil, errors.New("签到功能未启用")
+	}
+	clientIP := ""
+	if len(clientIPs) > 0 {
+		clientIP = strings.TrimSpace(clientIPs[0])
 	}
 
 	// 检查今天是否已签到
@@ -74,11 +80,16 @@ func UserCheckin(userId int) (*Checkin, error) {
 	}
 
 	today := time.Now().Format("2006-01-02")
+	if err := enforceCheckinIPDailyLimit(userId, today, clientIP, setting.IPDailyLimit); err != nil {
+		return nil, err
+	}
+
 	checkin := &Checkin{
 		UserId:       userId,
 		CheckinDate:  today,
 		QuotaAwarded: quotaAwarded,
 		CreatedAt:    time.Now().Unix(),
+		Ip:           clientIP,
 	}
 
 	// 根据数据库类型选择不同的策略
@@ -89,6 +100,63 @@ func UserCheckin(userId int) (*Checkin, error) {
 
 	// MySQL 和 PostgreSQL 支持事务，使用事务保证原子性
 	return userCheckinWithTransaction(checkin, userId, quotaAwarded)
+}
+
+func enforceCheckinIPDailyLimit(userId int, today string, clientIP string, limit int) error {
+	if limit <= 0 {
+		return nil
+	}
+	if clientIP != "" {
+		count, err := countTodayCheckinUsersByIP(today, clientIP)
+		if err != nil {
+			return err
+		}
+		if count >= int64(limit) {
+			return errors.New("当前网络今日签到账号过多，请明天再试或联系管理员")
+		}
+	}
+
+	registerIP, err := getUserRegisterIP(userId)
+	if err != nil {
+		return err
+	}
+	registerIP = strings.TrimSpace(registerIP)
+	if registerIP == "" {
+		return nil
+	}
+	count, err := countTodayCheckinUsersByRegisterIP(today, registerIP)
+	if err != nil {
+		return err
+	}
+	if count >= int64(limit) {
+		return errors.New("当前注册来源今日签到账号过多，请明天再试或联系管理员")
+	}
+	return nil
+}
+
+func countTodayCheckinUsersByIP(today string, ip string) (int64, error) {
+	var count int64
+	err := DB.Model(&Checkin{}).
+		Distinct("user_id").
+		Where("checkin_date = ? AND ip = ?", today, ip).
+		Count(&count).Error
+	return count, err
+}
+
+func countTodayCheckinUsersByRegisterIP(today string, registerIP string) (int64, error) {
+	var count int64
+	err := DB.Model(&Checkin{}).
+		Joins("JOIN users ON users.id = checkins.user_id").
+		Distinct("checkins.user_id").
+		Where("checkins.checkin_date = ? AND users.register_ip = ?", today, registerIP).
+		Count(&count).Error
+	return count, err
+}
+
+func getUserRegisterIP(userId int) (string, error) {
+	var user User
+	err := DB.Model(&User{}).Select("register_ip").Where("id = ?", userId).First(&user).Error
+	return user.RegisterIP, err
 }
 
 // userCheckinWithTransaction 使用事务执行签到（适用于 MySQL 和 PostgreSQL）

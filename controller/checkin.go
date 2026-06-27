@@ -53,7 +53,7 @@ func DoCheckin(c *gin.Context) {
 
 	userId := c.GetInt("id")
 
-	checkin, err := model.UserCheckin(userId)
+	checkin, err := model.UserCheckin(userId, c.ClientIP())
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
