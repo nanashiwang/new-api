@@ -25,18 +25,38 @@ import {
   showError,
   showSuccess,
   showWarning,
+  toBoolean,
 } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
+
+const CHECKIN_DEFAULT_INPUTS = {
+  'checkin_setting.enabled': false,
+  'checkin_setting.min_quota': 1000,
+  'checkin_setting.max_quota': 10000,
+  'checkin_setting.ip_daily_limit': 50,
+};
+
+const CHECKIN_NUMBER_KEYS = new Set([
+  'checkin_setting.min_quota',
+  'checkin_setting.max_quota',
+  'checkin_setting.ip_daily_limit',
+]);
+
+const normalizeCheckinOptionValue = (key, value) => {
+  if (key === 'checkin_setting.enabled') {
+    return toBoolean(value);
+  }
+  if (CHECKIN_NUMBER_KEYS.has(key)) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : CHECKIN_DEFAULT_INPUTS[key];
+  }
+  return value;
+};
 
 export default function SettingsCheckin(props) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
-  const [inputs, setInputs] = useState({
-    'checkin_setting.enabled': false,
-    'checkin_setting.min_quota': 1000,
-    'checkin_setting.max_quota': 10000,
-    'checkin_setting.ip_daily_limit': 50,
-  });
+  const [inputs, setInputs] = useState(CHECKIN_DEFAULT_INPUTS);
   const refForm = useRef();
   const [inputsRow, setInputsRow] = useState(inputs);
 
@@ -82,15 +102,18 @@ export default function SettingsCheckin(props) {
   }
 
   useEffect(() => {
-    const currentInputs = {};
+    const currentInputs = { ...CHECKIN_DEFAULT_INPUTS };
     for (let key in props.options) {
-      if (Object.keys(inputs).includes(key)) {
-        currentInputs[key] = props.options[key];
+      if (Object.keys(CHECKIN_DEFAULT_INPUTS).includes(key)) {
+        currentInputs[key] = normalizeCheckinOptionValue(
+          key,
+          props.options[key],
+        );
       }
     }
     setInputs(currentInputs);
     setInputsRow(structuredClone(currentInputs));
-    refForm.current.setValues(currentInputs);
+    if (refForm.current) refForm.current.setValues(currentInputs);
   }, [props.options]);
 
   return (
@@ -144,9 +167,7 @@ export default function SettingsCheckin(props) {
                   field={'checkin_setting.ip_daily_limit'}
                   label={t('同一 IP 每日签到账号上限')}
                   placeholder={t('填 0 表示不限制')}
-                  onChange={handleFieldChange(
-                    'checkin_setting.ip_daily_limit',
-                  )}
+                  onChange={handleFieldChange('checkin_setting.ip_daily_limit')}
                   min={0}
                   disabled={!inputs['checkin_setting.enabled']}
                 />

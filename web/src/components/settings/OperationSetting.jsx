@@ -85,6 +85,7 @@ const OperationSetting = () => {
     'checkin_setting.enabled': false,
     'checkin_setting.min_quota': 1000,
     'checkin_setting.max_quota': 10000,
+    'checkin_setting.ip_daily_limit': 50,
 
     /* 令牌设置 */
     'token_setting.max_user_tokens': 1000,
