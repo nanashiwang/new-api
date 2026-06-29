@@ -73,8 +73,31 @@ const addExternalLinkAttributes = (html) => {
   return template.innerHTML;
 };
 
+const sanitizeWholeDocumentHtml = (html) => {
+  if (typeof document === 'undefined') {
+    return DOMPurify.sanitize(html || '');
+  }
+
+  const sanitizedDocument = DOMPurify.sanitize(html || '', {
+    WHOLE_DOCUMENT: true,
+  });
+  const template = document.createElement('template');
+  template.innerHTML = sanitizedDocument;
+
+  const styles = Array.from(template.content.querySelectorAll('style'))
+    .map((style) => style.outerHTML)
+    .join('');
+  const body = template.content.querySelector('body');
+  const bodyHtml = body ? body.innerHTML : sanitizedDocument;
+
+  return `${styles}${bodyHtml}`;
+};
+
 export const sanitizeHtmlContent = (html) => {
-  const sanitized = DOMPurify.sanitize(html || '');
+  const source = html || '';
+  const sanitized = /<style[\s>]/i.test(source)
+    ? sanitizeWholeDocumentHtml(source)
+    : DOMPurify.sanitize(source);
   return addExternalLinkAttributes(sanitized);
 };
 

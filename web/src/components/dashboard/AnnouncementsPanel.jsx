@@ -89,18 +89,13 @@ const AnnouncementsPanel = ({
                     <RichContent
                       className='text-xs text-gray-500'
                       content={item.extra}
-                      mode='markdown'
                       breaks
                     />
                   ) : null
                 }
               >
                 <div>
-                  <RichContent
-                    content={item.content || ''}
-                    mode='markdown'
-                    breaks
-                  />
+                  <RichContent content={item.content || ''} breaks />
                 </div>
               </Timeline.Item>
             ))}

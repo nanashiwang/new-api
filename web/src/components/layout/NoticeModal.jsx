@@ -159,7 +159,6 @@ const NoticeModal = ({
     return (
       <RichContent
         content={noticeContent}
-        mode='markdown'
         breaks
         className='notice-content-scroll max-h-[55vh] overflow-y-auto pr-2'
       />
@@ -196,7 +195,6 @@ const NoticeModal = ({
                   <RichContent
                     className='text-xs text-gray-500'
                     content={item.extra}
-                    mode='markdown'
                     breaks
                   />
                 ) : null
@@ -207,7 +205,6 @@ const NoticeModal = ({
                 <RichContent
                   className={item.isUnread ? 'shine-text' : ''}
                   content={item.content || ''}
-                  mode='markdown'
                   breaks
                 />
               </div>

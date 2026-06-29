@@ -65,7 +65,6 @@ const PublicNoticeModal = ({ visible, content, onClose }) => {
         <RichContent
           className='public-notice-content'
           content={content}
-          mode='markdown'
           breaks
         />
         <footer className='public-notice-footer'>
