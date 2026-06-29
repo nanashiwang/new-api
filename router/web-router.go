@@ -28,12 +28,19 @@ func SetWebRouter(router *gin.Engine, buildFS embed.FS, indexPage []byte) {
 		if redirectMalformedFullwidthQuery(c) {
 			return
 		}
-		if strings.HasPrefix(c.Request.RequestURI, "/v1") || strings.HasPrefix(c.Request.RequestURI, "/api") || strings.HasPrefix(c.Request.RequestURI, "/assets") {
+		if shouldReturnRelayNotFound(c.Request.RequestURI) {
 			controller.RelayNotFound(c)
 			return
 		}
 		serveWebIndex(c, indexPage)
 	})
+}
+
+func shouldReturnRelayNotFound(requestURI string) bool {
+	return strings.HasPrefix(requestURI, "/v1") ||
+		strings.HasPrefix(requestURI, "/api") ||
+		strings.HasPrefix(requestURI, "/assets") ||
+		strings.HasPrefix(requestURI, "/image-playground/assets/")
 }
 
 func registerPrerenderedIndexRoutes(router *gin.Engine, indexPage []byte) {

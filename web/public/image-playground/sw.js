@@ -1,5 +1,14 @@
-const CACHE_NAME = 'gpt-image-playground-v0.1.5'
-const APP_SHELL = ['./', './index.html', './manifest.webmanifest', './pwa-icon.svg']
+const CACHE_NAME = 'gpt-image-playground-v0.1.6'
+const APP_SHELL = ['./manifest.webmanifest', './pwa-icon.svg']
+const CACHEABLE_DESTINATIONS = new Set(['font', 'image'])
+
+function shouldCacheRuntimeAsset(request, response) {
+  if (!response.ok) return false
+  const contentType = response.headers.get('content-type') || ''
+  if (contentType.includes('text/html')) return false
+  if (request.destination === 'script' || request.destination === 'style') return false
+  return CACHEABLE_DESTINATIONS.has(request.destination)
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -26,15 +35,7 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return
 
   if (request.mode === 'navigate') {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          const copy = response.clone()
-          caches.open(CACHE_NAME).then((cache) => cache.put('./index.html', copy))
-          return response
-        })
-        .catch(() => caches.match('./index.html')),
-    )
+    event.respondWith(fetch(request, { cache: 'no-store' }))
     return
   }
 
@@ -43,7 +44,7 @@ self.addEventListener('fetch', (event) => {
       if (cached) return cached
 
       return fetch(request).then((response) => {
-        if (response.ok) {
+        if (shouldCacheRuntimeAsset(request, response)) {
           const copy = response.clone()
           caches.open(CACHE_NAME).then((cache) => cache.put(request, copy))
         }

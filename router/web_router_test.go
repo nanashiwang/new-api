@@ -60,6 +60,30 @@ func TestPrerenderedIndexRoutesDoNotRedirect(t *testing.T) {
 	}
 }
 
+func TestShouldReturnRelayNotFoundForStaticAndApiPaths(t *testing.T) {
+	tests := []struct {
+		requestURI string
+		want       bool
+	}{
+		{requestURI: "/api/status", want: true},
+		{requestURI: "/v1/models", want: true},
+		{requestURI: "/assets/index.js", want: true},
+		{requestURI: "/image-playground/assets/missing.js", want: true},
+		{requestURI: "/image-playground/assets/missing.js?v=stale", want: true},
+		{requestURI: "/image-playground/assets/", want: true},
+		{requestURI: "/image-playground/?appMode=gallery", want: false},
+		{requestURI: "/console/image-playground", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.requestURI, func(t *testing.T) {
+			if got := shouldReturnRelayNotFound(tt.requestURI); got != tt.want {
+				t.Fatalf("shouldReturnRelayNotFound(%q) = %v, want %v", tt.requestURI, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRedirectMalformedFullwidthQuery(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

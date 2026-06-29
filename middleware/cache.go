@@ -24,7 +24,12 @@ func Cache() func(c *gin.Context) {
 			return
 		case path == "/":
 			c.Header("Cache-Control", "no-cache")
-		case strings.HasPrefix(path, "/assets/"):
+		case path == "/image-playground/sw.js":
+			c.Header("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0")
+			c.Header("Pragma", "no-cache")
+			c.Header("Expires", "0")
+		case strings.HasPrefix(path, "/assets/"),
+			strings.HasPrefix(path, "/image-playground/assets/"):
 			c.Header("Cache-Control", "public, max-age=31536000, immutable")
 		default:
 			c.Header("Cache-Control", "public, max-age=604800")
