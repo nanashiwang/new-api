@@ -34,13 +34,13 @@ import { API } from '../../helpers/apiCore';
 import { getRelativeTime } from '../../helpers/date';
 import { renderQuota, stringToColor } from '../../helpers/dashboardFormat';
 import { showError } from '../../helpers/toast';
-import { marked } from 'marked';
 import {
   IllustrationNoContent,
   IllustrationNoContentDark,
 } from '@douyinfe/semi-illustrations';
 import { StatusContext } from '../../context/Status';
 import { Bell, FileText, Megaphone, Wallet } from 'lucide-react';
+import RichContent from '../common/RichContent';
 
 const { Text } = Typography;
 
@@ -105,8 +105,7 @@ const NoticeModal = ({
       const { success, message, data } = res.data;
       if (success) {
         if (data !== '') {
-          const htmlNotice = marked.parse(data);
-          setNoticeContent(htmlNotice);
+          setNoticeContent(data);
         } else {
           setNoticeContent('');
         }
@@ -158,8 +157,10 @@ const NoticeModal = ({
     }
 
     return (
-      <div
-        dangerouslySetInnerHTML={{ __html: noticeContent }}
+      <RichContent
+        content={noticeContent}
+        mode='markdown'
+        breaks
         className='notice-content-scroll max-h-[55vh] overflow-y-auto pr-2'
       />
     );
@@ -185,33 +186,33 @@ const NoticeModal = ({
     return (
       <div className='max-h-[55vh] overflow-y-auto pr-2 card-content-scroll'>
         <Timeline mode='left'>
-          {processedAnnouncements.map((item, idx) => {
-            const htmlContent = marked.parse(item.content || '');
-            const htmlExtra = item.extra ? marked.parse(item.extra) : '';
-            return (
-              <Timeline.Item
-                key={idx}
-                type={item.type}
-                time={`${item.relative ? item.relative + ' ' : ''}${item.time}`}
-                extra={
-                  item.extra ? (
-                    <div
-                      className='text-xs text-gray-500'
-                      dangerouslySetInnerHTML={{ __html: htmlExtra }}
-                    />
-                  ) : null
-                }
-                className={item.isUnread ? '' : ''}
-              >
-                <div>
-                  <div
-                    className={item.isUnread ? 'shine-text' : ''}
-                    dangerouslySetInnerHTML={{ __html: htmlContent }}
+          {processedAnnouncements.map((item, idx) => (
+            <Timeline.Item
+              key={idx}
+              type={item.type}
+              time={`${item.relative ? item.relative + ' ' : ''}${item.time}`}
+              extra={
+                item.extra ? (
+                  <RichContent
+                    className='text-xs text-gray-500'
+                    content={item.extra}
+                    mode='markdown'
+                    breaks
                   />
-                </div>
-              </Timeline.Item>
-            );
-          })}
+                ) : null
+              }
+              className={item.isUnread ? '' : ''}
+            >
+              <div>
+                <RichContent
+                  className={item.isUnread ? 'shine-text' : ''}
+                  content={item.content || ''}
+                  mode='markdown'
+                  breaks
+                />
+              </div>
+            </Timeline.Item>
+          ))}
         </Timeline>
       </div>
     );

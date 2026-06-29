@@ -25,32 +25,16 @@ import { useActualTheme } from '../../context/Theme';
 import { API } from '../../helpers/apiCore';
 import { copy } from '../../helpers/clipboard';
 import { usePublicTranslation } from '../../helpers/publicLocale';
+import { isHttpsUrl } from '../../helpers/richContent';
 import { getLogo, getSystemName } from '../../helpers/storage';
+import RichContent from '../../components/common/RichContent';
 import EnterpriseHome from './EnterpriseHome';
 
 const PublicNoticeModal = lazy(
   () => import('../../components/layout/PublicNoticeModal'),
 );
 
-const isRemoteHomePage = (content) => content.startsWith('https://');
-
-// 内容以 HTML 标签 / 注释 / DOCTYPE 起头时视为原生 HTML，跳过 markdown 解析；
-// 否则按 markdown 处理。理由：marked v4 会把缩进 4+ 空格的 HTML 段误识别为 indented
-// code block 输出 <pre><code>，让用户的格式化 HTML 渲染成代码。识别为 HTML 的内容
-// 直接透传更稳，避免误处理；纯 markdown 文案（无标签）依然走 marked。
-const isRawHtmlContent = (content) => {
-  const trimmed = content.trimStart();
-  return (
-    trimmed.startsWith('<!') ||
-    trimmed.startsWith('<style') ||
-    trimmed.startsWith('<html') ||
-    trimmed.startsWith('<div') ||
-    trimmed.startsWith('<section') ||
-    trimmed.startsWith('<main') ||
-    trimmed.startsWith('<nav') ||
-    trimmed.startsWith('<header')
-  );
-};
+const isRemoteHomePage = isHttpsUrl;
 
 const getCachedHomePageContent = () => {
   try {
@@ -104,15 +88,7 @@ const Home = ({ onLandingChange } = {}) => {
       });
       const { success, message, data } = res.data;
       if (success) {
-        let content = data || '';
-        if (
-          content &&
-          !isRemoteHomePage(content) &&
-          !isRawHtmlContent(content)
-        ) {
-          const { marked } = await import('marked');
-          content = marked.parse(content);
-        }
+        const content = data || '';
         setHomePageContent(content);
         if (content) {
           localStorage.setItem('home_page_content', content);
@@ -165,8 +141,7 @@ const Home = ({ onLandingChange } = {}) => {
           });
           const { success, data } = res.data;
           if (success && data && data.trim() !== '') {
-            const { marked } = await import('marked');
-            setNoticeContent(marked.parse(data.trim()));
+            setNoticeContent(data.trim());
             setNoticeVisible(true);
           }
         } catch (error) {
@@ -241,7 +216,7 @@ const Home = ({ onLandingChange } = {}) => {
           ) : (
             // 自定义首页 HTML 自带顶部 nav 时，PageLayout 已经隐藏了全局 Header，
             // 这里也不再加 mt-[60px] 顶部留白，避免与自定义 nav 之间出现空白带。
-            <div dangerouslySetInnerHTML={{ __html: homePageContent }} />
+            <RichContent content={homePageContent} />
           )}
         </div>
       )}

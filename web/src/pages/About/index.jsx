@@ -19,13 +19,14 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React, { useEffect, useState } from 'react';
 import { API, showError } from '../../helpers';
-import { marked } from 'marked';
 import { Empty } from '@douyinfe/semi-ui';
 import {
   IllustrationConstruction,
   IllustrationConstructionDark,
 } from '@douyinfe/semi-illustrations';
 import { useTranslation } from 'react-i18next';
+import RichContent from '../../components/common/RichContent';
+import { isHttpsUrl } from '../../helpers/richContent';
 
 const About = () => {
   const { t } = useTranslation();
@@ -38,10 +39,7 @@ const About = () => {
     const res = await API.get('/api/about');
     const { success, message, data } = res.data;
     if (success) {
-      let aboutContent = data;
-      if (!data.startsWith('https://')) {
-        aboutContent = marked.parse(data);
-      }
+      const aboutContent = data || '';
       setAbout(aboutContent);
       localStorage.setItem('about', aboutContent);
     } else {
@@ -153,16 +151,13 @@ const About = () => {
         </div>
       ) : (
         <>
-          {about.startsWith('https://') ? (
+          {isHttpsUrl(about) ? (
             <iframe
               src={about}
               style={{ width: '100%', height: '100vh', border: 'none' }}
             />
           ) : (
-            <div
-              style={{ fontSize: 'larger' }}
-              dangerouslySetInnerHTML={{ __html: about }}
-            ></div>
+            <RichContent content={about} style={{ fontSize: 'larger' }} />
           )}
         </>
       )}

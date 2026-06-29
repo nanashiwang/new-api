@@ -20,6 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import React, { useEffect } from 'react';
 import { X } from 'lucide-react';
 import { usePublicTranslation } from '../../helpers/publicLocale';
+import RichContent from '../common/RichContent';
 
 const PublicNoticeModal = ({ visible, content, onClose }) => {
   const { t } = usePublicTranslation();
@@ -61,15 +62,25 @@ const PublicNoticeModal = ({ visible, content, onClose }) => {
             <X size={18} />
           </button>
         </header>
-        <div
+        <RichContent
           className='public-notice-content'
-          dangerouslySetInnerHTML={{ __html: content }}
+          content={content}
+          mode='markdown'
+          breaks
         />
         <footer className='public-notice-footer'>
-          <button type='button' className='public-notice-ghost' onClick={closeToday}>
+          <button
+            type='button'
+            className='public-notice-ghost'
+            onClick={closeToday}
+          >
             {t('今日关闭')}
           </button>
-          <button type='button' className='public-notice-primary' onClick={onClose}>
+          <button
+            type='button'
+            className='public-notice-primary'
+            onClick={onClose}
+          >
             {t('关闭公告')}
           </button>
         </footer>

@@ -29,10 +29,10 @@ import {
   Card,
 } from '@douyinfe/semi-ui';
 import { API, showError, showSuccess, timestamp2string } from '../../helpers';
-import { marked } from 'marked';
 import { useTranslation } from 'react-i18next';
 import { StatusContext } from '../../context/Status';
 import Text from '@douyinfe/semi-ui/lib/es/typography/text';
+import RichContent from '../common/RichContent';
 
 const LEGAL_USER_AGREEMENT_KEY = 'legal.user_agreement';
 const LEGAL_PRIVACY_POLICY_KEY = 'legal.privacy_policy';
@@ -244,13 +244,15 @@ const OtherSetting = () => {
       }
 
       if (!data?.update_available) {
-        showSuccess(data?.message || `已是最新版本：${data?.latest_version || ''}`);
+        showSuccess(
+          data?.message || `已是最新版本：${data?.latest_version || ''}`,
+        );
       } else {
         setUpdateData({
           latest_version: data.latest_version,
           release_url: data.release_url,
           compare_url: data.compare_url,
-          content: marked.parse(data.body || data.message || ''),
+          content: data.body || data.message || '',
         });
         setShowUpdateModal(true);
       }
@@ -498,7 +500,7 @@ const OtherSetting = () => {
           </Button>,
         ]}
       >
-        <div dangerouslySetInnerHTML={{ __html: updateData.content }}></div>
+        <RichContent content={updateData.content} mode='markdown' breaks />
       </Modal>
     </Row>
   );

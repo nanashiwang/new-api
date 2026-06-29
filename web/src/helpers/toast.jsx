@@ -22,9 +22,10 @@ import { toastConstants } from '../constants/toast.constants';
 import React from 'react';
 import { MOBILE_BREAKPOINT } from '../hooks/common/useIsMobile';
 import i18n from '../i18n/i18n';
+import RichContent from '../components/common/RichContent';
 
 const HTMLToastContent = ({ htmlContent }) => {
-  return <div dangerouslySetInnerHTML={{ __html: htmlContent }} />;
+  return <RichContent content={htmlContent} mode='html' />;
 };
 export default HTMLToastContent;
 

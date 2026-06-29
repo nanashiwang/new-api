@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next';
 import { Typography } from '@douyinfe/semi-ui';
 import { getFooterHTML, getLogo, getSystemName } from '../../helpers/storage';
 import { StatusContext } from '../../context/Status';
+import RichContent from '../common/RichContent';
 
 const FooterBar = () => {
   const { t } = useTranslation();
@@ -222,10 +223,7 @@ const FooterBar = () => {
     <div className='w-full'>
       {footer ? (
         <div className='relative'>
-          <div
-            className='custom-footer'
-            dangerouslySetInnerHTML={{ __html: footer }}
-          ></div>
+          <RichContent className='custom-footer' content={footer} mode='html' />
           <div className='absolute bottom-2 right-4 text-xs !text-semi-color-text-2 opacity-70'>
             <span>{t('设计与开发由')} </span>
             <a

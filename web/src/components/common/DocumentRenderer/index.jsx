@@ -27,40 +27,39 @@ import {
 } from '@douyinfe/semi-illustrations';
 import { useTranslation } from 'react-i18next';
 import MarkdownRenderer from '../markdown/MarkdownRenderer';
+import RichContent from '../RichContent';
+import {
+  isHttpUrl,
+  isLikelyStandaloneHtml,
+  sanitizeHtmlContent,
+} from '../../../helpers/richContent';
 
 // 检查是否为 URL
 const isUrl = (content) => {
-  try {
-    new URL(content.trim());
-    return true;
-  } catch {
-    return false;
-  }
+  return isHttpUrl(content);
 };
 
 // 检查是否为 HTML 内容
 const isHtmlContent = (content) => {
   if (!content || typeof content !== 'string') return false;
 
-  // 检查是否包含HTML标签
-  const htmlTagRegex = /<\/?[a-z][\s\S]*>/i;
-  return htmlTagRegex.test(content);
+  return isLikelyStandaloneHtml(content);
 };
 
 // 安全地渲染HTML内容
 const sanitizeHtml = (html) => {
   // 创建一个临时元素来解析HTML
   const tempDiv = document.createElement('div');
-  tempDiv.innerHTML = html;
+  tempDiv.innerHTML = sanitizeHtmlContent(html);
 
   // 提取样式
-  const styles = Array.from(tempDiv.querySelectorAll('style'))
-    .map((style) => style.innerHTML)
-    .join('\n');
+  const styleNodes = Array.from(tempDiv.querySelectorAll('style'));
+  const styles = styleNodes.map((style) => style.textContent || '').join('\n');
+  styleNodes.forEach((style) => style.remove());
 
   // 提取body内容，如果没有body标签则使用全部内容
   const bodyContent = tempDiv.querySelector('body');
-  const content = bodyContent ? bodyContent.innerHTML : html;
+  const content = bodyContent ? bodyContent.innerHTML : tempDiv.innerHTML;
 
   return { content, styles };
 };
@@ -207,15 +206,6 @@ const DocumentRenderer = ({ apiEndpoint, title, cacheKey, emptyMessage }) => {
 
   // 如果是 HTML 内容，直接渲染
   if (isHtmlContent(content)) {
-    const { content: htmlContent, styles } = sanitizeHtml(content);
-
-    // 设置样式（如果有的话）
-    useEffect(() => {
-      if (styles && styles !== htmlStyles) {
-        setHtmlStyles(styles);
-      }
-    }, [content, styles, htmlStyles]);
-
     return (
       <div className='min-h-screen bg-gray-50'>
         <div className='max-w-4xl mx-auto py-12 px-4 sm:px-6 lg:px-8'>
@@ -223,9 +213,10 @@ const DocumentRenderer = ({ apiEndpoint, title, cacheKey, emptyMessage }) => {
             <Title heading={2} className='text-center mb-8'>
               {title}
             </Title>
-            <div
+            <RichContent
               className='prose prose-lg max-w-none'
-              dangerouslySetInnerHTML={{ __html: htmlContent }}
+              content={processedHtmlContent}
+              mode='html'
             />
           </div>
         </div>
