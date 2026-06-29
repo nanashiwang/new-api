@@ -34,9 +34,15 @@ func IsRequestBodyTooLargeError(err error) bool {
 }
 
 func GetRequestBody(c *gin.Context) (io.Seeker, error) {
+	maxMB := GetRequestBodyLimitMB(c)
+	maxBytes := GetRequestBodyLimitBytes(c)
+
 	// 首先检查是否有 BodyStorage 缓存
 	if storage, exists := c.Get(KeyBodyStorage); exists && storage != nil {
 		if bs, ok := storage.(BodyStorage); ok {
+			if bs.Size() > maxBytes {
+				return nil, errors.Wrap(ErrRequestBodyTooLarge, fmt.Sprintf("request body exceeds %d MB", maxMB))
+			}
 			if _, err := bs.Seek(0, io.SeekStart); err != nil {
 				return nil, fmt.Errorf("failed to seek body storage: %w", err)
 			}
@@ -48,6 +54,9 @@ func GetRequestBody(c *gin.Context) (io.Seeker, error) {
 	cached, exists := c.Get(KeyRequestBody)
 	if exists && cached != nil {
 		if b, ok := cached.([]byte); ok {
+			if int64(len(b)) > maxBytes {
+				return nil, errors.Wrap(ErrRequestBodyTooLarge, fmt.Sprintf("request body exceeds %d MB", maxMB))
+			}
 			bs, err := CreateBodyStorage(b)
 			if err != nil {
 				return nil, err
@@ -56,12 +65,6 @@ func GetRequestBody(c *gin.Context) (io.Seeker, error) {
 			return bs, nil
 		}
 	}
-
-	maxMB := constant.MaxRequestBodyMB
-	if maxMB <= 0 {
-		maxMB = 128 // 默认 128MB
-	}
-	maxBytes := int64(maxMB) << 20
 
 	contentLength := c.Request.ContentLength
 

@@ -322,6 +322,7 @@ docker run --name new-api -d --restart always \
 | `STREAMING_TIMEOUT` | Streaming timeout (seconds) | `300` |
 | `STREAM_SCANNER_MAX_BUFFER_MB` | Max per-line buffer (MB) for the stream scanner; increase when upstream sends huge image/base64 payloads | `64` |
 | `MAX_REQUEST_BODY_MB` | Max request body size (MB, counted **after decompression**; prevents huge requests/zip bombs from exhausting memory). Exceeding it returns `413` | `256` |
+| `RESPONSES_REQUEST_BODY_LIMIT_MB` | Business preflight limit for `/v1/responses` and `/v1/chat/completions` request bodies (MB, counted after decompression). Oversized image/base64/context payloads fail locally with `413` instead of being retried upstream. Set `0` to disable this route-specific limit | `20` |
 | `AZURE_DEFAULT_API_VERSION` | Azure API version | `2025-04-01-preview` |
 | `ERROR_LOG_ENABLED` | Error log switch | `false` |
 | `PYROSCOPE_URL` | Pyroscope server address | - |

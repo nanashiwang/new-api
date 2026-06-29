@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -112,21 +111,7 @@ func crsCircuitScopes(channel *model.Channel) []crsCircuitScope {
 }
 
 func normalizeCRSCircuitBaseURL(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return ""
-	}
-	raw = strings.TrimRight(raw, "/")
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return strings.ToLower(raw)
-	}
-	parsed.Scheme = strings.ToLower(parsed.Scheme)
-	parsed.Host = strings.ToLower(parsed.Host)
-	parsed.Path = strings.TrimRight(parsed.Path, "/")
-	parsed.RawQuery = ""
-	parsed.Fragment = ""
-	return parsed.String()
+	return model.NormalizeChannelBaseURL(raw)
 }
 
 func crsCircuitRedisEnabled() bool {

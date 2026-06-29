@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -72,6 +73,9 @@ func ShouldRetryChannelError(c *gin.Context, openaiErr *types.NewAPIError, retry
 	if code < 100 || code > 599 {
 		return true
 	}
+	if IsUpstreamRequestTooLargeError(openaiErr) && isUpstreamRequestTooLargeBeyondKnownLimit(c, openaiErr) {
+		return false
+	}
 	if IsRetryableSpecialBadRequestError(openaiErr) {
 		return true
 	}
@@ -89,6 +93,9 @@ func ApplyChannelFailureRetryExclusion(param *RetryParam, channel *model.Channel
 	ids := []int{channel.Id}
 	if shouldExcludeRetryByTag(err) {
 		ids = retryExclusionIDsByTag(param, channel)
+	}
+	if shouldExcludeRetryByBaseURL(err) {
+		ids = append(ids, retryExclusionIDsByBaseURL(param, channel)...)
 	}
 
 	seen := make(map[int]struct{}, len(param.ExcludeChannels))
@@ -136,6 +143,17 @@ func retryExclusionIDsByTag(param *RetryParam, channel *model.Channel) []int {
 	return ids
 }
 
+func retryExclusionIDsByBaseURL(param *RetryParam, channel *model.Channel) []int {
+	if param == nil || channel == nil {
+		return nil
+	}
+	baseURL := channel.GetBaseURL()
+	if baseURL == "" {
+		return nil
+	}
+	return param.getCachedBaseURLChannelIDs(baseURL, param.AllowedChannels)
+}
+
 func shouldExcludeRetryByTag(err *types.NewAPIError) bool {
 	if err == nil {
 		return false
@@ -143,6 +161,25 @@ func shouldExcludeRetryByTag(err *types.NewAPIError) bool {
 	return IsRetryableSharedUpstreamPoolError(err) ||
 		IsChannelModelMismatchError(err) ||
 		IsUpstreamRequestTooLargeError(err)
+}
+
+func shouldExcludeRetryByBaseURL(err *types.NewAPIError) bool {
+	return IsUpstreamRequestTooLargeError(err)
+}
+
+func isUpstreamRequestTooLargeBeyondKnownLimit(c *gin.Context, err *types.NewAPIError) bool {
+	limitBytes := common.GetRequestBodyLimitBytes(c)
+	if limitBytes <= 0 {
+		return false
+	}
+	requestLength := int64(0)
+	if err != nil && err.Upstream != nil {
+		requestLength = err.Upstream.RequestLength
+	}
+	if requestLength <= 0 && c != nil && c.Request != nil {
+		requestLength = c.Request.ContentLength
+	}
+	return requestLength > limitBytes
 }
 
 func IsRetryableSharedUpstreamPoolError(err *types.NewAPIError) bool {

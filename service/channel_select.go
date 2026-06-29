@@ -24,7 +24,8 @@ type RetryParam struct {
 	// SameChannelFailoverDone 同渠道额度错误快速切换只允许触发一次，避免重试风暴。
 	SameChannelFailoverDone bool
 	// tagChannelCache 请求级 tag->渠道ID 缓存，避免重试时重复查库。
-	tagChannelCache map[string][]int
+	tagChannelCache     map[string][]int
+	baseURLChannelCache map[string][]int
 }
 
 func (p *RetryParam) GetRetry() int {
@@ -85,23 +86,59 @@ func (p *RetryParam) getCachedTagChannelIDs(tag string, allowedChannels []int) [
 	if err != nil || len(ids) == 0 {
 		return nil
 	}
-	if group != "" && modelName != "" {
-		filtered := make([]int, 0, len(ids))
-		for _, id := range ids {
-			if model.IsChannelEnabledForGroupModel(group, modelName, id) {
-				filtered = append(filtered, id)
-			}
-		}
-		ids = filtered
-		if len(ids) == 0 {
-			return nil
-		}
+	ids = p.filterChannelIDsForSelection(ids)
+	if len(ids) == 0 {
+		return nil
 	}
 	if p.tagChannelCache == nil {
 		p.tagChannelCache = make(map[string][]int)
 	}
 	p.tagChannelCache[cacheKey] = ids
 	return ids
+}
+
+// getCachedBaseURLChannelIDs 查询同 base_url 下启用的渠道 ID，结果在本次请求生命周期内缓存。
+func (p *RetryParam) getCachedBaseURLChannelIDs(baseURL string, allowedChannels []int) []int {
+	normalizedBaseURL := model.NormalizeChannelBaseURL(baseURL)
+	if normalizedBaseURL == "" {
+		return nil
+	}
+	group := p.getSelectionGroup()
+	modelName := p.ModelName
+	cacheKey := normalizedBaseURL + "|" + group + "|" + modelName
+	if p.baseURLChannelCache != nil {
+		if ids, ok := p.baseURLChannelCache[cacheKey]; ok {
+			return ids
+		}
+	}
+	ids, err := model.GetEnabledChannelIDsByBaseURL(normalizedBaseURL, allowedChannels)
+	if err != nil || len(ids) == 0 {
+		return nil
+	}
+	ids = p.filterChannelIDsForSelection(ids)
+	if len(ids) == 0 {
+		return nil
+	}
+	if p.baseURLChannelCache == nil {
+		p.baseURLChannelCache = make(map[string][]int)
+	}
+	p.baseURLChannelCache[cacheKey] = ids
+	return ids
+}
+
+func (p *RetryParam) filterChannelIDsForSelection(ids []int) []int {
+	group := p.getSelectionGroup()
+	modelName := p.ModelName
+	if group == "" || modelName == "" {
+		return ids
+	}
+	filtered := make([]int, 0, len(ids))
+	for _, id := range ids {
+		if model.IsChannelEnabledForGroupModel(group, modelName, id) {
+			filtered = append(filtered, id)
+		}
+	}
+	return filtered
 }
 
 func IsCodexAutoReviewRequestModel(modelName string) bool {

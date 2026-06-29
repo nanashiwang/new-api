@@ -61,6 +61,40 @@ func TestShouldRetryChannelError_GenericBadRequestRemainsNonRetryable(t *testing
 	}
 }
 
+func TestShouldRetryChannelError_RequestTooLargeOverKnownLimitStopsRetry(t *testing.T) {
+	originLimit := constant.ResponsesRequestBodyLimitMB
+	constant.ResponsesRequestBodyLimitMB = 20
+	t.Cleanup(func() { constant.ResponsesRequestBodyLimitMB = originLimit })
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	err := types.NewOpenAIError(errors.New("bad response status code 413"), types.ErrorCodeBadResponseStatusCode, http.StatusRequestEntityTooLarge)
+	err.Upstream = &types.UpstreamDiagnostics{RequestLength: 30 << 20}
+
+	if ShouldRetryChannelError(ctx, err, 1) {
+		t.Fatalf("did not expect oversized responses request to be retried")
+	}
+}
+
+func TestShouldRetryChannelError_RequestTooLargeBelowKnownLimitCanReroute(t *testing.T) {
+	originLimit := constant.ResponsesRequestBodyLimitMB
+	constant.ResponsesRequestBodyLimitMB = 20
+	t.Cleanup(func() { constant.ResponsesRequestBodyLimitMB = originLimit })
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	err := types.NewOpenAIError(errors.New("bad response status code 413"), types.ErrorCodeBadResponseStatusCode, http.StatusRequestEntityTooLarge)
+	err.Upstream = &types.UpstreamDiagnostics{RequestLength: 2 << 20}
+
+	if !ShouldRetryChannelError(ctx, err, 1) {
+		t.Fatalf("expected below-limit 413 to be allowed to reroute to another non-equivalent channel")
+	}
+}
+
 func TestIsQuotaRelatedErrorByCode(t *testing.T) {
 	err := types.NewError(errors.New("insufficient"), types.ErrorCodeInsufficientUserQuota)
 	if !IsQuotaRelatedError(err) {
@@ -476,5 +510,69 @@ func TestApplyChannelFailureRetryExclusion_RequestTooLargeUsesTagGroup(t *testin
 	}
 	if !slices.Contains(param.ExcludeChannels, 31) || !slices.Contains(param.ExcludeChannels, 32) {
 		t.Fatalf("unexpected excluded channels: %v", param.ExcludeChannels)
+	}
+}
+
+func TestApplyChannelFailureRetryExclusion_RequestTooLargeUsesBaseURLGroup(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+
+	originDB := model.DB
+	originLogDB := model.LOG_DB
+	originMemoryCacheEnabled := common.MemoryCacheEnabled
+	model.DB = db
+	model.LOG_DB = db
+	common.MemoryCacheEnabled = false
+	t.Cleanup(func() {
+		model.DB = originDB
+		model.LOG_DB = originLogDB
+		common.MemoryCacheEnabled = originMemoryCacheEnabled
+	})
+
+	if err := db.AutoMigrate(&model.Channel{}, &model.Ability{}); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+
+	tagA := "shared-crs-a"
+	tagB := "shared-crs-b"
+	baseURL := "https://CRS.example.com/openai/"
+	sameBaseURL := "https://crs.example.com/openai"
+	otherBaseURL := "https://other.example.com/openai"
+	channels := []model.Channel{
+		{Id: 41, Name: "primary", Status: common.ChannelStatusEnabled, Tag: &tagA, BaseURL: &baseURL},
+		{Id: 42, Name: "same-base", Status: common.ChannelStatusEnabled, Tag: &tagB, BaseURL: &sameBaseURL},
+		{Id: 43, Name: "other-base", Status: common.ChannelStatusEnabled, Tag: &tagB, BaseURL: &otherBaseURL},
+	}
+	if err := db.Create(&channels).Error; err != nil {
+		t.Fatalf("seed channels: %v", err)
+	}
+	abilities := []model.Ability{
+		{Group: "vip", Model: "gpt-5.5", ChannelId: 41, Enabled: true},
+		{Group: "vip", Model: "gpt-5.5", ChannelId: 42, Enabled: true},
+		{Group: "vip", Model: "gpt-5.5", ChannelId: 43, Enabled: true},
+	}
+	if err := db.Create(&abilities).Error; err != nil {
+		t.Fatalf("seed abilities: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	common.SetContextKey(ctx, constant.ContextKeyUsingGroup, "vip")
+	param := &RetryParam{
+		Ctx:        ctx,
+		TokenGroup: "vip",
+		ModelName:  "gpt-5.5",
+	}
+	retryErr := types.NewOpenAIError(errors.New("bad response status code 413"), types.ErrorCodeBadResponseStatusCode, http.StatusRequestEntityTooLarge)
+
+	ApplyChannelFailureRetryExclusion(param, &channels[0], retryErr)
+
+	if !slices.Contains(param.ExcludeChannels, 41) || !slices.Contains(param.ExcludeChannels, 42) {
+		t.Fatalf("expected same base_url channels to be excluded, got %v", param.ExcludeChannels)
+	}
+	if slices.Contains(param.ExcludeChannels, 43) {
+		t.Fatalf("did not expect unrelated base_url channel to be excluded: %v", param.ExcludeChannels)
 	}
 }

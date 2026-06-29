@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"fmt"
+	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -24,6 +25,24 @@ func abortWithOpenAiMessage(c *gin.Context, statusCode int, message string, code
 	})
 	c.Abort()
 	logger.LogError(c.Request.Context(), fmt.Sprintf("user %d | %s", userId, message))
+}
+
+func abortWithRequestBodyTooLarge(c *gin.Context) {
+	limitBytes := common.GetRequestBodyLimitBytes(c)
+	actualBytes := int64(0)
+	if c != nil && c.Request != nil && c.Request.ContentLength > limitBytes {
+		actualBytes = c.Request.ContentLength
+	}
+	message := common.FormatRequestBodyTooLargeMessage(actualBytes, limitBytes)
+	c.JSON(http.StatusRequestEntityTooLarge, gin.H{
+		"error": gin.H{
+			"message": common.MessageWithRequestId(message, c.GetString(common.RequestIdKey)),
+			"type":    "invalid_request_error",
+			"code":    "request_body_too_large",
+		},
+	})
+	c.Abort()
+	logger.LogError(c.Request.Context(), fmt.Sprintf("user %d | %s", c.GetInt("id"), message))
 }
 
 func abortWithMidjourneyMessage(c *gin.Context, statusCode int, code int, description string) {

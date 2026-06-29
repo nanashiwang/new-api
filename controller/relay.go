@@ -109,7 +109,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	if err != nil {
 		// Map "request body too large" to 413 so clients can handle it correctly
 		if common.IsRequestBodyTooLargeError(err) || errors.Is(err, common.ErrRequestBodyTooLarge) {
-			newAPIError = types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusRequestEntityTooLarge, types.ErrOptionWithSkipRetry())
+			newAPIError = newRequestBodyTooLargeRelayError(c, 0)
 		} else {
 			newAPIError = types.NewError(err, types.ErrorCodeInvalidRequest)
 		}
@@ -206,7 +206,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if bodyErr != nil {
 			// Ensure consistent 413 for oversized bodies even when error occurs later (e.g., retry path)
 			if common.IsRequestBodyTooLargeError(bodyErr) || errors.Is(bodyErr, common.ErrRequestBodyTooLarge) {
-				newAPIError = types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, http.StatusRequestEntityTooLarge, types.ErrOptionWithSkipRetry())
+				newAPIError = newRequestBodyTooLargeRelayError(c, 0)
 			} else {
 				newAPIError = types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 			}
@@ -308,6 +308,18 @@ func addUsedChannel(c *gin.Context, channelId int) {
 	useChannel := c.GetStringSlice("use_channel")
 	useChannel = append(useChannel, fmt.Sprintf("%d", channelId))
 	c.Set("use_channel", useChannel)
+}
+
+func newRequestBodyTooLargeRelayError(c *gin.Context, actualBytes int64) *types.NewAPIError {
+	limitBytes := common.GetRequestBodyLimitBytes(c)
+	if actualBytes <= 0 && c != nil && c.Request != nil && c.Request.ContentLength > limitBytes {
+		actualBytes = c.Request.ContentLength
+	}
+	return types.WithOpenAIError(types.OpenAIError{
+		Message: common.FormatRequestBodyTooLargeMessage(actualBytes, limitBytes),
+		Type:    "invalid_request_error",
+		Code:    "request_body_too_large",
+	}, http.StatusRequestEntityTooLarge, types.ErrOptionWithSkipRetry())
 }
 
 func appendUniqueInt(ids []int, id int) []int {
