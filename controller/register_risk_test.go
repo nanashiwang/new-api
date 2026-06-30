@@ -110,15 +110,31 @@ func TestEnforceUserRegisterRiskBlocksSameUAAndEmailDomain(t *testing.T) {
 
 	userAgent := "Mozilla/5.0 Chrome/148.0.0.0"
 	createRegisterRiskUsers(t,
-		model.User{Username: "ua-domain-1", Email: "a@outlook.com", AffCode: "ua-domain-1", RegisterIP: "198.51.100.1", RegisterUserAgent: userAgent},
-		model.User{Username: "ua-domain-2", Email: "b@outlook.com", AffCode: "ua-domain-2", RegisterIP: "198.51.100.2", RegisterUserAgent: userAgent},
-		model.User{Username: "ua-domain-3", Email: "c@outlook.com", AffCode: "ua-domain-3", RegisterIP: "198.51.100.3", RegisterUserAgent: userAgent},
+		model.User{Username: "ua-domain-1", Email: "a@example.net", AffCode: "ua-domain-1", RegisterIP: "198.51.100.1", RegisterUserAgent: userAgent},
+		model.User{Username: "ua-domain-2", Email: "b@example.net", AffCode: "ua-domain-2", RegisterIP: "198.51.100.2", RegisterUserAgent: userAgent},
+		model.User{Username: "ua-domain-3", Email: "c@example.net", AffCode: "ua-domain-3", RegisterIP: "198.51.100.3", RegisterUserAgent: userAgent},
 	)
 
 	ctx := newRegisterRiskTestContext(t, "198.51.100.88", userAgent)
-	err := enforceUserRegisterRisk(ctx, &model.User{Email: "d@outlook.com"})
+	err := enforceUserRegisterRisk(ctx, &model.User{Email: "d@example.net"})
 
 	require.ErrorIs(t, err, errRegisterRiskBlocked)
+}
+
+func TestEnforceUserRegisterRiskAllowsCommonDomainWithSameUA(t *testing.T) {
+	setupRegisterRiskControllerTestDB(t)
+
+	userAgent := "Mozilla/5.0 Chrome/148.0.0.0"
+	createRegisterRiskUsers(t,
+		model.User{Username: "common-domain-1", Email: "a@qq.com", AffCode: "common-domain-1", RegisterIP: "198.51.100.1", RegisterUserAgent: userAgent},
+		model.User{Username: "common-domain-2", Email: "b@qq.com", AffCode: "common-domain-2", RegisterIP: "198.51.100.2", RegisterUserAgent: userAgent},
+		model.User{Username: "common-domain-3", Email: "c@qq.com", AffCode: "common-domain-3", RegisterIP: "198.51.100.3", RegisterUserAgent: userAgent},
+	)
+
+	ctx := newRegisterRiskTestContext(t, "198.51.100.88", userAgent)
+	err := enforceUserRegisterRisk(ctx, &model.User{Email: "d@qq.com"})
+
+	require.NoError(t, err)
 }
 
 func TestEnforceUserRegisterRiskAllowsLowRiskRegister(t *testing.T) {

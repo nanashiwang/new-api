@@ -53,7 +53,7 @@ func enforceUserRegisterRisk(c *gin.Context, user *model.User) error {
 		}
 	}
 
-	if userAgent != "" && emailDomain != "" {
+	if userAgent != "" && shouldApplySameUAEmailDomainRisk(emailDomain) {
 		count, err := countRecentRegisteredUsers(
 			cutoff,
 			"register_user_agent = ? AND LOWER(email) LIKE ?",
@@ -70,6 +70,16 @@ func enforceUserRegisterRisk(c *gin.Context, user *model.User) error {
 	}
 
 	return nil
+}
+
+func shouldApplySameUAEmailDomainRisk(emailDomain string) bool {
+	emailDomain = common.NormalizeEmailDomain(emailDomain)
+	if emailDomain == "" {
+		return false
+	}
+	// Browser User-Agent strings are shared by large numbers of normal users.
+	// Do not hard-block common or explicitly whitelisted mailbox domains only by UA.
+	return !common.EmailDomainInWhitelist(emailDomain, common.EmailDomainWhitelist)
 }
 
 func countRecentRegisteredUsers(cutoff int64, query any, args ...any) (int64, error) {
