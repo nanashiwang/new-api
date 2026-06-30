@@ -97,6 +97,13 @@ const renderValidityLabel = (t, validitySeconds) =>
     ? `${Number(validitySeconds || 0)}s`
     : t('长期有效');
 
+const getInviteOrigin = () => {
+  const origin = window.location.origin.replace(/\/$/, '');
+  return origin === 'https://nan.meta-api.vip'
+    ? 'https://cn.meta-api.vip'
+    : origin;
+};
+
 const TopUp = () => {
   const { t } = useTranslation();
   const [userState, userDispatch] = useContext(UserContext);
@@ -595,7 +602,7 @@ const TopUp = () => {
     const res = await API.get('/api/user/aff');
     if (res.data?.success) {
       setAffCode(res.data.data);
-      setAffLink(`${window.location.origin}/i/${res.data.data}`);
+      setAffLink(`${getInviteOrigin()}/i/${res.data.data}`);
     }
   };
 
