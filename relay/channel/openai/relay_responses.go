@@ -35,6 +35,7 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	if oaiError := responsesResponse.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
+	info.RecordResponsesCompletedSummary(&responsesResponse)
 
 	if responsesResponse.HasImageGenerationCall() {
 		c.Set("image_generation_call", true)
@@ -166,6 +167,7 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 			case "response.completed":
 				completed = true
 				if streamResponse.Response != nil {
+					info.RecordResponsesCompletedSummary(streamResponse.Response)
 					if streamResponse.Response.Usage != nil {
 						if streamResponse.Response.Usage.InputTokens != 0 {
 							usage.PromptTokens = streamResponse.Response.Usage.InputTokens

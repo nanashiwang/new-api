@@ -112,6 +112,37 @@ func TestProcessHeaderOverride_PassthroughSkipsAcceptEncoding(t *testing.T) {
 	require.False(t, hasAcceptEncoding)
 }
 
+func TestAttachNewAPIRequestIDHeader(t *testing.T) {
+	t.Parallel()
+
+	header := http.Header{}
+	attachNewAPIRequestIDHeader(header, &relaycommon.RelayInfo{RequestId: " req-123 "})
+
+	require.Equal(t, "req-123", header.Get(upstreamNewAPIRequestIDHeader))
+}
+
+func TestAttachNewAPIRequestIDHeaderSkipsBlank(t *testing.T) {
+	t.Parallel()
+
+	header := http.Header{}
+	attachNewAPIRequestIDHeader(header, &relaycommon.RelayInfo{RequestId: "   "})
+
+	require.Empty(t, header.Get(upstreamNewAPIRequestIDHeader))
+}
+
+func TestAttachNewAPIRequestIDHeaderAllowsHeaderOverride(t *testing.T) {
+	t.Parallel()
+
+	header := http.Header{}
+	attachNewAPIRequestIDHeader(header, &relaycommon.RelayInfo{RequestId: "req-123"})
+	req := &http.Request{Header: header}
+	applyHeaderOverrideToRequest(req, map[string]string{
+		upstreamNewAPIRequestIDHeader: "override-req",
+	})
+
+	require.Equal(t, "override-req", req.Header.Get(upstreamNewAPIRequestIDHeader))
+}
+
 func TestProcessHeaderOverride_StripsDeprecatedContextBetaForClaude46RuntimeOverride(t *testing.T) {
 	t.Parallel()
 

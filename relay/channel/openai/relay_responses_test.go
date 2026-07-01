@@ -2,6 +2,7 @@ package openai
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -270,6 +271,79 @@ func TestOaiResponsesStreamHandler_DoesNotDuplicateCompleted(t *testing.T) {
 	require.False(t, info.StreamStatus.HasErrors())
 
 	require.Equal(t, 1, strings.Count(recorder.Body.String(), "event: response.completed"))
+}
+
+func TestOaiResponsesStreamHandler_RecordsCompletedSummary(t *testing.T) {
+	t.Parallel()
+	setResponsesStreamTestTimeout(t)
+
+	c, recorder := newResponsesStreamTestContext()
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "gpt-5.5",
+		},
+	}
+
+	body := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.5","created_at":1700000000}}`,
+		`data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.5","created_at":1700000000,"status":"completed","output":[{"type":"reasoning"},{"type":"function_call","name":"shell","arguments":"secret_value"},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]},{"type":"web_search_call","status":"completed"},{"type":"image_generation_call","status":"completed"}],"usage":{"input_tokens":3,"output_tokens":4,"total_tokens":7}}}`,
+		`data: [DONE]`,
+	}, "\n")
+
+	usage, err := OaiResponsesStreamHandler(c, info, newResponsesStreamHTTPResponse(body))
+	require.Nil(t, err)
+	require.Equal(t, 7, usage.TotalTokens)
+
+	summary := info.ResponsesCompletedSummary
+	require.NotNil(t, summary)
+	require.Equal(t, "completed", summary.Status)
+	require.Equal(t, 5, summary.OutputCount)
+	require.Equal(t, []string{"reasoning", "function_call", "message", "web_search_call", "image_generation_call"}, summary.OutputTypes)
+	require.Equal(t, 1, summary.MessageCount)
+	require.Equal(t, 1, summary.FunctionCallCount)
+	require.Equal(t, 1, summary.WebSearchCallCount)
+	require.Equal(t, 1, summary.ImageGenerationCallCount)
+	require.Equal(t, 1, summary.ActionableToolCallCount)
+	require.Equal(t, 4, summary.MessageTextChars)
+	require.True(t, summary.HasActionableToolCall)
+
+	summarySnapshot := fmt.Sprintf("%#v", summary)
+	require.NotContains(t, summarySnapshot, "secret_value")
+	require.NotContains(t, summarySnapshot, "done")
+	require.Contains(t, recorder.Body.String(), "event: response.completed")
+}
+
+func TestOaiResponsesStreamHandler_RecordsMessageOnlyCompletedSummary(t *testing.T) {
+	t.Parallel()
+	setResponsesStreamTestTimeout(t)
+
+	c, _ := newResponsesStreamTestContext()
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "gpt-5.5",
+		},
+	}
+
+	body := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.5","created_at":1700000000}}`,
+		`data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.5","created_at":1700000000,"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"top-secret"}]}],"usage":{"input_tokens":3,"output_tokens":4,"total_tokens":7}}}`,
+		`data: [DONE]`,
+	}, "\n")
+
+	usage, err := OaiResponsesStreamHandler(c, info, newResponsesStreamHTTPResponse(body))
+	require.Nil(t, err)
+	require.Equal(t, 7, usage.TotalTokens)
+
+	summary := info.ResponsesCompletedSummary
+	require.NotNil(t, summary)
+	require.Equal(t, 1, summary.OutputCount)
+	require.Equal(t, []string{"message"}, summary.OutputTypes)
+	require.Equal(t, 1, summary.MessageCount)
+	require.Zero(t, summary.FunctionCallCount)
+	require.Zero(t, summary.ActionableToolCallCount)
+	require.False(t, summary.HasActionableToolCall)
+	require.Equal(t, len("top-secret"), summary.MessageTextChars)
+	require.NotContains(t, fmt.Sprintf("%#v", summary), "top-secret")
 }
 
 func TestOaiResponsesStreamHandler_FailsWhenCompletedHasNoOutput(t *testing.T) {

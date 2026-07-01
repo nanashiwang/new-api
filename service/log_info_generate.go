@@ -143,6 +143,9 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 		}
 		other["stream_status"] = streamStatus
 	}
+	if relayInfo.ResponsesCompletedSummary != nil {
+		other["responses_completed_summary"] = relayInfo.ResponsesCompletedSummary
+	}
 	if common.GetContextKeyBool(ctx, constant.ContextKeyResponsesAutoContinue) {
 		other["responses_auto_continue"] = map[string]interface{}{
 			"from_channel": common.GetContextKeyInt(ctx, constant.ContextKeyResponsesAutoContinueFromChannel),

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -56,6 +57,81 @@ type BuildInToolInfo struct {
 
 type ResponsesUsageInfo struct {
 	BuiltInTools map[string]*BuildInToolInfo
+}
+
+type ResponsesCompletedSummary struct {
+	Status                   string   `json:"status,omitempty"`
+	OutputCount              int      `json:"output_count"`
+	OutputTypes              []string `json:"output_types,omitempty"`
+	MessageCount             int      `json:"message_count,omitempty"`
+	FunctionCallCount        int      `json:"function_call_count,omitempty"`
+	WebSearchCallCount       int      `json:"web_search_call_count,omitempty"`
+	ImageGenerationCallCount int      `json:"image_generation_call_count,omitempty"`
+	ActionableToolCallCount  int      `json:"actionable_tool_call_count,omitempty"`
+	MessageTextChars         int      `json:"message_text_chars,omitempty"`
+	HasActionableToolCall    bool     `json:"has_actionable_tool_call"`
+	IncompleteReason         string   `json:"incomplete_reason,omitempty"`
+}
+
+func (info *RelayInfo) RecordResponsesCompletedSummary(response *dto.OpenAIResponsesResponse) {
+	if info == nil || response == nil {
+		return
+	}
+	info.ResponsesCompletedSummary = NewResponsesCompletedSummary(response)
+}
+
+func NewResponsesCompletedSummary(response *dto.OpenAIResponsesResponse) *ResponsesCompletedSummary {
+	if response == nil {
+		return nil
+	}
+	// This summary is written into request logs, so keep it metadata-only.
+	summary := &ResponsesCompletedSummary{
+		Status:      response.Status,
+		OutputCount: len(response.Output),
+	}
+	seenOutputTypes := make(map[string]struct{}, len(response.Output))
+	for _, output := range response.Output {
+		if output.Type != "" {
+			if _, ok := seenOutputTypes[output.Type]; !ok {
+				seenOutputTypes[output.Type] = struct{}{}
+				summary.OutputTypes = append(summary.OutputTypes, output.Type)
+			}
+		}
+		switch output.Type {
+		case "message":
+			summary.MessageCount++
+			for _, content := range output.Content {
+				summary.MessageTextChars += utf8.RuneCountInString(content.Text)
+			}
+		case "function_call":
+			summary.FunctionCallCount++
+		case dto.BuildInCallWebSearchCall:
+			summary.WebSearchCallCount++
+		case dto.ResponsesOutputTypeImageGenerationCall:
+			summary.ImageGenerationCallCount++
+		}
+		if isActionableResponsesOutputType(output.Type) {
+			summary.ActionableToolCallCount++
+			summary.HasActionableToolCall = true
+		}
+	}
+	if response.IncompleteDetails != nil {
+		incompleteReason := strings.TrimSpace(response.IncompleteDetails.Reason)
+		if incompleteReason == "" {
+			incompleteReason = strings.TrimSpace(response.IncompleteDetails.Reasoning)
+		}
+		summary.IncompleteReason = incompleteReason
+	}
+	return summary
+}
+
+func isActionableResponsesOutputType(outputType string) bool {
+	switch outputType {
+	case "function_call", "computer_call", "custom_tool_call":
+		return true
+	default:
+		return false
+	}
 }
 
 type ChannelMeta struct {
@@ -155,6 +231,7 @@ type RelayInfo struct {
 	UseRuntimeHeadersOverride             bool
 	ParamOverrideAudit                    []string
 	StreamStatus                          *StreamStatus
+	ResponsesCompletedSummary             *ResponsesCompletedSummary
 
 	PriceData types.PriceData
 

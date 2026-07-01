@@ -46,6 +46,7 @@ const (
 	headerPassthroughAllKey        = "*"
 	headerPassthroughRegexPrefix   = "re:"
 	headerPassthroughRegexPrefixV2 = "regex:"
+	upstreamNewAPIRequestIDHeader  = "X-NewAPI-Request-ID"
 )
 
 var passthroughSkipHeaderNamesLower = map[string]struct{}{
@@ -292,6 +293,17 @@ func applyHeaderOverrideToRequest(req *http.Request, headerOverride map[string]s
 	}
 }
 
+func attachNewAPIRequestIDHeader(header http.Header, info *common.RelayInfo) {
+	if header == nil || info == nil {
+		return
+	}
+	requestID := strings.TrimSpace(info.RequestId)
+	if requestID == "" {
+		return
+	}
+	header.Set(upstreamNewAPIRequestIDHeader, requestID)
+}
+
 func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {
 	fullRequestURL, err := a.GetRequestURL(info)
 	if err != nil {
@@ -309,6 +321,7 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)
 	}
+	attachNewAPIRequestIDHeader(req.Header, info)
 	// 在 SetupRequestHeader 之后应用 Header Override，确保用户设置优先级最高
 	// 这样可以覆盖默认的 Authorization header 设置
 	headerOverride, err := processHeaderOverride(info, c)
@@ -342,6 +355,7 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)
 	}
+	attachNewAPIRequestIDHeader(req.Header, info)
 	// 在 SetupRequestHeader 之后应用 Header Override，确保用户设置优先级最高
 	// 这样可以覆盖默认的 Authorization header 设置
 	headerOverride, err := processHeaderOverride(info, c)
@@ -366,6 +380,7 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)
 	}
+	attachNewAPIRequestIDHeader(targetHeader, info)
 	// 在 SetupRequestHeader 之后应用 Header Override，确保用户设置优先级最高
 	// 这样可以覆盖默认的 Authorization header 设置
 	headerOverride, err := processHeaderOverride(info, c)

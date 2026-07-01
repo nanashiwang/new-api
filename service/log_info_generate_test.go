@@ -92,6 +92,39 @@ func TestGenerateTextOtherInfoIncludesResponsesRequestDiagnostics(t *testing.T) 
 	assertHash(t, diagnostics, "prompt_cache_key_hash", []byte(`"trace-1"`))
 }
 
+func TestGenerateTextOtherInfoIncludesResponsesCompletedSummary(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+
+	start := time.Unix(100, 0)
+	summary := &relaycommon.ResponsesCompletedSummary{
+		Status:                "completed",
+		OutputCount:           1,
+		OutputTypes:           []string{"message"},
+		MessageCount:          1,
+		MessageTextChars:      4,
+		HasActionableToolCall: false,
+	}
+	info := &relaycommon.RelayInfo{
+		StartTime:                 start,
+		FirstResponseTime:         start.Add(250 * time.Millisecond),
+		ChannelMeta:               &relaycommon.ChannelMeta{},
+		ResponsesCompletedSummary: summary,
+	}
+
+	other := GenerateTextOtherInfo(ctx, info, 1, 1, 1, 0, 1, 1, 1)
+
+	got, ok := other["responses_completed_summary"].(*relaycommon.ResponsesCompletedSummary)
+	if !ok {
+		t.Fatalf("expected responses_completed_summary, got %T", other["responses_completed_summary"])
+	}
+	if got != summary {
+		t.Fatalf("unexpected responses_completed_summary: %#v", got)
+	}
+}
+
 func TestGenerateTextOtherInfoResponsesDiagnosticsOmitsAbsentFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
