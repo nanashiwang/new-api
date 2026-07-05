@@ -199,6 +199,16 @@ func IsUpstreamModelTemporaryUnavailableError(err *types.NewAPIError) bool {
 			(strings.Contains(lowerMessage, "selected model") || strings.Contains(lowerMessage, "capacity")))
 }
 
+func IsUpstreamAccountPoolUnavailableError(err *types.NewAPIError) bool {
+	if err == nil || types.IsSkipRetryError(err) {
+		return false
+	}
+	lowerMessage := normalizeUpstreamErrorMessage(err)
+	return strings.Contains(lowerMessage, "no available") &&
+		strings.Contains(lowerMessage, "accounts") &&
+		strings.Contains(lowerMessage, "group")
+}
+
 func IsRequestedModelUnavailableError(err *types.NewAPIError) bool {
 	return IsUpstreamModelTemporaryUnavailableError(err)
 }

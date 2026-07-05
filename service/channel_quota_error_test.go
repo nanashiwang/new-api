@@ -95,6 +95,21 @@ func TestShouldRetryChannelError_RequestTooLargeBelowKnownLimitCanReroute(t *tes
 	}
 }
 
+func TestShouldRetryChannelError_CRSAccountPoolUnavailablePaymentRequired(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+
+	err := types.WithOpenAIError(types.OpenAIError{
+		Message: "No available accounts in group Pro",
+		Type:    "upstream_error",
+		Code:    nil,
+	}, http.StatusPaymentRequired)
+
+	if !ShouldRetryChannelError(ctx, err, 1) {
+		t.Fatalf("expected CRS account pool 402 to be retryable")
+	}
+}
+
 func TestIsQuotaRelatedErrorByCode(t *testing.T) {
 	err := types.NewError(errors.New("insufficient"), types.ErrorCodeInsufficientUserQuota)
 	if !IsQuotaRelatedError(err) {
@@ -394,6 +409,75 @@ func TestApplyChannelFailureRetryExclusion_TemporaryModelUnavailableUsesTagGroup
 	}
 	if !slices.Contains(param.ExcludeChannels, 7) || !slices.Contains(param.ExcludeChannels, 8) {
 		t.Fatalf("unexpected excluded channels: %v", param.ExcludeChannels)
+	}
+}
+
+func TestApplyChannelFailureRetryExclusion_CRSAccountPoolUnavailableUsesTagGroup(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+
+	originDB := model.DB
+	originLogDB := model.LOG_DB
+	originMemoryCacheEnabled := common.MemoryCacheEnabled
+	model.DB = db
+	model.LOG_DB = db
+	common.MemoryCacheEnabled = false
+	t.Cleanup(func() {
+		model.DB = originDB
+		model.LOG_DB = originLogDB
+		common.MemoryCacheEnabled = originMemoryCacheEnabled
+	})
+
+	if err := db.AutoMigrate(&model.Channel{}, &model.Ability{}); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+
+	tagA := "crs-ccmx.meta-api.vip - pro"
+	tagB := "crs-other.meta-api.vip - pro"
+	baseURL := "http://192.3.179.236:3000/openai"
+	channels := []model.Channel{
+		{Id: 11, Name: "primary", Status: common.ChannelStatusEnabled, Tag: &tagA, BaseURL: &baseURL},
+		{Id: 12, Name: "same-tag", Status: common.ChannelStatusEnabled, Tag: &tagA, BaseURL: &baseURL},
+		{Id: 13, Name: "other-tag-same-base", Status: common.ChannelStatusEnabled, Tag: &tagB, BaseURL: &baseURL},
+	}
+	if err := db.Create(&channels).Error; err != nil {
+		t.Fatalf("seed channels: %v", err)
+	}
+	abilities := []model.Ability{
+		{Group: "vip", Model: "gpt-5.5", ChannelId: 11, Enabled: true},
+		{Group: "vip", Model: "gpt-5.5", ChannelId: 12, Enabled: true},
+		{Group: "vip", Model: "gpt-5.5", ChannelId: 13, Enabled: true},
+	}
+	if err := db.Create(&abilities).Error; err != nil {
+		t.Fatalf("seed abilities: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	common.SetContextKey(ctx, constant.ContextKeyUsingGroup, "vip")
+	param := &RetryParam{
+		Ctx:        ctx,
+		TokenGroup: "vip",
+		ModelName:  "gpt-5.5",
+	}
+	retryErr := types.WithOpenAIError(types.OpenAIError{
+		Message: "No available accounts in group Pro",
+		Type:    "upstream_error",
+		Code:    nil,
+	}, http.StatusPaymentRequired)
+
+	ApplyChannelFailureRetryExclusion(param, &channels[0], retryErr)
+
+	if len(param.ExcludeChannels) != 2 {
+		t.Fatalf("expected same tag channels to be excluded, got %v", param.ExcludeChannels)
+	}
+	if !slices.Contains(param.ExcludeChannels, 11) || !slices.Contains(param.ExcludeChannels, 12) {
+		t.Fatalf("unexpected excluded channels: %v", param.ExcludeChannels)
+	}
+	if slices.Contains(param.ExcludeChannels, 13) {
+		t.Fatalf("did not expect same base_url with different tag to be excluded by option 1: %v", param.ExcludeChannels)
 	}
 }
 

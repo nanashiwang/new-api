@@ -188,6 +188,7 @@ func IsRetryableSharedUpstreamPoolError(err *types.NewAPIError) bool {
 	}
 	return IsQuotaRelatedError(err) ||
 		IsUpstreamModelTemporaryUnavailableError(err) ||
+		IsUpstreamAccountPoolUnavailableError(err) ||
 		IsUpstreamRateLimitError(err) ||
 		IsCRSMemoryPressureError(err)
 }
