@@ -119,7 +119,7 @@ const InviteCommissionModal = ({ visible, onCancel, t }) => {
           <div className='mt-2'>
             <Text type='tertiary' size='small'>
               {t(
-                '仅按匿名用户汇总已结算充值返佣，不展示被邀请人的真实账号信息。',
+                '仅按匿名用户汇总已结算充值返佣，不展示被邀请人的真实账号信息；数据每天 24 点刷新。',
               )}
             </Text>
           </div>
