@@ -50,6 +50,7 @@ const InvitationCard = ({
   affCode,
   onSaveAffCode,
   handleAffLinkClick,
+  onOpenInviteCommissions,
 }) => {
   const [newCode, setNewCode] = useState('');
   const [savingCode, setSavingCode] = useState(false);
@@ -172,7 +173,19 @@ const InvitationCard = ({
                   </div>
 
                   {/* 邀请人数 */}
-                  <div className='text-center'>
+                  <div
+                    className='text-center cursor-pointer rounded-xl transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-white/60'
+                    role='button'
+                    tabIndex={0}
+                    title={t('查看邀请返佣明细')}
+                    onClick={onOpenInviteCommissions}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        onOpenInviteCommissions?.();
+                      }
+                    }}
+                  >
                     <div
                       className='text-base sm:text-2xl font-bold mb-2'
                       style={{ color: 'white' }}
@@ -225,7 +238,9 @@ const InvitationCard = ({
             className='!rounded-lg mt-2'
             prefix={t('专属邀请码')}
             placeholder={
-              affCode ? `${t('当前')}: ${affCode}` : t('4-32位字母数字，好记好分享')
+              affCode
+                ? `${t('当前')}: ${affCode}`
+                : t('4-32位字母数字，好记好分享')
             }
             suffix={
               <Button

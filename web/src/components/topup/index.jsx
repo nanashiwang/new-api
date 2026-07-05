@@ -36,9 +36,7 @@ import {
   displayAmountToQuota,
   quotaToDisplayAmount,
 } from '../../helpers/quota';
-import {
-  getPaymentCurrencySymbol,
-} from '../../helpers/render';
+import { getPaymentCurrencySymbol } from '../../helpers/render';
 import {
   Button,
   Card,
@@ -53,10 +51,7 @@ import {
 } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { useDebouncedCallback } from 'use-debounce';
-import {
-  Sparkles,
-  BellRing,
-} from 'lucide-react';
+import { Sparkles, BellRing } from 'lucide-react';
 import { IconGift } from '@douyinfe/semi-icons';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
@@ -67,6 +62,7 @@ import TransferModal from './modals/TransferModal';
 import WithdrawalModal from './modals/WithdrawalModal';
 import PaymentConfirmModal from './modals/PaymentConfirmModal';
 import TopupHistoryModal from './modals/TopupHistoryModal';
+import InviteCommissionModal from './modals/InviteCommissionModal';
 import SubscriptionIssuanceModal from '../subscriptions/SubscriptionIssuanceModal';
 
 const { Text, Title } = Typography;
@@ -151,6 +147,7 @@ const TopUp = () => {
   const [affCode, setAffCode] = useState('');
   const [openTransfer, setOpenTransfer] = useState(false);
   const [openWithdrawal, setOpenWithdrawal] = useState(false);
+  const [openInviteCommissions, setOpenInviteCommissions] = useState(false);
   const [withdrawalSubmitting, setWithdrawalSubmitting] = useState(false);
   const [alipayAccount, setAlipayAccount] = useState('');
   const [alipayName, setAlipayName] = useState('');
@@ -829,6 +826,11 @@ const TopUp = () => {
         alipayName={alipayName}
         setAlipayName={setAlipayName}
       />
+      <InviteCommissionModal
+        visible={openInviteCommissions}
+        onCancel={() => setOpenInviteCommissions(false)}
+        t={t}
+      />
       <PaymentConfirmModal
         t={t}
         open={open}
@@ -964,6 +966,7 @@ const TopUp = () => {
             affCode={affCode}
             onSaveAffCode={saveAffCode}
             handleAffLinkClick={handleAffLinkClick}
+            onOpenInviteCommissions={() => setOpenInviteCommissions(true)}
           />
           <Card
             className='!rounded-xl shadow-sm border border-slate-200'

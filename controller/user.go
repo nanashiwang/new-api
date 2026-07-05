@@ -461,6 +461,33 @@ func GetUserInviteRelations(c *gin.Context) {
 	})
 }
 
+func GetSelfInviteRechargeCommissions(c *gin.Context) {
+	id := c.GetInt("id")
+	if id <= 0 {
+		common.ApiError(c, errors.New("用户不存在"))
+		return
+	}
+
+	pageInfo := common.GetPageQuery(c)
+	items, total, summary, err := model.GetUserInviteRechargeCommissions(id, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	inviteesPage := &common.PageInfo{
+		Page:     pageInfo.GetPage(),
+		PageSize: pageInfo.GetPageSize(),
+	}
+	inviteesPage.SetTotal(int(total))
+	inviteesPage.SetItems(items)
+
+	common.ApiSuccess(c, gin.H{
+		"invitees": inviteesPage,
+		"summary":  summary,
+	})
+}
+
 type RebuildAffCountRequest struct {
 	UserID *int `json:"user_id"`
 }

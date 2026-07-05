@@ -11,8 +11,10 @@ import (
 
 func setupUserAffInviteTestDB(t *testing.T) {
 	t.Helper()
-	require.NoError(t, DB.AutoMigrate(&User{}, &Log{}))
+	require.NoError(t, DB.AutoMigrate(&User{}, &Log{}, &InviteCommissionLedger{}, &InviteCommissionDailyCapState{}))
 	require.NoError(t, DB.Exec("DELETE FROM logs").Error)
+	require.NoError(t, DB.Exec("DELETE FROM invite_commission_ledgers").Error)
+	require.NoError(t, DB.Exec("DELETE FROM invite_commission_daily_cap_states").Error)
 	require.NoError(t, DB.Exec("DELETE FROM users").Error)
 }
 
@@ -146,4 +148,59 @@ func TestGenerateUniqueAffCodeRetriesOnCollision(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "unique000001", code)
 	assert.Equal(t, 2, calls)
+}
+
+func TestGetUserInviteRechargeCommissionsAnonymizesAndAggregates(t *testing.T) {
+	setupUserAffInviteTestDB(t)
+
+	inviter := createUserAffInviteTestInviter(t, "commission_inviter", "commission_inviter_aff", common.UserStatusEnabled)
+	invitee1 := &User{Username: "commission_invitee_1", Password: "password123", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "commission_invitee_1_aff", InviterId: inviter.Id}
+	invitee2 := &User{Username: "commission_invitee_2", Password: "password123", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "commission_invitee_2_aff", InviterId: inviter.Id}
+	require.NoError(t, DB.Create(invitee1).Error)
+	require.NoError(t, DB.Create(invitee2).Error)
+	require.NoError(t, DB.Create(&[]InviteCommissionLedger{
+		{
+			InviteeUserId:   invitee1.Id,
+			InviterUserId:   inviter.Id,
+			TopupTradeNo:    "invitee-1-topup-1",
+			BizDate:         "2026-07-05",
+			BaseQuota:       100,
+			CommissionRate:  0.1,
+			CommissionQuota: 10,
+			SettledQuota:    10,
+			Status:          InviteCommissionStatusSettled,
+		},
+		{
+			InviteeUserId:   invitee1.Id,
+			InviterUserId:   inviter.Id,
+			TopupTradeNo:    "invitee-1-topup-2",
+			BizDate:         "2026-07-05",
+			BaseQuota:       200,
+			CommissionRate:  0.1,
+			CommissionQuota: 20,
+			SettledQuota:    20,
+			Status:          InviteCommissionStatusSettled,
+		},
+		{
+			InviteeUserId:   invitee2.Id,
+			InviterUserId:   inviter.Id,
+			TopupTradeNo:    "invitee-2-pending",
+			BizDate:         "2026-07-05",
+			BaseQuota:       300,
+			CommissionRate:  0.1,
+			CommissionQuota: 30,
+			Status:          InviteCommissionStatusPending,
+		},
+	}).Error)
+
+	items, total, summary, err := GetUserInviteRechargeCommissions(inviter.Id, 0, 10)
+
+	require.NoError(t, err)
+	require.Equal(t, int64(2), total)
+	require.Equal(t, 30, summary.RechargeTotalQuota)
+	require.Len(t, items, 2)
+	require.Equal(t, "用户1", items[0].Alias)
+	require.Equal(t, 30, items[0].RechargeCommissionQuota)
+	require.Equal(t, "用户2", items[1].Alias)
+	require.Equal(t, 0, items[1].RechargeCommissionQuota)
 }

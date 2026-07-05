@@ -159,6 +159,15 @@ type InviteIncomeSummary struct {
 	TotalQuota         int `json:"total_quota"`
 }
 
+type InviteRechargeCommissionSummary struct {
+	RechargeTotalQuota int `json:"recharge_total_quota"`
+}
+
+type InviteRechargeCommissionInvitee struct {
+	Alias                   string `json:"alias"`
+	RechargeCommissionQuota int    `json:"recharge_commission_quota"`
+}
+
 func normalizeUserSortOrder(sortOrder string) string {
 	normalizedSortOrder := strings.ToLower(strings.TrimSpace(sortOrder))
 	switch normalizedSortOrder {
@@ -1108,6 +1117,81 @@ func GetUserInviteRelations(userID int, startIdx int, pageSize int) (*User, *Use
 	}
 
 	return user, inviter, invitees, total, summary, nil
+}
+
+func GetUserInviteRechargeCommissions(userID int, startIdx int, pageSize int) ([]*InviteRechargeCommissionInvitee, int64, *InviteRechargeCommissionSummary, error) {
+	if userID <= 0 {
+		return nil, 0, nil, errors.New("id 为空！")
+	}
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	if pageSize <= 0 {
+		pageSize = common.ItemsPerPage
+	}
+
+	query := DB.Unscoped().Model(&User{}).Where("inviter_id = ?", userID)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, nil, err
+	}
+
+	summary := &InviteRechargeCommissionSummary{}
+	if err := DB.Model(&InviteCommissionLedger{}).
+		Select("COALESCE(SUM(settled_quota), 0)").
+		Where("inviter_user_id = ? AND status = ?", userID, InviteCommissionStatusSettled).
+		Scan(&summary.RechargeTotalQuota).Error; err != nil {
+		return nil, 0, nil, err
+	}
+
+	var invitees []*User
+	if err := query.
+		Select("id").
+		Order("id asc").
+		Limit(pageSize).
+		Offset(startIdx).
+		Find(&invitees).Error; err != nil {
+		return nil, 0, nil, err
+	}
+
+	inviteeIDs := make([]int, 0, len(invitees))
+	for _, invitee := range invitees {
+		if invitee != nil && invitee.Id > 0 {
+			inviteeIDs = append(inviteeIDs, invitee.Id)
+		}
+	}
+
+	rechargeByInvitee := map[int]int{}
+	if len(inviteeIDs) > 0 {
+		type inviteeRechargeRow struct {
+			InviteeUserID      int `gorm:"column:invitee_user_id"`
+			RechargeTotalQuota int `gorm:"column:recharge_total_quota"`
+		}
+		var rows []inviteeRechargeRow
+		if err := DB.Model(&InviteCommissionLedger{}).
+			Select("invitee_user_id, COALESCE(SUM(settled_quota), 0) AS recharge_total_quota").
+			Where("inviter_user_id = ? AND status = ? AND invitee_user_id IN ?", userID, InviteCommissionStatusSettled, inviteeIDs).
+			Group("invitee_user_id").
+			Find(&rows).Error; err != nil {
+			return nil, 0, nil, err
+		}
+		for _, row := range rows {
+			rechargeByInvitee[row.InviteeUserID] = row.RechargeTotalQuota
+		}
+	}
+
+	items := make([]*InviteRechargeCommissionInvitee, 0, len(invitees))
+	for index, invitee := range invitees {
+		if invitee == nil {
+			continue
+		}
+		items = append(items, &InviteRechargeCommissionInvitee{
+			Alias:                   fmt.Sprintf("用户%d", startIdx+index+1),
+			RechargeCommissionQuota: rechargeByInvitee[invitee.Id],
+		})
+	}
+
+	return items, total, summary, nil
 }
 
 type RebuildAffCountResult struct {

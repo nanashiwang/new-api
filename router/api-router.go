@@ -108,6 +108,7 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.DELETE("/passkey", controller.PasskeyDelete)
 				selfRoute.GET("/aff", controller.GetAffCode)
 				selfRoute.PUT("/aff", controller.SetAffCode)
+				selfRoute.GET("/invite-recharge-commissions/self", controller.GetSelfInviteRechargeCommissions)
 				selfRoute.GET("/topup/info", controller.GetTopUpInfo)
 				selfRoute.GET("/topup/self", controller.GetUserTopUps)
 				selfRoute.POST("/redeem", middleware.CriticalRateLimit(), controller.Redeem)
