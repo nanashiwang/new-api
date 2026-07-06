@@ -63,6 +63,25 @@ func newResponsesStreamHTTPResponseWithReadError(body string, err error) *http.R
 	return resp
 }
 
+func TestShouldScheduleMissingResponsesCompletedCooldownSkipsClientGone(t *testing.T) {
+	t.Parallel()
+
+	info := &relaycommon.RelayInfo{StreamStatus: relaycommon.NewStreamStatus()}
+	info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, errors.New("context canceled"))
+
+	require.False(t, shouldScheduleMissingResponsesCompletedCooldown(info))
+}
+
+func TestShouldScheduleMissingResponsesCompletedCooldownKeepsUpstreamErrors(t *testing.T) {
+	t.Parallel()
+
+	info := &relaycommon.RelayInfo{StreamStatus: relaycommon.NewStreamStatus()}
+	info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, errors.New("upstream read timeout"))
+
+	require.True(t, shouldScheduleMissingResponsesCompletedCooldown(info))
+	require.True(t, shouldScheduleMissingResponsesCompletedCooldown(nil))
+}
+
 func TestOaiResponsesStreamHandler_FailsWhenMissingCompletedWithoutOutputAfterEOF(t *testing.T) {
 	t.Parallel()
 	setResponsesStreamTestTimeout(t)

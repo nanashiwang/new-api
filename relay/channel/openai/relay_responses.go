@@ -247,7 +247,9 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 		if info != nil && info.StreamStatus != nil {
 			info.StreamStatus.RecordError(reason)
 		}
-		scheduleResponsesStreamCooldown(c, reason)
+		if shouldScheduleMissingResponsesCompletedCooldown(info) {
+			scheduleResponsesStreamCooldown(c, reason)
+		}
 		if info != nil && info.IsChannelTest {
 			return usage, types.NewOpenAIError(errors.New(reason), types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 		}
@@ -379,6 +381,13 @@ func isNonTextResponsesOutput(output dto.ResponsesOutput) bool {
 
 func shouldFailMissingResponsesCompleted(hasEffectiveOutput bool) bool {
 	return !hasEffectiveOutput
+}
+
+func shouldScheduleMissingResponsesCompletedCooldown(info *relaycommon.RelayInfo) bool {
+	if info == nil || info.StreamStatus == nil {
+		return true
+	}
+	return info.StreamStatus.EndReason != relaycommon.StreamEndReasonClientGone
 }
 
 func shouldFailEmptyResponsesCompleted(hasEffectiveOutput bool) bool {
