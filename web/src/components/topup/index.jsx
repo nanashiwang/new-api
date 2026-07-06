@@ -798,7 +798,10 @@ const TopUp = () => {
   const renderAmount = () =>
     `${getPaymentCurrencySymbol()}${Number(amount || 0).toFixed(2)}`;
   return (
-    <div className='w-full max-w-7xl mx-auto relative min-h-screen lg:min-h-0 mt-[60px] px-2'>
+    <div
+      className='w-full max-w-7xl mx-auto relative min-h-screen lg:min-h-0 mt-[60px] px-2'
+      data-onboarding='wallet-management-panel'
+    >
       <TransferModal
         t={t}
         openTransfer={openTransfer}

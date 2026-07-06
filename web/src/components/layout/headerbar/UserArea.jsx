@@ -26,6 +26,7 @@ import {
   IconUserSetting,
   IconCreditCard,
   IconKey,
+  IconHelpCircle,
 } from '@douyinfe/semi-icons';
 import { stringToColor } from '../../../helpers/dashboardFormat';
 import SkeletonWrapper from '../components/SkeletonWrapper';
@@ -52,6 +53,8 @@ const UserArea = ({
   }
 
   if (userState.user) {
+    const showOnboardingEntry = Number(userState.user.role || 0) < 10;
+
     return (
       <div className='relative' ref={dropdownRef}>
         <Dropdown
@@ -101,6 +104,26 @@ const UserArea = ({
                   <span>{t('钱包管理')}</span>
                 </div>
               </Dropdown.Item>
+              {showOnboardingEntry && (
+                <Dropdown.Item
+                  onClick={() => {
+                    window.dispatchEvent(
+                      new Event('newapi:user-onboarding:restart'),
+                    );
+                    navigate('/console');
+                  }}
+                  className='!px-3 !py-1.5 !text-sm !text-semi-color-text-0 hover:!bg-semi-color-fill-1 dark:!text-gray-200 dark:hover:!bg-blue-500 dark:hover:!text-white'
+                  data-onboarding='restart-onboarding-button'
+                >
+                  <div className='flex items-center gap-2'>
+                    <IconHelpCircle
+                      size='small'
+                      className='text-gray-500 dark:text-gray-400'
+                    />
+                    <span>{t('新手引导')}</span>
+                  </div>
+                </Dropdown.Item>
+              )}
               <Dropdown.Item
                 onClick={logout}
                 className='!px-3 !py-1.5 !text-sm !text-semi-color-text-0 hover:!bg-semi-color-fill-1 dark:!text-gray-200 dark:hover:!bg-red-500 dark:hover:!text-white'

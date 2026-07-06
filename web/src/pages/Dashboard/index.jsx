@@ -21,7 +21,7 @@ import React from 'react';
 import Dashboard from '../../components/dashboard';
 
 const Detail = () => (
-  <div className='mt-[60px] px-2'>
+  <div className='mt-[60px] px-2' data-onboarding='console-dashboard-panel'>
     <Dashboard />
   </div>
 );

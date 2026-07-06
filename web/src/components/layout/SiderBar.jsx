@@ -369,6 +369,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
           <span
             className='truncate font-medium text-sm'
             style={{ color: textColor }}
+            data-onboarding={`sidebar-${item.itemKey}`}
           >
             {item.text}
           </span>
@@ -397,6 +398,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
             <span
               className='truncate font-medium text-sm'
               style={{ color: textColor }}
+              data-onboarding={`sidebar-${item.itemKey}`}
             >
               {item.text}
             </span>
@@ -419,6 +421,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
                   <span
                     className='truncate font-medium text-sm'
                     style={{ color: subTextColor }}
+                    data-onboarding={`sidebar-${subItem.itemKey}`}
                   >
                     {subItem.text}
                   </span>
@@ -436,6 +439,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
   return (
     <div
       className='sidebar-container'
+      data-onboarding='console-sidebar'
       style={{
         width: 'var(--sidebar-current-width)',
         minWidth: 'var(--sidebar-current-width)',
@@ -522,7 +526,9 @@ const SiderBar = ({ onNavigate = () => {} }) => {
               {!collapsed && (
                 <div className='sidebar-group-label'>{t('聊天')}</div>
               )}
-              {chatMenuItems.map((item) => renderSubItem(item))}
+              <div data-onboarding='sidebar-chat-section'>
+                {chatMenuItems.map((item) => renderSubItem(item))}
+              </div>
             </div>
           )}
 
@@ -530,7 +536,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
           {hasSectionVisibleModules('console') && (
             <>
               <Divider className='sidebar-divider' />
-              <div>
+              <div data-onboarding='sidebar-console-section'>
                 {!collapsed && (
                   <div className='sidebar-group-label'>{t('控制台')}</div>
                 )}
@@ -543,7 +549,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
           {hasSectionVisibleModules('personal') && (
             <>
               <Divider className='sidebar-divider' />
-              <div>
+              <div data-onboarding='sidebar-personal-section'>
                 {!collapsed && (
                   <div className='sidebar-group-label'>{t('个人中心')}</div>
                 )}

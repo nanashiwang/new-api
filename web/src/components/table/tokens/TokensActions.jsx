@@ -65,10 +65,14 @@ const TokensActions = ({
 
   return (
     <>
-      <div className='flex flex-wrap gap-2 w-full md:w-auto order-2 md:order-1'>
+      <div
+        className='flex flex-wrap gap-2 w-full md:w-auto order-2 md:order-1'
+        data-onboarding='tokens-actions'
+      >
         <Button
           type='primary'
           className='flex-1 md:flex-initial'
+          data-onboarding='create-token-button'
           onClick={() => {
             setEditingToken({
               id: undefined,

@@ -22,7 +22,14 @@ import { Layout } from '@douyinfe/semi-ui';
 import App from '../../App';
 import FooterBar from './Footer';
 import ErrorBoundary from '../common/ErrorBoundary';
-import React, { lazy, Suspense, useContext, useEffect, useMemo, useState } from 'react';
+import React, {
+  lazy,
+  Suspense,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import { useSidebarCollapsed } from '../../hooks/common/useSidebarCollapsed';
 import { useTranslation } from 'react-i18next';
@@ -34,6 +41,7 @@ import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
 import { useLocation } from 'react-router-dom';
 import GlobalTopProgress from '../common/ui/GlobalTopProgress';
+import UserOnboarding from '../onboarding/UserOnboarding';
 const { Sider, Content, Header } = Layout;
 const SiderBar = lazy(() => import('./SiderBar'));
 
@@ -237,6 +245,7 @@ const PageLayout = () => {
             <ErrorBoundary>
               <App />
             </ErrorBoundary>
+            <UserOnboarding />
           </Content>
           {!shouldHideFooter && (
             <Layout.Footer

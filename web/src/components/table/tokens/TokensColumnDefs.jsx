@@ -646,6 +646,7 @@ const renderOperations = (
         <Button
           size='small'
           type='tertiary'
+          data-onboarding='token-chat-action'
           onClick={() => {
             if (chatsArray.length === 0) {
               showError(t('请联系管理员配置聊天链接'));
@@ -662,6 +663,7 @@ const renderOperations = (
             type='tertiary'
             icon={<IconTreeTriangleDown />}
             size='small'
+            data-onboarding='token-chat-dropdown'
           />
         </Dropdown>
       </SplitButtonGroup>
@@ -669,6 +671,7 @@ const renderOperations = (
       <Button
         size='small'
         type='tertiary'
+        data-onboarding='token-test-action'
         onClick={() => openTestModal(record)}
       >
         {t('测试')}

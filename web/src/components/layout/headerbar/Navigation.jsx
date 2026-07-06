@@ -47,6 +47,7 @@ const Navigation = ({
             target='_blank'
             rel='noopener noreferrer'
             className={commonLinkClasses}
+            data-onboarding={`nav-${link.itemKey}`}
           >
             {linkContent}
           </a>
@@ -61,6 +62,7 @@ const Navigation = ({
             target='_blank'
             rel='noopener noreferrer'
             className={commonLinkClasses}
+            data-onboarding={`nav-${link.itemKey}`}
           >
             {linkContent}
           </a>
@@ -76,7 +78,12 @@ const Navigation = ({
       }
 
       return (
-        <Link key={link.itemKey} to={targetPath} className={commonLinkClasses}>
+        <Link
+          key={link.itemKey}
+          to={targetPath}
+          className={commonLinkClasses}
+          data-onboarding={`nav-${link.itemKey}`}
+        >
           {linkContent}
         </Link>
       );
