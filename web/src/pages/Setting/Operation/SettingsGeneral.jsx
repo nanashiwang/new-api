@@ -52,6 +52,7 @@ export default function GeneralSettings(props) {
     'general_setting.payment_currency_symbol': '¥',
     QuotaPerUnit: '',
     RetryTimes: '',
+    ResponsesRequestBodyLimitMB: '',
     USDExchangeRate: '',
     DisplayTokenStatEnabled: false,
     DefaultCollapseSidebar: false,
@@ -206,6 +207,20 @@ export default function GeneralSettings(props) {
                   placeholder={t('失败重试次数')}
                   onChange={handleFieldChange('RetryTimes')}
                   showClear
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  field={'ResponsesRequestBodyLimitMB'}
+                  label={t('对话请求体预检上限')}
+                  min={0}
+                  step={1}
+                  suffix='MiB'
+                  placeholder='20'
+                  extraText={t(
+                    '作用于 /v1/responses、/v1/chat/completions 及兼容路径，0 表示关闭业务预检；仍受全局请求体上限、Nginx 和上游限制影响。',
+                  )}
+                  onChange={handleFieldChange('ResponsesRequestBodyLimitMB')}
                 />
               </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>

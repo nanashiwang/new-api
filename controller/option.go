@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/console_setting"
@@ -279,6 +280,19 @@ func UpdateOption(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": err.Error(),
+			})
+			return
+		}
+	case "ResponsesRequestBodyLimitMB":
+		limitMB, parseErr := strconv.Atoi(strings.TrimSpace(option.Value.(string)))
+		maxRequestBodyMB := constant.MaxRequestBodyMB
+		if maxRequestBodyMB <= 0 {
+			maxRequestBodyMB = 256
+		}
+		if parseErr != nil || limitMB < 0 || limitMB > maxRequestBodyMB {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": fmt.Sprintf("请求体业务预检上限必须是 0-%d 之间的整数，0 表示关闭业务预检", maxRequestBodyMB),
 			})
 			return
 		}
