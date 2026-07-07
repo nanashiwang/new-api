@@ -709,13 +709,21 @@ func RelayTask(c *gin.Context) {
 		task.PrivateData.BillingSource = relayInfo.BillingSource
 		task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
 		task.PrivateData.TokenId = relayInfo.TokenId
+		taskTimeRatio := 0.0
+		if relayInfo.PriceData.TimeRatioInfo.Matched() || relayInfo.PriceData.TimeRatioInfo.EffectiveRatio() != 1 {
+			taskTimeRatio = relayInfo.PriceData.TimeRatioInfo.EffectiveRatio()
+		}
 		task.PrivateData.BillingContext = &model.TaskBillingContext{
-			ModelPrice:      relayInfo.PriceData.ModelPrice,
-			GroupRatio:      relayInfo.PriceData.GroupRatioInfo.GroupRatio,
-			ModelRatio:      relayInfo.PriceData.ModelRatio,
-			OtherRatios:     relayInfo.PriceData.OtherRatios,
-			OriginModelName: relayInfo.OriginModelName,
-			PerCallBilling:  common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName),
+			ModelPrice:         relayInfo.PriceData.ModelPrice,
+			GroupRatio:         relayInfo.PriceData.GroupRatioInfo.GroupRatio,
+			ModelRatio:         relayInfo.PriceData.ModelRatio,
+			TimeRatio:          taskTimeRatio,
+			TimeRatioRuleID:    relayInfo.PriceData.TimeRatioInfo.RuleID,
+			TimeRatioTimezone:  relayInfo.PriceData.TimeRatioInfo.Timezone,
+			TimeRatioMatchedAt: relayInfo.PriceData.TimeRatioInfo.MatchedAt,
+			OtherRatios:        relayInfo.PriceData.OtherRatios,
+			OriginModelName:    relayInfo.OriginModelName,
+			PerCallBilling:     common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName),
 		}
 		task.Quota = result.Quota
 		task.Data = result.TaskData

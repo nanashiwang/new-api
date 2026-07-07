@@ -10,6 +10,13 @@ func quotaConversion(exprOutput float64, snap *BillingSnapshot) float64 {
 	}
 }
 
+func effectiveTimeRatio(snap *BillingSnapshot) float64 {
+	if snap == nil || snap.TimeRatio <= 0 {
+		return 1
+	}
+	return snap.TimeRatio
+}
+
 // ComputeTieredQuota runs the Expr from a frozen BillingSnapshot against
 // actual token counts and returns the settlement result.
 func ComputeTieredQuota(snap *BillingSnapshot, params TokenParams) (TieredResult, error) {
@@ -23,7 +30,7 @@ func ComputeTieredQuotaWithRequest(snap *BillingSnapshot, params TokenParams, re
 	}
 
 	quotaBeforeGroup := quotaConversion(cost, snap)
-	afterGroup := QuotaRound(quotaBeforeGroup * snap.GroupRatio)
+	afterGroup := QuotaRound(quotaBeforeGroup * snap.GroupRatio * effectiveTimeRatio(snap))
 	crossed := trace.MatchedTier != snap.EstimatedTier
 
 	return TieredResult{

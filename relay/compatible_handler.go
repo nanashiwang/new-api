@@ -271,6 +271,7 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 	imageRatio := relayInfo.PriceData.ImageRatio
 	modelRatio := relayInfo.PriceData.ModelRatio
 	groupRatio := relayInfo.PriceData.GroupRatioInfo.GroupRatio
+	timeRatio := relayInfo.PriceData.TimeRatioInfo.EffectiveRatio()
 	modelPrice := relayInfo.PriceData.ModelPrice
 	cachedCreationRatio := relayInfo.PriceData.CacheCreationRatio
 
@@ -286,11 +287,12 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 	dImageRatio := decimal.NewFromFloat(imageRatio)
 	dModelRatio := decimal.NewFromFloat(modelRatio)
 	dGroupRatio := decimal.NewFromFloat(groupRatio)
+	dTimeRatio := decimal.NewFromFloat(timeRatio)
 	dModelPrice := decimal.NewFromFloat(modelPrice)
 	dCachedCreationRatio := decimal.NewFromFloat(cachedCreationRatio)
 	dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
 
-	ratio := dModelRatio.Mul(dGroupRatio)
+	ratio := dModelRatio.Mul(dGroupRatio).Mul(dTimeRatio)
 
 	// Collect tool call usage from context and relayInfo
 	toolUsage := service.ToolCallUsage{
@@ -316,7 +318,7 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 		toolUsage.WebSearchCalls = claudeSearchCalls
 		toolUsage.WebSearchToolName = "web_search"
 	}
-	toolResult := service.ComputeToolCallQuota(toolUsage, groupRatio)
+	toolResult := service.ComputeToolCallQuota(toolUsage, groupRatio*timeRatio)
 	for _, item := range toolResult.Items {
 		extraContent = append(extraContent, fmt.Sprintf("%s 调用 %d 次，花费 %d", item.Name, item.CallCount, item.Quota))
 	}
@@ -358,7 +360,7 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 			if audioInputPrice > 0 {
 				// 重新计算 base tokens
 				baseTokens = baseTokens.Sub(dAudioTokens)
-				audioInputQuota = decimal.NewFromFloat(audioInputPrice).Div(decimal.NewFromInt(1000000)).Mul(dAudioTokens).Mul(dGroupRatio).Mul(dQuotaPerUnit)
+				audioInputQuota = decimal.NewFromFloat(audioInputPrice).Div(decimal.NewFromInt(1000000)).Mul(dAudioTokens).Mul(dGroupRatio).Mul(dTimeRatio).Mul(dQuotaPerUnit)
 				extraContent = append(extraContent, fmt.Sprintf("Audio Input 花费 %s", audioInputQuota.String()))
 			}
 		}
@@ -374,7 +376,7 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 			quotaCalculateDecimal = decimal.NewFromInt(1)
 		}
 	} else {
-		quotaCalculateDecimal = dModelPrice.Mul(dQuotaPerUnit).Mul(dGroupRatio)
+		quotaCalculateDecimal = dModelPrice.Mul(dQuotaPerUnit).Mul(dGroupRatio).Mul(dTimeRatio)
 	}
 	// 添加 audio input 独立计费（Gemini 音频按 token 计价，不属于工具调用）
 	quotaCalculateDecimal = quotaCalculateDecimal.Add(audioInputQuota)
@@ -432,6 +434,9 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 	if strings.HasPrefix(logModel, "gpt-4o-gizmo") {
 		logModel = "gpt-4o-gizmo-*"
 		extraContent = append(extraContent, fmt.Sprintf("模型 %s", modelName))
+	}
+	if timeRatioContent := service.FormatTimeRatioContent(relayInfo.PriceData); timeRatioContent != "" {
+		extraContent = append(extraContent, timeRatioContent)
 	}
 	logContent := strings.Join(extraContent, ", ")
 	other := service.GenerateTextOtherInfo(ctx, relayInfo, modelRatio, groupRatio, completionRatio, cacheTokens, cacheRatio, modelPrice, relayInfo.PriceData.GroupRatioInfo.GroupSpecialRatio)

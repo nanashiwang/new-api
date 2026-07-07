@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -159,7 +160,39 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	appendRequestPath(ctx, relayInfo, other)
 	appendRequestConversionChain(relayInfo, other)
 	appendBillingInfo(relayInfo, other)
+	appendTimeRatioInfo(relayInfo, other)
 	return other
+}
+
+func appendTimeRatioInfo(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
+	if relayInfo == nil || other == nil {
+		return
+	}
+	timeRatioInfo := relayInfo.PriceData.TimeRatioInfo
+	if !timeRatioInfo.Matched() && timeRatioInfo.EffectiveRatio() == 1 {
+		return
+	}
+	other["time_ratio"] = timeRatioInfo.EffectiveRatio()
+	if timeRatioInfo.RuleID != "" {
+		other["time_ratio_rule"] = timeRatioInfo.RuleID
+	}
+	if timeRatioInfo.Timezone != "" {
+		other["time_ratio_timezone"] = timeRatioInfo.Timezone
+	}
+	if timeRatioInfo.MatchedAt != "" {
+		other["time_ratio_matched_at"] = timeRatioInfo.MatchedAt
+	}
+}
+
+func FormatTimeRatioContent(priceData types.PriceData) string {
+	timeRatioInfo := priceData.TimeRatioInfo
+	if !timeRatioInfo.Matched() && timeRatioInfo.EffectiveRatio() == 1 {
+		return ""
+	}
+	if timeRatioInfo.RuleID != "" {
+		return fmt.Sprintf("时间倍率 %.2f（%s）", timeRatioInfo.EffectiveRatio(), timeRatioInfo.RuleID)
+	}
+	return fmt.Sprintf("时间倍率 %.2f", timeRatioInfo.EffectiveRatio())
 }
 
 func appendBillingInfo(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
@@ -297,6 +330,7 @@ func GenerateMjOtherInfo(relayInfo *relaycommon.RelayInfo, priceData types.Price
 		other["user_group_ratio"] = priceData.GroupRatioInfo.GroupSpecialRatio
 	}
 	appendRequestPath(nil, relayInfo, other)
+	appendTimeRatioInfo(relayInfo, other)
 	return other
 }
 
@@ -315,5 +349,11 @@ func InjectTieredBillingInfo(other map[string]interface{}, relayInfo *relaycommo
 	other["expr_b64"] = base64.StdEncoding.EncodeToString([]byte(snap.ExprString))
 	if result != nil {
 		other["matched_tier"] = result.MatchedTier
+	}
+	if snap.TimeRatio > 0 {
+		other["time_ratio"] = snap.TimeRatio
+	}
+	if snap.TimeRatioRuleID != "" {
+		other["time_ratio_rule"] = snap.TimeRatioRuleID
 	}
 }

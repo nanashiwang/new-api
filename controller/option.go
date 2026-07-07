@@ -211,6 +211,15 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "TimeRatioRules":
+		_, err = ratio_setting.ParseTimeRatioRules(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "时间倍率规则设置失败: " + err.Error(),
+			})
+			return
+		}
 	case "ImageRatio":
 		err = ratio_setting.UpdateImageRatioByJSONString(option.Value.(string))
 		if err != nil {

@@ -27,6 +27,7 @@ import ModelRatioNotSetEditor from '../../pages/Setting/Ratio/ModelRationNotSetE
 import UpstreamRatioSync from '../../pages/Setting/Ratio/UpstreamRatioSync';
 import ToolPriceSettings from '../../pages/Setting/Ratio/ToolPriceSettings';
 import ModelPermissionSettings from '../../pages/Setting/Ratio/ModelPermissionSettings';
+import TimeRatioSettings from '../../pages/Setting/Ratio/TimeRatioSettings';
 
 import { API, showError, toBoolean } from '../../helpers';
 
@@ -42,6 +43,7 @@ const RatioSetting = () => {
     CompletionRatioMeta: '',
     GroupRatio: '',
     GroupGroupRatio: '',
+    TimeRatioRules: '',
     ImageRatio: '',
     AudioRatio: '',
     AudioCompletionRatio: '',
@@ -116,6 +118,9 @@ const RatioSetting = () => {
           </Tabs.TabPane>
           <Tabs.TabPane tab={t('工具调用定价')} itemKey='tool_price'>
             <ToolPriceSettings options={inputs} />
+          </Tabs.TabPane>
+          <Tabs.TabPane tab={t('时间倍率')} itemKey='time_ratio'>
+            <TimeRatioSettings options={inputs} refresh={onRefresh} />
           </Tabs.TabPane>
         </Tabs>
       </Card>

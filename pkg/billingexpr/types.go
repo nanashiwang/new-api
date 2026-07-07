@@ -49,6 +49,8 @@ type BillingSnapshot struct {
 	EstimatedTier             string  `json:"estimated_tier"`
 	QuotaPerUnit              float64 `json:"quota_per_unit"`
 	ExprVersion               int     `json:"expr_version"`
+	TimeRatio                 float64 `json:"time_ratio,omitempty"`
+	TimeRatioRuleID           string  `json:"time_ratio_rule_id,omitempty"`
 }
 
 // TieredResult holds everything needed after running tiered settlement.

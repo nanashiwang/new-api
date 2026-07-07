@@ -35,6 +35,9 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 			}
 		}
 	}
+	if timeRatioContent := FormatTimeRatioContent(info.PriceData); timeRatioContent != "" {
+		logContent = fmt.Sprintf("%s，%s", logContent, timeRatioContent)
+	}
 	other := make(map[string]interface{})
 	other["request_path"] = c.Request.URL.Path
 	other["model_price"] = info.PriceData.ModelPrice
@@ -42,6 +45,7 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	if info.PriceData.GroupRatioInfo.HasSpecialRatio {
 		other["user_group_ratio"] = info.PriceData.GroupRatioInfo.GroupSpecialRatio
 	}
+	appendTimeRatioInfo(info, other)
 	if info.IsModelMapped {
 		other["is_model_mapped"] = true
 		other["upstream_model_name"] = info.UpstreamModelName
@@ -112,6 +116,18 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 	if bc := task.PrivateData.BillingContext; bc != nil {
 		other["model_price"] = bc.ModelPrice
 		other["group_ratio"] = bc.GroupRatio
+		if bc.TimeRatioRuleID != "" || (bc.TimeRatio > 0 && bc.TimeRatio != 1) {
+			other["time_ratio"] = bc.TimeRatio
+		}
+		if bc.TimeRatioRuleID != "" {
+			other["time_ratio_rule"] = bc.TimeRatioRuleID
+		}
+		if bc.TimeRatioTimezone != "" {
+			other["time_ratio_timezone"] = bc.TimeRatioTimezone
+		}
+		if bc.TimeRatioMatchedAt != "" {
+			other["time_ratio_matched_at"] = bc.TimeRatioMatchedAt
+		}
 		if len(bc.OtherRatios) > 0 {
 			for k, v := range bc.OtherRatios {
 				other[k] = v
@@ -280,10 +296,14 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 	} else {
 		finalGroupRatio = groupRatio
 	}
+	timeRatio := 1.0
+	if bc := task.PrivateData.BillingContext; bc != nil && bc.TimeRatio > 0 {
+		timeRatio = bc.TimeRatio
+	}
 
-	// 计算实际应扣费额度: totalTokens * modelRatio * groupRatio
-	actualQuota := int(float64(totalTokens) * modelRatio * finalGroupRatio)
+	// 计算实际应扣费额度: totalTokens * modelRatio * groupRatio * timeRatio
+	actualQuota := int(float64(totalTokens) * modelRatio * finalGroupRatio * timeRatio)
 
-	reason := fmt.Sprintf("token重算：tokens=%d, modelRatio=%.2f, groupRatio=%.2f", totalTokens, modelRatio, finalGroupRatio)
+	reason := fmt.Sprintf("token重算：tokens=%d, modelRatio=%.2f, groupRatio=%.2f, timeRatio=%.2f", totalTokens, modelRatio, finalGroupRatio, timeRatio)
 	RecalculateTaskQuota(ctx, task, actualQuota, reason)
 }
