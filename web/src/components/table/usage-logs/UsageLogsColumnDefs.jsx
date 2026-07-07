@@ -31,6 +31,7 @@ import {
   renderQuota,
   stringToColor,
   getLogOther,
+  formatTimeRatioLogSummary,
   renderModelTag,
   renderModelPriceSimple,
   renderTieredModelPriceSimple,
@@ -183,11 +184,7 @@ function renderIsStream(bool, t, streamStatus) {
                 userSelect: 'none',
               }}
             >
-              <CircleAlert
-                size={14}
-                strokeWidth={2.5}
-                color='currentColor'
-              />
+              <CircleAlert size={14} strokeWidth={2.5} color='currentColor' />
             </span>
           </Tooltip>
         )}
@@ -315,9 +312,7 @@ function renderModelName(record, copyText, t) {
             copyText(event, record.model_name).then(() => {});
           },
           suffixIcon: (
-            <Route
-              style={{ width: '0.9em', height: '0.9em', opacity: 0.75 }}
-            />
+            <Route style={{ width: '0.9em', height: '0.9em', opacity: 0.75 }} />
           ),
         })}
       </Popover>
@@ -424,6 +419,11 @@ function getUsageLogDetailSummary(record, text, billingDisplayMode, t) {
     return null;
   }
 
+  const timeRatioText = formatTimeRatioLogSummary(other, t);
+  const timeRatioSegment = timeRatioText
+    ? { text: timeRatioText, tone: 'secondary' }
+    : null;
+
   if (
     other?.violation_fee === true ||
     Boolean(other?.violation_fee_code) ||
@@ -438,6 +438,7 @@ function getUsageLogDetailSummary(record, text, billingDisplayMode, t) {
     return {
       segments: [
         groupText ? { text: groupText, tone: 'primary' } : null,
+        timeRatioSegment,
         { text: t('违规扣费'), tone: 'primary' },
         {
           text: `${t('扣费')}：${renderQuota(feeQuota, 6)}`,
@@ -448,7 +449,11 @@ function getUsageLogDetailSummary(record, text, billingDisplayMode, t) {
     };
   }
 
-  const summaryOpts = { ...other, displayMode: billingDisplayMode, outputMode: 'segments' };
+  const summaryOpts = {
+    ...other,
+    displayMode: billingDisplayMode,
+    outputMode: 'segments',
+  };
   const imageGenerationSegment =
     other?.image_generation_call === true
       ? { text: t('图片生成工具'), tone: 'primary' }
@@ -458,6 +463,7 @@ function getUsageLogDetailSummary(record, text, billingDisplayMode, t) {
     return {
       segments: [
         ...renderTieredModelPriceSimple(summaryOpts),
+        timeRatioSegment,
         imageGenerationSegment,
       ].filter(Boolean),
     };
@@ -468,6 +474,7 @@ function getUsageLogDetailSummary(record, text, billingDisplayMode, t) {
       ...(other?.claude
         ? renderModelPriceSimple({ ...summaryOpts, provider: 'claude' })
         : renderModelPriceSimple({ ...summaryOpts, provider: 'openai' })),
+      timeRatioSegment,
       imageGenerationSegment,
     ].filter(Boolean),
   };

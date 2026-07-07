@@ -235,6 +235,7 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.PUT("/", controller.UpdateOption)
 			optionRoute.GET("/channel_affinity_cache", controller.GetChannelAffinityCacheStats)
 			optionRoute.DELETE("/channel_affinity_cache", controller.ClearChannelAffinityCache)
+			optionRoute.GET("/time_ratio_preview", controller.GetTimeRatioPreview)
 			optionRoute.POST("/rest_model_ratio", controller.ResetModelRatio)
 			optionRoute.GET("/model_permissions", controller.ListModelPermissions)
 			optionRoute.POST("/model_permissions", controller.CreateModelPermission)

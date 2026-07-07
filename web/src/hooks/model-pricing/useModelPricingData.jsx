@@ -27,9 +27,7 @@ import { getQuotaPerUnit } from '../../helpers/quota';
 
 const normalizeSubscriptionPlans = (items) => {
   if (!Array.isArray(items)) return [];
-  return items
-    .map((item) => item?.plan || item)
-    .filter(Boolean);
+  return items.map((item) => item?.plan || item).filter(Boolean);
 };
 
 const pickBestValuePlan = (plans, quotaPerUnit, usdExchangeRate) => {
@@ -39,7 +37,11 @@ const pickBestValuePlan = (plans, quotaPerUnit, usdExchangeRate) => {
   let bestRate = Infinity;
 
   for (const plan of plans) {
-    const rate = computePackageEffectiveRate(plan, quotaPerUnit, usdExchangeRate);
+    const rate = computePackageEffectiveRate(
+      plan,
+      quotaPerUnit,
+      usdExchangeRate,
+    );
     if (rate != null && rate < bestRate) {
       bestRate = rate;
       bestPlan = plan;
@@ -59,11 +61,21 @@ const computePackageEffectiveRate = (plan, quotaPerUnit, usdExchangeRate) => {
   // 套餐时长（秒）
   let durationSeconds = 0;
   switch (plan.duration_unit) {
-    case 'year':  durationSeconds = plan.duration_value * 365 * 86400; break;
-    case 'month': durationSeconds = plan.duration_value * 30 * 86400; break;
-    case 'day':   durationSeconds = plan.duration_value * 86400; break;
-    case 'hour':  durationSeconds = plan.duration_value * 3600; break;
-    case 'custom': durationSeconds = plan.custom_seconds || 0; break;
+    case 'year':
+      durationSeconds = plan.duration_value * 365 * 86400;
+      break;
+    case 'month':
+      durationSeconds = plan.duration_value * 30 * 86400;
+      break;
+    case 'day':
+      durationSeconds = plan.duration_value * 86400;
+      break;
+    case 'hour':
+      durationSeconds = plan.duration_value * 3600;
+      break;
+    case 'custom':
+      durationSeconds = plan.custom_seconds || 0;
+      break;
   }
 
   let totalQuotaUSD;
@@ -72,13 +84,26 @@ const computePackageEffectiveRate = (plan, quotaPerUnit, usdExchangeRate) => {
   } else {
     let resetSeconds;
     switch (plan.quota_reset_period) {
-      case 'daily':   resetSeconds = 86400; break;
-      case 'weekly':  resetSeconds = 7 * 86400; break;
-      case 'monthly': resetSeconds = 30 * 86400; break;
-      case 'custom':  resetSeconds = plan.quota_reset_custom_seconds || durationSeconds; break;
-      default:        resetSeconds = durationSeconds; break;
+      case 'daily':
+        resetSeconds = 86400;
+        break;
+      case 'weekly':
+        resetSeconds = 7 * 86400;
+        break;
+      case 'monthly':
+        resetSeconds = 30 * 86400;
+        break;
+      case 'custom':
+        resetSeconds = plan.quota_reset_custom_seconds || durationSeconds;
+        break;
+      default:
+        resetSeconds = durationSeconds;
+        break;
     }
-    const numPeriods = resetSeconds > 0 ? Math.max(1, Math.floor(durationSeconds / resetSeconds)) : 1;
+    const numPeriods =
+      resetSeconds > 0
+        ? Math.max(1, Math.floor(durationSeconds / resetSeconds))
+        : 1;
     totalQuotaUSD = quotaPerResetUSD * numPeriods;
   }
 
@@ -117,6 +142,8 @@ export const useModelPricingData = () => {
   const [vendorsMap, setVendorsMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [groupRatio, setGroupRatio] = useState({});
+  const [timeRatioMap, setTimeRatioMap] = useState({});
+  const [timeRatioAt, setTimeRatioAt] = useState('');
   const [usableGroup, setUsableGroup] = useState({});
   const [endpointMap, setEndpointMap] = useState({});
   const [autoGroups, setAutoGroups] = useState([]);
@@ -154,14 +181,15 @@ export const useModelPricingData = () => {
 
   // 可用套餐（过滤掉无限额度的）
   const availablePlans = useMemo(
-    () =>
-      subscriptionPlans.filter((p) => Number(p?.total_amount || 0) > 0),
+    () => subscriptionPlans.filter((p) => Number(p?.total_amount || 0) > 0),
     [subscriptionPlans],
   );
 
   // 当前选中的套餐
   const selectedPlan = useMemo(
-    () => availablePlans.find((p) => Number(p.id) === Number(selectedPlanId)) || null,
+    () =>
+      availablePlans.find((p) => Number(p.id) === Number(selectedPlanId)) ||
+      null,
     [availablePlans, selectedPlanId],
   );
 
@@ -201,12 +229,21 @@ export const useModelPricingData = () => {
     if (selectedPlanId != null) {
       setSelectedPlanId(null);
     }
-  }, [subscriptionPlansLoaded, availablePlans, priceConvertMode, selectedPlanId]);
+  }, [
+    subscriptionPlansLoaded,
+    availablePlans,
+    priceConvertMode,
+    selectedPlanId,
+  ]);
 
   // 套餐实际汇率（CNY/USD）
   const packageEffectiveRate = useMemo(() => {
     const quotaPerUnit = getQuotaPerUnit();
-    return computePackageEffectiveRate(selectedPlan, quotaPerUnit, usdExchangeRate);
+    return computePackageEffectiveRate(
+      selectedPlan,
+      quotaPerUnit,
+      usdExchangeRate,
+    );
   }, [selectedPlan, usdExchangeRate]);
 
   const filteredModels = useMemo(() => {
@@ -362,9 +399,13 @@ export const useModelPricingData = () => {
       usable_group,
       supported_endpoint,
       auto_groups,
+      time_ratio,
+      time_ratio_at,
     } = res.data;
     if (success) {
       setGroupRatio(group_ratio);
+      setTimeRatioMap(time_ratio || {});
+      setTimeRatioAt(time_ratio_at || '');
       setUsableGroup(usable_group);
       setSelectedGroup('all');
       // 构建供应商 Map 方便查找
@@ -516,6 +557,8 @@ export const useModelPricingData = () => {
     models,
     loading,
     groupRatio,
+    timeRatioMap,
+    timeRatioAt,
     usableGroup,
     endpointMap,
     autoGroups,

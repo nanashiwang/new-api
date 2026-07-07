@@ -31,3 +31,48 @@ export function getLogOther(otherStr) {
     return null;
   }
 }
+
+function formatRatioValue(value) {
+  const ratio = Number(value);
+  if (!Number.isFinite(ratio) || ratio <= 0) {
+    return '1';
+  }
+  return ratio.toFixed(4).replace(/\.?0+$/, '');
+}
+
+export function formatTimeRatioLogDetail(other, t = (value) => value) {
+  if (!other || typeof other !== 'object') {
+    return '';
+  }
+  const ratio = Number(other.time_ratio);
+  const hasRule = Boolean(other.time_ratio_rule);
+  if ((!Number.isFinite(ratio) || ratio === 1) && !hasRule) {
+    return '';
+  }
+
+  const parts = [
+    `${t('当前时间倍率')}：${formatRatioValue(ratio)}x`,
+    hasRule ? `${t('命中规则')}：${other.time_ratio_rule}` : '',
+    other.time_ratio_timezone
+      ? `${t('规则时区')}：${other.time_ratio_timezone}`
+      : '',
+    other.time_ratio_matched_at
+      ? `${t('匹配时间')}：${other.time_ratio_matched_at}`
+      : '',
+  ].filter(Boolean);
+
+  return parts.join('，');
+}
+
+export function formatTimeRatioLogSummary(other, t = (value) => value) {
+  if (!other || typeof other !== 'object') {
+    return '';
+  }
+  const ratio = Number(other.time_ratio);
+  const hasRule = Boolean(other.time_ratio_rule);
+  if ((!Number.isFinite(ratio) || ratio === 1) && !hasRule) {
+    return '';
+  }
+  const rule = hasRule ? ` · ${other.time_ratio_rule}` : '';
+  return `${t('时间倍率')} ${formatRatioValue(ratio)}x${rule}`;
+}

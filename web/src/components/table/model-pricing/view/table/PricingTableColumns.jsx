@@ -22,6 +22,7 @@ import { Tag, Space, Tooltip } from '@douyinfe/semi-ui';
 import { IconHelpCircle } from '@douyinfe/semi-icons';
 import {
   calculateModelPrice,
+  formatTimeRatioValue,
   formatPriceInfo,
   getLobeHubIcon,
   renderModelTag,
@@ -105,6 +106,7 @@ export const getPricingTableColumns = ({
   t,
   selectedGroup,
   groupRatio,
+  timeRatioMap,
   copyText,
   setModalImageUrl,
   setIsModalOpenurl,
@@ -123,6 +125,7 @@ export const getPricingTableColumns = ({
         record,
         selectedGroup,
         groupRatio,
+        timeRatioMap,
         tokenUnit,
         displayPrice,
         currency,
@@ -220,6 +223,10 @@ export const getPricingTableColumns = ({
           </div>
           <div className='text-gray-700'>
             {t('分组倍率')}：{priceData?.usedGroupRatio ?? '-'}
+          </div>
+          <div className='text-gray-700'>
+            {t('时间倍率')}：
+            {formatTimeRatioValue(priceData?.timeRatioInfo?.ratio)}x
           </div>
         </div>
       );

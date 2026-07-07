@@ -39,6 +39,7 @@ import {
   calculateModelPrice,
   formatPriceInfo,
   formatDynamicPriceSummary,
+  formatTimeRatioValue,
   getLobeHubIcon,
 } from '../../../../../helpers';
 import PricingCardSkeleton from './PricingCardSkeleton';
@@ -64,6 +65,7 @@ const PricingCardView = ({
   setCurrentPage,
   selectedGroup,
   groupRatio,
+  timeRatioMap,
   copyText,
   setModalImageUrl,
   setIsModalOpenurl,
@@ -245,6 +247,7 @@ const PricingCardView = ({
             record: model,
             selectedGroup,
             groupRatio,
+            timeRatioMap,
             tokenUnit,
             displayPrice,
             currency,
@@ -268,11 +271,14 @@ const PricingCardView = ({
                         {model.model_name}
                       </h3>
                       <div className='flex flex-col gap-1 text-xs mt-1'>
-                        {priceData.isDynamicPricing ? (
-                          formatDynamicPriceSummary(priceData.billingExpr, t, priceData.usedGroupRatio)
-                        ) : (
-                          formatPriceInfo(priceData, t, siteDisplayType)
-                        )}
+                        {priceData.isDynamicPricing
+                          ? formatDynamicPriceSummary(
+                              priceData.billingExpr,
+                              t,
+                              priceData.usedGroupRatio,
+                              priceData.timeRatioInfo,
+                            )
+                          : formatPriceInfo(priceData, t, siteDisplayType)}
                       </div>
                     </div>
                   </div>
@@ -339,7 +345,7 @@ const PricingCardView = ({
                           />
                         </Tooltip>
                       </div>
-                      <div className='grid grid-cols-3 gap-2 text-xs text-gray-600'>
+                      <div className='grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs text-gray-600'>
                         <div>
                           {t('模型')}:{' '}
                           {model.quota_type === 0 ? model.model_ratio : t('无')}
@@ -352,6 +358,13 @@ const PricingCardView = ({
                         </div>
                         <div>
                           {t('分组')}: {priceData?.usedGroupRatio ?? '-'}
+                        </div>
+                        <div>
+                          {t('时间')}:{' '}
+                          {formatTimeRatioValue(
+                            priceData?.timeRatioInfo?.ratio,
+                          )}
+                          x
                         </div>
                       </div>
                     </div>

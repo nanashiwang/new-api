@@ -17,11 +17,32 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useRef, useState } from 'react';
-import { Button, Card, Form, Typography } from '@douyinfe/semi-ui';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import {
+  Button,
+  Card,
+  Descriptions,
+  Form,
+  Select,
+  Space,
+  Tag,
+  Typography,
+} from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 
-import { API, showError, showSuccess, verifyJSON } from '../../../helpers';
+import {
+  API,
+  formatTimeRatioValue,
+  showError,
+  showSuccess,
+  verifyJSON,
+} from '../../../helpers';
 
 const { Paragraph, Text } = Typography;
 
@@ -51,17 +72,98 @@ const DEFAULT_EXAMPLE = `[
   }
 ]`;
 
+const parseJSONObject = (raw) => {
+  try {
+    const parsed = JSON.parse(raw || '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed
+      : {};
+  } catch {
+    return {};
+  }
+};
+
+const parseRules = (raw) => {
+  try {
+    const parsed = JSON.parse(raw || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
 export default function TimeRatioSettings({ options, refresh }) {
   const { t } = useTranslation();
   const formRef = useRef();
   const [loading, setLoading] = useState(false);
   const [rules, setRules] = useState('[]');
+  const [previewModel, setPreviewModel] = useState('');
+  const [previewGroup, setPreviewGroup] = useState('default');
+  const [previewUserGroup, setPreviewUserGroup] = useState('');
+  const [preview, setPreview] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
+  const modelOptions = useMemo(() => {
+    const candidates = new Set();
+    [
+      'ModelRatio',
+      'ModelPrice',
+      'CompletionRatio',
+      'CacheRatio',
+      'CreateCacheRatio',
+      'ImageRatio',
+      'AudioRatio',
+      'AudioCompletionRatio',
+    ].forEach((key) => {
+      Object.keys(parseJSONObject(options?.[key])).forEach((model) =>
+        candidates.add(model),
+      );
+    });
+    parseRules(rules).forEach((rule) => {
+      (rule?.models || []).forEach((model) => {
+        if (model && model !== '*') candidates.add(model);
+      });
+    });
+    return Array.from(candidates)
+      .sort()
+      .map((model) => ({ label: model, value: model }));
+  }, [options, rules]);
+
+  const groupOptions = useMemo(() => {
+    const candidates = new Set(
+      Object.keys(parseJSONObject(options?.GroupRatio)),
+    );
+    parseRules(rules).forEach((rule) => {
+      (rule?.groups || []).forEach((group) => {
+        if (group && group !== '*') candidates.add(group);
+      });
+      (rule?.user_groups || []).forEach((group) => {
+        if (group && group !== '*') candidates.add(group);
+      });
+    });
+    return Array.from(candidates)
+      .sort()
+      .map((group) => ({ label: group, value: group }));
+  }, [options, rules]);
 
   useEffect(() => {
     const nextRules = options?.TimeRatioRules || '[]';
     setRules(nextRules);
     formRef.current?.setValues({ TimeRatioRules: nextRules });
   }, [options]);
+
+  useEffect(() => {
+    if (!previewModel && modelOptions.length > 0) {
+      setPreviewModel(modelOptions[0].value);
+    }
+    if (
+      previewGroup === 'default' &&
+      groupOptions.length > 0 &&
+      !groupOptions.some((item) => item.value === 'default')
+    ) {
+      setPreviewGroup(groupOptions[0].value);
+    }
+  }, [modelOptions, groupOptions, previewModel, previewGroup]);
 
   const validateRules = (value) => {
     const raw = value && value.trim() ? value : '[]';
@@ -103,6 +205,82 @@ export default function TimeRatioSettings({ options, refresh }) {
     }
   };
 
+  const loadPreview = useCallback(
+    async (
+      model = previewModel,
+      group = previewGroup,
+      userGroup = previewUserGroup,
+    ) => {
+      const normalizedModel = String(model || '').trim();
+      const normalizedGroup = String(group || '').trim();
+      const normalizedUserGroup = String(userGroup || '').trim();
+      if (!normalizedModel || !normalizedGroup) {
+        setPreview(null);
+        return;
+      }
+
+      setPreviewLoading(true);
+      try {
+        const params = new URLSearchParams({
+          model: normalizedModel,
+          group: normalizedGroup,
+          user_group: normalizedUserGroup,
+        });
+        const res = await API.get(
+          `/api/option/time_ratio_preview?${params.toString()}`,
+        );
+        if (!res.data.success) {
+          showError(res.data.message || t('预览失败'));
+          return;
+        }
+        setPreview(res.data.data || null);
+      } catch (error) {
+        showError(error?.message || t('预览失败'));
+      } finally {
+        setPreviewLoading(false);
+      }
+    },
+    [previewModel, previewGroup, previewUserGroup, t],
+  );
+
+  useEffect(() => {
+    if (!previewModel || !previewGroup) {
+      setPreview(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      loadPreview(previewModel, previewGroup, previewUserGroup);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [previewModel, previewGroup, previewUserGroup, loadPreview]);
+
+  const previewRows = preview
+    ? [
+        { key: t('模型'), value: preview.model || '-' },
+        { key: t('使用分组'), value: preview.group || '-' },
+        { key: t('用户分组'), value: preview.user_group || t('未指定') },
+        {
+          key: t('当前时间倍率'),
+          value: (
+            <Tag color={preview.matched ? 'orange' : 'white'} shape='circle'>
+              {formatTimeRatioValue(preview.ratio)}x
+            </Tag>
+          ),
+        },
+        {
+          key: t('命中规则'),
+          value: preview.matched
+            ? preview.rule_id || t('未命名规则')
+            : t('未命中，使用 1x'),
+        },
+        { key: t('规则时区'), value: preview.timezone || '-' },
+        {
+          key: t('匹配时间'),
+          value: preview.matched_at || preview.checked_at || '-',
+        },
+      ]
+    : [];
+
   return (
     <Card>
       <Paragraph>
@@ -117,6 +295,72 @@ export default function TimeRatioSettings({ options, refresh }) {
           )}
         </Text>
       </Paragraph>
+      <Card
+        title={t('当前规则预览')}
+        bordered={false}
+        style={{ marginBottom: 16, background: 'var(--semi-color-fill-0)' }}
+      >
+        <Paragraph>
+          <Text type='tertiary'>
+            {t(
+              '选择模型和使用分组后，会按当前服务器时间和已保存规则展示实际命中的时间倍率规则。',
+            )}
+          </Text>
+        </Paragraph>
+        <Space wrap align='end' spacing={12} style={{ marginBottom: 12 }}>
+          <div>
+            <Text strong>{t('模型')}</Text>
+            <Select
+              allowCreate
+              filter
+              showClear
+              value={previewModel}
+              optionList={modelOptions}
+              placeholder={t('选择或输入模型名')}
+              style={{ width: 260, marginTop: 6 }}
+              onChange={(value) => setPreviewModel(String(value || ''))}
+            />
+          </div>
+          <div>
+            <Text strong>{t('使用分组')}</Text>
+            <Select
+              allowCreate
+              filter
+              showClear
+              value={previewGroup}
+              optionList={groupOptions}
+              placeholder={t('选择或输入分组')}
+              style={{ width: 180, marginTop: 6 }}
+              onChange={(value) => setPreviewGroup(String(value || ''))}
+            />
+          </div>
+          <div>
+            <Text strong>{t('用户分组')}</Text>
+            <Select
+              allowCreate
+              filter
+              showClear
+              value={previewUserGroup}
+              optionList={groupOptions}
+              placeholder={t('可选')}
+              style={{ width: 180, marginTop: 6 }}
+              onChange={(value) => setPreviewUserGroup(String(value || ''))}
+            />
+          </div>
+          <Button
+            loading={previewLoading}
+            disabled={!previewModel || !previewGroup}
+            onClick={() => loadPreview()}
+          >
+            {t('刷新预览')}
+          </Button>
+        </Space>
+        {previewRows.length > 0 ? (
+          <Descriptions data={previewRows} />
+        ) : (
+          <Text type='tertiary'>{t('请先选择模型和使用分组')}</Text>
+        )}
+      </Card>
       <Form ref={formRef} values={{ TimeRatioRules: rules }}>
         <Form.TextArea
           field='TimeRatioRules'

@@ -631,12 +631,54 @@ export const selectFilter = (input, option) => {
   return valueText.includes(keyword) || labelText.includes(keyword);
 };
 
+export const normalizePricingTimeRatioInfo = (info) => {
+  const ratio = Number(info?.ratio);
+  return {
+    ...(info || {}),
+    ratio: Number.isFinite(ratio) && ratio > 0 ? ratio : 1,
+    matched: Boolean(info?.matched),
+  };
+};
+
+export const formatTimeRatioValue = (ratio) => {
+  const parsed = Number(ratio);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return '1';
+  }
+  return parsed.toFixed(4).replace(/\.?0+$/, '');
+};
+
+export const shouldShowPricingTimeRatio = (info) => {
+  const normalized = normalizePricingTimeRatioInfo(info);
+  return normalized.matched || normalized.ratio !== 1;
+};
+
+const getTimeRatioInfoFromMap = (timeRatioMap, modelName, group) => {
+  return normalizePricingTimeRatioInfo(timeRatioMap?.[modelName]?.[group]);
+};
+
+const appendTimeRatioItem = (items, priceData, t) => {
+  if (!shouldShowPricingTimeRatio(priceData?.timeRatioInfo)) {
+    return items;
+  }
+  return [
+    ...items,
+    {
+      key: 'time-ratio',
+      label: t('当前时间倍率'),
+      value: formatTimeRatioValue(priceData.timeRatioInfo.ratio),
+      suffix: 'x',
+    },
+  ];
+};
+
 // -------------------------------
 // 模型定价计算工具函数
 export const calculateModelPrice = ({
   record,
   selectedGroup,
   groupRatio,
+  timeRatioMap,
   tokenUnit,
   displayPrice,
   currency,
@@ -646,20 +688,32 @@ export const calculateModelPrice = ({
   // 1. 选择实际使用的分组
   let usedGroup = selectedGroup;
   let usedGroupRatio = groupRatio[selectedGroup];
+  let usedTimeRatioInfo = getTimeRatioInfoFromMap(
+    timeRatioMap,
+    record.model_name,
+    usedGroup,
+  );
 
   if (selectedGroup === 'all' || usedGroupRatio === undefined) {
-    // 在模型可用分组中选择倍率最小的分组，若无则使用 1
-    let minRatio = Number.POSITIVE_INFINITY;
+    // 在模型可用分组中选择当前实际计费倍率最低的分组。
+    let minEffectiveRatio = Number.POSITIVE_INFINITY;
     if (
       Array.isArray(record.enable_groups) &&
       record.enable_groups.length > 0
     ) {
       record.enable_groups.forEach((g) => {
         const r = groupRatio[g];
-        if (r !== undefined && r < minRatio) {
-          minRatio = r;
+        const timeRatioInfo = getTimeRatioInfoFromMap(
+          timeRatioMap,
+          record.model_name,
+          g,
+        );
+        const effectiveRatio = r * timeRatioInfo.ratio;
+        if (r !== undefined && effectiveRatio < minEffectiveRatio) {
+          minEffectiveRatio = effectiveRatio;
           usedGroup = g;
           usedGroupRatio = r;
+          usedTimeRatioInfo = timeRatioInfo;
         }
       });
     }
@@ -667,8 +721,15 @@ export const calculateModelPrice = ({
     // 如果找不到合适分组倍率，回退为 1
     if (usedGroupRatio === undefined) {
       usedGroupRatio = 1;
+      usedTimeRatioInfo = getTimeRatioInfoFromMap(
+        timeRatioMap,
+        record.model_name,
+        usedGroup,
+      );
     }
   }
+  const timeRatio = usedTimeRatioInfo.ratio;
+  const effectiveBillingRatio = usedGroupRatio * timeRatio;
 
   // 2. 动态计费（tiered_expr）
   if (record.billing_mode === 'tiered_expr' && record.billing_expr) {
@@ -677,6 +738,9 @@ export const calculateModelPrice = ({
       billingExpr: record.billing_expr,
       usedGroup,
       usedGroupRatio,
+      timeRatio,
+      timeRatioInfo: usedTimeRatioInfo,
+      effectiveBillingRatio,
     };
   }
 
@@ -684,7 +748,7 @@ export const calculateModelPrice = ({
   if (record.quota_type === 0) {
     // 按量计费
     const isTokensDisplay = quotaDisplayType === 'TOKENS';
-    const inputRatioPriceUSD = record.model_ratio * 2 * usedGroupRatio;
+    const inputRatioPriceUSD = record.model_ratio * 2 * effectiveBillingRatio;
     const unitDivisor = tokenUnit === 'K' ? 1000 : 1;
     const unitLabel = tokenUnit === 'K' ? 'K' : 'M';
     const hasRatioValue = (value) =>
@@ -709,6 +773,9 @@ export const calculateModelPrice = ({
         isTokensDisplay: true,
         usedGroup,
         usedGroupRatio,
+        timeRatio,
+        timeRatioInfo: usedTimeRatioInfo,
+        effectiveBillingRatio,
       };
     }
 
@@ -771,12 +838,15 @@ export const calculateModelPrice = ({
       isTokensDisplay: false,
       usedGroup,
       usedGroupRatio,
+      timeRatio,
+      timeRatioInfo: usedTimeRatioInfo,
+      effectiveBillingRatio,
     };
   }
 
   if (record.quota_type === 1) {
     // 按次计费
-    const priceUSD = parseFloat(record.model_price) * usedGroupRatio;
+    const priceUSD = parseFloat(record.model_price) * effectiveBillingRatio;
     const displayVal = displayPrice(priceUSD);
 
     return {
@@ -785,6 +855,9 @@ export const calculateModelPrice = ({
       isTokensDisplay: false,
       usedGroup,
       usedGroupRatio,
+      timeRatio,
+      timeRatioInfo: usedTimeRatioInfo,
+      effectiveBillingRatio,
     };
   }
 
@@ -795,138 +868,164 @@ export const calculateModelPrice = ({
     isTokensDisplay: false,
     usedGroup,
     usedGroupRatio,
+    timeRatio,
+    timeRatioInfo: usedTimeRatioInfo,
+    effectiveBillingRatio,
   };
 };
 
 export const getModelPriceItems = (priceData, t, quotaDisplayType = 'USD') => {
   if (priceData.isDynamicPricing) {
-    return [
-      {
-        key: 'dynamic',
-        label: t('动态计费'),
-        value: '',
-        suffix: '',
-        isDynamic: true,
-      },
-    ];
+    return appendTimeRatioItem(
+      [
+        {
+          key: 'dynamic',
+          label: t('动态计费'),
+          value: '',
+          suffix: '',
+          isDynamic: true,
+        },
+      ],
+      priceData,
+      t,
+    );
   }
 
   if (priceData.isPerToken) {
     if (quotaDisplayType === 'TOKENS' || priceData.isTokensDisplay) {
-      return [
-        {
-          key: 'input-ratio',
-          label: t('输入倍率'),
-          value: priceData.inputRatio,
-          suffix: 'x',
-        },
-        {
-          key: 'completion-ratio',
-          label: t('补全倍率'),
-          value: priceData.completionRatio,
-          suffix: 'x',
-        },
-        {
-          key: 'cache-ratio',
-          label: t('缓存读取倍率'),
-          value: priceData.cacheRatio,
-          suffix: 'x',
-        },
-        {
-          key: 'create-cache-ratio',
-          label: t('缓存创建倍率'),
-          value: priceData.createCacheRatio,
-          suffix: 'x',
-        },
-        {
-          key: 'image-ratio',
-          label: t('图片输入倍率'),
-          value: priceData.imageRatio,
-          suffix: 'x',
-        },
-        {
-          key: 'audio-input-ratio',
-          label: t('音频输入倍率'),
-          value: priceData.audioInputRatio,
-          suffix: 'x',
-        },
-        {
-          key: 'audio-output-ratio',
-          label: t('音频补全倍率'),
-          value: priceData.audioOutputRatio,
-          suffix: 'x',
-        },
-      ].filter(
-        (item) =>
-          item.value !== null && item.value !== undefined && item.value !== '',
+      return appendTimeRatioItem(
+        [
+          {
+            key: 'input-ratio',
+            label: t('输入倍率'),
+            value: priceData.inputRatio,
+            suffix: 'x',
+          },
+          {
+            key: 'completion-ratio',
+            label: t('补全倍率'),
+            value: priceData.completionRatio,
+            suffix: 'x',
+          },
+          {
+            key: 'cache-ratio',
+            label: t('缓存读取倍率'),
+            value: priceData.cacheRatio,
+            suffix: 'x',
+          },
+          {
+            key: 'create-cache-ratio',
+            label: t('缓存创建倍率'),
+            value: priceData.createCacheRatio,
+            suffix: 'x',
+          },
+          {
+            key: 'image-ratio',
+            label: t('图片输入倍率'),
+            value: priceData.imageRatio,
+            suffix: 'x',
+          },
+          {
+            key: 'audio-input-ratio',
+            label: t('音频输入倍率'),
+            value: priceData.audioInputRatio,
+            suffix: 'x',
+          },
+          {
+            key: 'audio-output-ratio',
+            label: t('音频补全倍率'),
+            value: priceData.audioOutputRatio,
+            suffix: 'x',
+          },
+        ].filter(
+          (item) =>
+            item.value !== null &&
+            item.value !== undefined &&
+            item.value !== '',
+        ),
+        priceData,
+        t,
       );
     }
 
     const unitSuffix = ` / 1${priceData.unitLabel} Tokens`;
-    return [
+    return appendTimeRatioItem(
+      [
+        {
+          key: 'input',
+          label: t('输入价格'),
+          value: priceData.inputPrice,
+          suffix: unitSuffix,
+        },
+        {
+          key: 'completion',
+          label: t('补全价格'),
+          value: priceData.completionPrice,
+          suffix: unitSuffix,
+        },
+        {
+          key: 'cache',
+          label: t('缓存读取价格'),
+          value: priceData.cachePrice,
+          suffix: unitSuffix,
+        },
+        {
+          key: 'create-cache',
+          label: t('缓存创建价格'),
+          value: priceData.createCachePrice,
+          suffix: unitSuffix,
+        },
+        {
+          key: 'image',
+          label: t('图片输入价格'),
+          value: priceData.imagePrice,
+          suffix: unitSuffix,
+        },
+        {
+          key: 'audio-input',
+          label: t('音频输入价格'),
+          value: priceData.audioInputPrice,
+          suffix: unitSuffix,
+        },
+        {
+          key: 'audio-output',
+          label: t('音频补全价格'),
+          value: priceData.audioOutputPrice,
+          suffix: unitSuffix,
+        },
+      ].filter(
+        (item) =>
+          item.value !== null && item.value !== undefined && item.value !== '',
+      ),
+      priceData,
+      t,
+    );
+  }
+
+  return appendTimeRatioItem(
+    [
       {
-        key: 'input',
-        label: t('输入价格'),
-        value: priceData.inputPrice,
-        suffix: unitSuffix,
-      },
-      {
-        key: 'completion',
-        label: t('补全价格'),
-        value: priceData.completionPrice,
-        suffix: unitSuffix,
-      },
-      {
-        key: 'cache',
-        label: t('缓存读取价格'),
-        value: priceData.cachePrice,
-        suffix: unitSuffix,
-      },
-      {
-        key: 'create-cache',
-        label: t('缓存创建价格'),
-        value: priceData.createCachePrice,
-        suffix: unitSuffix,
-      },
-      {
-        key: 'image',
-        label: t('图片输入价格'),
-        value: priceData.imagePrice,
-        suffix: unitSuffix,
-      },
-      {
-        key: 'audio-input',
-        label: t('音频输入价格'),
-        value: priceData.audioInputPrice,
-        suffix: unitSuffix,
-      },
-      {
-        key: 'audio-output',
-        label: t('音频补全价格'),
-        value: priceData.audioOutputPrice,
-        suffix: unitSuffix,
+        key: 'fixed',
+        label: t('模型价格'),
+        value: priceData.price,
+        suffix: ` / ${t('次')}`,
       },
     ].filter(
       (item) =>
         item.value !== null && item.value !== undefined && item.value !== '',
-    );
-  }
-
-  return [
-    {
-      key: 'fixed',
-      label: t('模型价格'),
-      value: priceData.price,
-      suffix: ` / ${t('次')}`,
-    },
-  ].filter(
-    (item) =>
-      item.value !== null && item.value !== undefined && item.value !== '',
+    ),
+    priceData,
+    t,
   );
 };
 
 // 格式化动态计费摘要（用于卡片视图，与 formatPriceInfo 风格统一）
-export const formatDynamicPriceSummary = (billingExpr, t, groupRatio = 1) => {
+export const formatDynamicPriceSummary = (
+  billingExpr,
+  t,
+  groupRatio = 1,
+  timeRatioInfo = null,
+) => {
   if (!billingExpr)
     return (
       <span style={{ color: 'var(--semi-color-text-1)' }}>{t('动态计费')}</span>
@@ -946,7 +1045,8 @@ export const formatDynamicPriceSummary = (billingExpr, t, groupRatio = 1) => {
     }
   } catch (e) {}
 
-  const gr = groupRatio || 1;
+  const normalizedTimeRatio = normalizePricingTimeRatioInfo(timeRatioInfo);
+  const gr = (groupRatio || 1) * normalizedTimeRatio.ratio;
   const exprBody = billingExpr.replace(/^v\d+:/, '');
   const tierMatches = exprBody.match(/tier\(/g) || [];
   const tierCount = tierMatches.length;
@@ -970,6 +1070,11 @@ export const formatDynamicPriceSummary = (billingExpr, t, groupRatio = 1) => {
   if (tierCount > 1) tags.push(`${tierCount}${t('档')}`);
   if (hasTimeCondition) tags.push(t('含时间条件'));
   if (hasRequestCondition) tags.push(t('含请求条件'));
+  if (shouldShowPricingTimeRatio(normalizedTimeRatio)) {
+    tags.push(
+      `${t('时间倍率')} ${formatTimeRatioValue(normalizedTimeRatio.ratio)}x`,
+    );
+  }
 
   const unitSuffix = ' / 1M Tokens';
   const lineStyle = { color: 'var(--semi-color-text-1)' };
@@ -987,7 +1092,7 @@ export const formatDynamicPriceSummary = (billingExpr, t, groupRatio = 1) => {
           )}
         </>
       )}
-      {(tierCount > 1 || hasTimeCondition || hasRequestCondition) && (
+      {tags.length > 0 && (
         <span style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
           <span
             style={{

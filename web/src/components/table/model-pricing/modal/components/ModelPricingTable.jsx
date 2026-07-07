@@ -20,13 +20,19 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import { Avatar, Typography, Table, Tag } from '@douyinfe/semi-ui';
 import { IconCoinMoneyStroked } from '@douyinfe/semi-icons';
-import { calculateModelPrice, getModelPriceItems } from '../../../../../helpers';
+import {
+  calculateModelPrice,
+  formatTimeRatioValue,
+  getModelPriceItems,
+  shouldShowPricingTimeRatio,
+} from '../../../../../helpers';
 
 const { Text } = Typography;
 
 const ModelPricingTable = ({
   modelData,
   groupRatio,
+  timeRatioMap,
   currency,
   siteDisplayType,
   tokenUnit,
@@ -55,6 +61,7 @@ const ModelPricingTable = ({
             record: modelData,
             selectedGroup: group,
             groupRatio,
+            timeRatioMap,
             tokenUnit,
             displayPrice,
             currency,
@@ -64,12 +71,13 @@ const ModelPricingTable = ({
 
       // 获取分组倍率
       const groupRatioValue =
-        groupRatio && groupRatio[group] ? groupRatio[group] : 1;
+        groupRatio && groupRatio[group] !== undefined ? groupRatio[group] : 1;
 
       return {
         key: group,
         group: group,
         ratio: groupRatioValue,
+        timeRatioInfo: priceData.timeRatioInfo,
         billingType:
           modelData?.billing_mode === 'tiered_expr'
             ? t('动态计费')
@@ -111,6 +119,25 @@ const ModelPricingTable = ({
       });
     }
 
+    const shouldShowTimeRatioColumn = tableData.some((item) =>
+      shouldShowPricingTimeRatio(item.timeRatioInfo),
+    );
+    if (showRatio || shouldShowTimeRatioColumn) {
+      columns.push({
+        title: t('当前时间倍率'),
+        dataIndex: 'timeRatioInfo',
+        render: (info) => (
+          <Tag
+            color={shouldShowPricingTimeRatio(info) ? 'orange' : 'white'}
+            size='small'
+            shape='circle'
+          >
+            {formatTimeRatioValue(info?.ratio)}x
+          </Tag>
+        ),
+      });
+    }
+
     columns.push({
       title: t('计费类型'),
       dataIndex: 'billingType',
@@ -142,10 +169,18 @@ const ModelPricingTable = ({
           <div className='space-y-1'>
             {items.map((item) => (
               <div key={item.key}>
-                <div className='font-semibold text-orange-600'>
-                  {item.label} {item.value}
-                </div>
-                <div className='text-xs text-gray-500'>{item.suffix}</div>
+                {item.isDynamic ? (
+                  <Text type='tertiary' size='small'>
+                    {t('见上方动态计费详情')}
+                  </Text>
+                ) : (
+                  <>
+                    <div className='font-semibold text-orange-600'>
+                      {item.label} {item.value}
+                    </div>
+                    <div className='text-xs text-gray-500'>{item.suffix}</div>
+                  </>
+                )}
               </div>
             ))}
           </div>
