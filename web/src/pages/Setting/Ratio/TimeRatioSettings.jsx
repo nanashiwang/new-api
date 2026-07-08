@@ -94,7 +94,7 @@ const parseRules = (raw) => {
 
 export default function TimeRatioSettings({ options, refresh }) {
   const { t } = useTranslation();
-  const formRef = useRef();
+  const formApiRef = useRef(null);
   const [loading, setLoading] = useState(false);
   const [rules, setRules] = useState('[]');
   const [previewModel, setPreviewModel] = useState('');
@@ -149,7 +149,7 @@ export default function TimeRatioSettings({ options, refresh }) {
   useEffect(() => {
     const nextRules = options?.TimeRatioRules || '[]';
     setRules(nextRules);
-    formRef.current?.setValues({ TimeRatioRules: nextRules });
+    formApiRef.current?.setValues?.({ TimeRatioRules: nextRules });
   }, [options]);
 
   useEffect(() => {
@@ -180,7 +180,11 @@ export default function TimeRatioSettings({ options, refresh }) {
 
   const onSubmit = async () => {
     try {
-      await formRef.current.validate();
+      if (formApiRef.current?.validate) {
+        await formApiRef.current.validate();
+      } else if (!validateRules(rules)) {
+        throw new Error('invalid rules');
+      }
     } catch {
       showError(t('请检查输入'));
       return;
@@ -361,7 +365,10 @@ export default function TimeRatioSettings({ options, refresh }) {
           <Text type='tertiary'>{t('请先选择模型和使用分组')}</Text>
         )}
       </Card>
-      <Form ref={formRef} values={{ TimeRatioRules: rules }}>
+      <Form
+        getFormApi={(formApi) => (formApiRef.current = formApi)}
+        initValues={{ TimeRatioRules: rules }}
+      >
         <Form.TextArea
           field='TimeRatioRules'
           label={t('时间倍率规则')}
