@@ -292,6 +292,24 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "UserScopedCircuitBreakerStatusCodes":
+		_, err = operation_setting.ParseHTTPStatusCodeRanges(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+	case "UserScopedCircuitBreakerTTLSeconds", "UserScopedCircuitBreakerFailureThreshold":
+		value, parseErr := strconv.Atoi(option.Value.(string))
+		if parseErr != nil || value <= 0 {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "用户维度短熔断配置必须是大于 0 的整数",
+			})
+			return
+		}
 	case "ResponsesRequestBodyLimitMB":
 		limitMB, parseErr := strconv.Atoi(strings.TrimSpace(option.Value.(string)))
 		maxRequestBodyMB := constant.MaxRequestBodyMB

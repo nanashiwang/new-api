@@ -43,6 +43,10 @@ export default function SettingsMonitoring(props) {
     AutomaticDisableStatusCodes: '401',
     AutomaticRetryStatusCodes:
       '100-199,300-399,401-407,409-499,500-503,505-523,525-599',
+    UserScopedCircuitBreakerEnabled: false,
+    UserScopedCircuitBreakerStatusCodes: '503',
+    UserScopedCircuitBreakerTTLSeconds: 60,
+    UserScopedCircuitBreakerFailureThreshold: 2,
     'monitor_setting.auto_test_channel_enabled': false,
     'monitor_setting.auto_test_channel_minutes': 10,
     'monitor_setting.pre_disable_wait_enabled': false,
@@ -57,6 +61,9 @@ export default function SettingsMonitoring(props) {
   );
   const parsedAutoRetryStatusCodes = parseHttpStatusCodeRules(
     inputs.AutomaticRetryStatusCodes || '',
+  );
+  const parsedUserScopedCircuitBreakerStatusCodes = parseHttpStatusCodeRules(
+    inputs.UserScopedCircuitBreakerStatusCodes || '',
   );
 
   function onSubmit() {
@@ -78,6 +85,14 @@ export default function SettingsMonitoring(props) {
           : '';
       return showError(`${t('自动重试状态码格式不正确')}${details}`);
     }
+    if (!parsedUserScopedCircuitBreakerStatusCodes.ok) {
+      const details =
+        parsedUserScopedCircuitBreakerStatusCodes.invalidTokens &&
+        parsedUserScopedCircuitBreakerStatusCodes.invalidTokens.length > 0
+          ? `: ${parsedUserScopedCircuitBreakerStatusCodes.invalidTokens.join(', ')}`
+          : '';
+      return showError(`${t('用户维度短熔断状态码格式不正确')}${details}`);
+    }
     const requestQueue = updateArray.map((item) => {
       let value = '';
       if (typeof inputs[item.key] === 'boolean') {
@@ -86,6 +101,8 @@ export default function SettingsMonitoring(props) {
         const normalizedMap = {
           AutomaticDisableStatusCodes: parsedAutoDisableStatusCodes.normalized,
           AutomaticRetryStatusCodes: parsedAutoRetryStatusCodes.normalized,
+          UserScopedCircuitBreakerStatusCodes:
+            parsedUserScopedCircuitBreakerStatusCodes.normalized,
         };
         value = normalizedMap[item.key] ?? inputs[item.key];
       }
@@ -121,6 +138,7 @@ export default function SettingsMonitoring(props) {
         if (
           key === 'AutomaticDisableChannelEnabled' ||
           key === 'AutomaticEnableChannelEnabled' ||
+          key === 'UserScopedCircuitBreakerEnabled' ||
           key === 'monitor_setting.auto_test_channel_enabled' ||
           key === 'monitor_setting.pre_disable_wait_enabled' ||
           key === 'monitor_setting.pool_exhausted_notify_enabled'
@@ -129,6 +147,8 @@ export default function SettingsMonitoring(props) {
         } else if (
           key === 'ChannelDisableThreshold' ||
           key === 'QuotaRemindThreshold' ||
+          key === 'UserScopedCircuitBreakerTTLSeconds' ||
+          key === 'UserScopedCircuitBreakerFailureThreshold' ||
           key === 'monitor_setting.auto_test_channel_minutes' ||
           key === 'monitor_setting.pre_disable_wait_minutes'
         ) {
@@ -226,7 +246,9 @@ export default function SettingsMonitoring(props) {
                     step={1}
                     min={1}
                     suffix={t('分钟')}
-                    disabled={!inputs['monitor_setting.pre_disable_wait_enabled']}
+                    disabled={
+                      !inputs['monitor_setting.pre_disable_wait_enabled']
+                    }
                     extraText={t('触发自动禁用后，会等待并再测试一次')}
                     placeholder={''}
                     field={'monitor_setting.pre_disable_wait_minutes'}
@@ -369,6 +391,80 @@ export default function SettingsMonitoring(props) {
                   }
                   parsed={parsedAutoRetryStatusCodes}
                   invalidText={t('自动重试状态码格式不正确')}
+                />
+              </Col>
+            </Row>
+            <Row gutter={16}>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Switch
+                  field={'UserScopedCircuitBreakerEnabled'}
+                  label={t('用户维度短熔断')}
+                  size='default'
+                  checkedText='｜'
+                  uncheckedText='〇'
+                  extraText={t(
+                    '按用户ID + 渠道标签隔离短时过载，避免一个用户的瞬时 503 影响所有用户',
+                  )}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      UserScopedCircuitBreakerEnabled: value,
+                    })
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  label={t('短熔断 TTL')}
+                  step={1}
+                  min={1}
+                  suffix={t('秒')}
+                  disabled={!inputs.UserScopedCircuitBreakerEnabled}
+                  extraText={t('命中后暂停该用户使用该标签渠道的秒数')}
+                  field={'UserScopedCircuitBreakerTTLSeconds'}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      UserScopedCircuitBreakerTTLSeconds: parseInt(value),
+                    })
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  label={t('短熔断连续失败次数')}
+                  step={1}
+                  min={1}
+                  disabled={!inputs.UserScopedCircuitBreakerEnabled}
+                  extraText={t('达到该次数后才开启短熔断，避免单次抖动误伤')}
+                  field={'UserScopedCircuitBreakerFailureThreshold'}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      UserScopedCircuitBreakerFailureThreshold: parseInt(value),
+                    })
+                  }
+                />
+              </Col>
+            </Row>
+            <Row gutter={16}>
+              <Col xs={24} sm={16}>
+                <HttpStatusCodeRulesInput
+                  label={t('用户维度短熔断状态码')}
+                  placeholder={t('例如：503, 502-503')}
+                  extraText={t(
+                    '这些 HTTP 状态码会按用户ID + 渠道标签记录连续失败并短时熔断，不会自动禁用渠道',
+                  )}
+                  field={'UserScopedCircuitBreakerStatusCodes'}
+                  disabled={!inputs.UserScopedCircuitBreakerEnabled}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      UserScopedCircuitBreakerStatusCodes: value,
+                    })
+                  }
+                  parsed={parsedUserScopedCircuitBreakerStatusCodes}
+                  invalidText={t('用户维度短熔断状态码格式不正确')}
                 />
                 <Form.TextArea
                   label={t('自动禁用关键词')}

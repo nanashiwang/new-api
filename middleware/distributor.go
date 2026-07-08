@@ -212,7 +212,7 @@ func tryAffinityChannel(c *gin.Context, modelName string, usingGroup string, cli
 	if !IsTokenChannelAllowed(c, preferred.Id) || !service.IsChannelAllowedForClient(preferred, clientID) {
 		return nil, "", false
 	}
-	if service.IsChannelUnavailableForRequest(preferred) {
+	if service.IsChannelUnavailableForRequestContext(c, preferred) {
 		return nil, "", false
 	}
 	if usingGroup == "auto" {

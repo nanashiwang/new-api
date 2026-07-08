@@ -30,6 +30,7 @@ export default function HttpStatusCodeRulesInput(props) {
     onChange,
     parsed,
     invalidText,
+    disabled,
   } = props;
 
   return (
@@ -39,6 +40,7 @@ export default function HttpStatusCodeRulesInput(props) {
         placeholder={placeholder}
         extraText={extraText}
         field={field}
+        disabled={disabled}
         onChange={onChange}
       />
       {parsed?.ok && parsed.tokens?.length > 0 && (

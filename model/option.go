@@ -197,6 +197,10 @@ func InitOptionMap() {
 	common.OptionMap["AutomaticDisableKeywords"] = operation_setting.AutomaticDisableKeywordsToString()
 	common.OptionMap["AutomaticDisableStatusCodes"] = operation_setting.AutomaticDisableStatusCodesToString()
 	common.OptionMap["AutomaticRetryStatusCodes"] = operation_setting.AutomaticRetryStatusCodesToString()
+	common.OptionMap["UserScopedCircuitBreakerEnabled"] = strconv.FormatBool(operation_setting.UserScopedCircuitBreakerEnabled)
+	common.OptionMap["UserScopedCircuitBreakerStatusCodes"] = operation_setting.UserScopedCircuitBreakerStatusCodesToString()
+	common.OptionMap["UserScopedCircuitBreakerTTLSeconds"] = strconv.Itoa(operation_setting.UserScopedCircuitBreakerTTLSeconds)
+	common.OptionMap["UserScopedCircuitBreakerFailureThreshold"] = strconv.Itoa(operation_setting.UserScopedCircuitBreakerFailureThreshold)
 	common.OptionMap["ExposeRatioEnabled"] = strconv.FormatBool(ratio_setting.IsExposeRatioEnabled())
 
 	// 自动添加所有注册的模型配置
@@ -334,6 +338,8 @@ func updateOptionMap(key string, value string) (err error) {
 			operation_setting.DemoSiteEnabled = boolValue
 		case "SelfUseModeEnabled":
 			operation_setting.SelfUseModeEnabled = boolValue
+		case "UserScopedCircuitBreakerEnabled":
+			operation_setting.UserScopedCircuitBreakerEnabled = boolValue
 		case "CheckSensitiveOnPromptEnabled":
 			setting.CheckSensitiveOnPromptEnabled = boolValue
 		case "ModelRequestRateLimitEnabled":
@@ -600,6 +606,22 @@ func updateOptionMap(key string, value string) (err error) {
 		err = operation_setting.AutomaticDisableStatusCodesFromString(value)
 	case "AutomaticRetryStatusCodes":
 		err = operation_setting.AutomaticRetryStatusCodesFromString(value)
+	case "UserScopedCircuitBreakerStatusCodes":
+		err = operation_setting.UserScopedCircuitBreakerStatusCodesFromString(value)
+	case "UserScopedCircuitBreakerTTLSeconds":
+		seconds, parseErr := strconv.Atoi(value)
+		if parseErr != nil {
+			err = parseErr
+		} else {
+			operation_setting.UserScopedCircuitBreakerTTLSeconds = operation_setting.NormalizeUserScopedCircuitBreakerTTLSeconds(seconds)
+		}
+	case "UserScopedCircuitBreakerFailureThreshold":
+		threshold, parseErr := strconv.Atoi(value)
+		if parseErr != nil {
+			err = parseErr
+		} else {
+			operation_setting.UserScopedCircuitBreakerFailureThreshold = operation_setting.NormalizeUserScopedCircuitBreakerFailureThreshold(threshold)
+		}
 	case "StreamCacheQueueLength":
 		setting.StreamCacheQueueLength, _ = strconv.Atoi(value)
 	case "PayMethods":

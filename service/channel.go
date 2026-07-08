@@ -63,6 +63,9 @@ func ShouldDisableChannel(channelType int, err *types.NewAPIError) bool {
 	if types.IsSkipRetryError(err) {
 		return false
 	}
+	if operation_setting.ShouldUseUserScopedCircuitBreakerByStatusCode(err.StatusCode) {
+		return false
+	}
 	if operation_setting.ShouldDisableByStatusCode(err.StatusCode) {
 		return true
 	}

@@ -28,6 +28,11 @@ var AutomaticRetryStatusCodeRanges = []StatusCodeRange{
 	{Start: 525, End: 599},
 }
 
+var UserScopedCircuitBreakerEnabled = false
+var UserScopedCircuitBreakerStatusCodeRanges = []StatusCodeRange{{Start: 503, End: 503}}
+var UserScopedCircuitBreakerTTLSeconds = 60
+var UserScopedCircuitBreakerFailureThreshold = 2
+
 var alwaysSkipRetryStatusCodes = map[int]struct{}{
 	504: {},
 	524: {},
@@ -82,6 +87,40 @@ func ShouldRetryByStatusCode(code int) bool {
 		return false
 	}
 	return shouldMatchStatusCodeRanges(AutomaticRetryStatusCodeRanges, code)
+}
+
+func UserScopedCircuitBreakerStatusCodesToString() string {
+	return statusCodeRangesToString(UserScopedCircuitBreakerStatusCodeRanges)
+}
+
+func UserScopedCircuitBreakerStatusCodesFromString(s string) error {
+	ranges, err := ParseHTTPStatusCodeRanges(s)
+	if err != nil {
+		return err
+	}
+	UserScopedCircuitBreakerStatusCodeRanges = ranges
+	return nil
+}
+
+func ShouldUseUserScopedCircuitBreakerByStatusCode(code int) bool {
+	if !UserScopedCircuitBreakerEnabled {
+		return false
+	}
+	return shouldMatchStatusCodeRanges(UserScopedCircuitBreakerStatusCodeRanges, code)
+}
+
+func NormalizeUserScopedCircuitBreakerTTLSeconds(seconds int) int {
+	if seconds <= 0 {
+		return 60
+	}
+	return seconds
+}
+
+func NormalizeUserScopedCircuitBreakerFailureThreshold(threshold int) int {
+	if threshold <= 0 {
+		return 1
+	}
+	return threshold
 }
 
 func statusCodeRangesToString(ranges []StatusCodeRange) string {

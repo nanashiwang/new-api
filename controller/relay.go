@@ -226,6 +226,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		if newAPIError == nil {
+			service.ClearUserScopedCircuit(c, channel)
 			// 调用成功：异步清掉该 Key 的连续失败计数与整池耗尽通知标记，
 			// 避免历史失败抬高健康 Key 下次冷却的起点。
 			if common.QuotaStabilityEnabled && channel.ChannelInfo.IsMultiKey {
@@ -261,6 +262,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		logCRSMemoryPressureShortCircuit(c, channel, newAPIError)
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+		service.RecordUserScopedCircuitFailure(c, channel, newAPIError)
 
 		// 同渠道多 Key 快速切换：配额耗尽时先在当前渠道内换一个 Key 重试。
 		// 此处故意不调用 ApplyChannelFailureRetryExclusion，因为目的是换 Key 而非换渠道，
@@ -629,6 +631,7 @@ func RelayTask(c *gin.Context) {
 
 	// lastTaskRelayErr 保留最近一次上游任务错误，避免重试找不到新渠道时覆盖原始错误。
 	var lastTaskRelayErr *dto.TaskError
+	var lastTaskChannel *model.Channel
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
 		var channel *model.Channel
@@ -655,6 +658,7 @@ func RelayTask(c *gin.Context) {
 				break
 			}
 		}
+		lastTaskChannel = channel
 
 		addUsedChannel(c, channel.Id)
 		bodyStorage, bodyErr := common.GetBodyStorage(c)
@@ -682,6 +686,7 @@ func RelayTask(c *gin.Context) {
 				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
 					common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
 				apiErr)
+			service.RecordUserScopedCircuitFailure(c, channel, apiErr)
 		}
 
 		retryParam.ExcludeChannels = append(retryParam.ExcludeChannels, channel.Id)
@@ -699,6 +704,7 @@ func RelayTask(c *gin.Context) {
 
 	// ── 成功：结算 + 日志 + 插入任务 ──
 	if taskErr == nil {
+		service.ClearUserScopedCircuit(c, lastTaskChannel)
 		if settleErr := service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
 			common.SysError("settle task billing error: " + settleErr.Error())
 		}
