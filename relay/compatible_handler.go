@@ -239,6 +239,7 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 
 	if originUsage != nil {
 		service.ObserveChannelAffinityUsageCacheByRelayFormat(ctx, usage, relayInfo.GetFinalRequestRelayFormat())
+		service.ObserveSlowTTFT(ctx, relayInfo, usage)
 	}
 
 	// Tiered billing: only determines quota, logging continues through normal path

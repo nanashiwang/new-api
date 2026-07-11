@@ -785,6 +785,9 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	if claudeResponse.Delta != nil && claudeResponse.Delta.StopReason != nil {
 		maybeMarkClaudeRefusal(c, *claudeResponse.Delta.StopReason)
 	}
+	if isEffectiveClaudeStreamOutput(&claudeResponse) {
+		info.SetFirstEffectiveOutputTime()
+	}
 	if info.RelayFormat == types.RelayFormatClaude {
 		FormatClaudeResponseInfo(&claudeResponse, nil, claudeInfo)
 
@@ -817,6 +820,16 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		}
 	}
 	return nil
+}
+
+func isEffectiveClaudeStreamOutput(response *dto.ClaudeResponse) bool {
+	if response == nil || response.Delta == nil {
+		return false
+	}
+	delta := response.Delta
+	return (delta.Text != nil && strings.TrimSpace(*delta.Text) != "") ||
+		(delta.Thinking != nil && strings.TrimSpace(*delta.Thinking) != "") ||
+		(delta.PartialJson != nil && strings.TrimSpace(*delta.PartialJson) != "")
 }
 
 func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo) {

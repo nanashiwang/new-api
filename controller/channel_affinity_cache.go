@@ -17,6 +17,30 @@ func GetChannelAffinityCacheStats(c *gin.Context) {
 	})
 }
 
+func GetSlowTTFTGuardStats(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    service.GetSlowTTFTGuardStats(),
+	})
+}
+
+func RefreshSlowTTFTBaselines(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    service.RefreshSlowTTFTBaselines(),
+	})
+}
+
+func ClearSlowTTFTGuardState(c *gin.Context) {
+	service.ClearSlowTTFTGuardState()
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+	})
+}
+
 func ClearChannelAffinityCache(c *gin.Context) {
 	all := strings.TrimSpace(c.Query("all"))
 	ruleName := strings.TrimSpace(c.Query("rule_name"))

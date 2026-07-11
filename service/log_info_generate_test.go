@@ -20,10 +20,11 @@ func TestGenerateTextOtherInfoIncludesParamOverrideAuditAndStreamStatus(t *testi
 
 	start := time.Unix(100, 0)
 	info := &relaycommon.RelayInfo{
-		StartTime:         start,
-		FirstResponseTime: start.Add(250 * time.Millisecond),
-		IsStream:          true,
-		ChannelMeta:       &relaycommon.ChannelMeta{},
+		StartTime:                start,
+		FirstResponseTime:        start.Add(250 * time.Millisecond),
+		FirstEffectiveOutputTime: start.Add(500 * time.Millisecond),
+		IsStream:                 true,
+		ChannelMeta:              &relaycommon.ChannelMeta{},
 		ParamOverrideAudit: []string{
 			"copy metadata.target_model -> model",
 		},
@@ -33,6 +34,9 @@ func TestGenerateTextOtherInfoIncludesParamOverrideAuditAndStreamStatus(t *testi
 	info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonTimeout, nil)
 
 	other := GenerateTextOtherInfo(ctx, info, 1, 1, 1, 0, 1, 1, 1)
+	if other["first_effective_output_ms"] != float64(500) {
+		t.Fatalf("unexpected first_effective_output_ms: %#v", other["first_effective_output_ms"])
+	}
 
 	lines, ok := other["po"].([]string)
 	if !ok {

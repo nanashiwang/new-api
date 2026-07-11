@@ -2,10 +2,25 @@ package common
 
 import (
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/require"
 )
+
+func TestSetFirstEffectiveOutputTimeCapturesInitialChannelOnce(t *testing.T) {
+	info := &RelayInfo{ChannelMeta: &ChannelMeta{ChannelId: 10, ChannelTag: "tag-a"}}
+	info.SetFirstEffectiveOutputTime()
+	first := info.FirstEffectiveOutputTime
+
+	info.ChannelMeta = &ChannelMeta{ChannelId: 20, ChannelTag: "tag-b"}
+	time.Sleep(time.Millisecond)
+	info.SetFirstEffectiveOutputTime()
+
+	require.Equal(t, first, info.FirstEffectiveOutputTime)
+	require.Equal(t, 10, info.FirstEffectiveOutputChannelId)
+	require.Equal(t, "tag-a", info.FirstEffectiveOutputChannelTag)
+}
 
 func TestRelayInfoGetFinalRequestRelayFormatPrefersExplicitFinal(t *testing.T) {
 	info := &RelayInfo{

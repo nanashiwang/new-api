@@ -137,6 +137,7 @@ func isActionableResponsesOutputType(outputType string) bool {
 type ChannelMeta struct {
 	ChannelType                    int
 	ChannelId                      int
+	ChannelTag                     string
 	ChannelIsMultiKey              bool
 	ChannelMultiKeyIndex           int
 	ChannelBaseUrl                 string
@@ -162,16 +163,19 @@ type TokenCountMeta struct {
 }
 
 type RelayInfo struct {
-	TokenId           int
-	TokenKey          string
-	TokenGroup        string
-	UserId            int
-	UsingGroup        string // 使用的分组，当auto跨分组重试时，会变动
-	UserGroup         string // 用户所在分组
-	TokenUnlimited    bool
-	StartTime         time.Time
-	FirstResponseTime time.Time
-	isFirstResponse   bool
+	TokenId                        int
+	TokenKey                       string
+	TokenGroup                     string
+	UserId                         int
+	UsingGroup                     string // 使用的分组，当auto跨分组重试时，会变动
+	UserGroup                      string // 用户所在分组
+	TokenUnlimited                 bool
+	StartTime                      time.Time
+	FirstResponseTime              time.Time
+	FirstEffectiveOutputTime       time.Time
+	FirstEffectiveOutputChannelId  int
+	FirstEffectiveOutputChannelTag string
+	isFirstResponse                bool
 	//SendLastReasoningResponse bool
 	IsStream                bool
 	IsGeminiBatchEmbedding  bool
@@ -266,6 +270,7 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 	channelMeta := &ChannelMeta{
 		ChannelType:          channelType,
 		ChannelId:            common.GetContextKeyInt(c, constant.ContextKeyChannelId),
+		ChannelTag:           common.GetContextKeyString(c, constant.ContextKeyChannelTag),
 		ChannelIsMultiKey:    common.GetContextKeyBool(c, constant.ContextKeyChannelIsMultiKey),
 		ChannelMultiKeyIndex: common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex),
 		ChannelBaseUrl:       common.GetContextKeyString(c, constant.ContextKeyChannelBaseUrl),
@@ -360,8 +365,8 @@ func (info *RelayInfo) ToString() string {
 	// Channel metadata (mask ApiKey)
 	if info.ChannelMeta != nil {
 		cm := info.ChannelMeta
-		fmt.Fprintf(b, "ChannelMeta{ Type: %d, Id: %d, IsMultiKey: %t, MultiKeyIndex: %d, BaseURL: %q, ApiType: %d, ApiVersion: %q, Organization: %q, CreateTime: %d, UpstreamModelName: %q, IsModelMapped: %t, SupportsChatStreamOptions: %t, SupportsResponsesAPI: %t, SupportsResponsesStreamOptions: %t, ApiKey: ***masked*** }, ",
-			cm.ChannelType, cm.ChannelId, cm.ChannelIsMultiKey, cm.ChannelMultiKeyIndex, cm.ChannelBaseUrl, cm.ApiType, cm.ApiVersion, cm.Organization, cm.ChannelCreateTime, cm.UpstreamModelName, cm.IsModelMapped, cm.SupportsChatStreamOptions, cm.SupportsResponsesAPI, cm.SupportsResponsesStreamOptions)
+		fmt.Fprintf(b, "ChannelMeta{ Type: %d, Id: %d, Tag: %q, IsMultiKey: %t, MultiKeyIndex: %d, BaseURL: %q, ApiType: %d, ApiVersion: %q, Organization: %q, CreateTime: %d, UpstreamModelName: %q, IsModelMapped: %t, SupportsChatStreamOptions: %t, SupportsResponsesAPI: %t, SupportsResponsesStreamOptions: %t, ApiKey: ***masked*** }, ",
+			cm.ChannelType, cm.ChannelId, cm.ChannelTag, cm.ChannelIsMultiKey, cm.ChannelMultiKeyIndex, cm.ChannelBaseUrl, cm.ApiType, cm.ApiVersion, cm.Organization, cm.ChannelCreateTime, cm.UpstreamModelName, cm.IsModelMapped, cm.SupportsChatStreamOptions, cm.SupportsResponsesAPI, cm.SupportsResponsesStreamOptions)
 	}
 
 	// Responses usage info (non-sensitive)
@@ -707,6 +712,17 @@ func (info *RelayInfo) SetFirstResponseTime() {
 	if info.isFirstResponse {
 		info.FirstResponseTime = time.Now()
 		info.isFirstResponse = false
+	}
+}
+
+func (info *RelayInfo) SetFirstEffectiveOutputTime() {
+	if info == nil || !info.FirstEffectiveOutputTime.IsZero() {
+		return
+	}
+	info.FirstEffectiveOutputTime = time.Now()
+	if info.ChannelMeta != nil {
+		info.FirstEffectiveOutputChannelId = info.ChannelId
+		info.FirstEffectiveOutputChannelTag = info.ChannelTag
 	}
 }
 

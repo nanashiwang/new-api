@@ -103,6 +103,7 @@ func TestOaiResponsesStreamHandler_FailsWhenMissingCompletedWithoutOutputAfterEO
 	require.Equal(t, 0, usage.TotalTokens)
 	require.NotNil(t, info.StreamStatus)
 	require.True(t, info.StreamStatus.HasErrors())
+	require.True(t, info.FirstEffectiveOutputTime.IsZero())
 
 	responseBody := recorder.Body.String()
 	require.Contains(t, responseBody, "event: response.failed")
@@ -133,6 +134,7 @@ func TestOaiResponsesStreamHandler_SynthesizesCompletedWhenMissingWithOutput(t *
 	require.NotNil(t, usage)
 	require.NotNil(t, info.StreamStatus)
 	require.True(t, info.StreamStatus.HasErrors())
+	require.False(t, info.FirstEffectiveOutputTime.IsZero())
 
 	responseBody := recorder.Body.String()
 	require.Contains(t, responseBody, "partial output")

@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -67,5 +68,68 @@ func TestCacheGetRandomSatisfiedChannel_CodexAutoReviewAllowsOpenAICompatibleCha
 	}
 	if got.Id != 1 {
 		t.Fatalf("expected openai channel 1, got %d", got.Id)
+	}
+}
+
+func TestCacheGetRandomSatisfiedChannel_SlowTTFTFilterSoftFallsBack(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+
+	originDB := model.DB
+	originLogDB := model.LOG_DB
+	originMemoryCacheEnabled := common.MemoryCacheEnabled
+	model.DB = db
+	model.LOG_DB = db
+	common.MemoryCacheEnabled = false
+	t.Cleanup(func() {
+		model.DB = originDB
+		model.LOG_DB = originLogDB
+		common.MemoryCacheEnabled = originMemoryCacheEnabled
+	})
+	if err := db.AutoMigrate(&model.Channel{}, &model.Ability{}); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+
+	channel := model.Channel{Id: 1, Name: "only-slow-tag", Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled}
+	channel.SetTag("slow-tag")
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+	ability := model.Ability{Group: "Pro", Model: "gpt-5.5", ChannelId: 1, Enabled: true, Priority: common.GetPointer[int64](0), Weight: 100}
+	if err := db.Create(&ability).Error; err != nil {
+		t.Fatalf("seed ability: %v", err)
+	}
+
+	now := time.Now()
+	guard := newSlowTTFTGuardState()
+	guard.evidence[slowTTFTScope{Model: "gpt-5.5", Group: "Pro", Tag: "slow-tag"}] = &slowTTFTEvidenceState{
+		OpenUntil: now.Add(time.Minute),
+		LastSeen:  now,
+	}
+	useSlowTTFTGuardForTest(t, guard)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	ctx.Set(ginKeySlowTTFTModel, "gpt-5.5")
+	ctx.Set(ginKeySlowTTFTGroup, "Pro")
+	ctx.Set(ginKeySlowTTFTSetting, slowTTFTTestSetting())
+
+	got, _, err := CacheGetRandomSatisfiedChannel(&RetryParam{
+		Ctx:        ctx,
+		TokenGroup: "Pro",
+		ModelName:  "gpt-5.5",
+		Retry:      common.GetPointer(0),
+	})
+	if err != nil {
+		t.Fatalf("get channel: %v", err)
+	}
+	if got == nil || got.Id != 1 {
+		t.Fatalf("expected soft fallback channel 1, got %#v", got)
+	}
+	if !ctx.GetBool(ginKeySlowTTFTBypass) {
+		t.Fatal("expected request-scoped slow TTFT bypass")
 	}
 }

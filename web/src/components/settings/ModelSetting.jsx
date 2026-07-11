@@ -27,6 +27,7 @@ import SettingClaudeModel from '../../pages/Setting/Model/SettingClaudeModel';
 import SettingGlobalModel from '../../pages/Setting/Model/SettingGlobalModel';
 import SettingGrokModel from '../../pages/Setting/Model/SettingGrokModel';
 import SettingsChannelAffinity from '../../pages/Setting/Operation/SettingsChannelAffinity';
+import SettingsSlowTTFTGuard from '../../pages/Setting/Operation/SettingsSlowTTFTGuard';
 
 const defaultModelSettingInputs = {
   'gemini.safety_settings': '',
@@ -84,7 +85,9 @@ const ModelSetting = () => {
         // Keep boolean config keys ending with enabled/Enabled so UI parses correctly.
         if (item.key.endsWith('Enabled') || item.key.endsWith('enabled')) {
           newInputs[item.key] = toBoolean(item.value);
-        } else if (item.key === 'global.image_generation_tool_call_permission') {
+        } else if (
+          item.key === 'global.image_generation_tool_call_permission'
+        ) {
           newInputs[item.key] = Number(item.value || 0);
         } else {
           newInputs[item.key] = item.value;
@@ -123,6 +126,9 @@ const ModelSetting = () => {
         {/* Channel affinity */}
         <Card style={{ marginTop: '10px' }}>
           <SettingsChannelAffinity options={inputs} refresh={onRefresh} />
+        </Card>
+        <Card style={{ marginTop: '10px' }}>
+          <SettingsSlowTTFTGuard options={inputs} refresh={onRefresh} />
         </Card>
         {/* Gemini */}
         <Card style={{ marginTop: '10px' }}>

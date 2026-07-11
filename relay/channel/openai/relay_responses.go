@@ -132,11 +132,15 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 		var streamResponse dto.ResponsesStreamResponse
 		if err := common.UnmarshalJsonStr(data, &streamResponse); err == nil {
 			delayCompletedEvent := streamResponse.Type == "response.completed"
+			effectiveOutput := isEffectiveResponsesStreamOutput(streamResponse)
+			if effectiveOutput {
+				info.SetFirstEffectiveOutputTime()
+			}
 			if !delayCompletedEvent {
 				if shouldSendResponsesStreamData(streamResponse, opts) {
 					sendResponsesStreamData(c, streamResponse, data)
 				}
-				if isEffectiveResponsesStreamOutput(streamResponse) {
+				if effectiveOutput {
 					hasEffectiveOutput = true
 				}
 				if isNonTextResponsesStreamOutput(streamResponse) {
@@ -157,7 +161,7 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 			if streamResponse.Error != nil {
 				terminalWithoutCompleted = true
 			}
-			if delayCompletedEvent && isEffectiveResponsesStreamOutput(streamResponse) {
+			if delayCompletedEvent && effectiveOutput {
 				hasEffectiveOutput = true
 			}
 			if delayCompletedEvent && isNonTextResponsesStreamOutput(streamResponse) {

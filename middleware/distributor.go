@@ -25,10 +25,11 @@ import (
 )
 
 type ModelRequest struct {
-	Model      string          `json:"model"`
-	Group      string          `json:"group,omitempty"`
-	Tools      json.RawMessage `json:"tools,omitempty"`
-	ToolChoice json.RawMessage `json:"tool_choice,omitempty"`
+	Model              string          `json:"model"`
+	Group              string          `json:"group,omitempty"`
+	Tools              json.RawMessage `json:"tools,omitempty"`
+	ToolChoice         json.RawMessage `json:"tool_choice,omitempty"`
+	PreviousResponseID string          `json:"previous_response_id,omitempty"`
 }
 
 func (r *ModelRequest) HasImageGenerationTool() bool {
@@ -60,6 +61,7 @@ func Distribute() func(c *gin.Context) {
 			abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
 			return
 		}
+		responsesImageGenerationTool := isResponsesCreateRequest(c) && modelRequest.HasImageGenerationTool()
 		if shouldSelectChannel && strings.TrimSpace(modelRequest.Model) != "" {
 			role := getModelPermissionRole(c)
 			permissionModel := ratio_setting.FormatMatchingModelName(modelRequest.Model)
@@ -67,7 +69,7 @@ func Distribute() func(c *gin.Context) {
 				abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("无权调用模型 %s", modelRequest.Model), types.ErrorCodeAccessDenied)
 				return
 			}
-			if isResponsesCreateRequest(c) && modelRequest.HasImageGenerationTool() {
+			if responsesImageGenerationTool {
 				if !isImageGenerationToolCallableByRole(role) {
 					abortWithOpenAiMessage(c, http.StatusForbidden, "无权调用图片生成工具 image_generation", types.ErrorCodeAccessDenied)
 					return
@@ -131,6 +133,13 @@ func Distribute() func(c *gin.Context) {
 					common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
 				}
 			}
+			service.PrepareSlowTTFTRequest(
+				c,
+				modelRequest.Model,
+				usingGroup,
+				strings.TrimSpace(modelRequest.PreviousResponseID) != "",
+				responsesImageGenerationTool,
+			)
 
 			channel, selectGroup, selectErr := selectChannelForRequest(c, modelRequest.Model, usingGroup, clientID, specificChannelID)
 			if selectErr != nil {
@@ -534,6 +543,7 @@ func SetupContextForSelectedChannelKey(c *gin.Context, channel *model.Channel, m
 	}
 	common.SetContextKey(c, constant.ContextKeyChannelId, channel.Id)
 	common.SetContextKey(c, constant.ContextKeyChannelName, channel.Name)
+	common.SetContextKey(c, constant.ContextKeyChannelTag, channel.GetTag())
 	common.SetContextKey(c, constant.ContextKeyChannelType, channel.Type)
 	common.SetContextKey(c, constant.ContextKeyChannelCreateTime, channel.CreatedTime)
 	common.SetContextKey(c, constant.ContextKeyChannelSetting, channel.GetSetting())

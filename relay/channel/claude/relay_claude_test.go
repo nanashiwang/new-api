@@ -14,6 +14,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestIsEffectiveClaudeStreamOutput(t *testing.T) {
+	text := "hello"
+	thinking := "reasoning"
+	partialJSON := `{"name"`
+	empty := "   "
+
+	tests := []struct {
+		name     string
+		response *dto.ClaudeResponse
+		want     bool
+	}{
+		{name: "nil", response: nil, want: false},
+		{name: "lifecycle", response: &dto.ClaudeResponse{Type: "message_start"}, want: false},
+		{name: "empty text", response: &dto.ClaudeResponse{Delta: &dto.ClaudeMediaMessage{Text: &empty}}, want: false},
+		{name: "text", response: &dto.ClaudeResponse{Delta: &dto.ClaudeMediaMessage{Text: &text}}, want: true},
+		{name: "thinking", response: &dto.ClaudeResponse{Delta: &dto.ClaudeMediaMessage{Thinking: &thinking}}, want: true},
+		{name: "partial json", response: &dto.ClaudeResponse{Delta: &dto.ClaudeMediaMessage{PartialJson: &partialJSON}}, want: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.want, isEffectiveClaudeStreamOutput(test.response))
+		})
+	}
+}
+
 func TestHandleClaudeResponseData_UsesUpstreamStatusCodeForClaudeError(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)

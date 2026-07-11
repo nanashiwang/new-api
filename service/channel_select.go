@@ -188,6 +188,25 @@ func IsCodexAutoReviewRequestModel(modelName string) bool {
 //	Retry=3: GroupB, priority1 (startRetryIndex=2, priorityRetry=1)
 //	         分组B, 优先级1
 func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, error) {
+	if param == nil {
+		return nil, "", errors.New("retry param is nil")
+	}
+	originalRetry := param.GetRetry()
+	originalResetNextTry := param.resetNextTry
+	channel, selectGroup, err := cacheGetRandomSatisfiedChannel(param)
+	if err != nil || channel != nil || !EnableSlowTTFTSoftFallback(param.Ctx) {
+		return channel, selectGroup, err
+	}
+
+	common.DeleteContextKey(param.Ctx, constant.ContextKeyAutoGroup)
+	common.DeleteContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex)
+	common.DeleteContextKey(param.Ctx, constant.ContextKeyAutoGroupRetryIndex)
+	param.SetRetry(originalRetry)
+	param.resetNextTry = originalResetNextTry
+	return cacheGetRandomSatisfiedChannel(param)
+}
+
+func cacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, error) {
 	var channel *model.Channel
 	var err error
 	selectGroup := param.TokenGroup
