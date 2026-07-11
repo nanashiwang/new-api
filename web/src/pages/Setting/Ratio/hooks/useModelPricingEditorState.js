@@ -34,7 +34,10 @@ const EMPTY_MODEL = {
   inputPrice: '',
   completionPrice: '',
   lockedCompletionRatio: '',
+  defaultCompletionRatio: '',
   completionRatioLocked: false,
+  completionRatioCanOverride: false,
+  completionRatioOverridden: false,
   cachePrice: '',
   createCachePrice: '',
   imagePrice: '',
@@ -112,12 +115,18 @@ const normalizeCompletionRatioMeta = (rawMeta) => {
     return {
       locked: false,
       ratio: '',
+      canOverride: false,
+      isOverridden: false,
+      defaultRatio: '',
     };
   }
 
   return {
     locked: Boolean(rawMeta.locked),
     ratio: toNumericString(rawMeta.ratio),
+    canOverride: Boolean(rawMeta.can_override),
+    isOverridden: Boolean(rawMeta.is_overridden),
+    defaultRatio: toNumericString(rawMeta.default_ratio),
   };
 };
 
@@ -165,7 +174,16 @@ const buildModelState = (name, sourceMaps) => {
     fixedPrice,
     inputPrice,
     completionRatioLocked: completionRatioMeta.locked,
+    completionRatioCanOverride: completionRatioMeta.canOverride,
+    completionRatioOverridden:
+      completionRatioMeta.isOverridden ||
+      (completionRatioMeta.canOverride &&
+        !completionRatioMeta.locked &&
+        hasValue(completionRatio)),
     lockedCompletionRatio: completionRatioMeta.ratio,
+    defaultCompletionRatio:
+      completionRatioMeta.defaultRatio ||
+      (completionRatioMeta.locked ? completionRatioMeta.ratio : ''),
     completionPrice:
       inputPriceNumber !== null &&
       hasValue(
@@ -414,7 +432,11 @@ const serializeModel = (model, t) => {
 
   result.ModelRatio = toNormalizedNumber(inputPrice / 2);
 
-  if (!model.completionRatioLocked && completionPrice !== null) {
+  const shouldSaveCompletionRatio = model.completionRatioCanOverride
+    ? model.completionRatioOverridden
+    : !model.completionRatioLocked;
+
+  if (shouldSaveCompletionRatio && completionPrice !== null) {
     result.CompletionRatio = toNormalizedNumber(completionPrice / inputPrice);
   } else if (
     model.completionRatioLocked &&
@@ -570,11 +592,12 @@ export const buildPreviewRows = (model, t) => {
     {
       key: 'CompletionRatio',
       label: 'CompletionRatio',
-      value: model.completionRatioLocked
-        ? `${model.lockedCompletionRatio || t('空')} (${t('后端固定')})`
-        : completionPrice !== null
-          ? formatNumber(completionPrice / inputPrice)
-          : t('空'),
+      value:
+        model.completionRatioLocked && !model.completionRatioCanOverride
+          ? `${model.lockedCompletionRatio || t('空')} (${t('后端固定')})`
+          : completionPrice !== null
+            ? formatNumber(completionPrice / inputPrice)
+            : t('空'),
     },
     {
       key: 'CacheRatio',
@@ -795,6 +818,10 @@ export function useModelPricingEditorState({
     upsertModel(selectedModel.name, (model) => {
       const nextModel = { ...model, [field]: '' };
 
+      if (field === 'completionPrice' && model.completionRatioCanOverride) {
+        nextModel.completionRatioOverridden = false;
+      }
+
       if (field === 'audioInputPrice') {
         nextModel.audioOutputPrice = '';
         setOptionalFieldToggles((prev) => ({
@@ -820,7 +847,11 @@ export function useModelPricingEditorState({
     return {
       ...model,
       completionPrice:
-        model.completionRatioLocked && hasValue(model.lockedCompletionRatio)
+        model.completionRatioLocked &&
+        hasValue(model.lockedCompletionRatio) &&
+        (!model.completionRatioCanOverride ||
+          !model.completionRatioOverridden ||
+          !hasValue(model.completionPrice))
           ? formatNumber(baseNumber * Number(model.lockedCompletionRatio))
           : !hasValue(model.completionPrice) &&
               hasValue(model.rawRatios.completionRatio)
@@ -862,7 +893,13 @@ export function useModelPricingEditorState({
     }
 
     upsertModel(selectedModel.name, (model) => {
-      const updatedModel = { ...model, [field]: value };
+      const updatedModel = {
+        ...model,
+        [field]: value,
+        ...(field === 'completionPrice' && model.completionRatioCanOverride
+          ? { completionRatioOverridden: hasValue(value) }
+          : {}),
+      };
 
       if (field === 'inputPrice') {
         return fillDerivedPricesFromBase(updatedModel, value);
@@ -973,11 +1010,16 @@ export function useModelPricingEditorState({
           audioOutputPrice: selectedModel.audioOutputPrice,
           billingExpr: selectedModel.billingExpr || '',
           requestRuleExpr: selectedModel.requestRuleExpr || '',
+          completionRatioOverridden:
+            model.completionRatioCanOverride &&
+            Boolean(sourceToggles.completionPrice) &&
+            hasValue(selectedModel.completionPrice),
         };
 
         if (
           nextModel.billingMode === 'per-token' &&
           nextModel.completionRatioLocked &&
+          !nextModel.completionRatioCanOverride &&
           hasValue(nextModel.inputPrice) &&
           hasValue(nextModel.lockedCompletionRatio)
         ) {
@@ -996,9 +1038,11 @@ export function useModelPricingEditorState({
       selectedModelNames.forEach((modelName) => {
         const targetModel = models.find((item) => item.name === modelName);
         next[modelName] = {
-          completionPrice: targetModel?.completionRatioLocked
-            ? true
-            : Boolean(sourceToggles.completionPrice),
+          completionPrice:
+            targetModel?.completionRatioLocked &&
+            !targetModel?.completionRatioCanOverride
+              ? true
+              : Boolean(sourceToggles.completionPrice),
           cachePrice: Boolean(sourceToggles.cachePrice),
           createCachePrice: Boolean(sourceToggles.createCachePrice),
           imagePrice: Boolean(sourceToggles.imagePrice),
