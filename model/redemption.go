@@ -303,8 +303,7 @@ func RedeemWithOptions(key string, userId int, renewTargetSubscriptionId int, pu
 		if err := tx.Save(redemption).Error; err != nil {
 			return err
 		}
-		// 返佣台账和权益发放放在同一事务里，保持“全成或全不成”的一致性。
-		return EnqueueInviteCommissionFromRedemptionTx(tx, redemption)
+		return nil
 	})
 	if err != nil {
 		if _, ok := err.(*RedeemNeedRenewTargetError); ok {

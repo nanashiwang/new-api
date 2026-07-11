@@ -92,6 +92,7 @@ func (*StripeAdaptor) RequestPay(c *gin.Context, req *StripePayRequest) {
 	id := c.GetInt("id")
 	user, _ := model.GetUserById(id, false)
 	chargedMoney := GetChargedAmount(float64(req.Amount), *user)
+	paidMoney := getStripePayMoney(float64(req.Amount), user.Group)
 
 	reference := fmt.Sprintf("new-api-ref-%d-%d-%s", user.Id, time.Now().UnixMilli(), randstr.String(4))
 	referenceId := "ref_" + common.Sha1([]byte(reference))
@@ -107,6 +108,7 @@ func (*StripeAdaptor) RequestPay(c *gin.Context, req *StripePayRequest) {
 		UserId:          id,
 		Amount:          req.Amount,
 		Money:           chargedMoney,
+		PaidMoney:       paidMoney,
 		TradeNo:         referenceId,
 		PaymentMethod:   PaymentMethodStripe,
 		PaymentProvider: model.PaymentProviderStripe,
@@ -243,7 +245,7 @@ func sessionCompleted(event stripe.Event, callerIp string) {
 	if checkResult.AlreadyCompleted {
 		return
 	}
-	err = model.Recharge(referenceId, customerId, callerIp)
+	err = model.Recharge(referenceId, customerId, callerIp, paidAmount)
 	if err != nil {
 		log.Println(err.Error(), referenceId)
 		return

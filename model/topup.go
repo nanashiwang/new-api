@@ -17,6 +17,7 @@ type TopUp struct {
 	UserId          int     `json:"user_id" gorm:"index"`
 	Amount          int64   `json:"amount"`
 	Money           float64 `json:"money"`
+	PaidMoney       float64 `json:"paid_money" gorm:"type:decimal(20,6);not null;default:0"`
 	TradeNo         string  `json:"trade_no" gorm:"unique;type:varchar(255);index"`
 	PaymentMethod   string  `json:"payment_method" gorm:"type:varchar(50)"`
 	PaymentProvider string  `json:"payment_provider" gorm:"type:varchar(50);default:''"`
@@ -157,7 +158,7 @@ func UpdatePendingTopUpStatus(tradeNo string, expectedPaymentProvider string, ta
 	})
 }
 
-func Recharge(referenceId string, customerId string, callerIp string) (err error) {
+func Recharge(referenceId string, customerId string, callerIp string, paidMoney float64) (err error) {
 	if referenceId == "" {
 		return errors.New("未提供支付单号")
 	}
@@ -190,6 +191,9 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 		if topUp.PaymentMethod == "" {
 			topUp.PaymentMethod = PaymentMethodStripe
 		}
+		if paidMoney > 0 {
+			topUp.PaidMoney = paidMoney
+		}
 		topUp.CompleteTime = common.GetTimestamp()
 		topUp.Status = common.TopUpStatusSuccess
 		err = tx.Save(topUp).Error
@@ -220,7 +224,7 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 	// 返佣采用 T+1 日批结算：
 	// 1) 此处只入返佣台账（pending），不直接发放；
 	// 2) 真正发放由定时任务统一处理，避免支付回调路径里出现复杂并发问题。
-	if enqueueErr := EnqueueInviteCommissionFromTopUp(topUp, int(quota)); enqueueErr != nil {
+	if enqueueErr := EnqueueInviteCommissionFromTopUp(topUp); enqueueErr != nil {
 		common.SysError("enqueue invite commission failed: " + enqueueErr.Error())
 	}
 
@@ -510,7 +514,7 @@ func CompleteTopUpByTradeNoWithPayment(tradeNo string, source string, callerIp s
 	RecordTopupLog(userId, logMessage, callerIp, paymentMethod, source, adminExtras)
 
 	if topUp := GetTopUpByTradeNo(tradeNo); topUp != nil {
-		if enqueueErr := EnqueueInviteCommissionFromTopUp(topUp, quotaToAdd); enqueueErr != nil {
+		if enqueueErr := EnqueueInviteCommissionFromTopUp(topUp); enqueueErr != nil {
 			context := source
 			if context == "" {
 				context = "topup"
@@ -608,8 +612,7 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 	RecordTopupLog(topUp.UserId,
 		fmt.Sprintf("使用Creem充值成功，充值额度: %v，支付金额：%.2f", quota, topUp.Money),
 		callerIp, topUp.PaymentMethod, "creem", nil)
-	// Creem 的 Amount 字段就是充值额度，直接作为返佣基数入池。
-	if enqueueErr := EnqueueInviteCommissionFromTopUp(topUp, int(quota)); enqueueErr != nil {
+	if enqueueErr := EnqueueInviteCommissionFromTopUp(topUp); enqueueErr != nil {
 		common.SysError("enqueue invite commission (creem) failed: " + enqueueErr.Error())
 	}
 

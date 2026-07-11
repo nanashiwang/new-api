@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -39,23 +38,17 @@ func createSubscriptionRedemptionForTest(t *testing.T, planID int, mode string, 
 	return redemption
 }
 
-func TestRedeemWithResult_SubscriptionBenefitCreatesSubscriptionAndCommissionLedger(t *testing.T) {
+func TestRedeemWithResult_SubscriptionBenefitDoesNotCreateCommissionLedger(t *testing.T) {
 	setupRedemptionSubscriptionTest(t)
 
 	originEnabled := common.InviterCommissionEnabled
 	originRate := common.InviterRechargeCommissionRate
-	originQuotaPerUnit := common.QuotaPerUnit
-	originPrice := operation_setting.Price
 	t.Cleanup(func() {
 		common.InviterCommissionEnabled = originEnabled
 		common.InviterRechargeCommissionRate = originRate
-		common.QuotaPerUnit = originQuotaPerUnit
-		operation_setting.Price = originPrice
 	})
 	common.InviterCommissionEnabled = true
 	common.InviterRechargeCommissionRate = 0.1
-	common.QuotaPerUnit = 1000
-	operation_setting.Price = 8
 
 	inviter := createInviteCommissionTestUser(t, "inviter_redeem_subscription", 0)
 	invitee := createInviteCommissionTestUser(t, "invitee_redeem_subscription", inviter.Id)
@@ -88,12 +81,9 @@ func TestRedeemWithResult_SubscriptionBenefitCreatesSubscriptionAndCommissionLed
 	require.NoError(t, DB.Model(&UserSubscription{}).Where("user_id = ? AND plan_id = ?", invitee.Id, plan.Id).Count(&subCount).Error)
 	assert.EqualValues(t, 0, subCount)
 
-	var ledger InviteCommissionLedger
-	require.NoError(t, DB.Where("topup_trade_no = ? AND inviter_user_id = ?", fmt.Sprintf("redeem:%d", redemption.Id), inviter.Id).First(&ledger).Error)
-	assert.Equal(t, invitee.Id, ledger.InviteeUserId)
-	assert.Equal(t, inviter.Id, ledger.InviterUserId)
-	assert.Equal(t, 11000, ledger.BaseQuota)
-	assert.Equal(t, 1100, ledger.CommissionQuota)
+	var ledgerCount int64
+	require.NoError(t, DB.Model(&InviteCommissionLedger{}).Count(&ledgerCount).Error)
+	assert.EqualValues(t, 0, ledgerCount)
 }
 
 func TestRedeemWithResult_SubscriptionBenefitUsesCurrentPlanConfiguration(t *testing.T) {

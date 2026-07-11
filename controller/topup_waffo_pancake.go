@@ -164,6 +164,7 @@ func RequestWaffoPancakePay(c *gin.Context) {
 		UserId:          id,
 		Amount:          normalizeWaffoPancakeTopUpAmount(req.Amount),
 		Money:           payMoney,
+		PaidMoney:       payMoney,
 		TradeNo:         tradeNo,
 		PaymentMethod:   model.PaymentMethodWaffoPancake,
 		PaymentProvider: model.PaymentProviderWaffoPancake,

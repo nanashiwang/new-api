@@ -3,6 +3,8 @@ package model
 import (
 	"errors"
 	"fmt"
+	"math"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -29,6 +31,12 @@ const (
 	InviteCommissionRiskReasonDailyCapReached = "daily_cap_reached"
 	// 风控原因：本单返佣被当日上限截断，仅部分发放。
 	InviteCommissionRiskReasonDailyCapTruncated = "daily_cap_truncated"
+	// 历史兑换码返佣待结算记录不再允许发放。
+	InviteCommissionRiskReasonRedemptionNotCommissionable = "redemption_not_commissionable"
+	// 返佣台账找不到对应的成功支付订单。
+	InviteCommissionRiskReasonPaymentSourceInvalid = "payment_source_invalid"
+	// 历史订单缺少可信实付金额，无法安全计算返佣。
+	InviteCommissionRiskReasonPaidMoneyMissing = "paid_money_missing"
 )
 
 var errInviteCommissionAlreadyProcessed = errors.New("invite commission ledger already processed")
@@ -69,18 +77,48 @@ type InviteCommissionDailyCapState struct {
 	UpdatedAt     int64  `json:"updated_at" gorm:"index"`
 }
 
-func EnqueueInviteCommissionFromTopUp(topUp *TopUp, baseQuota int) error {
-	// 基础防护：仅合法充值额度允许入池。
-	if topUp == nil {
+// EnqueueInviteCommissionFromTopUp 按订单实付金额折算返佣基数，不复用到账额度。
+func EnqueueInviteCommissionFromTopUp(topUp *TopUp) error {
+	if topUp == nil || topUp.Id <= 0 {
 		return nil
 	}
-	return enqueueInviteCommission(topUp.UserId, topUp.TradeNo, topUp.CompleteTime, baseQuota)
-}
+	if !common.InviterCommissionEnabled || common.InviterRechargeCommissionRate <= 0 {
+		return nil
+	}
+	if operation_setting.Price <= 0 || math.IsNaN(operation_setting.Price) || math.IsInf(operation_setting.Price, 0) {
+		common.SysError(fmt.Sprintf("skip invite commission for top-up %d: invalid payment price setting", topUp.Id))
+		return nil
+	}
 
-// EnqueueInviteCommissionFromRedemption 将“兑换码充值”纳入邀请返佣口径。
-// 管理员直接修改余额不会调用该入口，因此不计入返佣。
-func EnqueueInviteCommissionFromRedemption(redemption *Redemption) error {
-	return EnqueueInviteCommissionFromRedemptionTx(DB, redemption)
+	// 仅信任订单 ID，金额、状态和归属统一从数据库读取，避免调用方伪造返佣基数。
+	dbTopUp := &TopUp{}
+	if err := DB.Select("id", "user_id", "trade_no", "money", "paid_money", "payment_method", "payment_provider", "complete_time", "status").
+		First(dbTopUp, "id = ?", topUp.Id).Error; err != nil {
+		return err
+	}
+	if dbTopUp.Status != common.TopUpStatusSuccess {
+		return nil
+	}
+
+	paidMoney := dbTopUp.PaidMoney
+	if paidMoney <= 0 {
+		// 兼容升级前创建的订单；旧订单的 money 字段就是支付金额快照。
+		if InferPaymentProvider(dbTopUp.PaymentProvider, dbTopUp.PaymentMethod) == PaymentProviderStripe {
+			return nil
+		}
+		paidMoney = dbTopUp.Money
+	}
+	if paidMoney <= 0 || math.IsNaN(paidMoney) || math.IsInf(paidMoney, 0) {
+		return nil
+	}
+
+	baseQuota := int(decimal.NewFromFloat(paidMoney).
+		Mul(decimal.NewFromFloat(common.QuotaPerUnit)).
+		Div(decimal.NewFromFloat(operation_setting.Price)).IntPart())
+	if baseQuota <= 0 {
+		return nil
+	}
+	return enqueueInviteCommission(dbTopUp.UserId, dbTopUp.TradeNo, dbTopUp.CompleteTime, baseQuota)
 }
 
 // EnqueueInviteCommissionFromSubscriptionOrderTx 将“订阅支付成功”纳入邀请返佣口径。
@@ -122,68 +160,6 @@ func EnqueueInviteCommissionFromSubscriptionOrderTx(tx *gorm.DB, order *Subscrip
 	}
 
 	return enqueueInviteCommissionWithDB(tx, dbOrder.UserId, dbOrder.TradeNo, dbOrder.CompleteTime, baseQuota)
-}
-
-// EnqueueInviteCommissionFromRedemptionTx 在指定事务中入返佣台账，用于保证兑换与返佣原子一致。
-func EnqueueInviteCommissionFromRedemptionTx(tx *gorm.DB, redemption *Redemption) error {
-	if tx == nil {
-		return errors.New("tx is nil")
-	}
-	if redemption == nil || redemption.Id <= 0 {
-		return nil
-	}
-	// 仅信任 redemption.id；其余字段统一从数据库读取，避免调用方传入伪造数据。
-	dbRedemption := &Redemption{}
-	if err := tx.Select("id", "used_user_id", "quota", "redeemed_time", "status", "benefit_type", "plan_id").
-		First(dbRedemption, "id = ?", redemption.Id).Error; err != nil {
-		return err
-	}
-	// 仅已兑换成功的兑换码允许参与返佣入池。
-	if dbRedemption.Status != common.RedemptionCodeStatusUsed {
-		return nil
-	}
-
-	// 返佣基数随兑换码权益类型变化：余额码按额度，套餐码按当前套餐售价折算。
-	// 这样可以保证“买套餐”和“兑套餐”走同一套返佣口径。
-	baseQuota, err := getRedemptionCommissionBaseQuotaTx(tx, dbRedemption)
-	if err != nil {
-		return err
-	}
-	// redemption.id 全局唯一，作为 trade_no 可保证幂等去重。
-	tradeNo := fmt.Sprintf("redeem:%d", dbRedemption.Id)
-	return enqueueInviteCommissionWithDB(tx, dbRedemption.UsedUserId, tradeNo, dbRedemption.RedeemedTime, baseQuota)
-}
-
-// getRedemptionCommissionBaseQuotaTx 统一计算兑换码返佣基数。
-// 余额码直接使用兑换额度；套餐码按当前套餐售价折算额度。
-func getRedemptionCommissionBaseQuotaTx(tx *gorm.DB, redemption *Redemption) (int, error) {
-	if redemption == nil {
-		return 0, nil
-	}
-	if NormalizeRedemptionBenefitType(redemption.BenefitType) != RedemptionBenefitTypeSubscription {
-		// 余额码保持旧口径：返佣基数直接等于兑换到账额度。
-		return redemption.Quota, nil
-	}
-	if redemption.PlanId <= 0 {
-		return 0, nil
-	}
-	if operation_setting.Price <= 0 {
-		return 0, errors.New("invalid payment price setting")
-	}
-	plan, err := getSubscriptionPlanByIdTx(tx, redemption.PlanId)
-	if err != nil {
-		return 0, err
-	}
-	if plan == nil || plan.PriceAmount <= 0 {
-		// 当前套餐无有效售价时，不再给套餐兑换码产生返佣基数。
-		// 这里选择“不给返佣”而不是报错，是为了避免后台临时调整展示价导致历史码无法兑换。
-		return 0, nil
-	}
-	// 套餐码返佣和付费订阅保持同一套折算公式，避免不同入口口径不一致。
-	dBaseQuota := decimal.NewFromFloat(plan.PriceAmount).
-		Mul(decimal.NewFromFloat(common.QuotaPerUnit)).
-		Div(decimal.NewFromFloat(operation_setting.Price))
-	return int(dBaseQuota.IntPart()), nil
 }
 
 func enqueueInviteCommission(inviteeUserID int, tradeNo string, completeTime int64, baseQuota int) error {
@@ -293,11 +269,25 @@ func SettleInviteCommissionByBizDate(bizDate string, batchSize int) (settledCoun
 
 func settleSingleInviteCommissionLedger(ledger *InviteCommissionLedger, dailyCap int) (processed bool, settled bool, err error) {
 	now := common.GetTimestamp()
-	allowedQuota := ledger.CommissionQuota
+	allowedQuota := 0
 	riskReason := ""
 
 	err = DB.Transaction(func(tx *gorm.DB) error {
-		if ledger.InviterUserId == ledger.InviteeUserId {
+		sourceRiskReason, reconcileErr := reconcilePendingInviteCommissionAmountTx(tx, ledger)
+		if reconcileErr != nil {
+			return reconcileErr
+		}
+		if sourceRiskReason != "" {
+			riskReason = sourceRiskReason
+		}
+		allowedQuota = ledger.CommissionQuota
+
+		if strings.HasPrefix(ledger.TopupTradeNo, "redeem:") {
+			allowedQuota = 0
+			riskReason = InviteCommissionRiskReasonRedemptionNotCommissionable
+		} else if sourceRiskReason != "" {
+			allowedQuota = 0
+		} else if ledger.InviterUserId == ledger.InviteeUserId {
 			allowedQuota = 0
 			riskReason = InviteCommissionRiskReasonSelfInvite
 		}
@@ -325,10 +315,12 @@ func settleSingleInviteCommissionLedger(ledger *InviteCommissionLedger, dailyCap
 		updateResult := tx.Model(&InviteCommissionLedger{}).
 			Where("id = ? AND status = ?", ledger.Id, InviteCommissionStatusPending).
 			Updates(map[string]interface{}{
-				"status":        targetStatus,
-				"settled_quota": allowedQuota,
-				"risk_reason":   riskReason,
-				"settled_at":    now,
+				"base_quota":       ledger.BaseQuota,
+				"commission_quota": ledger.CommissionQuota,
+				"status":           targetStatus,
+				"settled_quota":    allowedQuota,
+				"risk_reason":      riskReason,
+				"settled_at":       now,
 			})
 		if updateResult.Error != nil {
 			return updateResult.Error
@@ -369,6 +361,57 @@ func settleSingleInviteCommissionLedger(ledger *InviteCommissionLedger, dailyCap
 	}
 
 	return processed, settled, nil
+}
+
+func reconcilePendingInviteCommissionAmountTx(tx *gorm.DB, ledger *InviteCommissionLedger) (string, error) {
+	if tx == nil || ledger == nil || strings.HasPrefix(ledger.TopupTradeNo, "redeem:") || operation_setting.Price <= 0 ||
+		math.IsNaN(operation_setting.Price) || math.IsInf(operation_setting.Price, 0) {
+		return "", nil
+	}
+
+	topUp := &TopUp{}
+	err := tx.Select("id", "money", "paid_money", "payment_method", "payment_provider", "status").
+		First(topUp, "trade_no = ?", ledger.TopupTradeNo).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return InviteCommissionRiskReasonPaymentSourceInvalid, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if topUp.Status != common.TopUpStatusSuccess {
+		return InviteCommissionRiskReasonPaymentSourceInvalid, nil
+	}
+
+	paidMoney := topUp.PaidMoney
+	if paidMoney <= 0 {
+		// 旧 Stripe 订单的 money 是到账额度基数，不是实付金额，无法安全反推时不予结算。
+		if InferPaymentProvider(topUp.PaymentProvider, topUp.PaymentMethod) == PaymentProviderStripe {
+			return InviteCommissionRiskReasonPaidMoneyMissing, nil
+		}
+		paidMoney = topUp.Money
+	}
+	if paidMoney <= 0 || math.IsNaN(paidMoney) || math.IsInf(paidMoney, 0) {
+		return InviteCommissionRiskReasonPaidMoneyMissing, nil
+	}
+	if ledger.CommissionRate <= 0 || math.IsNaN(ledger.CommissionRate) || math.IsInf(ledger.CommissionRate, 0) {
+		return InviteCommissionRiskReasonPaymentSourceInvalid, nil
+	}
+
+	baseQuota := int(decimal.NewFromFloat(paidMoney).
+		Mul(decimal.NewFromFloat(common.QuotaPerUnit)).
+		Div(decimal.NewFromFloat(operation_setting.Price)).IntPart())
+	if baseQuota <= 0 {
+		return InviteCommissionRiskReasonPaidMoneyMissing, nil
+	}
+	commissionQuota := int(decimal.NewFromInt(int64(baseQuota)).
+		Mul(decimal.NewFromFloat(ledger.CommissionRate)).IntPart())
+	if commissionQuota <= 0 {
+		return InviteCommissionRiskReasonPaidMoneyMissing, nil
+	}
+
+	ledger.BaseQuota = baseQuota
+	ledger.CommissionQuota = commissionQuota
+	return "", nil
 }
 
 func reserveInviteCommissionDailyCapTx(tx *gorm.DB, inviterUserId int, bizDate string, requestQuota int, dailyCap int) (grantedQuota int, truncated bool, err error) {

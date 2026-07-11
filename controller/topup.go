@@ -200,6 +200,7 @@ func RequestEpay(c *gin.Context) {
 		UserId:          id,
 		Amount:          amount,
 		Money:           payMoney,
+		PaidMoney:       payMoney,
 		TradeNo:         tradeNo,
 		PaymentMethod:   req.PaymentMethod,
 		PaymentProvider: model.PaymentProviderEpay,

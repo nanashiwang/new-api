@@ -1,0 +1,211 @@
+package model
+
+import (
+	"testing"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func setupInviteCommissionTopUpTest(t *testing.T) {
+	t.Helper()
+	setupInviteCommissionSubscriptionTest(t)
+
+	originEnabled := common.InviterCommissionEnabled
+	originRate := common.InviterRechargeCommissionRate
+	originQuotaPerUnit := common.QuotaPerUnit
+	originPrice := operation_setting.Price
+	t.Cleanup(func() {
+		common.InviterCommissionEnabled = originEnabled
+		common.InviterRechargeCommissionRate = originRate
+		common.QuotaPerUnit = originQuotaPerUnit
+		operation_setting.Price = originPrice
+	})
+
+	common.InviterCommissionEnabled = true
+	common.InviterRechargeCommissionRate = 0.1
+	common.QuotaPerUnit = 1000
+	operation_setting.Price = 1
+}
+
+func createInviteCommissionTopUp(t *testing.T, userID int, tradeNo string, amount int64, money, paidMoney float64, status string) *TopUp {
+	t.Helper()
+	topUp := &TopUp{
+		UserId:       userID,
+		Amount:       amount,
+		Money:        money,
+		PaidMoney:    paidMoney,
+		TradeNo:      tradeNo,
+		CreateTime:   common.GetTimestamp(),
+		CompleteTime: common.GetTimestamp(),
+		Status:       status,
+	}
+	require.NoError(t, DB.Create(topUp).Error)
+	return topUp
+}
+
+func TestEnqueueInviteCommissionFromTopUp_UsesPaidMoneyAndDatabaseOrder(t *testing.T) {
+	setupInviteCommissionTopUpTest(t)
+
+	inviter := createInviteCommissionTestUser(t, "inviter_topup_paid", 0)
+	invitee := createInviteCommissionTestUser(t, "invitee_topup_paid", inviter.Id)
+	topUp := createInviteCommissionTopUp(t, invitee.Id, "topup_paid_001", 100, 80, 80, common.TopUpStatusSuccess)
+
+	tampered := &TopUp{
+		Id:           topUp.Id,
+		UserId:       999999,
+		TradeNo:      "tampered_trade_no",
+		PaidMoney:    1,
+		CompleteTime: 1,
+		Status:       common.TopUpStatusSuccess,
+	}
+	require.NoError(t, EnqueueInviteCommissionFromTopUp(tampered))
+	require.NoError(t, EnqueueInviteCommissionFromTopUp(tampered))
+
+	var ledger InviteCommissionLedger
+	require.NoError(t, DB.Where("topup_trade_no = ?", topUp.TradeNo).First(&ledger).Error)
+	assert.Equal(t, invitee.Id, ledger.InviteeUserId)
+	assert.Equal(t, inviter.Id, ledger.InviterUserId)
+	assert.Equal(t, 80000, ledger.BaseQuota)
+	assert.Equal(t, 8000, ledger.CommissionQuota)
+	assert.NotEqual(t, int(topUp.Amount*int64(common.QuotaPerUnit)), ledger.BaseQuota)
+
+	var count int64
+	require.NoError(t, DB.Model(&InviteCommissionLedger{}).Where("topup_trade_no = ?", topUp.TradeNo).Count(&count).Error)
+	assert.EqualValues(t, 1, count)
+}
+
+func TestEnqueueInviteCommissionFromTopUp_StripeUsesPaidMoneyInsteadOfGrantedMoney(t *testing.T) {
+	setupInviteCommissionTopUpTest(t)
+
+	inviter := createInviteCommissionTestUser(t, "inviter_topup_stripe", 0)
+	invitee := createInviteCommissionTestUser(t, "invitee_topup_stripe", inviter.Id)
+	topUp := createInviteCommissionTopUp(t, invitee.Id, "topup_stripe_001", 100, 100, 80, common.TopUpStatusSuccess)
+	topUp.PaymentMethod = PaymentMethodStripe
+	topUp.PaymentProvider = PaymentProviderStripe
+	require.NoError(t, DB.Save(topUp).Error)
+
+	require.NoError(t, EnqueueInviteCommissionFromTopUp(topUp))
+
+	var ledger InviteCommissionLedger
+	require.NoError(t, DB.Where("topup_trade_no = ?", topUp.TradeNo).First(&ledger).Error)
+	assert.Equal(t, 80000, ledger.BaseQuota)
+	assert.Equal(t, 8000, ledger.CommissionQuota)
+}
+
+func TestEnqueueInviteCommissionFromTopUp_RejectsUnsuccessfulOrders(t *testing.T) {
+	setupInviteCommissionTopUpTest(t)
+
+	inviter := createInviteCommissionTestUser(t, "inviter_topup_status", 0)
+	invitee := createInviteCommissionTestUser(t, "invitee_topup_status", inviter.Id)
+	pending := createInviteCommissionTopUp(t, invitee.Id, "topup_pending_001", 100, 80, 80, common.TopUpStatusPending)
+	failed := createInviteCommissionTopUp(t, invitee.Id, "topup_failed_001", 100, 80, 80, common.TopUpStatusFailed)
+
+	require.NoError(t, EnqueueInviteCommissionFromTopUp(pending))
+	require.NoError(t, EnqueueInviteCommissionFromTopUp(failed))
+
+	var count int64
+	require.NoError(t, DB.Model(&InviteCommissionLedger{}).Count(&count).Error)
+	assert.EqualValues(t, 0, count)
+}
+
+func TestEnqueueInviteCommissionFromTopUp_LegacyOrderFallsBackToMoney(t *testing.T) {
+	setupInviteCommissionTopUpTest(t)
+
+	inviter := createInviteCommissionTestUser(t, "inviter_topup_legacy", 0)
+	invitee := createInviteCommissionTestUser(t, "invitee_topup_legacy", inviter.Id)
+	topUp := createInviteCommissionTopUp(t, invitee.Id, "topup_legacy_001", 100, 75, 0, common.TopUpStatusSuccess)
+
+	require.NoError(t, EnqueueInviteCommissionFromTopUp(topUp))
+
+	var ledger InviteCommissionLedger
+	require.NoError(t, DB.Where("topup_trade_no = ?", topUp.TradeNo).First(&ledger).Error)
+	assert.Equal(t, 75000, ledger.BaseQuota)
+	assert.Equal(t, 7500, ledger.CommissionQuota)
+}
+
+func TestSettleInviteCommission_ReconcilesLegacyPendingTopUpLedger(t *testing.T) {
+	setupInviteCommissionTopUpTest(t)
+
+	originDailyCap := common.InviterCommissionDailyCap
+	common.InviterCommissionDailyCap = 0
+	t.Cleanup(func() {
+		common.InviterCommissionDailyCap = originDailyCap
+	})
+
+	inviter := createInviteCommissionTestUser(t, "inviter_topup_reconcile", 0)
+	invitee := createInviteCommissionTestUser(t, "invitee_topup_reconcile", inviter.Id)
+	topUp := createInviteCommissionTopUp(t, invitee.Id, "topup_reconcile_001", 100, 80, 0, common.TopUpStatusSuccess)
+	ledger := &InviteCommissionLedger{
+		InviteeUserId:   invitee.Id,
+		InviterUserId:   inviter.Id,
+		TopupTradeNo:    topUp.TradeNo,
+		BizDate:         "2026-01-01",
+		BaseQuota:       100000,
+		CommissionRate:  0.1,
+		CommissionQuota: 10000,
+		Status:          InviteCommissionStatusPending,
+		CreatedAt:       common.GetTimestamp(),
+	}
+	require.NoError(t, DB.Create(ledger).Error)
+
+	settled, skipped, processed, err := SettleInviteCommissionByBizDate("2026-01-02", 10)
+	require.NoError(t, err)
+	assert.Equal(t, 1, settled)
+	assert.Equal(t, 0, skipped)
+	assert.Equal(t, 1, processed)
+
+	var refreshedLedger InviteCommissionLedger
+	require.NoError(t, DB.First(&refreshedLedger, ledger.Id).Error)
+	assert.Equal(t, 80000, refreshedLedger.BaseQuota)
+	assert.Equal(t, 8000, refreshedLedger.CommissionQuota)
+	assert.Equal(t, 8000, refreshedLedger.SettledQuota)
+
+	var refreshedInviter User
+	require.NoError(t, DB.First(&refreshedInviter, inviter.Id).Error)
+	assert.Equal(t, 8000, refreshedInviter.AffQuota)
+	assert.Equal(t, 8000, refreshedInviter.AffHistoryQuota)
+}
+
+func TestSettleInviteCommission_SkipsLegacyStripeWithoutPaidMoney(t *testing.T) {
+	setupInviteCommissionTopUpTest(t)
+
+	originDailyCap := common.InviterCommissionDailyCap
+	common.InviterCommissionDailyCap = 0
+	t.Cleanup(func() {
+		common.InviterCommissionDailyCap = originDailyCap
+	})
+
+	inviter := createInviteCommissionTestUser(t, "inviter_stripe_missing_paid", 0)
+	invitee := createInviteCommissionTestUser(t, "invitee_stripe_missing_paid", inviter.Id)
+	topUp := createInviteCommissionTopUp(t, invitee.Id, "stripe_missing_paid_001", 100, 100, 0, common.TopUpStatusSuccess)
+	topUp.PaymentMethod = PaymentMethodStripe
+	topUp.PaymentProvider = PaymentProviderStripe
+	require.NoError(t, DB.Save(topUp).Error)
+	ledger := &InviteCommissionLedger{
+		InviteeUserId:   invitee.Id,
+		InviterUserId:   inviter.Id,
+		TopupTradeNo:    topUp.TradeNo,
+		BizDate:         "2026-01-01",
+		BaseQuota:       100000,
+		CommissionRate:  0.1,
+		CommissionQuota: 10000,
+		Status:          InviteCommissionStatusPending,
+		CreatedAt:       common.GetTimestamp(),
+	}
+	require.NoError(t, DB.Create(ledger).Error)
+
+	settled, skipped, processed, err := SettleInviteCommissionByBizDate("2026-01-02", 10)
+	require.NoError(t, err)
+	assert.Equal(t, 0, settled)
+	assert.Equal(t, 1, skipped)
+	assert.Equal(t, 1, processed)
+
+	var refreshedLedger InviteCommissionLedger
+	require.NoError(t, DB.First(&refreshedLedger, ledger.Id).Error)
+	assert.Equal(t, InviteCommissionStatusSkipped, refreshedLedger.Status)
+	assert.Equal(t, InviteCommissionRiskReasonPaidMoneyMissing, refreshedLedger.RiskReason)
+	assert.Equal(t, 0, refreshedLedger.SettledQuota)
+}

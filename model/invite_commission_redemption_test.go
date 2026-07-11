@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/assert"
@@ -44,7 +43,7 @@ func createInviteCommissionTestUser(t *testing.T, username string, inviterID int
 	return user
 }
 
-func TestEnqueueInviteCommissionFromRedemption_CreatesLedger(t *testing.T) {
+func TestRedeemQuotaCode_DoesNotCreateInviteCommissionLedger(t *testing.T) {
 	setupInviteCommissionRedemptionTest(t)
 
 	originEnabled := common.InviterCommissionEnabled
@@ -59,42 +58,27 @@ func TestEnqueueInviteCommissionFromRedemption_CreatesLedger(t *testing.T) {
 	inviter := createInviteCommissionTestUser(t, "inviter_redemption", 0)
 	invitee := createInviteCommissionTestUser(t, "invitee_redemption", inviter.Id)
 
-	redeemedAt := int64(1700000000)
-	dbRedemption := &Redemption{
-		Id:           101,
-		Key:          "0123456789abcdef0123456789abcdef",
-		Status:       common.RedemptionCodeStatusUsed,
-		UsedUserId:   invitee.Id,
-		Quota:        300,
-		RedeemedTime: redeemedAt,
-	}
-	require.NoError(t, DB.Create(dbRedemption).Error)
-
-	// 传入对象中的关键字段被篡改，也应以 DB 中记录为准。
 	redemption := &Redemption{
-		Id:           101,
-		UsedUserId:   99999,
-		Quota:        1,
-		RedeemedTime: 1,
+		Key:         common.GetUUID(),
+		Status:      common.RedemptionCodeStatusEnabled,
+		Name:        "余额兑换码",
+		BenefitType: RedemptionBenefitTypeQuota,
+		Quota:       300,
+		CreatedTime: common.GetTimestamp(),
 	}
+	require.NoError(t, redemption.Insert())
 
-	require.NoError(t, EnqueueInviteCommissionFromRedemption(redemption))
-	// 同一个兑换码重复入池应被唯一索引忽略（幂等）。
-	require.NoError(t, EnqueueInviteCommissionFromRedemption(redemption))
+	quota, err := Redeem(redemption.Key, invitee.Id)
+	require.NoError(t, err)
+	assert.Equal(t, 300, quota)
 
-	var ledger InviteCommissionLedger
-	require.NoError(t, DB.Where("topup_trade_no = ? AND inviter_user_id = ?", "redeem:101", inviter.Id).First(&ledger).Error)
-
-	assert.Equal(t, invitee.Id, ledger.InviteeUserId)
-	assert.Equal(t, inviter.Id, ledger.InviterUserId)
-	assert.Equal(t, 300, ledger.BaseQuota)
-	assert.Equal(t, 30, ledger.CommissionQuota)
-	assert.Equal(t, InviteCommissionStatusPending, ledger.Status)
-	assert.Equal(t, time.Unix(redeemedAt, 0).Format("2006-01-02"), ledger.BizDate)
+	var refreshed User
+	require.NoError(t, DB.First(&refreshed, invitee.Id).Error)
+	assert.Equal(t, 300, refreshed.Quota)
 
 	var count int64
-	require.NoError(t, DB.Model(&InviteCommissionLedger{}).Where("topup_trade_no = ? AND inviter_user_id = ?", "redeem:101", inviter.Id).Count(&count).Error)
-	assert.EqualValues(t, 1, count)
+	require.NoError(t, DB.Model(&InviteCommissionLedger{}).Count(&count).Error)
+	assert.EqualValues(t, 0, count)
 }
 
 func TestAdminDirectQuotaUpdate_DoesNotCreateInviteCommissionLedger(t *testing.T) {
@@ -118,4 +102,46 @@ func TestAdminDirectQuotaUpdate_DoesNotCreateInviteCommissionLedger(t *testing.T
 	var count int64
 	require.NoError(t, DB.Model(&InviteCommissionLedger{}).Count(&count).Error)
 	assert.EqualValues(t, 0, count)
+}
+
+func TestSettleInviteCommission_SkipsLegacyRedemptionLedger(t *testing.T) {
+	setupInviteCommissionRedemptionTest(t)
+
+	originDailyCap := common.InviterCommissionDailyCap
+	common.InviterCommissionDailyCap = 0
+	t.Cleanup(func() {
+		common.InviterCommissionDailyCap = originDailyCap
+	})
+
+	inviter := createInviteCommissionTestUser(t, "inviter_legacy_redemption", 0)
+	invitee := createInviteCommissionTestUser(t, "invitee_legacy_redemption", inviter.Id)
+	ledger := &InviteCommissionLedger{
+		InviteeUserId:   invitee.Id,
+		InviterUserId:   inviter.Id,
+		TopupTradeNo:    "redeem:101",
+		BizDate:         "2026-01-01",
+		BaseQuota:       300,
+		CommissionRate:  0.1,
+		CommissionQuota: 30,
+		Status:          InviteCommissionStatusPending,
+		CreatedAt:       common.GetTimestamp(),
+	}
+	require.NoError(t, DB.Create(ledger).Error)
+
+	settled, skipped, processed, err := SettleInviteCommissionByBizDate("2026-01-02", 10)
+	require.NoError(t, err)
+	assert.Equal(t, 0, settled)
+	assert.Equal(t, 1, skipped)
+	assert.Equal(t, 1, processed)
+
+	var refreshedLedger InviteCommissionLedger
+	require.NoError(t, DB.First(&refreshedLedger, ledger.Id).Error)
+	assert.Equal(t, InviteCommissionStatusSkipped, refreshedLedger.Status)
+	assert.Equal(t, InviteCommissionRiskReasonRedemptionNotCommissionable, refreshedLedger.RiskReason)
+	assert.Equal(t, 0, refreshedLedger.SettledQuota)
+
+	var refreshedInviter User
+	require.NoError(t, DB.First(&refreshedInviter, inviter.Id).Error)
+	assert.Equal(t, 0, refreshedInviter.AffQuota)
+	assert.Equal(t, 0, refreshedInviter.AffHistoryQuota)
 }
