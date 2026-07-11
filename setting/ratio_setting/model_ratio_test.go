@@ -2,6 +2,20 @@ package ratio_setting
 
 import "testing"
 
+func TestGetCompletionRatioInfoGPT56UsesSixTimesOutputMultiplier(t *testing.T) {
+	info := GetCompletionRatioInfo("gpt-5.6")
+
+	if info.Ratio != 6 {
+		t.Fatalf("gpt-5.6 completion ratio = %v, want 6", info.Ratio)
+	}
+	if !info.Locked {
+		t.Fatal("gpt-5.6 default completion ratio should come from the backend")
+	}
+	if !info.CanOverride {
+		t.Fatal("gpt-5.6 default completion ratio should allow a custom override")
+	}
+}
+
 func TestGetCompletionRatioInfoGPT55UsesOfficialOutputMultiplier(t *testing.T) {
 	info := GetCompletionRatioInfo("gpt-5.5")
 

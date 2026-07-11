@@ -138,6 +138,32 @@ export default function ModelPricingEditor({
     filterMode,
   });
 
+  const completionRatioReadOnly =
+    Boolean(selectedModel?.completionRatioLocked) &&
+    !selectedModel?.completionRatioCanOverride;
+
+  let completionPriceExtraText = '';
+  if (selectedModel?.completionRatioCanOverride) {
+    completionPriceExtraText = selectedModel.completionRatioOverridden
+      ? t(
+          '当前正在覆盖官方默认补全倍率 {{ratio}}，保存后按你的自定义价格生效。',
+          { ratio: selectedModel.defaultCompletionRatio || '-' },
+        )
+      : hasValue(selectedModel.defaultCompletionRatio)
+        ? `${t('默认补全倍率')}: ${selectedModel.defaultCompletionRatio}`
+        : '';
+  } else if (selectedModel?.completionRatioLocked) {
+    completionPriceExtraText = t(
+      '后端固定倍率：{{ratio}}。该字段仅展示换算后的价格。',
+      { ratio: selectedModel.lockedCompletionRatio || '-' },
+    );
+  } else if (
+    selectedModel &&
+    !isOptionalFieldEnabled(selectedModel, 'completionPrice')
+  ) {
+    completionPriceExtraText = t('当前未启用，需要时再打开即可。');
+  }
+
   const getExprModeLabel = useCallback((model) => {
     if (model?.billingMode !== 'tiered_expr') {
       return '';
@@ -473,7 +499,7 @@ export default function ModelPricingEditor({
                         placeholder={t('输入 $/1M tokens')}
                         onChange={(value) => handleNumericFieldChange('inputPrice', value)}
                       />
-                      {selectedModel.completionRatioLocked ? (
+                      {completionRatioReadOnly ? (
                         <Banner
                           type='warning'
                           bordered
@@ -503,7 +529,7 @@ export default function ModelPricingEditor({
                               selectedModel,
                               'completionPrice',
                             )}
-                            disabled={selectedModel.completionRatioLocked}
+                            disabled={completionRatioReadOnly}
                             onChange={(checked) =>
                               handleOptionalFieldToggle('completionPrice', checked)
                             }
@@ -514,23 +540,9 @@ export default function ModelPricingEditor({
                         }
                         disabled={
                           !hasValue(selectedModel.inputPrice) ||
-                          selectedModel.completionRatioLocked
+                          completionRatioReadOnly
                         }
-                        extraText={
-                          selectedModel.completionRatioLocked
-                            ? t(
-                                '后端固定倍率：{{ratio}}。该字段仅展示换算后的价格。',
-                                {
-                                  ratio: selectedModel.lockedCompletionRatio || '-',
-                                },
-                              )
-                            : !isOptionalFieldEnabled(
-                                  selectedModel,
-                                  'completionPrice',
-                                )
-                              ? t('当前未启用，需要时再打开即可。')
-                              : ''
-                        }
+                        extraText={completionPriceExtraText}
                       />
                       <PriceInput
                         label={t('缓存读取价格')}
