@@ -286,9 +286,7 @@ const RegisterForm = () => {
     setVerificationCodeLoading(true);
     try {
       const res = await API.get(
-        `/api/verification?email=${encodeURIComponent(
-          inputs.email,
-        )}&turnstile=${encodeURIComponent(turnstileToken)}`,
+        `/api/verification?email=${encodeURIComponent(inputs.email)}&turnstile=${encodeURIComponent(turnstileToken)}`,
       );
       const { success, message } = res.data;
       if (success) {
@@ -674,21 +672,11 @@ const RegisterForm = () => {
                       }
                       prefix={<IconKey />}
                       extraText={
-                        disableButton ? (
-                          <span>
-                            {t(
-                              '若未收到电子邮件，请到垃圾箱或广告邮件中查找；如仍未收到，请',
-                            )}
-                            <a
-                              href='https://qm.qq.com/q/rAMnpMsFvq'
-                              target='_blank'
-                              rel='noopener noreferrer'
-                              className='text-blue-500 hover:underline'
-                            >
-                              {t('联系客服人员')}
-                            </a>
-                          </span>
-                        ) : undefined
+                        disableButton
+                          ? t(
+                              '没收到验证码？请检查垃圾箱/广告邮件（QQ邮箱常见），或等倒计时结束后重发',
+                            )
+                          : undefined
                       }
                     />
                   </>
