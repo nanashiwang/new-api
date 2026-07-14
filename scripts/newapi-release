@@ -1,0 +1,703 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+umask 077
+
+APP_DIR="${NEWAPI_APP_DIR:-/opt/newapi}"
+COMPOSE_FILE="${NEWAPI_COMPOSE_FILE:-$APP_DIR/docker-compose.yml}"
+SERVICE_NAME="${NEWAPI_SERVICE_NAME:-new-api}"
+CONTAINER_NAME="${NEWAPI_CONTAINER_NAME:-new-api-master}"
+MYSQL_CONTAINER="${NEWAPI_MYSQL_CONTAINER:-newapi-mysql}"
+DOCKER_NETWORK="${NEWAPI_DOCKER_NETWORK:-newapi_default}"
+IMAGE_REPOSITORY="${NEWAPI_IMAGE_REPOSITORY:-ghcr.io/nanashiwang/new-api}"
+GITHUB_REPOSITORY="${NEWAPI_GITHUB_REPOSITORY:-nanashiwang/new-api}"
+BACKUP_ROOT="${NEWAPI_BACKUP_ROOT:-$APP_DIR/backups/one-click}"
+STATE_DIR="${NEWAPI_STATE_DIR:-$APP_DIR/.release-manager}"
+STATE_FILE="$STATE_DIR/state.env"
+HISTORY_FILE="$STATE_DIR/history.tsv"
+LOCK_FILE="${NEWAPI_LOCK_FILE:-/run/newapi-release.lock}"
+HEALTH_URL="${NEWAPI_HEALTH_URL:-http://127.0.0.1:3000/api/status}"
+HEALTH_TIMEOUT="${NEWAPI_HEALTH_TIMEOUT:-120}"
+PREFLIGHT_PASSES="${NEWAPI_PREFLIGHT_PASSES:-2}"
+MIN_FREE_KB="${NEWAPI_MIN_FREE_KB:-2097152}"
+
+TARGET_IMAGE=""
+TARGET_ID=""
+TARGET_VERSION=""
+PREFLIGHT_DB=""
+PREFLIGHT_USER=""
+PREFLIGHT_CONTAINER=""
+PREFLIGHT_WORK_DIR=""
+RECOVERY_REQUIRED=0
+RECOVERY_COMPOSE=""
+RECOVERY_IMAGE=""
+RECOVERY_ID=""
+RECOVERY_STATE_SNAPSHOT=""
+RECOVERY_STATE_EXISTED=0
+CURRENT_IMAGE=""
+CURRENT_ID=""
+CURRENT_VERSION=""
+PREVIOUS_IMAGE=""
+PREVIOUS_ID=""
+PREVIOUS_VERSION=""
+LAST_BACKUP_DIR=""
+
+timestamp_iso() {
+  date -u '+%Y-%m-%dT%H:%M:%SZ'
+}
+
+log() {
+  printf '[%s] %s\n' "$(timestamp_iso)" "$*"
+}
+
+die() {
+  log "ERROR: $*" >&2
+  exit 1
+}
+
+usage() {
+  cat <<'EOF'
+Usage:
+  newapi-update [latest|sha-abcdefg] [--dry-run]
+  newapi-rollback [--dry-run]
+  newapi-release status
+  newapi-release init [sha-abcdefg]
+
+The update command resolves latest to an immutable SHA image, backs up MySQL,
+tests migrations against a temporary schema, deploys, and rolls back on failure.
+The rollback command restores only the previous application image; it never
+restores MySQL automatically.
+EOF
+}
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || die "missing command: $1"
+}
+
+check_prerequisites() {
+  local required_command
+  [ "$(id -u)" -eq 0 ] || die "run as root"
+  [ -d "$APP_DIR" ] || die "app directory not found: $APP_DIR"
+  [ -f "$COMPOSE_FILE" ] || die "compose file not found: $COMPOSE_FILE"
+  for required_command in docker flock curl gzip sha256sum awk sed grep mktemp stat; do
+    require_command "$required_command"
+  done
+  docker compose version >/dev/null
+  docker inspect "$CONTAINER_NAME" >/dev/null
+  docker inspect "$MYSQL_CONTAINER" >/dev/null
+  [[ "$HEALTH_TIMEOUT" =~ ^[0-9]+$ ]] && [ "$HEALTH_TIMEOUT" -gt 0 ] \
+    || die "NEWAPI_HEALTH_TIMEOUT must be a positive integer"
+  [[ "$PREFLIGHT_PASSES" =~ ^[0-9]+$ ]] && [ "$PREFLIGHT_PASSES" -ge 2 ] \
+    || die "NEWAPI_PREFLIGHT_PASSES must be at least 2"
+}
+
+acquire_lock() {
+  install -d -m 700 "$(dirname "$LOCK_FILE")"
+  exec 9>"$LOCK_FILE"
+  flock -n 9 || die "another new-api deployment is running"
+}
+
+image_id() {
+  docker image inspect -f '{{.Id}}' "$1"
+}
+
+image_version() {
+  docker run --rm --entrypoint /new-api "$1" --version 2>/dev/null | tr -d '\r' | tail -n 1
+}
+
+normalize_explicit_target() {
+  local requested="$1"
+  if [[ "$requested" =~ ^sha-[0-9a-f]{7,40}$ ]]; then
+    printf '%s:%s\n' "$IMAGE_REPOSITORY" "$requested"
+  elif [[ "$requested" =~ ^[0-9a-f]{7,40}$ ]]; then
+    printf '%s:sha-%s\n' "$IMAGE_REPOSITORY" "$requested"
+  elif [[ "$requested" =~ ^${IMAGE_REPOSITORY//./\.}@sha256:[0-9a-f]{64}$ ]]; then
+    printf '%s\n' "$requested"
+  elif [[ "$requested" =~ ^${IMAGE_REPOSITORY//./\.}:sha-[0-9a-f]{7,40}$ ]]; then
+    printf '%s\n' "$requested"
+  else
+    return 1
+  fi
+}
+
+github_main_sha() {
+  curl -fsSL --max-time 20 "https://api.github.com/repos/$GITHUB_REPOSITORY/commits/main" \
+    | sed -nE 's/^[[:space:]]*"sha": "([0-9a-f]{40})",?$/\1/p' \
+    | {
+      local first_sha
+      IFS= read -r first_sha || return 1
+      printf '%s\n' "$first_sha"
+      cat >/dev/null
+    }
+}
+
+resolve_target() {
+  local requested="${1:-latest}"
+  local resolved latest_ref latest_id version commit_sha candidate candidate_id digest_ref
+
+  if [ "$requested" = "latest" ]; then
+    latest_ref="$IMAGE_REPOSITORY:latest"
+    log "pulling discovery image: $latest_ref"
+    docker pull "$latest_ref"
+    latest_id="$(image_id "$latest_ref")"
+    version="$(image_version "$latest_ref")"
+    commit_sha="$(github_main_sha)"
+    [ -n "$commit_sha" ] || die "cannot resolve GitHub main commit"
+
+    if [[ "$version" =~ ^main-([0-9a-f]{7,40})$ ]]; then
+      [ "${commit_sha:0:7}" = "${BASH_REMATCH[1]:0:7}" ] \
+        || die "latest image ($version) does not match GitHub main (${commit_sha:0:7}); wait for the build"
+      candidate="$IMAGE_REPOSITORY:sha-${BASH_REMATCH[1]:0:7}"
+      docker pull "$candidate"
+      candidate_id="$(image_id "$candidate")"
+      [ "$candidate_id" = "$latest_id" ] || die "latest and immutable SHA image IDs differ"
+      resolved="$candidate"
+    else
+      digest_ref="$(docker image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' "$latest_ref" \
+        | awk -v prefix="$IMAGE_REPOSITORY@" 'index($0, prefix) == 1 {print; exit}')"
+      [ -n "$digest_ref" ] || die "cannot resolve immutable digest for latest"
+      resolved="$digest_ref"
+    fi
+  else
+    resolved="$(normalize_explicit_target "$requested")" \
+      || die "unsupported target: $requested"
+    log "pulling target image: $resolved"
+    docker pull "$resolved"
+    version="$(image_version "$resolved")"
+  fi
+
+  TARGET_IMAGE="$resolved"
+  TARGET_ID="$(image_id "$resolved")"
+  TARGET_VERSION="${version:-unknown}"
+}
+
+actual_image() {
+  docker inspect -f '{{.Config.Image}}' "$CONTAINER_NAME"
+}
+
+actual_image_id() {
+  docker inspect -f '{{.Image}}' "$CONTAINER_NAME"
+}
+
+actual_version() {
+  image_version "$(actual_image)"
+}
+
+schema_fingerprint() {
+  local database_name="$1"
+  docker exec -e TARGET_DB="$database_name" "$MYSQL_CONTAINER" sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -Nse "
+    SELECT CONCAT('\''C|'\'', TABLE_NAME, '\''|'\'', COLUMN_NAME, '\''|'\'', COLUMN_TYPE, '\''|'\'', IS_NULLABLE, '\''|'\'', COALESCE(COLUMN_DEFAULT, '\''<NULL>'\''), '\''|'\'', EXTRA)
+    FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '\''$TARGET_DB'\'' ORDER BY TABLE_NAME, ORDINAL_POSITION;
+    SELECT CONCAT('\''I|'\'', TABLE_NAME, '\''|'\'', INDEX_NAME, '\''|'\'', NON_UNIQUE, '\''|'\'', GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX))
+    FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = '\''$TARGET_DB'\'' GROUP BY TABLE_NAME, INDEX_NAME, NON_UNIQUE ORDER BY TABLE_NAME, INDEX_NAME;
+  "' 2>/dev/null | sha256sum | awk '{print $1}'
+}
+
+cleanup_preflight() {
+  set +e
+  [ -n "$PREFLIGHT_CONTAINER" ] && docker rm -f "$PREFLIGHT_CONTAINER" >/dev/null 2>&1
+  if [ -n "$PREFLIGHT_DB" ] && [ -n "$PREFLIGHT_USER" ]; then
+    docker exec -e TARGET_DB="$PREFLIGHT_DB" -e TARGET_USER="$PREFLIGHT_USER" "$MYSQL_CONTAINER" sh -c \
+      'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -e "DROP DATABASE IF EXISTS \`$TARGET_DB\`; DROP USER IF EXISTS '\''$TARGET_USER'\''@'\''%'\'';"' \
+      >/dev/null 2>&1
+  fi
+  if [[ -n "$PREFLIGHT_WORK_DIR" && "$PREFLIGHT_WORK_DIR" == /tmp/newapi-preflight-* ]]; then
+    rm -rf -- "$PREFLIGHT_WORK_DIR"
+  fi
+  PREFLIGHT_DB=""
+  PREFLIGHT_USER=""
+  PREFLIGHT_CONTAINER=""
+  PREFLIGHT_WORK_DIR=""
+  set -e
+}
+
+wait_for_container_health() {
+  local expected_id="$1"
+  local _attempt state running_id restarts
+  for _attempt in $(seq 1 "$HEALTH_TIMEOUT"); do
+    state="$(docker inspect -f '{{.State.Status}}' "$CONTAINER_NAME" 2>/dev/null || true)"
+    running_id="$(docker inspect -f '{{.Image}}' "$CONTAINER_NAME" 2>/dev/null || true)"
+    restarts="$(docker inspect -f '{{.RestartCount}}' "$CONTAINER_NAME" 2>/dev/null || echo 999)"
+    if docker logs "$CONTAINER_NAME" 2>&1 | grep -Eqi 'Error 1091|DROP FOREIGN KEY|\[FATAL\]|panic detected'; then
+      return 1
+    fi
+    if [ "$state" = "running" ] && [ "$running_id" = "$expected_id" ] && [ "$restarts" = "0" ] \
+      && curl -fsS --connect-timeout 2 --max-time 5 "$HEALTH_URL" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+run_preflight_pass() {
+  local pass="$1"
+  local ready=0 _attempt
+
+  docker run -d --name "$PREFLIGHT_CONTAINER" --network "$DOCKER_NETWORK" \
+    -e GIN_MODE=release \
+    -e SQL_DSN="${PREFLIGHT_USER}:${PREFLIGHT_PASSWORD}@tcp(${MYSQL_CONTAINER}:3306)/${PREFLIGHT_DB}?charset=utf8mb4&parseTime=true&loc=Local" \
+    "$TARGET_IMAGE" >/dev/null
+
+  for _attempt in $(seq 1 "$HEALTH_TIMEOUT"); do
+    if [ "$(docker inspect -f '{{.State.Running}}' "$PREFLIGHT_CONTAINER" 2>/dev/null || true)" != "true" ]; then
+      docker logs "$PREFLIGHT_CONTAINER" || true
+      return 1
+    fi
+    if [ "$(docker inspect -f '{{.Image}}' "$PREFLIGHT_CONTAINER" 2>/dev/null || true)" != "$TARGET_ID" ]; then
+      return 1
+    fi
+    if docker exec "$PREFLIGHT_CONTAINER" wget -T 5 -qO- http://127.0.0.1:3000/api/status >/dev/null 2>&1; then
+      ready=1
+      break
+    fi
+    sleep 1
+  done
+
+  docker logs "$PREFLIGHT_CONTAINER" >"$PREFLIGHT_WORK_DIR/pass-${pass}.log" 2>&1
+  [ "$ready" -eq 1 ] || return 1
+  if grep -Eqi 'Error 1091|DROP FOREIGN KEY|\[FATAL\]|panic detected' "$PREFLIGHT_WORK_DIR/pass-${pass}.log"; then
+    return 1
+  fi
+  docker stop -t 10 "$PREFLIGHT_CONTAINER" >/dev/null
+  docker rm "$PREFLIGHT_CONTAINER" >/dev/null
+  log "preflight pass $pass succeeded"
+}
+
+preflight_target() {
+  local timestamp pass fingerprint previous_fingerprint=""
+  timestamp="$(date +%Y%m%d%H%M%S)"
+  PREFLIGHT_DB="newapi_preflight_${timestamp}_$$"
+  PREFLIGHT_USER="pf${timestamp}$$"
+  PREFLIGHT_PASSWORD="P${timestamp}${RANDOM}x"
+  PREFLIGHT_CONTAINER="new-api-preflight-${timestamp}-$$"
+  PREFLIGHT_WORK_DIR="/tmp/newapi-preflight-${timestamp}-$$"
+  mkdir -p "$PREFLIGHT_WORK_DIR"
+
+  docker exec -e TARGET_DB="$PREFLIGHT_DB" -e TARGET_USER="$PREFLIGHT_USER" -e TARGET_PASSWORD="$PREFLIGHT_PASSWORD" "$MYSQL_CONTAINER" sh -c \
+    'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -e "CREATE DATABASE \`$TARGET_DB\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; CREATE USER '\''$TARGET_USER'\''@'\''%'\'' IDENTIFIED BY '\''$TARGET_PASSWORD'\''; GRANT ALL PRIVILEGES ON \`$TARGET_DB\`.* TO '\''$TARGET_USER'\''@'\''%'\'';"'
+
+  docker exec "$MYSQL_CONTAINER" sh -c \
+    'exec mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --no-data --skip-triggers --single-transaction --no-tablespaces "$MYSQL_DATABASE"' \
+    | docker exec -i -e TARGET_DB="$PREFLIGHT_DB" "$MYSQL_CONTAINER" sh -c \
+      'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$TARGET_DB"'
+
+  for pass in $(seq 1 "$PREFLIGHT_PASSES"); do
+    run_preflight_pass "$pass"
+    fingerprint="$(schema_fingerprint "$PREFLIGHT_DB")"
+    if [ -n "$previous_fingerprint" ] && [ "$fingerprint" != "$previous_fingerprint" ]; then
+      die "migration is not idempotent: schema changed after preflight pass $pass"
+    fi
+    previous_fingerprint="$fingerprint"
+  done
+  log "preflight schema is stable: $previous_fingerprint"
+  cleanup_preflight
+}
+
+available_kb() {
+  df -Pk "$APP_DIR" | awk 'NR == 2 {print $4}'
+}
+
+safe_label() {
+  printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_'
+}
+
+create_database_backup() {
+  local current_version="$1"
+  local target_version="$2"
+  local timestamp label temporary_dump
+
+  [ "$(available_kb)" -ge "$MIN_FREE_KB" ] || die "less than $((MIN_FREE_KB / 1024)) MiB free disk space"
+  timestamp="$(date +%Y%m%d-%H%M%S)"
+  label="$(safe_label "${current_version}-to-${target_version}")"
+  ACTIVE_BACKUP_DIR="$BACKUP_ROOT/${timestamp}-${label}"
+  install -d -m 700 "$ACTIVE_BACKUP_DIR"
+  cp -a "$COMPOSE_FILE" "$ACTIVE_BACKUP_DIR/docker-compose.yml"
+  [ -f "$APP_DIR/.env" ] && cp -a "$APP_DIR/.env" "$ACTIVE_BACKUP_DIR/.env"
+  [ -f "$STATE_FILE" ] && cp -a "$STATE_FILE" "$ACTIVE_BACKUP_DIR/state.env"
+
+  temporary_dump="$ACTIVE_BACKUP_DIR/mysql.sql.gz.tmp"
+  docker exec "$MYSQL_CONTAINER" sh -c \
+    'exec mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --single-transaction --quick --routines --triggers --events --hex-blob --no-tablespaces "$MYSQL_DATABASE"' \
+    | gzip -1 >"$temporary_dump"
+  mv "$temporary_dump" "$ACTIVE_BACKUP_DIR/mysql.sql.gz"
+  gzip -t "$ACTIVE_BACKUP_DIR/mysql.sql.gz"
+  sha256sum "$ACTIVE_BACKUP_DIR"/* >"$ACTIVE_BACKUP_DIR/SHA256SUMS"
+  log "backup completed: $ACTIVE_BACKUP_DIR"
+}
+
+replace_compose_image() {
+  local target="$1"
+  local temporary_file file_mode
+  temporary_file="$(mktemp "$APP_DIR/.docker-compose.yml.XXXXXX")"
+  file_mode="$(stat -c '%a' "$COMPOSE_FILE" 2>/dev/null || stat -f '%Lp' "$COMPOSE_FILE")"
+  chmod "$file_mode" "$temporary_file"
+
+  awk -v service="$SERVICE_NAME" -v target="$target" '
+    BEGIN { in_service = 0; replaced = 0 }
+    $0 == "  " service ":" { in_service = 1; print; next }
+    in_service && $0 ~ /^  [^[:space:]][^:]*:[[:space:]]*$/ { in_service = 0 }
+    in_service && $0 ~ /^[[:space:]]+image:[[:space:]]*/ {
+      match($0, /^[[:space:]]*/)
+      print substr($0, 1, RLENGTH) "image: " target
+      replaced++
+      next
+    }
+    { print }
+    END { if (replaced != 1) exit 42 }
+  ' "$COMPOSE_FILE" >"$temporary_file" || {
+    rm -f "$temporary_file"
+    die "could not replace image for service $SERVICE_NAME"
+  }
+
+  docker compose -f "$temporary_file" config >/dev/null
+  mv "$temporary_file" "$COMPOSE_FILE"
+  [ "$(compose_service_image)" = "$target" ] || die "compose did not resolve target image"
+}
+
+compose_service_image() {
+  docker compose -f "$COMPOSE_FILE" config | awk -v service="$SERVICE_NAME" '
+    $0 == "  " service ":" { in_service = 1; next }
+    in_service && $0 ~ /^  [^[:space:]][^:]*:[[:space:]]*$/ { exit 42 }
+    in_service && $0 ~ /^    image:[[:space:]]*/ {
+      sub(/^    image:[[:space:]]*/, "")
+      print
+      found = 1
+      exit
+    }
+    END { if (!found) exit 42 }
+  '
+}
+
+write_state() {
+  local current_image="$1" current_id="$2" current_version="$3"
+  local previous_image="$4" previous_id="$5" previous_version="$6" backup_dir="$7"
+  local temporary_file
+  install -d -m 700 "$STATE_DIR"
+  temporary_file="$(mktemp "$STATE_DIR/.state.XXXXXX")"
+  {
+    printf 'CURRENT_IMAGE=%q\n' "$current_image"
+    printf 'CURRENT_ID=%q\n' "$current_id"
+    printf 'CURRENT_VERSION=%q\n' "$current_version"
+    printf 'PREVIOUS_IMAGE=%q\n' "$previous_image"
+    printf 'PREVIOUS_ID=%q\n' "$previous_id"
+    printf 'PREVIOUS_VERSION=%q\n' "$previous_version"
+    printf 'LAST_BACKUP_DIR=%q\n' "$backup_dir"
+    printf 'UPDATED_AT=%q\n' "$(timestamp_iso)"
+  } >"$temporary_file"
+  mv "$temporary_file" "$STATE_FILE"
+}
+
+append_history() {
+  local action="$1" from_image="$2" to_image="$3" result="$4" backup_dir="$5"
+  install -d -m 700 "$STATE_DIR"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(timestamp_iso)" "$action" "$from_image" "$to_image" "$result" "$backup_dir" \
+    >>"$HISTORY_FILE"
+}
+
+load_state() {
+  [ -f "$STATE_FILE" ] || die "release state is not initialized; run: newapi-release init [previous-sha]"
+  # shellcheck disable=SC1090
+  source "$STATE_FILE"
+}
+
+recover_previous_deployment() {
+  set +e
+  [ "$RECOVERY_REQUIRED" -eq 1 ] || return 0
+  log "deployment failed; restoring $RECOVERY_IMAGE"
+  docker logs "$CONTAINER_NAME" >"${ACTIVE_BACKUP_DIR:-$STATE_DIR}/failed-deployment.log" 2>&1 || true
+  cp -a "$RECOVERY_COMPOSE" "$COMPOSE_FILE"
+  if [ "$RECOVERY_STATE_EXISTED" -eq 1 ]; then
+    install -d -m 700 "$STATE_DIR"
+    cp -a "$RECOVERY_STATE_SNAPSHOT" "$STATE_FILE"
+  else
+    rm -f "$STATE_FILE"
+  fi
+  cd "$APP_DIR"
+  docker compose -f "$COMPOSE_FILE" config >/dev/null
+  docker compose -f "$COMPOSE_FILE" up -d --no-deps --force-recreate "$SERVICE_NAME"
+  if wait_for_container_health "$RECOVERY_ID"; then
+    log "automatic recovery succeeded"
+  else
+    log "CRITICAL: automatic recovery failed" >&2
+  fi
+  RECOVERY_REQUIRED=0
+}
+
+on_exit() {
+  local exit_code="$?"
+  trap - EXIT
+  set +e
+  cleanup_preflight
+  if [ "$exit_code" -ne 0 ]; then
+    recover_previous_deployment
+  fi
+  exit "$exit_code"
+}
+trap on_exit EXIT
+
+deploy_target() {
+  local recovery_compose="$1" recovery_dir
+  RECOVERY_COMPOSE="$recovery_compose"
+  RECOVERY_IMAGE="$(actual_image)"
+  RECOVERY_ID="$(actual_image_id)"
+  recovery_dir="$(dirname "$recovery_compose")"
+  RECOVERY_STATE_SNAPSHOT="$recovery_dir/release-state-before.env"
+  if [ -f "$STATE_FILE" ]; then
+    cp -a "$STATE_FILE" "$RECOVERY_STATE_SNAPSHOT"
+    RECOVERY_STATE_EXISTED=1
+  else
+    RECOVERY_STATE_EXISTED=0
+  fi
+  RECOVERY_REQUIRED=1
+
+  replace_compose_image "$TARGET_IMAGE"
+  cd "$APP_DIR"
+  docker compose -f "$COMPOSE_FILE" up -d --no-deps --force-recreate "$SERVICE_NAME"
+  wait_for_container_health "$TARGET_ID" || die "new image failed health checks"
+}
+
+parse_dry_run() {
+  DRY_RUN=0
+  POSITIONAL_ARGS=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --dry-run) DRY_RUN=1 ;;
+      *) POSITIONAL_ARGS+=("$1") ;;
+    esac
+    shift
+  done
+}
+
+reconcile_current_target() {
+  local actual_image="$1" actual_version="$2"
+  local declared_image state_matches=0 unmanaged_update=0
+  local previous_image="" previous_id="" previous_version="" last_backup=""
+  local reconcile_dir state_snapshot=""
+
+  declared_image="$(compose_service_image)" || die "cannot resolve compose image for $SERVICE_NAME"
+  if [ -f "$STATE_FILE" ]; then
+    load_state
+    if [ "${CURRENT_ID:-}" = "$TARGET_ID" ]; then
+      previous_image="${PREVIOUS_IMAGE:-}"
+      previous_id="${PREVIOUS_ID:-}"
+      previous_version="${PREVIOUS_VERSION:-}"
+      last_backup="${LAST_BACKUP_DIR:-}"
+      if [ "${CURRENT_IMAGE:-}" = "$TARGET_IMAGE" ]; then
+        state_matches=1
+      fi
+    elif [ -n "${CURRENT_IMAGE:-}" ] && [ -n "${CURRENT_ID:-}" ]; then
+      previous_image="$CURRENT_IMAGE"
+      previous_id="$CURRENT_ID"
+      previous_version="${CURRENT_VERSION:-unknown}"
+      unmanaged_update=1
+    else
+      unmanaged_update=1
+    fi
+  else
+    unmanaged_update=1
+  fi
+
+  if [ "$state_matches" -eq 1 ] && [ "$declared_image" = "$TARGET_IMAGE" ]; then
+    log "already running the requested image"
+    return 0
+  fi
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "dry run detected release metadata drift; no changes made"
+    return 0
+  fi
+
+  reconcile_dir="$BACKUP_ROOT/$(date +%Y%m%d-%H%M%S)-reconcile-$(safe_label "$actual_version")"
+  install -d -m 700 "$reconcile_dir"
+  cp -a "$COMPOSE_FILE" "$reconcile_dir/docker-compose-before.yml"
+  if [ -f "$STATE_FILE" ]; then
+    state_snapshot="$reconcile_dir/state-before.env"
+    cp -a "$STATE_FILE" "$state_snapshot"
+  fi
+
+  if ! (
+    replace_compose_image "$TARGET_IMAGE"
+    write_state "$TARGET_IMAGE" "$TARGET_ID" "$TARGET_VERSION" \
+      "$previous_image" "$previous_id" "$previous_version" "$last_backup"
+  ); then
+    cp -a "$reconcile_dir/docker-compose-before.yml" "$COMPOSE_FILE" \
+      || log "CRITICAL: could not restore compose after reconciliation failure"
+    if [ -n "$state_snapshot" ]; then
+      cp -a "$state_snapshot" "$STATE_FILE" \
+        || log "CRITICAL: could not restore release state after reconciliation failure"
+    else
+      rm -f "$STATE_FILE"
+    fi
+    die "could not reconcile release metadata"
+  fi
+
+  append_history reconcile "$actual_image" "$TARGET_IMAGE" success "$reconcile_dir" \
+    || log "WARNING: could not append reconciliation history"
+  log "running image was already current; compose and release state were reconciled"
+  if [ "$unmanaged_update" -eq 1 ]; then
+    log "WARNING: unmanaged update detected; no pre-update MySQL backup is available"
+  fi
+}
+
+command_update() {
+  local current_image current_id current_version requested
+  local state_previous_image state_previous_id state_previous_version
+  parse_dry_run "$@"
+  [ "${#POSITIONAL_ARGS[@]}" -le 1 ] || die "too many arguments"
+  requested="${POSITIONAL_ARGS[0]:-latest}"
+  acquire_lock
+  resolve_target "$requested"
+
+  current_image="$(actual_image)"
+  current_id="$(actual_image_id)"
+  current_version="$(actual_version)"
+  log "current: $current_image ($current_version)"
+  log "target:  $TARGET_IMAGE ($TARGET_VERSION)"
+
+  if [ "$current_id" = "$TARGET_ID" ]; then
+    reconcile_current_target "$current_image" "$current_version"
+    return 0
+  fi
+  [ "$DRY_RUN" -eq 0 ] || {
+    log "dry run completed; no changes made"
+    return 0
+  }
+
+  create_database_backup "$current_version" "$TARGET_VERSION"
+  preflight_target
+  deploy_target "$ACTIVE_BACKUP_DIR/docker-compose.yml"
+  state_previous_image="$current_image"
+  state_previous_id="$current_id"
+  state_previous_version="$current_version"
+  if [ "$current_id" = "$TARGET_ID" ]; then
+    state_previous_image=""
+    state_previous_id=""
+    state_previous_version=""
+  fi
+  write_state "$TARGET_IMAGE" "$TARGET_ID" "$TARGET_VERSION" \
+    "$state_previous_image" "$state_previous_id" "$state_previous_version" "$ACTIVE_BACKUP_DIR"
+  RECOVERY_REQUIRED=0
+  append_history update "$current_image" "$TARGET_IMAGE" success "$ACTIVE_BACKUP_DIR" \
+    || log "WARNING: could not append update history"
+  docker logs "$CONTAINER_NAME" >"$ACTIVE_BACKUP_DIR/deploy-success.log" 2>&1 \
+    || log "WARNING: could not save deployment log"
+  log "update succeeded: $TARGET_IMAGE"
+}
+
+command_rollback() {
+  local current_image current_id current_version rollback_dir
+  parse_dry_run "$@"
+  [ "${#POSITIONAL_ARGS[@]}" -eq 0 ] || die "rollback does not accept an image argument"
+  acquire_lock
+  load_state
+  [ -n "${PREVIOUS_IMAGE:-}" ] || die "no previous image is available"
+
+  current_image="$(actual_image)"
+  current_id="$(actual_image_id)"
+  current_version="$(actual_version)"
+  [ "$current_id" = "$CURRENT_ID" ] \
+    || die "running image differs from release state; run newapi-release init before rollback"
+
+  log "current:  $current_image ($current_version)"
+  log "rollback: $PREVIOUS_IMAGE (${PREVIOUS_VERSION:-unknown})"
+  [ "$DRY_RUN" -eq 0 ] || {
+    log "dry run completed; no changes made"
+    return 0
+  }
+
+  docker pull "$PREVIOUS_IMAGE"
+  TARGET_IMAGE="$PREVIOUS_IMAGE"
+  TARGET_ID="$(image_id "$PREVIOUS_IMAGE")"
+  TARGET_VERSION="$(image_version "$PREVIOUS_IMAGE")"
+  [ "$TARGET_ID" = "$PREVIOUS_ID" ] || die "previous image ID no longer matches release state"
+
+  rollback_dir="$BACKUP_ROOT/$(date +%Y%m%d-%H%M%S)-rollback-$(safe_label "$current_version")"
+  install -d -m 700 "$rollback_dir"
+  cp -a "$COMPOSE_FILE" "$rollback_dir/docker-compose.yml"
+  ACTIVE_BACKUP_DIR="$rollback_dir"
+  deploy_target "$rollback_dir/docker-compose.yml"
+  write_state "$TARGET_IMAGE" "$TARGET_ID" "$TARGET_VERSION" "" "" "" "${LAST_BACKUP_DIR:-}"
+  RECOVERY_REQUIRED=0
+  append_history rollback "$current_image" "$TARGET_IMAGE" success "$rollback_dir" \
+    || log "WARNING: could not append rollback history"
+  docker logs "$CONTAINER_NAME" >"$rollback_dir/rollback-success.log" 2>&1 \
+    || log "WARNING: could not save rollback log"
+  log "rollback succeeded: $TARGET_IMAGE"
+  log "MySQL was not restored automatically"
+}
+
+command_init() {
+  local current_image current_id current_version previous_image="" previous_id="" previous_version=""
+  [ "$#" -le 1 ] || die "init accepts at most one previous image"
+  acquire_lock
+  current_image="$(actual_image)"
+  current_id="$(actual_image_id)"
+  current_version="$(actual_version)"
+  if [ "$#" -eq 1 ]; then
+    resolve_target "$1"
+    [ "$TARGET_ID" != "$current_id" ] || die "previous image must differ from current image"
+    previous_image="$TARGET_IMAGE"
+    previous_id="$TARGET_ID"
+    previous_version="$TARGET_VERSION"
+  fi
+  write_state "$current_image" "$current_id" "$current_version" \
+    "$previous_image" "$previous_id" "$previous_version" ""
+  append_history init "" "$current_image" success ""
+  log "release state initialized"
+}
+
+command_status() {
+  local current_image current_id current_version declared_image
+  current_image="$(actual_image)"
+  current_id="$(actual_image_id)"
+  current_version="$(actual_version)"
+  declared_image="$(compose_service_image 2>/dev/null || printf unknown)"
+  printf 'running_image=%s\n' "$current_image"
+  printf 'running_id=%s\n' "$current_id"
+  printf 'running_version=%s\n' "$current_version"
+  printf 'compose_image=%s\n' "$declared_image"
+  printf 'container_state=%s\n' "$(docker inspect -f '{{.State.Status}}' "$CONTAINER_NAME")"
+  printf 'container_restarts=%s\n' "$(docker inspect -f '{{.RestartCount}}' "$CONTAINER_NAME")"
+  if [ -f "$STATE_FILE" ]; then
+    load_state
+    printf 'state_current=%s\n' "$CURRENT_IMAGE"
+    printf 'state_current_version=%s\n' "$CURRENT_VERSION"
+    printf 'state_previous=%s\n' "${PREVIOUS_IMAGE:-}"
+    printf 'last_backup=%s\n' "${LAST_BACKUP_DIR:-}"
+    if [ "$current_id" = "$CURRENT_ID" ] && [ "$declared_image" = "$CURRENT_IMAGE" ]; then
+      printf 'release_state=synchronized\n'
+    else
+      printf 'release_state=drifted\n'
+    fi
+  else
+    printf 'release_state=not_initialized\n'
+  fi
+}
+
+main() {
+  local invoked command_name
+  invoked="$(basename "$0")"
+
+  case "$invoked" in
+    newapi-update) command_name="update" ;;
+    newapi-rollback) command_name="rollback" ;;
+    *) command_name="${1:-}"; [ "$#" -gt 0 ] && shift ;;
+  esac
+
+  case "$command_name" in
+    help|-h|--help|"") usage; return 0 ;;
+  esac
+
+  check_prerequisites
+  cd "$APP_DIR"
+
+  case "$command_name" in
+    update) command_update "$@" ;;
+    rollback) command_rollback "$@" ;;
+    init) command_init "$@" ;;
+    status) command_status ;;
+    *) usage >&2; die "unknown command: $command_name" ;;
+  esac
+}
+
+main "$@"
