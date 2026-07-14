@@ -48,6 +48,12 @@ func supportsClaudeAdaptiveReasoning(model string) bool {
 	return strings.HasPrefix(model, "claude-opus-4-6") || strings.HasPrefix(model, "claude-opus-4-7")
 }
 
+// claude-opus-4-8 及 Fable 世代起，Anthropic 已废弃 temperature 参数，
+// 透传会被上游以 400 "`temperature` is deprecated for this model" 拒绝
+func claudeTemperatureDeprecated(model string) bool {
+	return strings.HasPrefix(model, "claude-opus-4-8") || strings.HasPrefix(model, "claude-fable")
+}
+
 func mergeStringMessageContents(left, right string) string {
 	return strings.Trim(fmt.Sprintf("%s %s", left, right), "\"")
 }
@@ -411,6 +417,12 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 
 	claudeRequest.Prompt = ""
 	claudeRequest.Messages = claudeMessages
+
+	// 放在所有分支之后统一剥离：thinking 分支可能把 temperature 重设为 1.0
+	if claudeTemperatureDeprecated(claudeRequest.Model) {
+		claudeRequest.Temperature = nil
+	}
+
 	return &claudeRequest, nil
 }
 
