@@ -104,6 +104,7 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 	}
 
 	var requestBody io.Reader
+	var healRequestJSON []byte // 供参数自愈重发使用（透传模式不做自愈，保持 as-is 语义）
 
 	if passThroughGlobal || info.ChannelSetting.PassThroughBodyEnabled {
 		storage, err := common.GetBodyStorage(c)
@@ -186,6 +187,7 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 
 		logger.LogDebug(c, fmt.Sprintf("text request body: %s", string(jsonData)))
 
+		healRequestJSON = jsonData
 		requestBody = bytes.NewBuffer(jsonData)
 	}
 
@@ -199,6 +201,11 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 
 	if resp != nil {
 		httpResp = resp.(*http.Response)
+		if httpResp.StatusCode != http.StatusOK {
+			if healedResp, healed := tryHealClaudeParamError(c, info, adaptor, healRequestJSON, httpResp); healed {
+				httpResp = healedResp
+			}
+		}
 		info.IsStream = info.IsStream || strings.HasPrefix(httpResp.Header.Get("Content-Type"), "text/event-stream")
 		if httpResp.StatusCode != http.StatusOK {
 			newApiErr := service.RelayErrorHandler(c.Request.Context(), httpResp, false)

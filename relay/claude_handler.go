@@ -150,6 +150,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	}
 
 	var requestBody io.Reader
+	var healRequestJSON []byte // 供参数自愈重发使用（透传模式不做自愈，保持 as-is 语义）
 	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
 		storage, err := common.GetBodyStorage(c)
 		if err != nil {
@@ -185,6 +186,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		if common.DebugEnabled {
 			println("requestBody: ", string(jsonData))
 		}
+		healRequestJSON = jsonData
 		requestBody = bytes.NewBuffer(jsonData)
 	}
 
@@ -197,6 +199,11 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 
 	if resp != nil {
 		httpResp = resp.(*http.Response)
+		if httpResp.StatusCode != http.StatusOK {
+			if healedResp, healed := tryHealClaudeParamError(c, info, adaptor, healRequestJSON, httpResp); healed {
+				httpResp = healedResp
+			}
+		}
 		info.IsStream = info.IsStream || strings.HasPrefix(httpResp.Header.Get("Content-Type"), "text/event-stream")
 		if httpResp.StatusCode != http.StatusOK {
 			newAPIError = service.RelayErrorHandler(c.Request.Context(), httpResp, false)
