@@ -40,6 +40,9 @@ WORKDIR /build
 
 ADD go.mod go.sum ./
 RUN go mod download
+# Block the GORM combination that turns MySQL unique indexes into invalid foreign-key drops.
+RUN test "$(go list -m -f '{{if .Replace}}{{.Replace.Version}}{{else}}{{.Version}}{{end}}' github.com/glebarez/sqlite)" = "v1.10.0" \
+    && test "$(go list -m -f '{{if .Replace}}{{.Replace.Version}}{{else}}{{.Version}}{{end}}' gorm.io/gorm)" = "v1.25.5"
 
 COPY . .
 COPY --from=builder /build/dist ./web/dist
