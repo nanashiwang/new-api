@@ -279,6 +279,9 @@ func appendRequestConversionChain(relayInfo *relaycommon.RelayInfo, other map[st
 		return
 	}
 	other["request_conversion"] = chain
+	if relayInfo.TextProtocolPlan != nil && relayInfo.TextProtocolPlan.RequiresConversion() {
+		other["request_converter"] = string(relayInfo.TextProtocolPlan.Converter)
+	}
 }
 
 func GenerateWssOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.RealtimeUsage, modelRatio, groupRatio, completionRatio, audioRatio, audioCompletionRatio, modelPrice, userGroupRatio float64) map[string]interface{} {

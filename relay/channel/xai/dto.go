@@ -11,6 +11,7 @@ type ChatCompletionResponse struct {
 	Choices           []dto.OpenAITextResponseChoice `json:"choices"`
 	Usage             *dto.Usage                     `json:"usage"`
 	SystemFingerprint string                         `json:"system_fingerprint"`
+	Error             any                            `json:"error,omitempty"`
 }
 
 // quality, size or style are not supported by xAI API at the moment.

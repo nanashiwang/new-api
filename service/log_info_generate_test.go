@@ -9,6 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
 
@@ -159,6 +160,30 @@ func TestGenerateTextOtherInfoResponsesDiagnosticsOmitsAbsentFields(t *testing.T
 	}
 	if _, ok := diagnostics["prompt_cache_key_hash"]; ok {
 		t.Fatalf("expected prompt_cache_key_hash omitted for compact requests")
+	}
+}
+
+func TestGenerateTextOtherInfoIncludesTextProtocolConverter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/messages", nil)
+
+	info := &relaycommon.RelayInfo{
+		StartTime:              time.Unix(100, 0),
+		ChannelMeta:            &relaycommon.ChannelMeta{},
+		RequestConversionChain: []types.RelayFormat{types.RelayFormatClaude, types.RelayFormatOpenAI},
+		TextProtocolPlan: &relaycommon.TextProtocolPlan{
+			IncomingFormat: types.RelayFormatClaude,
+			UpstreamFormat: types.RelayFormatOpenAI,
+			Converter:      relaycommon.TextProtocolConverterClaudeToOpenAIChat,
+		},
+	}
+
+	other := GenerateTextOtherInfo(ctx, info, 1, 1, 1, 0, 1, 1, 1)
+
+	if other["request_converter"] != string(relaycommon.TextProtocolConverterClaudeToOpenAIChat) {
+		t.Fatalf("unexpected request_converter: %#v", other["request_converter"])
 	}
 }
 

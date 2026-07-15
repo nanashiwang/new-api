@@ -5,6 +5,7 @@ import (
 
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/types"
 )
 
 func TestResolveChannelCapabilitiesOpenAIOfficialHost(t *testing.T) {
@@ -13,6 +14,9 @@ func TestResolveChannelCapabilitiesOpenAIOfficialHost(t *testing.T) {
 	if !caps.SupportsChatStreamOptions || !caps.SupportsResponsesAPI || !caps.SupportsResponsesStreamOptions {
 		t.Fatalf("expected official openai host to support advanced capabilities, got %+v", caps)
 	}
+	if !caps.NativeTextFormats.Supports(types.RelayFormatOpenAI) || !caps.NativeTextFormats.Supports(types.RelayFormatOpenAIResponses) {
+		t.Fatalf("expected official openai host to expose native text protocols, got %+v", caps)
+	}
 }
 
 func TestResolveChannelCapabilitiesOpenAICompatibleHostDefaultsConservative(t *testing.T) {
@@ -20,6 +24,20 @@ func TestResolveChannelCapabilitiesOpenAICompatibleHostDefaultsConservative(t *t
 
 	if caps.SupportsChatStreamOptions || caps.SupportsResponsesAPI || caps.SupportsResponsesStreamOptions {
 		t.Fatalf("expected unknown openai-compatible host to default conservative, got %+v", caps)
+	}
+	if !caps.NativeTextFormats.Supports(types.RelayFormatOpenAI) {
+		t.Fatalf("expected openai-compatible channel to keep its native chat protocol, got %+v", caps)
+	}
+}
+
+func TestResolveChannelCapabilitiesXAINativeTextProtocols(t *testing.T) {
+	caps := ResolveChannelCapabilities(constant.ChannelTypeXai, "https://api.x.ai", dto.ChannelOtherSettings{})
+
+	if !caps.NativeTextFormats.Supports(types.RelayFormatOpenAI) || !caps.NativeTextFormats.Supports(types.RelayFormatOpenAIResponses) {
+		t.Fatalf("expected xAI to expose chat and responses protocols, got %+v", caps)
+	}
+	if caps.NativeTextFormats.Supports(types.RelayFormatClaude) {
+		t.Fatalf("expected Claude Messages to require conversion for xAI, got %+v", caps)
 	}
 }
 

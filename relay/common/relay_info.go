@@ -155,6 +155,7 @@ type ChannelMeta struct {
 	SupportsChatStreamOptions      bool // 是否支持 chat/completions 的 stream_options
 	SupportsResponsesAPI           bool // 是否支持 /v1/responses
 	SupportsResponsesStreamOptions bool // 是否支持 responses 的 stream_options
+	NativeTextFormats              TextProtocolSet
 }
 
 type TokenCountMeta struct {
@@ -252,6 +253,7 @@ type RelayInfo struct {
 	// 最终请求到上游的格式。可由 adaptor 显式设置；
 	// 若为空，调用 GetFinalRequestRelayFormat 会回退到 RequestConversionChain 的最后一项或 RelayFormat。
 	FinalRequestRelayFormat types.RelayFormat
+	TextProtocolPlan        *TextProtocolPlan
 
 	ThinkingContentInfo
 	TokenCountMeta
@@ -306,6 +308,7 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 	channelMeta.SupportsChatStreamOptions = caps.SupportsChatStreamOptions
 	channelMeta.SupportsResponsesAPI = caps.SupportsResponsesAPI
 	channelMeta.SupportsResponsesStreamOptions = caps.SupportsResponsesStreamOptions
+	channelMeta.NativeTextFormats = caps.NativeTextFormats
 
 	info.ChannelMeta = channelMeta
 

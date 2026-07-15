@@ -6,15 +6,20 @@ import (
 
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/types"
 )
 
 type ChannelCapabilities struct {
 	SupportsChatStreamOptions      bool
 	SupportsResponsesAPI           bool
 	SupportsResponsesStreamOptions bool
+	NativeTextFormats              TextProtocolSet
 }
 
 var defaultChannelCapabilities = map[int]ChannelCapabilities{
+	constant.ChannelTypeOpenAI: {
+		NativeTextFormats: NewTextProtocolSet(types.RelayFormatOpenAI),
+	},
 	constant.ChannelTypeAnthropic: {
 		SupportsChatStreamOptions:      true,
 		SupportsResponsesAPI:           true,
@@ -54,6 +59,10 @@ var defaultChannelCapabilities = map[int]ChannelCapabilities{
 		SupportsChatStreamOptions:      true,
 		SupportsResponsesAPI:           true,
 		SupportsResponsesStreamOptions: true,
+		NativeTextFormats: NewTextProtocolSet(
+			types.RelayFormatOpenAI,
+			types.RelayFormatOpenAIResponses,
+		),
 	},
 	constant.ChannelTypeDeepSeek: {
 		SupportsChatStreamOptions:      true,
@@ -131,6 +140,10 @@ func resolveDefaultChannelCapabilities(channelType int, baseURL string) ChannelC
 			SupportsChatStreamOptions:      true,
 			SupportsResponsesAPI:           true,
 			SupportsResponsesStreamOptions: true,
+			NativeTextFormats: NewTextProtocolSet(
+				types.RelayFormatOpenAI,
+				types.RelayFormatOpenAIResponses,
+			),
 		}
 	}
 
