@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useMemo } from 'react';
-import { Button, Card, Space, Typography } from '@douyinfe/semi-ui';
+import { Button, Card, Select, Space, Typography } from '@douyinfe/semi-ui';
 import { IconBookOpenStroked, IconLink } from '@douyinfe/semi-icons';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -32,6 +32,8 @@ import geminiMarkdown from '../../../../docs/NAN_CLIENT_GEMINI.md?raw';
 import opencodeMarkdown from '../../../../docs/NAN_CLIENT_OPENCODE.md?raw';
 import openclawMarkdown from '../../../../docs/NAN_CLIENT_OPENCLAW.md?raw';
 import ccSwitchMarkdown from '../../../../docs/NAN_CLIENT_CCSWITCH.md?raw';
+import imageGenerationMarkdown from '../../../../docs/NAN_IMAGE_GENERATION.md?raw';
+import apiExamplesMarkdown from '../../../../docs/NAN_API_EXAMPLES.md?raw';
 import troubleshootingMarkdown from '../../../../docs/NAN_TROUBLESHOOTING.md?raw';
 import './index.css';
 
@@ -113,6 +115,22 @@ const DOCS = [
     content: ccSwitchMarkdown,
   },
   {
+    key: 'image-generation',
+    path: '/docs/image-generation',
+    group: '能力',
+    title: 'AI 生图',
+    description: '平台工作台、本地技能包与 API 请求三种使用方式',
+    content: imageGenerationMarkdown,
+  },
+  {
+    key: 'api-examples',
+    path: '/docs/api-examples',
+    group: '开发',
+    title: '模型请求样例',
+    description: '各厂商模型、协议地址与可直接复制的调用样例',
+    content: apiExamplesMarkdown,
+  },
+  {
     key: 'troubleshooting',
     path: '/docs/troubleshooting',
     group: '排查',
@@ -135,6 +153,8 @@ const DOC_LINK_REPLACEMENTS = [
   [/\.\/NAN_CLIENT_OPENCODE\.md/g, '/docs/clients/opencode'],
   [/\.\/NAN_CLIENT_OPENCLAW\.md/g, '/docs/clients/openclaw'],
   [/\.\/NAN_CLIENT_CCSWITCH\.md/g, '/docs/clients/ccswitch'],
+  [/\.\/NAN_IMAGE_GENERATION\.md/g, '/docs/image-generation'],
+  [/\.\/NAN_API_EXAMPLES\.md/g, '/docs/api-examples'],
   [/\.\/NAN_TROUBLESHOOTING\.md/g, '/docs/troubleshooting'],
   // 图片放 /docs-images/（不能叫 /docs/images/：dist 里出现 docs 目录会让
   // 静态文件服务把 /docs 当目录发 301，与 SPA 路由打架导致重定向死循环）
@@ -155,6 +175,57 @@ function normalizeMarkdownLinks(content) {
   );
 }
 
+function normalizeHeadingText(value) {
+  return value
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/[`*_~]/g, '')
+    .replace(/\s+#+\s*$/, '')
+    .trim();
+}
+
+function createHeadingId(value) {
+  return normalizeHeadingText(value)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s-]/gu, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+function prepareMarkdown(content) {
+  return normalizeMarkdownLinks(content).replace(/^\uFEFF?#\s+[^\n]+\n+/, '');
+}
+
+function extractHeadings(content) {
+  let inCodeBlock = false;
+  return content.split('\n').reduce((headings, line) => {
+    if (/^\s*```/.test(line)) {
+      inCodeBlock = !inCodeBlock;
+      return headings;
+    }
+    if (inCodeBlock) {
+      return headings;
+    }
+
+    const match = line.match(/^(##|###)\s+(.+)$/);
+    if (!match) {
+      return headings;
+    }
+
+    const title = normalizeHeadingText(match[2]);
+    const id = createHeadingId(title);
+    if (title && id) {
+      headings.push({
+        id,
+        title,
+        level: match[1].length,
+      });
+    }
+    return headings;
+  }, []);
+}
+
 function getActiveDoc(pathname) {
   const normalizedPath = pathname.replace(/\/+$/, '') || '/docs';
   const matched = [...DOCS]
@@ -173,12 +244,13 @@ export default function DocsPage() {
   const navigate = useNavigate();
   const activeDoc = getActiveDoc(location.pathname);
   const content = useMemo(
-    () => normalizeMarkdownLinks(activeDoc.content),
+    () => prepareMarkdown(activeDoc.content),
     [activeDoc.content],
   );
+  const headings = useMemo(() => extractHeadings(content), [content]);
 
   return (
-    <div className='nan-docs-page'>
+    <div className='nan-docs-page' id='docs-top'>
       <section className='nan-docs-hero'>
         <div>
           <Text className='nan-docs-eyebrow'>{DOCS_EYEBROW}</Text>
@@ -201,6 +273,18 @@ export default function DocsPage() {
       </section>
 
       <div className='nan-docs-layout'>
+        <div className='nan-docs-mobile-nav'>
+          <Text className='nan-docs-mobile-nav-label'>{t('选择文档')}</Text>
+          <Select
+            value={activeDoc.path}
+            optionList={DOCS.map((doc) => ({
+              value: doc.path,
+              label: `${t(doc.group)} · ${t(doc.title)}`,
+            }))}
+            onChange={(value) => navigate(value)}
+          />
+        </div>
+
         <aside className='nan-docs-sidebar'>
           {NAV_GROUPS.map((group) => (
             <div className='nan-docs-nav-group' key={group}>
@@ -235,6 +319,28 @@ export default function DocsPage() {
             <MarkdownRenderer content={content} fontSize={15} />
           </Card>
         </main>
+
+        <aside className='nan-docs-toc'>
+          <Text className='nan-docs-toc-title'>{t('本页目录')}</Text>
+          <nav aria-label={t('本页目录')}>
+            {headings.map((heading, index) => (
+              <a
+                key={`${heading.id}-${index}`}
+                href={`#${heading.id}`}
+                className={
+                  heading.level === 3
+                    ? 'nan-docs-toc-link nan-docs-toc-link-sub'
+                    : 'nan-docs-toc-link'
+                }
+              >
+                {heading.title}
+              </a>
+            ))}
+          </nav>
+          <a className='nan-docs-toc-back' href='#docs-top'>
+            {t('返回顶部')}
+          </a>
+        </aside>
       </div>
     </div>
   );
