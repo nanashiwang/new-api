@@ -244,6 +244,103 @@ type Usage struct {
 	Cost any `json:"cost,omitempty"`
 }
 
+// OpenAIChatCompletionsUsage is the public Chat Completions usage shape.
+//
+// Usage is also used internally for Responses, Claude and billing semantics,
+// so it intentionally contains provider-specific fields. Those fields must
+// not cross an OpenAI Chat Completions response boundary.
+type OpenAIChatCompletionsUsage struct {
+	PromptTokens            int                               `json:"prompt_tokens"`
+	CompletionTokens        int                               `json:"completion_tokens"`
+	TotalTokens             int                               `json:"total_tokens"`
+	PromptTokensDetails     OpenAIChatPromptTokensDetails     `json:"prompt_tokens_details"`
+	CompletionTokensDetails OpenAIChatCompletionTokensDetails `json:"completion_tokens_details"`
+}
+
+type OpenAIChatPromptTokensDetails struct {
+	CachedTokens int `json:"cached_tokens"`
+	AudioTokens  int `json:"audio_tokens"`
+}
+
+type OpenAIChatCompletionTokensDetails struct {
+	ReasoningTokens int `json:"reasoning_tokens"`
+	AudioTokens     int `json:"audio_tokens"`
+}
+
+func NewOpenAIChatCompletionsUsage(usage *Usage) *OpenAIChatCompletionsUsage {
+	if usage == nil {
+		return nil
+	}
+	return &OpenAIChatCompletionsUsage{
+		PromptTokens:     usage.PromptTokens,
+		CompletionTokens: usage.CompletionTokens,
+		TotalTokens:      usage.TotalTokens,
+		PromptTokensDetails: OpenAIChatPromptTokensDetails{
+			CachedTokens: usage.PromptTokensDetails.CachedTokens,
+			AudioTokens:  usage.PromptTokensDetails.AudioTokens,
+		},
+		CompletionTokensDetails: OpenAIChatCompletionTokensDetails{
+			ReasoningTokens: usage.CompletionTokenDetails.ReasoningTokens,
+			AudioTokens:     usage.CompletionTokenDetails.AudioTokens,
+		},
+	}
+}
+
+// OpenAITextResponseWire is the protocol boundary representation used when a
+// response is sent to an OpenAI Chat Completions client.
+type OpenAITextResponseWire struct {
+	Id      string                     `json:"id"`
+	Model   string                     `json:"model"`
+	Object  string                     `json:"object"`
+	Created any                        `json:"created"`
+	Choices []OpenAITextResponseChoice `json:"choices"`
+	Error   any                        `json:"error,omitempty"`
+	Usage   OpenAIChatCompletionsUsage `json:"usage"`
+}
+
+func NewOpenAITextResponseWire(response *OpenAITextResponse) *OpenAITextResponseWire {
+	if response == nil {
+		return nil
+	}
+	usage := NewOpenAIChatCompletionsUsage(&response.Usage)
+	return &OpenAITextResponseWire{
+		Id:      response.Id,
+		Model:   response.Model,
+		Object:  response.Object,
+		Created: response.Created,
+		Choices: response.Choices,
+		Error:   response.Error,
+		Usage:   *usage,
+	}
+}
+
+// ChatCompletionsStreamResponseWire applies the same usage whitelist to SSE
+// chunks without mutating the internal usage used for billing and conversion.
+type ChatCompletionsStreamResponseWire struct {
+	Id                string                                `json:"id"`
+	Object            string                                `json:"object"`
+	Created           int64                                 `json:"created"`
+	Model             string                                `json:"model"`
+	SystemFingerprint *string                               `json:"system_fingerprint"`
+	Choices           []ChatCompletionsStreamResponseChoice `json:"choices"`
+	Usage             *OpenAIChatCompletionsUsage           `json:"usage"`
+}
+
+func NewChatCompletionsStreamResponseWire(response *ChatCompletionsStreamResponse) *ChatCompletionsStreamResponseWire {
+	if response == nil {
+		return nil
+	}
+	return &ChatCompletionsStreamResponseWire{
+		Id:                response.Id,
+		Object:            response.Object,
+		Created:           response.Created,
+		Model:             response.Model,
+		SystemFingerprint: response.SystemFingerprint,
+		Choices:           response.Choices,
+		Usage:             NewOpenAIChatCompletionsUsage(response.Usage),
+	}
+}
+
 type OpenAIVideoResponse struct {
 	Id        string `json:"id" example:"file-abc123"`
 	Object    string `json:"object" example:"file"`
@@ -285,7 +382,7 @@ type OpenAIResponsesResponse struct {
 	Reasoning          *Reasoning         `json:"reasoning"`
 	Store              bool               `json:"store"`
 	Temperature        float64            `json:"temperature"`
-	ToolChoice         string             `json:"tool_choice"`
+	ToolChoice         json.RawMessage    `json:"tool_choice"`
 	Tools              []map[string]any   `json:"tools"`
 	TopP               float64            `json:"top_p"`
 	Truncation         string             `json:"truncation"`
