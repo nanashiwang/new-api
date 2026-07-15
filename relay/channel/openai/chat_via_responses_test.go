@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
@@ -36,7 +37,7 @@ func TestOaiResponsesToChatStreamHandler_CountsWebSearchCalls(t *testing.T) {
 		`data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-4.1","created_at":1700000000}}`,
 		`data: {"type":"response.output_item.done","item":{"type":"web_search_call","id":"ws_1","status":"completed"}}`,
 		`data: {"type":"response.output_text.delta","delta":"Found it."}`,
-		`data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-4.1","created_at":1700000000,"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15},"output":[{"type":"web_search_call","id":"ws_1"},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Found it."}]}]}}`,
+		`data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-4.1","created_at":1700000000,"tool_choice":{"type":"function","name":"lookup"},"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15},"output":[{"type":"web_search_call","id":"ws_1"},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Found it."}]}]}}`,
 		`data: [DONE]`,
 	}, "\n")
 
@@ -59,6 +60,84 @@ func TestOaiResponsesToChatStreamHandler_CountsWebSearchCalls(t *testing.T) {
 	require.Equal(t, 1, usage.WebSearchRequests)
 	require.Equal(t, 10, usage.PromptTokens)
 	require.Equal(t, 5, usage.CompletionTokens)
+	require.NotContains(t, recorder.Body.String(), `"input_tokens"`)
+	require.NotContains(t, recorder.Body.String(), `"output_tokens"`)
+	require.NotContains(t, recorder.Body.String(), `"claude_cache_creation_`)
+}
+
+func TestOaiResponsesToChatHandler_AcceptsObjectToolChoiceAndProjectsUsage(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	body := `{
+		"id":"resp_tool",
+		"object":"response",
+		"created_at":1700000000,
+		"status":"completed",
+		"model":"gpt-5",
+		"tool_choice":{"type":"function","name":"lookup","future_field":{"enabled":true}},
+		"usage":{
+			"input_tokens":10,
+			"output_tokens":5,
+			"total_tokens":15,
+			"input_tokens_details":{"cached_tokens":4},
+			"claude_cache_creation_5_m_tokens":2,
+			"claude_cache_creation_1_h_tokens":3
+		},
+		"output":[{
+			"type":"function_call",
+			"id":"fc_1",
+			"call_id":"call_lookup",
+			"name":"lookup",
+			"arguments":"{\"query\":\"weather\"}"
+		}]
+	}`
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type": []string{"application/json"},
+		},
+		Body: io.NopCloser(strings.NewReader(body)),
+	}
+
+	usage, relayErr := OaiResponsesToChatHandler(c, &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatOpenAI,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "gpt-5",
+		},
+	}, resp)
+	require.Nil(t, relayErr)
+	require.NotNil(t, usage)
+	require.Equal(t, 10, usage.PromptTokens)
+	require.Equal(t, 5, usage.CompletionTokens)
+
+	responseBody := recorder.Body.Bytes()
+	var decoded map[string]any
+	require.NoError(t, common.Unmarshal(responseBody, &decoded))
+	require.NotContains(t, string(responseBody), `"input_tokens"`)
+	require.NotContains(t, string(responseBody), `"output_tokens"`)
+	require.NotContains(t, string(responseBody), `"claude_cache_creation_`)
+	require.Contains(t, string(responseBody), `"finish_reason":"tool_calls"`)
+	require.Contains(t, string(responseBody), `"id":"call_lookup"`)
+
+	usageObject, ok := decoded["usage"].(map[string]any)
+	require.True(t, ok)
+	require.ElementsMatch(t,
+		[]string{"prompt_tokens", "completion_tokens", "total_tokens", "prompt_tokens_details", "completion_tokens_details"},
+		mapKeys(usageObject),
+	)
+}
+
+func mapKeys(value map[string]any) []string {
+	keys := make([]string, 0, len(value))
+	for key := range value {
+		keys = append(keys, key)
+	}
+	return keys
 }
 
 func TestOaiResponsesToChatStreamHandler_ClaudeWebSearchEmitsAnthropicBlocks(t *testing.T) {
