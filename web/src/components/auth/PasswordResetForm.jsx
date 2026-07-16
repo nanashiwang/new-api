@@ -25,7 +25,7 @@ import { Button, Card, Form, Typography } from '@douyinfe/semi-ui';
 import { IconMail } from '@douyinfe/semi-icons';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import Turnstile from 'react-turnstile';
+import Turnstile from '../common/ResilientTurnstile';
 
 const { Text, Title } = Typography;
 
@@ -90,7 +90,9 @@ const PasswordResetForm = () => {
     );
     const { success, message } = res.data;
     if (success) {
-      showSuccess(t('重置邮件发送成功，请检查邮箱（未收到请翻垃圾箱或广告邮件）'));
+      showSuccess(
+        t('重置邮件发送成功，请检查邮箱（未收到请翻垃圾箱或广告邮件）'),
+      );
       setInputs({ ...inputs, email: '' });
     } else {
       showError(message);

@@ -86,8 +86,7 @@ const manualChunks = (id) => {
 
   if (
     nodeModuleId(id, 'react-dropzone') ||
-    nodeModuleId(id, 'react-telegram-login') ||
-    nodeModuleId(id, 'react-turnstile')
+    nodeModuleId(id, 'react-telegram-login')
   ) {
     return 'react-integrations';
   }

@@ -63,7 +63,7 @@ import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
 import { useTranslation } from 'react-i18next';
 import { SiDiscord } from 'react-icons/si';
-import Turnstile from 'react-turnstile';
+import Turnstile from '../common/ResilientTurnstile';
 
 const TelegramLoginButton = lazy(() => import('react-telegram-login/src'));
 const OAuthProviderIcon = lazy(() => import('../common/OAuthProviderIcon'));

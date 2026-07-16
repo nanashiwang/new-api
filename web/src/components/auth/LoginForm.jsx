@@ -70,7 +70,7 @@ import LinuxDoIcon from '../common/logo/LinuxDoIcon';
 import TwoFAVerification from './TwoFAVerification';
 import { useTranslation } from 'react-i18next';
 import { SiDiscord } from 'react-icons/si';
-import Turnstile from 'react-turnstile';
+import Turnstile from '../common/ResilientTurnstile';
 
 const TelegramLoginButton = lazy(() => import('react-telegram-login'));
 const OAuthProviderIcon = lazy(() => import('../common/OAuthProviderIcon'));
