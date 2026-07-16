@@ -180,6 +180,7 @@ const EditChannelModal = (props) => {
     chat_completions_to_responses_mode: 'inherit',
     system_prompt: '',
     system_prompt_override: false,
+    max_concurrency: 0,
     settings: '',
     // 客户端限制设置
     client_restriction_mode: '',
@@ -755,6 +756,7 @@ const EditChannelModal = (props) => {
           data.system_prompt = parsedSettings.system_prompt || '';
           data.system_prompt_override =
             parsedSettings.system_prompt_override || false;
+          data.max_concurrency = Number(parsedSettings.max_concurrency) || 0;
           data.client_restriction_mode =
             parsedSettings.client_restriction_mode || '';
           data.client_restriction_clients =
@@ -775,6 +777,7 @@ const EditChannelModal = (props) => {
           data.chat_completions_to_responses_mode = 'inherit';
           data.system_prompt = '';
           data.system_prompt_override = false;
+          data.max_concurrency = 0;
           data.client_restriction_mode = '';
           data.client_restriction_clients = [];
           data.quota_policy_enabled = false;
@@ -790,6 +793,7 @@ const EditChannelModal = (props) => {
         data.chat_completions_to_responses_mode = 'inherit';
         data.system_prompt = '';
         data.system_prompt_override = false;
+        data.max_concurrency = 0;
         data.client_restriction_mode = '';
         data.client_restriction_clients = [];
         data.quota_policy_enabled = false;
@@ -915,6 +919,7 @@ const EditChannelModal = (props) => {
           data.chat_completions_to_responses_mode || 'inherit',
         system_prompt: data.system_prompt,
         system_prompt_override: data.system_prompt_override || false,
+        max_concurrency: data.max_concurrency || 0,
       });
       initialModelsRef.current = (data.models || [])
         .map((model) => (model || '').trim())
@@ -1743,6 +1748,7 @@ const EditChannelModal = (props) => {
         localInputs.chat_completions_to_responses_mode || 'inherit',
       system_prompt: localInputs.system_prompt || '',
       system_prompt_override: localInputs.system_prompt_override || false,
+      max_concurrency: Math.max(0, Number(localInputs.max_concurrency) || 0),
       client_restriction_mode: localInputs.client_restriction_mode || '',
       client_restriction_clients: normalizedClientRestrictionClients,
       quota_policy: {
@@ -4410,6 +4416,20 @@ const EditChannelModal = (props) => {
                       }
                       showClear
                       extraText={t('用于配置网络代理，支持 socks5 协议')}
+                    />
+
+                    <Form.InputNumber
+                      field='max_concurrency'
+                      label={t('渠道最大并发')}
+                      min={0}
+                      onChange={(value) =>
+                        handleChannelSettingsChange('max_concurrency', value)
+                      }
+                      style={{ width: '100%' }}
+                      placeholder={t('0 表示使用全局默认')}
+                      extraText={t(
+                        '该渠道的在途并发上限，0 表示使用全局默认值。需在「运营设置」开启渠道并发控制后生效；超过上限时请求会切换到其它未满渠道，全部满时进入有界等待或返回 503',
+                      )}
                     />
 
                     <Form.TextArea
