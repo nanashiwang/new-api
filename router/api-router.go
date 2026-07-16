@@ -267,6 +267,11 @@ func SetApiRouter(router *gin.Engine) {
 			performanceRoute.POST("/reset_stats", controller.ResetPerformanceStats)
 			performanceRoute.POST("/gc", controller.ForceGC)
 		}
+		channelConcurrencyRoute := apiRouter.Group("/channel_concurrency")
+		channelConcurrencyRoute.Use(middleware.RootAuth())
+		{
+			channelConcurrencyRoute.GET("/stats", controller.GetChannelConcurrencyStats)
+		}
 		ratioSyncRoute := apiRouter.Group("/ratio_sync")
 		ratioSyncRoute.Use(middleware.RootAuth())
 		{

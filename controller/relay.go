@@ -189,10 +189,14 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	var lastRelayError *types.NewAPIError
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
-		channel, channelErr := getChannel(c, relayInfo, retryParam)
+		channel, releaseSlot, channelErr, overloadControl := selectChannelWithConcurrency(c, relayInfo, retryParam)
 		if channelErr != nil {
 			logger.LogError(c, channelErr.Error())
-			if lastRelayError != nil {
+			if overloadControl {
+				// Layer C 过载控制的终态错误（503 / 客户端断开）：直接采用，
+				// 不用历史重试错误覆盖——系统整体过载对用户更有指导性。
+				newAPIError = channelErr
+			} else if lastRelayError != nil {
 				// 保留原始上游错误，让用户能看到真正的失败原因
 				newAPIError = lastRelayError
 			} else {
@@ -201,28 +205,42 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			break
 		}
 
-		addUsedChannel(c, channel.Id)
-		bodyStorage, bodyErr := common.GetBodyStorage(c)
-		if bodyErr != nil {
-			// Ensure consistent 413 for oversized bodies even when error occurs later (e.g., retry path)
-			if common.IsRequestBodyTooLargeError(bodyErr) || errors.Is(bodyErr, common.ErrRequestBodyTooLarge) {
-				newAPIError = newRequestBodyTooLargeRelayError(c, 0)
-			} else {
-				newAPIError = types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+		// 用闭包包裹本轮上游调用的完整生命周期，确保渠道并发名额 releaseSlot 无论走哪条
+		// 退出路径都释放一次，且在每轮迭代结束即释放（避免 for 循环内 defer 堆积到函数返回）。
+		// addUsedChannel 也置于 defer releaseSlot 之后，保证 acquire 成功到 defer 注册之间
+		// 没有任何可 panic 的语句，杜绝 panic 绕过释放导致的名额泄漏。
+		breakLoop := false
+		func() {
+			if releaseSlot != nil {
+				defer releaseSlot()
 			}
-			break
-		}
-		c.Request.Body = io.NopCloser(bodyStorage)
+			addUsedChannel(c, channel.Id)
+			bodyStorage, bodyErr := common.GetBodyStorage(c)
+			if bodyErr != nil {
+				// Ensure consistent 413 for oversized bodies even when error occurs later (e.g., retry path)
+				if common.IsRequestBodyTooLargeError(bodyErr) || errors.Is(bodyErr, common.ErrRequestBodyTooLarge) {
+					newAPIError = newRequestBodyTooLargeRelayError(c, 0)
+				} else {
+					newAPIError = types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+				}
+				breakLoop = true
+				return
+			}
+			c.Request.Body = io.NopCloser(bodyStorage)
 
-		switch relayFormat {
-		case types.RelayFormatOpenAIRealtime:
-			newAPIError = relay.WssHelper(c, relayInfo)
-		case types.RelayFormatClaude:
-			newAPIError = relay.ClaudeHelper(c, relayInfo)
-		case types.RelayFormatGemini:
-			newAPIError = geminiRelayHandler(c, relayInfo)
-		default:
-			newAPIError = relayHandler(c, relayInfo)
+			switch relayFormat {
+			case types.RelayFormatOpenAIRealtime:
+				newAPIError = relay.WssHelper(c, relayInfo)
+			case types.RelayFormatClaude:
+				newAPIError = relay.ClaudeHelper(c, relayInfo)
+			case types.RelayFormatGemini:
+				newAPIError = geminiRelayHandler(c, relayInfo)
+			default:
+				newAPIError = relayHandler(c, relayInfo)
+			}
+		}()
+		if breakLoop {
+			break
 		}
 
 		if newAPIError == nil {
