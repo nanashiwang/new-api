@@ -29,6 +29,13 @@ type ChannelConcurrencySetting struct {
 	PollIntervalMs int `json:"poll_interval_ms"`
 	// 返回 503 时 Retry-After 响应头的秒数，指导客户端退避重试。
 	RetryAfterSeconds int `json:"retry_after_seconds"`
+	// 是否启用「渠道亲和粘性」：优先把请求粘在其亲和绑定渠道上以命中上游 prompt cache。
+	// 绑定渠道并发满时会在 AffinityWaitMs 内有界等待它释放（而非立即换渠道），
+	// 只有它熔断/禁用/等待超时才降级到普通负载均衡。默认开启（仅在 Enabled=true 时生效）。
+	AffinityStickyEnabled bool `json:"affinity_sticky_enabled"`
+	// 亲和渠道的等待预算（毫秒）：绑定渠道满时最多为它等这么久，超时则降级换渠道以保障体验。
+	// 应 ≤ WaitTimeoutMs，留出剩余时间给降级阶段的等待。
+	AffinityWaitMs int `json:"affinity_wait_ms"`
 }
 
 // 默认配置：关闭状态 + 一组安全默认值。
@@ -39,6 +46,8 @@ var channelConcurrencySetting = ChannelConcurrencySetting{
 	MaxQueueLength:        200,
 	PollIntervalMs:        50,
 	RetryAfterSeconds:     3,
+	AffinityStickyEnabled: true,
+	AffinityWaitMs:        2000,
 }
 
 func init() {
@@ -98,6 +107,18 @@ func (s *ChannelConcurrencySetting) NormalizedRetryAfterSeconds() int {
 	return s.RetryAfterSeconds
 }
 
+// NormalizedAffinityWaitMs 返回亲和渠道等待预算，兜底默认并封顶到总等待超时（不超过 WaitTimeoutMs）。
+func (s *ChannelConcurrencySetting) NormalizedAffinityWaitMs() int {
+	v := s.AffinityWaitMs
+	if v <= 0 {
+		v = 2000
+	}
+	if total := s.NormalizedWaitTimeoutMs(); v > total {
+		v = total
+	}
+	return v
+}
+
 // ValidateChannelConcurrencyOption 校验后台写入的 channel_concurrency_setting.* 配置值，
 // 供 controller/option.go 在保存前调用。数值字段必须为非负整数；enabled 为 bool 不校验。
 func ValidateChannelConcurrencyOption(key, value string) error {
@@ -108,11 +129,14 @@ func ValidateChannelConcurrencyOption(key, value string) error {
 		"channel_concurrency_setting.wait_timeout_ms",
 		"channel_concurrency_setting.max_queue_length",
 		"channel_concurrency_setting.poll_interval_ms",
-		"channel_concurrency_setting.retry_after_seconds":
+		"channel_concurrency_setting.retry_after_seconds",
+		"channel_concurrency_setting.affinity_wait_ms":
 		n, err := strconv.Atoi(value)
 		if err != nil || n < 0 {
 			return fmt.Errorf("%s 必须是非负整数", key)
 		}
+		return nil
+	case "channel_concurrency_setting.affinity_sticky_enabled":
 		return nil
 	}
 	return nil

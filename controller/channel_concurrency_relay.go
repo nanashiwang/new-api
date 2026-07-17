@@ -60,6 +60,22 @@ func selectChannelWithConcurrency(
 	maxQueueLen := setting.NormalizedMaxQueueLength()
 	deadline := time.Now().Add(waitTimeout)
 
+	// ---- 阶段1：亲和粘性优先（保上游 prompt cache 命中）----
+	// 仅在首轮（未发生真实上游失败）尝试。重试轮意味着亲和渠道可能真的故障了，
+	// 不该再死粘它，直接进入阶段2 的正常负载均衡以保障请求成功。
+	if setting.AffinityStickyEnabled && retryParam.GetRetry() == 0 {
+		ch, release, outcome := tryStickToAffinityChannel(c, info, retryParam, setting, deadline)
+		switch outcome {
+		case affinityStickAcquired:
+			return ch, release, nil, false
+		case affinityStickClientGone:
+			return nil, nil, buildClientCanceledError(), true
+		case affinityStickSkip, affinityStickDegrade:
+			// 无亲和绑定 / 亲和渠道不可用 / 等待其超时 → 落到阶段2 正常选择（保体验）。
+		}
+	}
+
+	// ---- 阶段2：正常负载均衡 + 并发控制（有界过载兜底）----
 	// 本次请求内因“并发已满”而被临时排除的渠道集合。等到容量后从 ExcludeChannels 中移除它们重试。
 	fullChannels := make(map[int]bool)
 	inWaitQueue := false
@@ -169,6 +185,112 @@ func buildClientCanceledError() *types.NewAPIError {
 		types.ErrOptionWithSkipRetry(),
 		types.ErrOptionWithHideErrMsg("client canceled while waiting for channel capacity"),
 	)
+}
+
+// affinityStickOutcome 表示"尽力粘住亲和渠道"的结果。
+type affinityStickOutcome int
+
+const (
+	affinityStickSkip       affinityStickOutcome = iota // 无亲和绑定，跳过粘性（新会话走正常选择，自然建立绑定）
+	affinityStickAcquired                               // 成功粘住亲和渠道并占用名额（缓存最优）
+	affinityStickClientGone                             // 等待亲和渠道时客户端断开
+	affinityStickDegrade                                // 亲和渠道不可用/等待超时/队列满 → 降级到正常负载均衡
+)
+
+// tryStickToAffinityChannel 尽力把请求粘在其亲和绑定渠道上，以命中上游 prompt cache。
+//
+// 缓存与体验的平衡点：
+//   - 亲和渠道可用且未满 → 立即占用并返回（缓存最优，无额外延迟）；
+//   - 亲和渠道并发满 → 在 AffinityWaitMs 内有界等待它释放，等到即用（保住缓存局部性）；
+//   - 亲和渠道熔断/禁用/等待超时/等待队列已满 → 返回 degrade，交由阶段2 正常负载均衡兜底（保体验）；
+//   - 客户端断开 → 立即取消（不空等）。
+//
+// 全程在请求自身 goroutine 内 select，等待时长由 AffinityWaitMs 上界、等待并发由队列上界，无额外 goroutine。
+// 返回 acquired 时已通过 SetupContextForSelectedChannel 把渠道写入 context，调用方可直接转发。
+func tryStickToAffinityChannel(
+	c *gin.Context,
+	info *relaycommon.RelayInfo,
+	retryParam *service.RetryParam,
+	setting *operation_setting.ChannelConcurrencySetting,
+	overallDeadline time.Time,
+) (*model.Channel, func(), affinityStickOutcome) {
+	// 复用 distributor 的完整亲和校验（可用性/熔断、token 与客户端权限、codex 兼容、
+	// 分组内模型启用、auto 分组展开），避免自行实现校验遗漏把请求粘到无权/未启用的渠道。
+	affinityCh, selectGroup, ok := middleware.ResolveAffinityChannelForRelay(
+		c, info.OriginModelName, info.UsingGroup, retryParam.ExcludeChannels,
+	)
+	if !ok {
+		// 无亲和绑定，或绑定渠道不可用/无权限 → 交由阶段2 正常负载均衡（新会话会自然建立绑定）。
+		return nil, nil, affinityStickSkip
+	}
+
+	maxConcurrency := middleware.ResolveChannelMaxConcurrency(affinityCh)
+	// 亲和等待预算：不超过 AffinityWaitMs，也不超过总 deadline（把剩余时间留给降级阶段的等待）。
+	affinityDeadline := time.Now().Add(time.Duration(setting.NormalizedAffinityWaitMs()) * time.Millisecond)
+	if affinityDeadline.After(overallDeadline) {
+		affinityDeadline = overallDeadline
+	}
+	pollInterval := time.Duration(setting.NormalizedPollIntervalMs()) * time.Millisecond
+	maxQueueLen := setting.NormalizedMaxQueueLength()
+
+	inWaitQueue := false
+	var waitStart time.Time
+	defer func() {
+		if inWaitQueue {
+			middleware.LeaveChannelWaitQueue()
+			middleware.RecordChannelWaitDuration(time.Since(waitStart))
+		}
+	}()
+
+	for {
+		release, acquired := middleware.AcquireChannelSlotWithMetric(affinityCh.Id, maxConcurrency)
+		if acquired {
+			// 阶段1 绕过了 getChannel，需自己把亲和渠道写入 context 供后续转发链路使用。
+			if setupErr := middleware.SetupContextForSelectedChannel(c, affinityCh, info.OriginModelName); setupErr != nil {
+				release()
+				return nil, nil, affinityStickDegrade
+			}
+			// 与 distributor 路径对齐：标记亲和已用（供 SkipRetryOnFailure 规则与 admin 日志/统计生效），
+			// 用 tryAffinityChannel 返回的生效分组，避免 auto 分组下的 group 维度错乱。
+			service.MarkChannelAffinityUsed(c, selectGroup, affinityCh.Id)
+			if inWaitQueue {
+				middleware.RecordChannelWaitAcquired()
+			}
+			return affinityCh, release, affinityStickAcquired
+		}
+
+		// 亲和渠道并发满：在预算内有界等待它释放（而非立即换渠道，以保住缓存）。
+		if !inWaitQueue {
+			if !middleware.EnterChannelWaitQueue(maxQueueLen) {
+				// 等待队列已满 → 降级换渠道，保障体验（不无界堆积）。
+				middleware.RecordChannelQueueReject()
+				return nil, nil, affinityStickDegrade
+			}
+			inWaitQueue = true
+			waitStart = time.Now()
+			middleware.RecordChannelWaitEnter()
+		}
+
+		remaining := time.Until(affinityDeadline)
+		if remaining <= 0 {
+			// 等待亲和渠道超时 → 降级换渠道（用有界延迟换缓存，超时则让位给可用性）。
+			middleware.RecordChannelWaitTimeout()
+			return nil, nil, affinityStickDegrade
+		}
+		wait := pollInterval
+		if wait > remaining {
+			wait = remaining
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-c.Request.Context().Done():
+			timer.Stop()
+			middleware.RecordChannelWaitCancel()
+			return nil, nil, affinityStickClientGone
+		case <-timer.C:
+			// 继续尝试占用亲和渠道（可能已释放容量）。
+		}
+	}
 }
 
 // removeChannelsFromExclusion 返回移除了 remove 集合中所有渠道 ID 的新排除列表。

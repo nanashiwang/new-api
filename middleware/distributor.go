@@ -240,6 +240,15 @@ func tryAffinityChannel(c *gin.Context, modelName string, usingGroup string, cli
 	return nil, "", false
 }
 
+// ResolveAffinityChannelForRelay 返回经【完整校验】的亲和绑定渠道及其生效分组，供 relay 层的
+// 渠道亲和粘性复用——与 distributor 的亲和选择共用同一套校验（可用性/熔断、token 与客户端权限、
+// codex-auto-review 兼容、分组内该模型是否启用、auto 分组展开），保证不遗漏、单一事实来源。
+// 返回 (channel, selectGroup, true) 表示可安全粘定；false 表示无绑定或亲和渠道不可用/无权限。
+func ResolveAffinityChannelForRelay(c *gin.Context, modelName string, usingGroup string, excludeChannels []int) (*model.Channel, string, bool) {
+	clientID := service.DetectClient(c)
+	return tryAffinityChannel(c, modelName, usingGroup, clientID, excludeChannels)
+}
+
 func selectChannelForRequest(c *gin.Context, modelName string, usingGroup string, clientID string, specificChannelID *int) (*model.Channel, string, *types.NewAPIError) {
 	allowedChannels := GetAllowedTokenChannelIDs(c)
 	excludeChannels := make([]int, 0, 4)
