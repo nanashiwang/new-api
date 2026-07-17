@@ -153,7 +153,12 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 	statusCodeMappingStr := c.GetString("status_code_mapping")
 	strippedStreamOptions := false
 	retriedWithoutPreviousResponseID := false
+	// clientWantsStream 记录客户端的原始 stream 意图。codex 上游被 newapi 恒定强制流式后,
+	// 绝不能再用「上游返回 SSE」去污染 info.IsStream(否则非流式客户端会拿到无法解析的 SSE);
+	// 响应分派严格按「客户端意图 + 上游实际类型」决定,info.IsStream 全程保持客户端原始意图。
+	clientWantsStream := info.IsStream
 	var httpResp *http.Response
+	var upstreamIsStream bool
 	for {
 		requestTemplate := responsesReq
 		if retriedWithoutPreviousResponseID && fallbackResponsesReq != nil {
@@ -206,7 +211,7 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 		}
 
 		httpResp = resp.(*http.Response)
-		info.IsStream = info.IsStream || strings.HasPrefix(httpResp.Header.Get("Content-Type"), "text/event-stream")
+		upstreamIsStream = strings.HasPrefix(httpResp.Header.Get("Content-Type"), "text/event-stream")
 		if httpResp.StatusCode == http.StatusOK {
 			break
 		}
@@ -231,8 +236,19 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 		return nil, newApiErr
 	}
 
-	if info.IsStream {
+	if clientWantsStream {
+		// 客户端要流式 → 转成 chat/claude SSE 转发(上游此时必为 SSE)。
 		usage, newApiErr := openaichannel.OaiResponsesToChatStreamHandler(c, info, httpResp)
+		if newApiErr != nil {
+			service.ResetStatusCode(newApiErr, statusCodeMappingStr)
+			return nil, newApiErr
+		}
+		return usage, nil
+	}
+
+	if upstreamIsStream {
+		// 客户端要非流式,但 codex 上游被强制流式返回 SSE → 聚合成非流式 JSON 返回,对客户端透明。
+		usage, newApiErr := openaichannel.OaiResponsesToChatAggregateHandler(c, info, httpResp)
 		if newApiErr != nil {
 			service.ResetStatusCode(newApiErr, statusCodeMappingStr)
 			return nil, newApiErr

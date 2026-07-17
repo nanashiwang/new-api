@@ -104,6 +104,10 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 	// rm max_output_tokens
 	request.MaxOutputTokens = 0
 	request.Temperature = nil
+	// codex 上游(ChatGPT backend)只接受流式请求,非流式会报 "Stream must be set to true"。
+	// 恒定强制上游 stream=true;若客户端本意是非流式,由 DoResponse 走聚合 handler 把 SSE
+	// 聚合成单个非流式 JSON 返回——对客户端透明,info.IsStream 保持客户端原始意图不被污染。
+	request.Stream = true
 	return request, nil
 }
 
@@ -122,6 +126,12 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 
 	if info.IsStream {
 		return openai.OaiResponsesStreamHandler(c, info, resp)
+	}
+	// 客户端要非流式,但普通 responses 请求已被强制上游流式(ConvertOpenAIResponsesRequest
+	// 里 stream=true)。若上游确实返回 SSE,则把整条流聚合成单个非流式 Responses JSON 返回,
+	// 对客户端完全透明;上游若仍返回 JSON(理论上不会),回退到原非流式 handler。
+	if strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
+		return openai.OaiResponsesAggregateHandler(c, info, resp)
 	}
 	return openai.OaiResponsesHandler(c, info, resp)
 }
@@ -182,7 +192,9 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 	// Clients may omit it or include parameters like `application/json; charset=utf-8`,
 	// which can be rejected by the upstream. Force the exact media type.
 	req.Set("Content-Type", "application/json")
-	if info.IsStream {
+	if info.RelayMode != relayconstant.RelayModeResponsesCompact {
+		// 普通 /v1/responses:newapi 恒定对 codex 强制上游流式(见 ConvertOpenAIResponsesRequest),
+		// 故 Accept 必须恒为 SSE,与请求体 stream=true 保持一致(不再依赖客户端 info.IsStream)。
 		req.Set("Accept", "text/event-stream")
 	} else if req.Get("Accept") == "" {
 		req.Set("Accept", "application/json")

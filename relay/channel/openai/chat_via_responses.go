@@ -113,14 +113,22 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		return nil, newResponsesIncompleteError(&responsesResp)
 	}
 
+	return finishResponsesToChatConversion(c, info, resp, &responsesResp)
+}
+
+// finishResponsesToChatConversion 把一个完整的 Responses 响应对象转换为客户端期望的
+// chat.completion / Claude / Gemini 非流式 JSON 并写出,返回计费 usage。
+// 供「上游非流式直连」(OaiResponsesToChatHandler)与「上游强制流式后聚合」
+// (OaiResponsesToChatAggregateHandler)两条路径共用,保证转换与计费口径完全一致。
+func finishResponsesToChatConversion(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response, responsesResp *dto.OpenAIResponsesResponse) (*dto.Usage, *types.NewAPIError) {
 	chatId := helper.GetResponseID(c)
-	chatResp, usage, err := service.ResponsesResponseToChatCompletionsResponse(&responsesResp, chatId)
+	chatResp, usage, err := service.ResponsesResponseToChatCompletionsResponse(responsesResp, chatId)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 
 	if usage == nil || usage.TotalTokens == 0 {
-		text := service.ExtractOutputTextFromResponses(&responsesResp)
+		text := service.ExtractOutputTextFromResponses(responsesResp)
 		usage = service.ResponseText2Usage(c, text, info.UpstreamModelName, info.GetEstimatePromptTokens())
 		chatResp.Usage = *usage
 	}
@@ -131,7 +139,7 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	var responseBody []byte
 	switch info.RelayFormat {
 	case types.RelayFormatClaude:
-		claudeResp := service.ResponseOpenAIResponses2Claude(&responsesResp, chatId)
+		claudeResp := service.ResponseOpenAIResponses2Claude(responsesResp, chatId)
 		responseBody, err = common.Marshal(claudeResp)
 	case types.RelayFormatGemini:
 		geminiResp := service.ResponseOpenAI2Gemini(chatResp, info)
@@ -145,6 +153,19 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 	return usage, nil
+}
+
+// OaiResponsesToChatAggregateHandler 与 OaiResponsesToChatHandler 对应,但用于「codex 强制流式」
+// 场景:客户端要非流式的 chat/claude/gemini 结果,而上游被 newapi 强制返回 SSE。这里先把上游 SSE
+// 聚合成完整 Responses 对象,再走与非流式直连完全相同的转换路径。上游是 SSE,写出前需把响应头改回
+// application/json(sanitizeAggregatedResponseHeaders),避免客户端把 JSON 误当作 SSE。
+func OaiResponsesToChatAggregateHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
+	finalResponse, apiErr := aggregateResponsesStream(c, info, resp)
+	if apiErr != nil {
+		return nil, apiErr
+	}
+	sanitizeAggregatedResponseHeaders(resp)
+	return finishResponsesToChatConversion(c, info, resp, finalResponse)
 }
 
 func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {

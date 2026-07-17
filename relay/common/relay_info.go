@@ -189,6 +189,10 @@ type RelayInfo struct {
 	RequestHeaders          map[string]string
 	ShouldIncludeUsage      bool
 	DisablePing             bool // 是否禁止向下游发送自定义 Ping
+	// SuppressStreamResponseHeaders 为 true 时,StreamScannerHandler 不再自动向客户端
+	// 写入 SSE 响应头(text/event-stream)。用于「codex 恒定强制上游流式、但客户端要非流式」
+	// 的聚合场景:内部读上游 SSE,但最终以单个 JSON body 返回,因此绝不能提前把响应头设成 SSE。
+	SuppressStreamResponseHeaders bool
 	ClientWs                *websocket.Conn
 	TargetWs                *websocket.Conn
 	InputAudioFormat        string

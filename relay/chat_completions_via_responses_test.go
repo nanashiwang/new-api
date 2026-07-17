@@ -230,6 +230,61 @@ func TestChatCompletionsViaResponses_RemovesStreamOptionsForNonStreamRequest(t *
 	require.NotContains(t, adaptor.requests[0], `"stream":true`)
 }
 
+// 方案B 分派解耦回归:客户端非流式,但上游(codex 被强制流式)返回 SSE →
+// 必须走聚合分支,把 SSE 聚合成单个非流式 chat.completion JSON,而不是把 SSE 直接透传给客户端。
+// 这是本次解耦唯一新增的分派叉(chat_completions_via_responses.go 的 upstreamIsStream 分支)。
+func TestChatCompletionsViaResponses_NonStreamClientSSEUpstreamAggregates(t *testing.T) {
+	setResponsesRetryStreamTestTimeout(t)
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	info := &relaycommon.RelayInfo{
+		TokenId:         322,
+		UserId:          321,
+		RelayMode:       relayconstant.RelayModeChatCompletions,
+		OriginModelName: "gpt-5",
+		RelayFormat:     types.RelayFormatOpenAI,
+		IsStream:        false, // 客户端要非流式
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:         323,
+			UpstreamModelName: "gpt-5",
+		},
+	}
+	request := &dto.GeneralOpenAIRequest{
+		Model:    "gpt-5",
+		Messages: []dto.Message{{Role: "user", Content: "hello"}},
+	}
+	// 上游(codex 被强制流式)返回 SSE。
+	successBody := strings.Join([]string{
+		`data: {"type":"response.output_text.delta","delta":"aggregated"}`,
+		`data: {"type":"response.completed","response":{"id":"resp_agg","model":"gpt-5","created_at":1700000000,"usage":{"input_tokens":9,"output_tokens":3,"total_tokens":12},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"aggregated"}]}]}}`,
+		`data: [DONE]`,
+	}, "\n")
+	adaptor := &responsesRetryTestAdaptor{
+		responses: []*http.Response{
+			newResponsesRetryStreamHTTPResponse(successBody),
+		},
+	}
+
+	usage, newAPIError := chatCompletionsViaResponses(ctx, info, adaptor, request)
+	require.Nil(t, newAPIError)
+	require.NotNil(t, usage)
+	require.Equal(t, 9, usage.PromptTokens)
+	require.Equal(t, 3, usage.CompletionTokens)
+
+	// 客户端非流式意图必须被保留,不被上游 SSE 污染。
+	require.False(t, info.IsStream)
+	// 返回给客户端的是单个非流式 chat.completion JSON,不是 SSE 流。
+	require.Equal(t, "application/json", recorder.Header().Get("Content-Type"))
+	out := recorder.Body.String()
+	require.NotContains(t, out, "data:")
+	require.Contains(t, out, `"object":"chat.completion"`)
+	require.Contains(t, out, "aggregated")
+}
+
 func TestChatCompletionsViaResponses_PreservesStreamOptionsForStreamRequest(t *testing.T) {
 	setResponsesRetryStreamTestTimeout(t)
 

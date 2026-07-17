@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -47,7 +48,12 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	// 写入新的 response body
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 
-	// compute usage
+	return buildResponsesUsage(c, info, &responsesResponse), nil
+}
+
+// buildResponsesUsage 从一个完整的 Responses 响应对象计算 *dto.Usage(含内置工具用量),
+// 供非流式直连 handler 与聚合 handler 共用,保证两条路径计费口径完全一致。
+func buildResponsesUsage(c *gin.Context, info *relaycommon.RelayInfo, responsesResponse *dto.OpenAIResponsesResponse) *dto.Usage {
 	usage := dto.Usage{}
 	if responsesResponse.Usage != nil {
 		usage.PromptTokens = responsesResponse.Usage.InputTokens
@@ -63,7 +69,7 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		}
 	}
 	if info == nil || info.ResponsesUsageInfo == nil || info.ResponsesUsageInfo.BuiltInTools == nil {
-		return &usage, nil
+		return &usage
 	}
 	if usage.WebSearchRequests > 0 {
 		if webSearchTool, exists := info.ResponsesUsageInfo.BuiltInTools[dto.NormalizeBuiltInToolType(dto.BuildInToolWebSearch)]; exists && webSearchTool != nil {
@@ -84,7 +90,134 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		}
 		buildToolinfo.CallCount++
 	}
-	return &usage, nil
+	return &usage
+}
+
+// aggregateResponsesStream 消费上游的 Responses SSE 流并聚合出最终的完整响应对象。
+//
+// 使用场景:codex 上游被 newapi 恒定强制流式(stream=true),但客户端本意是非流式。
+// 本函数复用 StreamScannerHandler 读上游(保留其 goroutine 防泄漏 / client-gone 检测 /
+// 超时 / resp.Body 关闭等全套保护),但通过 SuppressStreamResponseHeaders 抑制客户端 SSE
+// 响应头、DisablePing 抑制 ping,使调用方可在末尾以单个非流式 JSON body 返回。
+//
+// response.completed 事件里的 Response 就是与非流式 body 同构的完整对象(含 Output+Usage),
+// 故聚合本质就是捕获它;拿到即停止扫描。上游异常(incomplete/failed/error)转为非流式错误返回;
+// 未收到 completed 则按 client-gone / 上游异常分别返回可跳过重试或普通错误。
+func aggregateResponsesStream(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.OpenAIResponsesResponse, *types.NewAPIError) {
+	if resp == nil || resp.Body == nil {
+		return nil, types.NewError(fmt.Errorf("invalid response"), types.ErrorCodeBadResponse)
+	}
+	// 抑制客户端 SSE 头 + ping:读上游 SSE,但最终以单个非流式 JSON 返回客户端。
+	// 用 defer 存/恢复原值,把抑制严格收敛到本次聚合调用作用域内,避免标志残留到外层
+	// 换渠道重试的后续轮次(RelayInfo 跨轮复用)造成跨渠道污染;保存原值而非硬编码 false,
+	// 也避免误清其它设置方(如 gemini adaptor)已置的 DisablePing。StreamScannerHandler
+	// 是同步调用(内部 goroutine 在其返回前已 wg 收敛),故 defer 复位不影响读流期间的抑制生效。
+	entrySuppress := info.SuppressStreamResponseHeaders
+	entryDisablePing := info.DisablePing
+	info.SuppressStreamResponseHeaders = true
+	info.DisablePing = true
+	defer func() {
+		info.SuppressStreamResponseHeaders = entrySuppress
+		info.DisablePing = entryDisablePing
+	}()
+
+	var (
+		finalResponse *dto.OpenAIResponsesResponse
+		streamErr     *types.NewAPIError
+		completed     bool
+	)
+
+	helper.StreamScannerHandler(c, resp, info, func(data string) bool {
+		if streamErr != nil {
+			return false
+		}
+		var streamResponse dto.ResponsesStreamResponse
+		if err := common.UnmarshalJsonStr(data, &streamResponse); err != nil {
+			logger.LogError(c, "aggregate responses stream: failed to unmarshal event: "+err.Error())
+			return true
+		}
+		switch streamResponse.Type {
+		case "response.completed":
+			if streamResponse.Response == nil {
+				return true
+			}
+			if strings.EqualFold(strings.TrimSpace(streamResponse.Response.Status), "incomplete") {
+				streamErr = newResponsesIncompleteError(streamResponse.Response)
+				return false
+			}
+			finalResponse = streamResponse.Response
+			completed = true
+			return false // 已拿到完整响应,停止扫描
+		case "error", "response.error", "response.failed", "response.incomplete":
+			streamErr = newResponsesStreamEventError(streamResponse)
+			return false
+		}
+		return true
+	})
+
+	if streamErr != nil {
+		return nil, streamErr
+	}
+	if !completed || finalResponse == nil {
+		// 客户端已断开:归类为取消,跳过重试且不污染错误率(与并发控制的 client-canceled 一致)。
+		if info.StreamStatus != nil && info.StreamStatus.EndReason == relaycommon.StreamEndReasonClientGone {
+			return nil, types.NewError(context.Canceled, types.ErrorCodeDoRequestFailed,
+				types.ErrOptionWithSkipRetry(),
+				types.ErrOptionWithHideErrMsg("client canceled while aggregating codex stream"))
+		}
+		// 上游异常结束且无 completed 事件:返回可重试错误,交由外层换渠道重试(此时尚未向客户端写任何字节)。
+		reason := "codex stream ended without a completed event"
+		if info.StreamStatus != nil && info.StreamStatus.EndReason != "" {
+			reason = fmt.Sprintf("%s (stream end: %s)", reason, info.StreamStatus.EndReason)
+		}
+		return nil, types.NewOpenAIError(fmt.Errorf("%s", reason), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+	}
+	return finalResponse, nil
+}
+
+// sanitizeAggregatedResponseHeaders 把上游 SSE 响应的头改写为适合单个 JSON body 的形态。
+// IOCopyBytesGracefully 会把上游 resp.Header 原样拷给客户端,而上游此时是 text/event-stream,
+// 必须覆盖为 application/json,并清掉分块传输头,避免客户端把非流式 JSON 误当作 SSE。
+func sanitizeAggregatedResponseHeaders(resp *http.Response) {
+	if resp == nil || resp.Header == nil {
+		return
+	}
+	resp.Header.Set("Content-Type", "application/json")
+	resp.Header.Del("Transfer-Encoding")
+	// 聚合后写出的是重新序列化的未压缩 JSON,清掉上游可能残留的压缩标记,避免客户端误解码。
+	resp.Header.Del("Content-Encoding")
+	// 清掉上游 SSE 残留的流式语义头:非流式 JSON 是一次性返回,保留 X-Accel-Buffering:no
+	// 会让 nginx 等反代关闭对该响应的缓冲;Connection/Cache-Control 也与非流式响应语义不符。
+	resp.Header.Del("X-Accel-Buffering")
+	resp.Header.Del("Connection")
+	resp.Header.Del("Cache-Control")
+}
+
+// OaiResponsesAggregateHandler 处理「客户端要非流式的 /v1/responses、但上游被强制流式」的情况:
+// 聚合上游 SSE 成完整 Responses 对象,再以单个非流式 JSON 返回客户端——客户端看到的正是它期望的
+// 原生 Responses 非流式响应(无需任何格式转换)。计费与非流式直连 handler 完全一致。
+func OaiResponsesAggregateHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
+	finalResponse, apiErr := aggregateResponsesStream(c, info, resp)
+	if apiErr != nil {
+		return nil, apiErr
+	}
+
+	info.RecordResponsesCompletedSummary(finalResponse)
+	if finalResponse.HasImageGenerationCall() {
+		c.Set("image_generation_call", true)
+		c.Set("image_generation_call_count", finalResponse.CountImageGenerationCalls())
+		c.Set("image_generation_call_quality", finalResponse.GetQuality())
+		c.Set("image_generation_call_size", finalResponse.GetSize())
+	}
+
+	responseBody, err := common.Marshal(finalResponse)
+	if err != nil {
+		return nil, types.NewOpenAIError(err, types.ErrorCodeJsonMarshalFailed, http.StatusInternalServerError)
+	}
+
+	sanitizeAggregatedResponseHeaders(resp)
+	service.IOCopyBytesGracefully(c, resp, responseBody)
+	return buildResponsesUsage(c, info, finalResponse), nil
 }
 
 func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {

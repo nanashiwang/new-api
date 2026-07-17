@@ -137,7 +137,11 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	}()
 
 	scanner.Split(bufio.ScanLines)
-	SetEventStreamHeaders(c)
+	// 聚合模式(codex 强制上游流式、客户端要非流式)下,最终要以单个 JSON body 返回,
+	// 因此不能在此把客户端响应头设成 SSE;由聚合 handler 在末尾自行写 application/json。
+	if info == nil || !info.SuppressStreamResponseHeaders {
+		SetEventStreamHeaders(c)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
