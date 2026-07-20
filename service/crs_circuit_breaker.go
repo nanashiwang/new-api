@@ -98,10 +98,7 @@ func crsCircuitScopes(channel *model.Channel) []crsCircuitScope {
 	if channel == nil {
 		return nil
 	}
-	scopes := make([]crsCircuitScope, 0, 2)
-	if tag := strings.TrimSpace(channel.GetTag()); tag != "" {
-		scopes = append(scopes, crsCircuitScope{scope: "tag", key: tag})
-	}
+	scopes := make([]crsCircuitScope, 0, 1)
 	if channel.BaseURL != nil {
 		if baseURL := normalizeCRSCircuitBaseURL(*channel.BaseURL); baseURL != "" {
 			scopes = append(scopes, crsCircuitScope{scope: "base_url", key: baseURL})

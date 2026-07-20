@@ -10,7 +10,6 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
-	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
@@ -18,7 +17,7 @@ import (
 )
 
 func slowTTFTTestSetting() operation_setting.SlowTTFTSetting {
-	return operation_setting.NormalizeSlowTTFTSetting(operation_setting.SlowTTFTSetting{
+	setting := operation_setting.NormalizeSlowTTFTSetting(operation_setting.SlowTTFTSetting{
 		Enabled:                 true,
 		ThresholdMS:             1000,
 		BaselineMultiplier:      2,
@@ -37,6 +36,8 @@ func slowTTFTTestSetting() operation_setting.SlowTTFTSetting {
 		MaxEntries:              10000,
 		ContextBucketBoundaries: []int{50000, 100000, 150000, 200000},
 	})
+	setting.ObserveOnly = false
+	return setting
 }
 
 func seedSlowTTFTBaseline(guard *slowTTFTGuardState, setting operation_setting.SlowTTFTSetting, now time.Time) {
@@ -66,12 +67,6 @@ func slowTTFTTestContext(traceKey string, previous bool) *gin.Context {
 	return ctx
 }
 
-func slowTTFTTestChannel(tag string) *model.Channel {
-	channel := &model.Channel{}
-	channel.SetTag(tag)
-	return channel
-}
-
 func useSlowTTFTGuardForTest(t *testing.T, guard *slowTTFTGuardState) {
 	t.Helper()
 	old := slowTTFTGuard
@@ -79,7 +74,7 @@ func useSlowTTFTGuardForTest(t *testing.T, guard *slowTTFTGuardState) {
 	t.Cleanup(func() { slowTTFTGuard = old })
 }
 
-func TestSlowTTFTTraceBlockAndPreviousResponseProtection(t *testing.T) {
+func TestSlowTTFTTraceBlockObservation(t *testing.T) {
 	setting := slowTTFTTestSetting()
 	setting.GlobalMinSamples = 100
 	now := time.Unix(1000, 0)
@@ -89,21 +84,14 @@ func TestSlowTTFTTraceBlockAndPreviousResponseProtection(t *testing.T) {
 
 	trace := "trace-a"
 	traceHash := common.GenerateHMAC("test:" + trace)
+	var decision slowTTFTDecision
 	for index := 0; index < setting.TraceConsecutiveSlow; index++ {
-		decision := guard.observe(slowTTFTSample{
+		decision = guard.observe(slowTTFTSample{
 			Model: "gpt-5.5", Group: "Pro", Tag: "slow", Bucket: ">=200000",
 			TraceKey: traceHash, UserID: 1, LatencyMS: 3000,
 		}, now.Add(time.Duration(index+2)*time.Second), setting)
-		if index == setting.TraceConsecutiveSlow-1 {
-			require.True(t, decision.TraceBlocked)
-		}
 	}
-
-	ctx := slowTTFTTestContext(trace, false)
-	require.True(t, isSlowTTFTTagUnavailableAt(ctx, slowTTFTTestChannel("slow"), now.Add(10*time.Second), setting))
-
-	previousCtx := slowTTFTTestContext(trace, true)
-	require.False(t, isSlowTTFTTagUnavailableAt(previousCtx, slowTTFTTestChannel("slow"), now.Add(10*time.Second), setting))
+	require.True(t, decision.TraceBlocked)
 }
 
 func TestSlowTTFTPreviousResponseSamplesDoNotBlockLaterStatelessRequest(t *testing.T) {
@@ -122,8 +110,7 @@ func TestSlowTTFTPreviousResponseSamplesDoNotBlockLaterStatelessRequest(t *testi
 		}, now.Add(time.Duration(index+2)*time.Second), setting)
 	}
 
-	ctx := slowTTFTTestContext("trace-a", false)
-	require.False(t, isSlowTTFTTagUnavailableAt(ctx, slowTTFTTestChannel("slow"), now.Add(20*time.Second), setting))
+	require.Empty(t, guard.traces)
 }
 
 func TestSlowTTFTFastSampleResetsTraceSequence(t *testing.T) {
@@ -151,28 +138,27 @@ func TestSlowTTFTGlobalCircuitRequiresDistinctUsersAndTraces(t *testing.T) {
 	useSlowTTFTGuardForTest(t, guard)
 	seedSlowTTFTBaseline(guard, setting, now)
 
+	var decision slowTTFTDecision
 	for index := 0; index < setting.GlobalMinSamples; index++ {
-		guard.observe(slowTTFTSample{
+		decision = guard.observe(slowTTFTSample{
 			Model: "gpt-5.5", Group: "Pro", Tag: "slow", Bucket: ">=200000",
 			TraceKey:  fmt.Sprintf("trace-%d", index%setting.GlobalMinTraces),
 			UserID:    index%setting.GlobalMinUsers + 1,
 			LatencyMS: 3000,
 		}, now.Add(time.Duration(index+2)*time.Second), setting)
 	}
-
-	ctx := slowTTFTTestContext("unrelated-trace", false)
-	require.True(t, isSlowTTFTTagUnavailableAt(ctx, slowTTFTTestChannel("slow"), now.Add(30*time.Second), setting))
+	require.True(t, decision.GlobalOpened)
 
 	guard = newSlowTTFTGuardState()
 	useSlowTTFTGuardForTest(t, guard)
 	seedSlowTTFTBaseline(guard, setting, now)
 	for index := 0; index < setting.GlobalMinSamples; index++ {
-		guard.observe(slowTTFTSample{
+		decision = guard.observe(slowTTFTSample{
 			Model: "gpt-5.5", Group: "Pro", Tag: "slow", Bucket: ">=200000",
 			TraceKey: fmt.Sprintf("single-user-trace-%d", index), UserID: 1, LatencyMS: 3000,
 		}, now.Add(time.Duration(index+2)*time.Second), setting)
 	}
-	require.False(t, isSlowTTFTTagUnavailableAt(ctx, slowTTFTTestChannel("slow"), now.Add(30*time.Second), setting))
+	require.False(t, decision.GlobalOpened)
 }
 
 func TestSlowTTFTGlobalCircuitRequiresConfiguredSlowRate(t *testing.T) {
@@ -183,56 +169,43 @@ func TestSlowTTFTGlobalCircuitRequiresConfiguredSlowRate(t *testing.T) {
 	useSlowTTFTGuardForTest(t, guard)
 	seedSlowTTFTBaseline(guard, setting, now)
 
+	var decision slowTTFTDecision
 	for index := 0; index < 12; index++ {
 		latency := int64(500)
 		if index < 7 {
 			latency = 3000
 		}
-		guard.observe(slowTTFTSample{
+		decision = guard.observe(slowTTFTSample{
 			Model: "gpt-5.5", Group: "Pro", Tag: "slow", Bucket: ">=200000",
 			TraceKey: fmt.Sprintf("trace-%d", index), UserID: index%3 + 1, LatencyMS: latency,
 		}, now.Add(time.Duration(index+2)*time.Second), setting)
 	}
-
-	ctx := slowTTFTTestContext("unrelated-trace", false)
-	require.False(t, isSlowTTFTTagUnavailableAt(ctx, slowTTFTTestChannel("slow"), now.Add(20*time.Second), setting))
-	guard.observe(slowTTFTSample{
+	require.False(t, decision.GlobalOpened)
+	decision = guard.observe(slowTTFTSample{
 		Model: "gpt-5.5", Group: "Pro", Tag: "slow", Bucket: ">=200000",
 		TraceKey: "trace-extra", UserID: 1, LatencyMS: 3000,
 	}, now.Add(21*time.Second), setting)
-	require.True(t, isSlowTTFTTagUnavailableAt(ctx, slowTTFTTestChannel("slow"), now.Add(22*time.Second), setting))
+	require.True(t, decision.GlobalOpened)
 }
 
-func TestSlowTTFTSoftFallbackNeverRemovesLastAvailableTag(t *testing.T) {
+func TestSlowTTFTObserveOnlyDoesNotOpenCircuit(t *testing.T) {
 	setting := slowTTFTTestSetting()
-	now := time.Unix(3000, 0)
-	guard := newSlowTTFTGuardState()
-	useSlowTTFTGuardForTest(t, guard)
-	ctx := slowTTFTTestContext("trace-a", false)
-	scope := slowTTFTScope{Model: "gpt-5.5", Group: "Pro", Tag: "only-tag"}
-	guard.evidence[scope] = &slowTTFTEvidenceState{OpenUntil: now.Add(time.Minute), LastSeen: now}
-
-	channel := slowTTFTTestChannel("only-tag")
-	require.True(t, isSlowTTFTTagUnavailableAt(ctx, channel, now, setting))
-	require.True(t, EnableSlowTTFTSoftFallback(ctx))
-	require.False(t, isSlowTTFTTagUnavailableAt(ctx, channel, now, setting))
-}
-
-func TestSlowTTFTObserveOnlyAndExpiryDoNotExcludeTag(t *testing.T) {
-	setting := slowTTFTTestSetting()
+	setting.ObserveOnly = true
+	setting.TraceConsecutiveSlow = 20
 	now := time.Unix(4000, 0)
 	guard := newSlowTTFTGuardState()
-	useSlowTTFTGuardForTest(t, guard)
-	ctx := slowTTFTTestContext("trace-a", false)
-	scope := slowTTFTScope{Model: "gpt-5.5", Group: "Pro", Tag: "slow"}
-	guard.evidence[scope] = &slowTTFTEvidenceState{OpenUntil: now.Add(time.Minute), LastSeen: now}
-
-	setting.ObserveOnly = true
-	require.False(t, isSlowTTFTTagUnavailableAt(ctx, slowTTFTTestChannel("slow"), now, setting))
-	setting.ObserveOnly = false
-	require.False(t, isSlowTTFTTagUnavailableAt(ctx, slowTTFTTestChannel("slow"), now.Add(2*time.Minute), setting))
-	setting.Enabled = false
-	require.False(t, isSlowTTFTTagUnavailableAt(ctx, slowTTFTTestChannel("slow"), now, setting))
+	seedSlowTTFTBaseline(guard, setting, now)
+	var decision slowTTFTDecision
+	for index := 0; index < setting.GlobalMinSamples; index++ {
+		decision = guard.observe(slowTTFTSample{
+			Model: "gpt-5.5", Group: "Pro", Tag: "slow", Bucket: ">=200000",
+			TraceKey:  fmt.Sprintf("trace-%d", index%setting.GlobalMinTraces),
+			UserID:    index%setting.GlobalMinUsers + 1,
+			LatencyMS: 3000,
+		}, now.Add(time.Duration(index+2)*time.Second), setting)
+	}
+	require.True(t, decision.GlobalWouldOpen)
+	require.False(t, decision.GlobalOpened)
 }
 
 func TestSlowTTFTMissingPeerBaselineOnlyObserves(t *testing.T) {

@@ -11,7 +11,6 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
-	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
@@ -24,8 +23,6 @@ const (
 	ginKeySlowTTFTPrevious       = "slow_ttft_previous_response_id"
 	ginKeySlowTTFTImageTool      = "slow_ttft_image_generation_tool"
 	ginKeySlowTTFTTraceKey       = "slow_ttft_trace_key"
-	ginKeySlowTTFTExcluded       = "slow_ttft_tag_excluded"
-	ginKeySlowTTFTBypass         = "slow_ttft_soft_fallback"
 	ginKeySlowTTFTLogInfo        = "slow_ttft_log_info"
 	slowTTFTEvidenceBucketCount  = 8
 	slowTTFTStatusCircuitListMax = 50
@@ -196,55 +193,6 @@ func PrepareSlowTTFTRequest(c *gin.Context, modelName string, usingGroup string,
 	c.Set(ginKeySlowTTFTGroup, strings.TrimSpace(usingGroup))
 	c.Set(ginKeySlowTTFTPrevious, previousResponseID)
 	c.Set(ginKeySlowTTFTImageTool, imageGenerationTool)
-}
-
-func IsSlowTTFTTagUnavailable(c *gin.Context, channel *model.Channel) bool {
-	return isSlowTTFTTagUnavailableAt(c, channel, time.Now(), slowTTFTSettingForContext(c))
-}
-
-func isSlowTTFTTagUnavailableAt(c *gin.Context, channel *model.Channel, now time.Time, setting operation_setting.SlowTTFTSetting) bool {
-	if c == nil || channel == nil || !setting.Enabled || setting.ObserveOnly || c.GetBool(ginKeySlowTTFTBypass) || c.GetBool(ginKeySlowTTFTPrevious) {
-		return false
-	}
-	modelName := strings.TrimSpace(c.GetString(ginKeySlowTTFTModel))
-	usingGroup := strings.TrimSpace(c.GetString(ginKeySlowTTFTGroup))
-	tag := strings.TrimSpace(channel.GetTag())
-	if modelName == "" || tag == "" {
-		return false
-	}
-
-	scope := slowTTFTScope{Model: modelName, Group: usingGroup, Tag: tag}
-	traceKey := slowTTFTTraceKey(c)
-	reason := ""
-	slowTTFTGuard.mu.RLock()
-	if state := slowTTFTGuard.evidence[scope]; state != nil {
-		if state.OpenUntil.After(now) {
-			reason = "global"
-		}
-	}
-	if reason == "" && traceKey != "" {
-		traceScope := slowTTFTTraceScope{slowTTFTScope: scope, TraceKey: traceKey}
-		if state := slowTTFTGuard.traces[traceScope]; state != nil {
-			if state.BlockedUntil.After(now) {
-				reason = "trace"
-			}
-		}
-	}
-	slowTTFTGuard.mu.RUnlock()
-	if reason == "" {
-		return false
-	}
-	recordSlowTTFTRouteExclusion(c, tag, reason)
-	return true
-}
-
-func EnableSlowTTFTSoftFallback(c *gin.Context) bool {
-	if c == nil || !c.GetBool(ginKeySlowTTFTExcluded) {
-		return false
-	}
-	c.Set(ginKeySlowTTFTBypass, true)
-	mergeSlowTTFTLogInfo(c, map[string]interface{}{"soft_fallback": true})
-	return true
 }
 
 func ObserveSlowTTFT(c *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage) {
@@ -874,28 +822,6 @@ func slowTTFTRequestHasImageGenerationTool(c *gin.Context, relayInfo *relaycommo
 	}
 	request, ok := relayInfo.Request.(*dto.OpenAIResponsesRequest)
 	return ok && request.HasImageGenerationTool()
-}
-
-func recordSlowTTFTRouteExclusion(c *gin.Context, tag string, reason string) {
-	if c == nil {
-		return
-	}
-	c.Set(ginKeySlowTTFTExcluded, true)
-	info := getSlowTTFTLogInfo(c)
-	excluded, _ := info["route_excluded_tags"].([]string)
-	found := false
-	for _, value := range excluded {
-		if value == tag {
-			found = true
-			break
-		}
-	}
-	if !found && len(excluded) < 8 {
-		excluded = append(excluded, tag)
-	}
-	info["route_excluded_tags"] = excluded
-	info["route_exclusion_reason"] = reason
-	c.Set(ginKeySlowTTFTLogInfo, info)
 }
 
 func mergeSlowTTFTLogInfo(c *gin.Context, values map[string]interface{}) {

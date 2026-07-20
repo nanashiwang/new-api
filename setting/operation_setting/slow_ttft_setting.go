@@ -53,7 +53,7 @@ type SlowTTFTSetting struct {
 
 var slowTTFTSetting = SlowTTFTSetting{
 	Enabled:                 true,
-	ObserveOnly:             false,
+	ObserveOnly:             true,
 	ThresholdMS:             defaultSlowTTFTThresholdMS,
 	BaselineMultiplier:      defaultSlowTTFTBaselineMultiplier,
 	MaxSampleMS:             defaultSlowTTFTMaxSampleMS,
@@ -85,6 +85,7 @@ func GetNormalizedSlowTTFTSetting() SlowTTFTSetting {
 }
 
 func NormalizeSlowTTFTSetting(value SlowTTFTSetting) SlowTTFTSetting {
+	value.ObserveOnly = true
 	if value.ThresholdMS < 1000 || value.ThresholdMS > 120000 {
 		value.ThresholdMS = defaultSlowTTFTThresholdMS
 	}

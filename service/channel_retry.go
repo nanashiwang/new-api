@@ -91,9 +91,6 @@ func ApplyChannelFailureRetryExclusion(param *RetryParam, channel *model.Channel
 	}
 
 	ids := []int{channel.Id}
-	if shouldExcludeRetryByTag(err) {
-		ids = retryExclusionIDsByTag(param, channel)
-	}
 	if shouldExcludeRetryByBaseURL(err) {
 		ids = append(ids, retryExclusionIDsByBaseURL(param, channel)...)
 	}
@@ -111,38 +108,6 @@ func ApplyChannelFailureRetryExclusion(param *RetryParam, channel *model.Channel
 	}
 }
 
-func ApplyChannelTagRetryExclusion(param *RetryParam, channel *model.Channel) {
-	if param == nil || channel == nil {
-		return
-	}
-	ids := retryExclusionIDsByTag(param, channel)
-	seen := make(map[int]struct{}, len(param.ExcludeChannels))
-	for _, id := range param.ExcludeChannels {
-		seen[id] = struct{}{}
-	}
-	for _, id := range ids {
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		param.ExcludeChannels = append(param.ExcludeChannels, id)
-		seen[id] = struct{}{}
-	}
-}
-
-func retryExclusionIDsByTag(param *RetryParam, channel *model.Channel) []int {
-	if param == nil || channel == nil {
-		return nil
-	}
-	ids := []int{channel.Id}
-	tag := strings.TrimSpace(channel.GetTag())
-	if tag != "" {
-		if tagIDs := param.getCachedTagChannelIDs(tag, param.AllowedChannels); len(tagIDs) > 0 {
-			ids = tagIDs
-		}
-	}
-	return ids
-}
-
 func retryExclusionIDsByBaseURL(param *RetryParam, channel *model.Channel) []int {
 	if param == nil || channel == nil {
 		return nil
@@ -152,15 +117,6 @@ func retryExclusionIDsByBaseURL(param *RetryParam, channel *model.Channel) []int
 		return nil
 	}
 	return param.getCachedBaseURLChannelIDs(baseURL, param.AllowedChannels)
-}
-
-func shouldExcludeRetryByTag(err *types.NewAPIError) bool {
-	if err == nil {
-		return false
-	}
-	return IsRetryableSharedUpstreamPoolError(err) ||
-		IsChannelModelMismatchError(err) ||
-		IsUpstreamRequestTooLargeError(err)
 }
 
 func shouldExcludeRetryByBaseURL(err *types.NewAPIError) bool {

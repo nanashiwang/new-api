@@ -242,7 +242,7 @@ func TestIsCRSMemoryPressureError_CompactMessage(t *testing.T) {
 	}
 }
 
-func TestCRSMemoryPressureShortCircuitTripsTagAndBaseURL(t *testing.T) {
+func TestCRSMemoryPressureShortCircuitTripsBaseURLOnly(t *testing.T) {
 	resetCRSShortCircuitForTest()
 	originRedisEnabled := common.RedisEnabled
 	common.RedisEnabled = false
@@ -264,14 +264,14 @@ func TestCRSMemoryPressureShortCircuitTripsTagAndBaseURL(t *testing.T) {
 	}, 503)
 
 	trips := ApplyCRSMemoryPressureShortCircuit(channel, err)
-	if len(trips) != 2 {
-		t.Fatalf("expected tag and base_url trips, got %+v", trips)
+	if len(trips) != 1 || trips[0].Scope != "base_url" {
+		t.Fatalf("expected only base_url trip, got %+v", trips)
 	}
 	if !IsChannelUnavailableForRequest(channel) {
 		t.Fatalf("expected original channel to be short-circuited")
 	}
-	if !IsChannelUnavailableForRequest(&model.Channel{Id: 11, Status: common.ChannelStatusEnabled, Tag: &tag, BaseURL: &otherBaseURL}) {
-		t.Fatalf("expected same tag to be short-circuited")
+	if IsChannelUnavailableForRequest(&model.Channel{Id: 11, Status: common.ChannelStatusEnabled, Tag: &tag, BaseURL: &otherBaseURL}) {
+		t.Fatalf("did not expect same tag with another base_url to be short-circuited")
 	}
 	if !IsChannelUnavailableForRequest(&model.Channel{Id: 12, Status: common.ChannelStatusEnabled, Tag: &otherTag, BaseURL: &normalizedBaseURL}) {
 		t.Fatalf("expected same base_url to be short-circuited")
@@ -281,7 +281,7 @@ func TestCRSMemoryPressureShortCircuitTripsTagAndBaseURL(t *testing.T) {
 	}
 }
 
-func TestApplyChannelFailureRetryExclusion_UsesTagGroup(t *testing.T) {
+func TestApplyChannelFailureRetryExclusion_QuotaExcludesOnlyFailedChannel(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -339,18 +339,18 @@ func TestApplyChannelFailureRetryExclusion_UsesTagGroup(t *testing.T) {
 
 	ApplyChannelFailureRetryExclusion(param, &channels[0], retryErr)
 
-	if len(param.ExcludeChannels) != 2 {
-		t.Fatalf("expected two excluded channels, got %v", param.ExcludeChannels)
+	if len(param.ExcludeChannels) != 1 {
+		t.Fatalf("expected only failed channel, got %v", param.ExcludeChannels)
 	}
-	if !slices.Contains(param.ExcludeChannels, 1) || !slices.Contains(param.ExcludeChannels, 2) {
+	if !slices.Contains(param.ExcludeChannels, 1) {
 		t.Fatalf("unexpected excluded channels: %v", param.ExcludeChannels)
 	}
-	if slices.Contains(param.ExcludeChannels, 3) || slices.Contains(param.ExcludeChannels, 4) {
+	if slices.Contains(param.ExcludeChannels, 2) || slices.Contains(param.ExcludeChannels, 3) || slices.Contains(param.ExcludeChannels, 4) {
 		t.Fatalf("unexpected sibling channels excluded: %v", param.ExcludeChannels)
 	}
 }
 
-func TestApplyChannelFailureRetryExclusion_TemporaryModelUnavailableUsesTagGroup(t *testing.T) {
+func TestApplyChannelFailureRetryExclusion_TemporaryModelUnavailableExcludesOnlyFailedChannel(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -404,15 +404,15 @@ func TestApplyChannelFailureRetryExclusion_TemporaryModelUnavailableUsesTagGroup
 
 	ApplyChannelFailureRetryExclusion(param, channel, retryErr)
 
-	if len(param.ExcludeChannels) != 2 {
-		t.Fatalf("expected two excluded channels, got %v", param.ExcludeChannels)
+	if len(param.ExcludeChannels) != 1 {
+		t.Fatalf("expected only failed channel, got %v", param.ExcludeChannels)
 	}
-	if !slices.Contains(param.ExcludeChannels, 7) || !slices.Contains(param.ExcludeChannels, 8) {
+	if !slices.Contains(param.ExcludeChannels, 7) || slices.Contains(param.ExcludeChannels, 8) {
 		t.Fatalf("unexpected excluded channels: %v", param.ExcludeChannels)
 	}
 }
 
-func TestApplyChannelFailureRetryExclusion_CRSAccountPoolUnavailableUsesTagGroup(t *testing.T) {
+func TestApplyChannelFailureRetryExclusion_CRSAccountPoolUnavailableExcludesOnlyFailedChannel(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -470,18 +470,18 @@ func TestApplyChannelFailureRetryExclusion_CRSAccountPoolUnavailableUsesTagGroup
 
 	ApplyChannelFailureRetryExclusion(param, &channels[0], retryErr)
 
-	if len(param.ExcludeChannels) != 2 {
-		t.Fatalf("expected same tag channels to be excluded, got %v", param.ExcludeChannels)
+	if len(param.ExcludeChannels) != 1 {
+		t.Fatalf("expected only failed channel, got %v", param.ExcludeChannels)
 	}
-	if !slices.Contains(param.ExcludeChannels, 11) || !slices.Contains(param.ExcludeChannels, 12) {
+	if !slices.Contains(param.ExcludeChannels, 11) {
 		t.Fatalf("unexpected excluded channels: %v", param.ExcludeChannels)
 	}
-	if slices.Contains(param.ExcludeChannels, 13) {
-		t.Fatalf("did not expect same base_url with different tag to be excluded by option 1: %v", param.ExcludeChannels)
+	if slices.Contains(param.ExcludeChannels, 12) || slices.Contains(param.ExcludeChannels, 13) {
+		t.Fatalf("did not expect sibling channels to be excluded: %v", param.ExcludeChannels)
 	}
 }
 
-func TestApplyChannelFailureRetryExclusion_ChannelMismatchUsesTagGroup(t *testing.T) {
+func TestApplyChannelFailureRetryExclusion_ChannelMismatchExcludesOnlyFailedChannel(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -531,15 +531,15 @@ func TestApplyChannelFailureRetryExclusion_ChannelMismatchUsesTagGroup(t *testin
 
 	ApplyChannelFailureRetryExclusion(param, &channels[0], retryErr)
 
-	if len(param.ExcludeChannels) != 2 {
-		t.Fatalf("expected two excluded channels, got %v", param.ExcludeChannels)
+	if len(param.ExcludeChannels) != 1 {
+		t.Fatalf("expected only failed channel, got %v", param.ExcludeChannels)
 	}
-	if !slices.Contains(param.ExcludeChannels, 21) || !slices.Contains(param.ExcludeChannels, 22) {
+	if !slices.Contains(param.ExcludeChannels, 21) || slices.Contains(param.ExcludeChannels, 22) {
 		t.Fatalf("unexpected excluded channels: %v", param.ExcludeChannels)
 	}
 }
 
-func TestApplyChannelFailureRetryExclusion_RequestTooLargeUsesTagGroup(t *testing.T) {
+func TestApplyChannelFailureRetryExclusion_RequestTooLargeWithoutBaseURLExcludesOnlyFailedChannel(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -589,10 +589,10 @@ func TestApplyChannelFailureRetryExclusion_RequestTooLargeUsesTagGroup(t *testin
 
 	ApplyChannelFailureRetryExclusion(param, &channels[0], retryErr)
 
-	if len(param.ExcludeChannels) != 2 {
-		t.Fatalf("expected two excluded channels, got %v", param.ExcludeChannels)
+	if len(param.ExcludeChannels) != 1 {
+		t.Fatalf("expected only failed channel, got %v", param.ExcludeChannels)
 	}
-	if !slices.Contains(param.ExcludeChannels, 31) || !slices.Contains(param.ExcludeChannels, 32) {
+	if !slices.Contains(param.ExcludeChannels, 31) || slices.Contains(param.ExcludeChannels, 32) {
 		t.Fatalf("unexpected excluded channels: %v", param.ExcludeChannels)
 	}
 }

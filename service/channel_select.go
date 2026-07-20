@@ -23,9 +23,7 @@ type RetryParam struct {
 	ExcludeChannels []int // 需要排除的渠道 ID（重试时跳过已失败的渠道）
 	// SameChannelFailoverDone 同渠道额度错误快速切换只允许触发一次，避免重试风暴。
 	SameChannelFailoverDone bool
-	// tagChannelCache 请求级 tag->渠道ID 缓存，避免重试时重复查库。
-	tagChannelCache     map[string][]int
-	baseURLChannelCache map[string][]int
+	baseURLChannelCache     map[string][]int
 }
 
 func (p *RetryParam) GetRetry() int {
@@ -70,31 +68,6 @@ func (p *RetryParam) getSelectionGroup() string {
 		return p.TokenGroup
 	}
 	return ""
-}
-
-// getCachedTagChannelIDs 查询同 tag 下启用的渠道 ID，结果在本次请求生命周期内缓存，避免重试时重复打库。
-func (p *RetryParam) getCachedTagChannelIDs(tag string, allowedChannels []int) []int {
-	group := p.getSelectionGroup()
-	modelName := p.ModelName
-	cacheKey := tag + "|" + group + "|" + modelName
-	if p.tagChannelCache != nil {
-		if ids, ok := p.tagChannelCache[cacheKey]; ok {
-			return ids
-		}
-	}
-	ids, err := model.GetEnabledChannelIDsByTag(tag, allowedChannels)
-	if err != nil || len(ids) == 0 {
-		return nil
-	}
-	ids = p.filterChannelIDsForSelection(ids)
-	if len(ids) == 0 {
-		return nil
-	}
-	if p.tagChannelCache == nil {
-		p.tagChannelCache = make(map[string][]int)
-	}
-	p.tagChannelCache[cacheKey] = ids
-	return ids
 }
 
 // getCachedBaseURLChannelIDs 查询同 base_url 下启用的渠道 ID，结果在本次请求生命周期内缓存。
@@ -191,18 +164,6 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 	if param == nil {
 		return nil, "", errors.New("retry param is nil")
 	}
-	originalRetry := param.GetRetry()
-	originalResetNextTry := param.resetNextTry
-	channel, selectGroup, err := cacheGetRandomSatisfiedChannel(param)
-	if err != nil || channel != nil || !EnableSlowTTFTSoftFallback(param.Ctx) {
-		return channel, selectGroup, err
-	}
-
-	common.DeleteContextKey(param.Ctx, constant.ContextKeyAutoGroup)
-	common.DeleteContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex)
-	common.DeleteContextKey(param.Ctx, constant.ContextKeyAutoGroupRetryIndex)
-	param.SetRetry(originalRetry)
-	param.resetNextTry = originalResetNextTry
 	return cacheGetRandomSatisfiedChannel(param)
 }
 

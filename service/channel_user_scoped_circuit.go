@@ -33,7 +33,7 @@ var (
 )
 
 func IsChannelUnavailableForRequestContext(c *gin.Context, channel *model.Channel) bool {
-	return IsChannelUnavailableForRequest(channel) || IsUserScopedCircuitOpen(c, channel) || IsSlowTTFTTagUnavailable(c, channel)
+	return IsChannelUnavailableForRequest(channel) || IsUserScopedCircuitOpen(c, channel)
 }
 
 func IsUserScopedCircuitOpen(c *gin.Context, channel *model.Channel) bool {

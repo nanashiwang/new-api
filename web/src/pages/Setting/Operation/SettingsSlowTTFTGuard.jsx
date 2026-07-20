@@ -28,8 +28,6 @@ import {
   Row,
   Space,
   Spin,
-  Table,
-  Tag,
   Typography,
 } from '@douyinfe/semi-ui';
 import { IconRefresh } from '@douyinfe/semi-icons';
@@ -45,7 +43,7 @@ import { useTranslation } from 'react-i18next';
 
 const DEFAULT_INPUTS = {
   'slow_ttft_setting.enabled': true,
-  'slow_ttft_setting.observe_only': false,
+  'slow_ttft_setting.observe_only': true,
   'slow_ttft_setting.threshold_ms': 8000,
   'slow_ttft_setting.baseline_multiplier': 3,
   'slow_ttft_setting.max_sample_ms': 120000,
@@ -161,7 +159,7 @@ export default function SettingsSlowTTFTGuard(props) {
   const confirmClearState = () => {
     Modal.confirm({
       title: t('确认清空慢首字保护状态'),
-      content: t('将清空当前实例的同行基线、证据窗口和熔断状态。'),
+      content: t('将清空当前实例的同行基线和观测状态。'),
       onOk: async () => {
         try {
           const response = await API.delete('/api/option/slow_ttft_guard');
@@ -230,44 +228,16 @@ export default function SettingsSlowTTFTGuard(props) {
         next[key] = Number.isFinite(value) ? value : DEFAULT_INPUTS[key];
       }
     }
+    next['slow_ttft_setting.observe_only'] = true;
     setInputs(next);
     setSavedInputs(structuredClone(next));
     formRef.current?.setValues(next);
     refreshStats();
   }, [props.options]);
 
-  const circuitColumns = [
-    { title: t('模型'), dataIndex: 'model' },
-    { title: t('分组'), dataIndex: 'group' },
-    {
-      title: 'Tag',
-      dataIndex: 'tag',
-      render: (value) => <Tag color='red'>{value || '-'}</Tag>,
-    },
-    {
-      title: t('触发证据'),
-      render: (_, row) =>
-        `${row.trigger_slow || 0}/${row.trigger_total || 0} (${(
-          Number(row.trigger_rate || 0) * 100
-        ).toFixed(0)}%)`,
-    },
-    {
-      title: t('用户 / Trace'),
-      render: (_, row) =>
-        `${row.distinct_users || 0} / ${row.distinct_traces || 0}`,
-    },
-    {
-      title: t('恢复时间'),
-      dataIndex: 'open_until',
-      render: formatTimestamp,
-    },
-  ];
-
   const metricItems = [
     [t('已生成同行基线'), stats.baseline_entries],
     [t('待计算样本项'), stats.pending_baseline_entries],
-    [t('全局 Tag 熔断'), stats.open_global_circuits],
-    [t('Trace 软屏蔽'), stats.active_trace_blocks],
     [t('Tag 证据项'), stats.evidence_entries],
     [t('Trace 状态项'), stats.trace_entries],
     [t('容量丢弃项'), stats.dropped_entries],
@@ -281,12 +251,12 @@ export default function SettingsSlowTTFTGuard(props) {
         getFormApi={(api) => (formRef.current = api)}
         style={{ marginBottom: 15 }}
       >
-        <Form.Section text={t('慢首字 Tag 自动换路')}>
+        <Form.Section text={t('慢首字观测')}>
           <Banner
             fullMode={false}
             type='warning'
             description={t(
-              '仅在首个有效输出同时超过绝对阈值和同行基线倍数时记录为慢请求；当前请求不重试，只影响下一次选路。previous_response_id 请求只观察，不跨 Tag。',
+              '仅记录首个有效输出与同行基线数据，不再参与渠道筛选、Tag 熔断或自动换路。',
             )}
           />
           <Text type='tertiary' style={{ display: 'block', marginTop: 8 }}>
@@ -312,7 +282,7 @@ export default function SettingsSlowTTFTGuard(props) {
                 label={t('仅观察，不换路')}
                 checkedText={t('｜')}
                 uncheckedText={t('〇')}
-                onChange={setField('slow_ttft_setting.observe_only')}
+                disabled
               />
             </Col>
             <Col xs={24} sm={12} md={6}>
@@ -401,89 +371,6 @@ export default function SettingsSlowTTFTGuard(props) {
             </Col>
           </Row>
 
-          <Divider align='left'>{t('Trace 级软屏蔽')}</Divider>
-          <Row gutter={16}>
-            <Col xs={24} sm={12} md={8}>
-              <Form.InputNumber
-                field='slow_ttft_setting.trace_consecutive_slow'
-                label={t('连续慢请求次数')}
-                min={1}
-                max={20}
-                onChange={setField('slow_ttft_setting.trace_consecutive_slow')}
-              />
-            </Col>
-            <Col xs={24} sm={12} md={8}>
-              <Form.InputNumber
-                field='slow_ttft_setting.trace_circuit_seconds'
-                label={t('Trace 屏蔽时长（秒）')}
-                min={30}
-                max={86400}
-                onChange={setField('slow_ttft_setting.trace_circuit_seconds')}
-              />
-            </Col>
-          </Row>
-
-          <Divider align='left'>{t('全局 Tag 熔断')}</Divider>
-          <Row gutter={16}>
-            <Col xs={24} sm={12} md={8}>
-              <Form.InputNumber
-                field='slow_ttft_setting.evidence_window_seconds'
-                label={t('证据窗口（秒）')}
-                min={60}
-                max={3600}
-                onChange={setField('slow_ttft_setting.evidence_window_seconds')}
-              />
-            </Col>
-            <Col xs={24} sm={12} md={8}>
-              <Form.InputNumber
-                field='slow_ttft_setting.global_min_samples'
-                label={t('最少总样本')}
-                min={1}
-                max={10000}
-                onChange={setField('slow_ttft_setting.global_min_samples')}
-              />
-            </Col>
-            <Col xs={24} sm={12} md={8}>
-              <Form.InputNumber
-                field='slow_ttft_setting.global_slow_rate'
-                label={t('慢请求比例（0-1）')}
-                min={0.01}
-                max={1}
-                step={0.05}
-                onChange={setField('slow_ttft_setting.global_slow_rate')}
-              />
-            </Col>
-            <Col xs={24} sm={12} md={8}>
-              <Form.InputNumber
-                field='slow_ttft_setting.global_min_users'
-                label={t('最少独立用户数')}
-                min={2}
-                max={20}
-                extraText={t('默认 3，可在 2-20 之间配置。')}
-                onChange={setField('slow_ttft_setting.global_min_users')}
-              />
-            </Col>
-            <Col xs={24} sm={12} md={8}>
-              <Form.InputNumber
-                field='slow_ttft_setting.global_min_traces'
-                label={t('最少独立 Trace 数')}
-                min={1}
-                max={100}
-                extraText={t('Trace 来自已命中的渠道亲和规则。')}
-                onChange={setField('slow_ttft_setting.global_min_traces')}
-              />
-            </Col>
-            <Col xs={24} sm={12} md={8}>
-              <Form.InputNumber
-                field='slow_ttft_setting.global_circuit_seconds'
-                label={t('Tag 熔断时长（秒）')}
-                min={30}
-                max={86400}
-                onChange={setField('slow_ttft_setting.global_circuit_seconds')}
-              />
-            </Col>
-          </Row>
-
           <Space style={{ marginTop: 12 }} wrap>
             <Button theme='solid' type='primary' onClick={onSubmit}>
               {t('保存慢首字设置')}
@@ -530,16 +417,6 @@ export default function SettingsSlowTTFTGuard(props) {
             {t('预计下次计算')}：
             {formatTimestamp(stats.next_baseline_refresh_at)}
           </Text>
-
-          <Table
-            style={{ marginTop: 12 }}
-            columns={circuitColumns}
-            dataSource={stats.circuits || []}
-            rowKey={(row) => `${row.model}-${row.group}-${row.tag}`}
-            pagination={false}
-            size='small'
-            empty={t('当前没有全局 Tag 熔断')}
-          />
         </Form.Section>
       </Form>
     </Spin>

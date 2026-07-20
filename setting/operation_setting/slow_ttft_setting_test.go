@@ -20,6 +20,7 @@ func TestNormalizeSlowTTFTSettingUsesSafeDefaults(t *testing.T) {
 	require.Equal(t, defaultSlowTTFTGlobalMinUsers, setting.GlobalMinUsers)
 	require.Equal(t, defaultSlowTTFTMaxEntries, setting.MaxEntries)
 	require.Equal(t, defaultSlowTTFTContextBuckets, setting.ContextBucketBoundaries)
+	require.True(t, setting.ObserveOnly)
 }
 
 func TestValidateSlowTTFTOption(t *testing.T) {

@@ -114,21 +114,9 @@ func selectResponsesAutoContinueChannel(c *gin.Context, info *relaycommon.RelayI
 	if c == nil || info == nil {
 		return nil, false
 	}
-	failedChannel, _ := model.CacheGetChannel(failedChannelID)
-	excludeSets := [][]int{nil, nil, nil}
-	if failedChannel != nil {
-		tagExcluded := &service.RetryParam{
-			Ctx:             c,
-			TokenGroup:      info.TokenGroup,
-			ModelName:       info.OriginModelName,
-			AllowedChannels: middleware.GetAllowedTokenChannelIDs(c),
-			Retry:           common.GetPointer(0),
-		}
-		service.ApplyChannelTagRetryExclusion(tagExcluded, failedChannel)
-		excludeSets[0] = tagExcluded.ExcludeChannels
-		excludeSets[1] = []int{failedChannelID}
-	} else if failedChannelID > 0 {
-		excludeSets[0] = []int{failedChannelID}
+	excludeSets := [][]int{nil}
+	if failedChannelID > 0 {
+		excludeSets = [][]int{{failedChannelID}, nil}
 	}
 
 	for _, excludeChannels := range excludeSets {

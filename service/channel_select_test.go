@@ -71,7 +71,7 @@ func TestCacheGetRandomSatisfiedChannel_CodexAutoReviewAllowsOpenAICompatibleCha
 	}
 }
 
-func TestCacheGetRandomSatisfiedChannel_SlowTTFTFilterSoftFallsBack(t *testing.T) {
+func TestCacheGetRandomSatisfiedChannel_SlowTTFTStateDoesNotFilter(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -127,9 +127,6 @@ func TestCacheGetRandomSatisfiedChannel_SlowTTFTFilterSoftFallsBack(t *testing.T
 		t.Fatalf("get channel: %v", err)
 	}
 	if got == nil || got.Id != 1 {
-		t.Fatalf("expected soft fallback channel 1, got %#v", got)
-	}
-	if !ctx.GetBool(ginKeySlowTTFTBypass) {
-		t.Fatal("expected request-scoped slow TTFT bypass")
+		t.Fatalf("expected slow TTFT state not to filter channel 1, got %#v", got)
 	}
 }

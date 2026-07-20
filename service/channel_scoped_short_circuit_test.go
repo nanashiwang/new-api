@@ -10,7 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func TestApplyChannelScopedShortCircuitTripsTagAndBaseURL(t *testing.T) {
+func TestApplyChannelScopedShortCircuitTripsBaseURLOnly(t *testing.T) {
 	resetCRSShortCircuitForTest()
 	originRedisEnabled := common.RedisEnabled
 	common.RedisEnabled = false
@@ -27,20 +27,37 @@ func TestApplyChannelScopedShortCircuitTripsTagAndBaseURL(t *testing.T) {
 	channel := &model.Channel{Id: 10, Status: common.ChannelStatusEnabled, Tag: &tag, BaseURL: &baseURL}
 
 	trips := ApplyChannelScopedShortCircuit(channel, ResponsesStreamMissingCompletedReason)
-	if len(trips) != 2 {
-		t.Fatalf("expected tag and base_url trips, got %+v", trips)
+	if len(trips) != 1 || trips[0].Scope != "base_url" {
+		t.Fatalf("expected only base_url trip, got %+v", trips)
 	}
 	if !IsChannelUnavailableForRequest(channel) {
 		t.Fatalf("expected original channel to be short-circuited")
 	}
-	if !IsChannelUnavailableForRequest(&model.Channel{Id: 11, Status: common.ChannelStatusEnabled, Tag: &tag, BaseURL: &otherBaseURL}) {
-		t.Fatalf("expected same tag to be short-circuited")
+	if IsChannelUnavailableForRequest(&model.Channel{Id: 11, Status: common.ChannelStatusEnabled, Tag: &tag, BaseURL: &otherBaseURL}) {
+		t.Fatalf("did not expect same tag with another base_url to be short-circuited")
 	}
 	if !IsChannelUnavailableForRequest(&model.Channel{Id: 12, Status: common.ChannelStatusEnabled, Tag: &otherTag, BaseURL: &normalizedBaseURL}) {
 		t.Fatalf("expected same base_url to be short-circuited")
 	}
 	if IsChannelUnavailableForRequest(&model.Channel{Id: 13, Status: common.ChannelStatusEnabled, Tag: &otherTag, BaseURL: &otherBaseURL}) {
 		t.Fatalf("did not expect unrelated channel to be short-circuited")
+	}
+}
+
+func TestApplyChannelScopedShortCircuitDoesNotFallbackToTag(t *testing.T) {
+	resetCRSShortCircuitForTest()
+	originRedisEnabled := common.RedisEnabled
+	common.RedisEnabled = false
+	t.Cleanup(func() {
+		common.RedisEnabled = originRedisEnabled
+		resetCRSShortCircuitForTest()
+	})
+
+	tag := "shared-crs"
+	channel := &model.Channel{Id: 10, Status: common.ChannelStatusEnabled, Tag: &tag}
+	trips := ApplyChannelScopedShortCircuit(channel, ResponsesStreamMissingCompletedReason)
+	if len(trips) != 0 {
+		t.Fatalf("expected no trip without base_url, got %+v", trips)
 	}
 }
 
