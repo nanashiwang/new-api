@@ -95,7 +95,7 @@ func InvalidateUserAndTokenCaches(userId int) error {
 	}
 
 	var tokens []Token
-	if err := DB.Where("user_id = ?", userId).Find(&tokens).Error; err != nil {
+	if err := DB.Unscoped().Where("user_id = ?", userId).Find(&tokens).Error; err != nil {
 		return err
 	}
 
@@ -103,15 +103,23 @@ func InvalidateUserAndTokenCaches(userId int) error {
 		return err
 	}
 
+	return invalidateTokensCache(tokens)
+}
+
+func invalidateTokensCache(tokens []Token) error {
+	if !common.RedisEnabled {
+		return nil
+	}
+	var firstErr error
 	for _, token := range tokens {
 		if token.Key == "" {
 			continue
 		}
-		if err := tokenCacheInvalidator(token.Key); err != nil {
-			return err
+		if err := tokenCacheInvalidator(token.Key); err != nil && firstErr == nil {
+			firstErr = err
 		}
 	}
-	return nil
+	return firstErr
 }
 
 // GetUserCache gets complete user cache from hash

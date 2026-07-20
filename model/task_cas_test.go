@@ -33,7 +33,7 @@ func TestMain(m *testing.M) {
 	}
 	sqlDB.SetMaxOpenConns(1)
 
-	if err := db.AutoMigrate(&Task{}, &User{}, &Token{}, &Log{}, &Channel{}, &UserOAuthBinding{}); err != nil {
+	if err := db.AutoMigrate(&Task{}, &User{}, &Token{}, &Log{}, &Channel{}, &UserOAuthBinding{}, &TwoFA{}, &TwoFABackupCode{}, &PasskeyCredential{}); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
 
@@ -43,12 +43,19 @@ func TestMain(m *testing.M) {
 func truncateTables(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
-		DB.Exec("DELETE FROM tasks")
-		DB.Exec("DELETE FROM users")
-		DB.Exec("DELETE FROM tokens")
-		DB.Exec("DELETE FROM logs")
-		DB.Exec("DELETE FROM channels")
-		DB.Exec("DELETE FROM user_oauth_bindings")
+		for _, entity := range []any{
+			&Task{},
+			&User{},
+			&Token{},
+			&Log{},
+			&Channel{},
+			&UserOAuthBinding{},
+			&TwoFA{},
+			&TwoFABackupCode{},
+			&PasskeyCredential{},
+		} {
+			DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(entity)
+		}
 	})
 }
 
@@ -97,6 +104,77 @@ func TestUserHardDeleteDeletesOAuthBindings(t *testing.T) {
 	var bindingCount int64
 	require.NoError(t, DB.Model(&UserOAuthBinding{}).Where("user_id = ?", user.Id).Count(&bindingCount).Error)
 	assert.Equal(t, int64(0), bindingCount)
+}
+
+func TestHardDeleteUserPurgesAuthenticationData(t *testing.T) {
+	truncateTables(t)
+
+	user := &User{Username: "auth-hard-delete", Password: "password"}
+	require.NoError(t, DB.Create(user).Error)
+	require.NoError(t, DB.Create(&Token{UserId: user.Id, Name: "auth-token", Key: "auth-token-key"}).Error)
+	require.NoError(t, DB.Create(&TwoFA{UserId: user.Id, Secret: "totp-secret", IsEnabled: true}).Error)
+	codeHash, err := common.HashBackupCode("ABCD-EFGH")
+	require.NoError(t, err)
+	require.NoError(t, DB.Create(&TwoFABackupCode{UserId: user.Id, CodeHash: codeHash}).Error)
+	require.NoError(t, DB.Create(&PasskeyCredential{
+		UserID:          user.Id,
+		CredentialID:    "credential-id",
+		PublicKey:       "public-key",
+		AttestationType: "none",
+	}).Error)
+	require.NoError(t, CreateUserOAuthBinding(&UserOAuthBinding{
+		UserId:         user.Id,
+		ProviderId:     1003,
+		ProviderUserId: "provider-user-3",
+	}))
+
+	require.NoError(t, HardDeleteUserById(user.Id))
+
+	for _, tc := range []struct {
+		name  string
+		model any
+		where string
+	}{
+		{name: "user", model: &User{}, where: "id = ?"},
+		{name: "token", model: &Token{}, where: "user_id = ?"},
+		{name: "twofa", model: &TwoFA{}, where: "user_id = ?"},
+		{name: "twofa_backup_code", model: &TwoFABackupCode{}, where: "user_id = ?"},
+		{name: "passkey", model: &PasskeyCredential{}, where: "user_id = ?"},
+		{name: "oauth_binding", model: &UserOAuthBinding{}, where: "user_id = ?"},
+	} {
+		var count int64
+		require.NoError(t, DB.Unscoped().Model(tc.model).Where(tc.where, user.Id).Count(&count).Error, tc.name)
+		assert.Equal(t, int64(0), count, tc.name)
+	}
+}
+
+func TestUserAccessTokenOmittedFromJSON(t *testing.T) {
+	accessToken := "secret-access-token"
+	user := User{Id: 1, Username: "hidden-token", AccessToken: &accessToken}
+
+	data, err := common.Marshal(user)
+	require.NoError(t, err)
+
+	assert.NotContains(t, string(data), "access_token")
+	assert.NotContains(t, string(data), accessToken)
+}
+
+func TestValidateBackupCodeCanOnlyBeUsedOnce(t *testing.T) {
+	truncateTables(t)
+
+	user := &User{Username: "twofa-backup", Password: "password"}
+	require.NoError(t, DB.Create(user).Error)
+	codeHash, err := common.HashBackupCode("ABCD-EFGH")
+	require.NoError(t, err)
+	require.NoError(t, DB.Create(&TwoFABackupCode{UserId: user.Id, CodeHash: codeHash}).Error)
+
+	ok, err := ValidateBackupCode(user.Id, "abcd-efgh")
+	require.NoError(t, err)
+	assert.True(t, ok)
+
+	ok, err = ValidateBackupCode(user.Id, "ABCD-EFGH")
+	require.NoError(t, err)
+	assert.False(t, ok)
 }
 
 // ---------------------------------------------------------------------------

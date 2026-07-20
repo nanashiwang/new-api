@@ -78,8 +78,14 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	// 检查是否启用2FA
-	if model.IsTwoFAEnabled(user.Id) {
+	// 检查是否启用2FA；查询失败时按失败处理，避免数据库异常绕过二次验证。
+	twoFAEnabled, err := model.IsTwoFAEnabled(user.Id)
+	if err != nil {
+		common.SysLog(fmt.Sprintf("Login failed to load 2FA status for user %d: %v", user.Id, err))
+		common.ApiErrorI18n(c, i18n.MsgDatabaseError)
+		return
+	}
+	if twoFAEnabled {
 		// 设置pending session，等待2FA验证
 		session := sessions.Default(c)
 		session.Set("pending_username", user.Username)
@@ -1169,12 +1175,14 @@ func DeleteUser(c *gin.Context) {
 	}
 	err = model.HardDeleteUserById(id)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"success": true,
-			"message": "",
-		})
+		common.ApiError(c, err)
 		return
 	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+	})
+	return
 }
 
 func DeleteSelf(c *gin.Context) {

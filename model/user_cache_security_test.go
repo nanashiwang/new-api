@@ -106,9 +106,13 @@ func TestInvalidateUserAndTokenCachesDeletesUserAndAllTokenEntries(t *testing.T)
 	tokens := []Token{
 		{Id: 1, UserId: user.Id, Key: "token-cache-a", Name: "a", Status: common.TokenStatusEnabled},
 		{Id: 2, UserId: user.Id, Key: "token-cache-b", Name: "b", Status: common.TokenStatusEnabled},
+		{Id: 3, UserId: user.Id, Key: "token-cache-soft-deleted", Name: "deleted", Status: common.TokenStatusEnabled},
 	}
 	if err := db.Create(&tokens).Error; err != nil {
 		t.Fatalf("seed tokens: %v", err)
+	}
+	if err := db.Delete(&tokens[2]).Error; err != nil {
+		t.Fatalf("soft-delete token: %v", err)
 	}
 
 	originUserInvalidator := userCacheInvalidator
@@ -138,7 +142,7 @@ func TestInvalidateUserAndTokenCachesDeletesUserAndAllTokenEntries(t *testing.T)
 	}
 
 	sort.Strings(invalidatedTokenKeys)
-	wantKeys := []string{"token-cache-a", "token-cache-b"}
+	wantKeys := []string{"token-cache-a", "token-cache-b", "token-cache-soft-deleted"}
 	for i, want := range wantKeys {
 		if i >= len(invalidatedTokenKeys) || invalidatedTokenKeys[i] != want {
 			t.Fatalf("unexpected invalidated token keys: %#v", invalidatedTokenKeys)

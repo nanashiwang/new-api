@@ -75,8 +75,8 @@ type User struct {
 	OidcId               string         `json:"oidc_id" gorm:"column:oidc_id;index"`
 	WeChatId             string         `json:"wechat_id" gorm:"column:wechat_id;index"`
 	TelegramId           string         `json:"telegram_id" gorm:"column:telegram_id;index"`
-	VerificationCode     string         `json:"verification_code" gorm:"-:all"`                                    // this field is only for Email verification, don't save it to database!
-	AccessToken          *string        `json:"access_token" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
+	VerificationCode     string         `json:"verification_code" gorm:"-:all"`                         // this field is only for Email verification, don't save it to database!
+	AccessToken          *string        `json:"-" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
 	Quota                int            `json:"quota" gorm:"type:int;default:0"`
 	UsedQuota            int            `json:"used_quota" gorm:"type:int;default:0;column:used_quota"` // used quota
 	RequestCount         int            `json:"request_count" gorm:"type:int;default:0;"`               // request number
@@ -433,7 +433,7 @@ func GetAllUsers(pageInfo *common.PageInfo, sortBy string, sortOrder string, idS
 
 	orderClause := buildUserOrderClause(sortBy, sortOrder, idSortOrder, balanceSortOrder, usedQuotaSortOrder)
 	// Get paginated users within same transaction
-	err = tx.Unscoped().Order(orderClause).Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Omit("password").Find(&users).Error
+	err = tx.Unscoped().Order(orderClause).Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Omit("password", "access_token").Find(&users).Error
 	if err != nil {
 		tx.Rollback()
 		return nil, 0, err
@@ -628,7 +628,7 @@ func SearchUsersWithParams(params UserSearchParams) ([]*User, int64, error) {
 	orderClause := buildUserOrderClause(params.SortBy, params.SortOrder, params.IdSortOrder, params.WalletSortOrder, params.UsedQuotaSortOrder)
 
 	// 获取分页数据
-	err = query.Omit("password").Order(orderClause).Limit(pageSize).Offset(startIdx).Find(&users).Error
+	err = query.Omit("password", "access_token").Order(orderClause).Limit(pageSize).Offset(startIdx).Find(&users).Error
 	if err != nil {
 		tx.Rollback()
 		return nil, 0, err
@@ -1025,7 +1025,7 @@ func GetUserInviteRelations(userID int, startIdx int, pageSize int) (*User, *Use
 
 	// 先查主用户，再查邀请人与被邀请人分页列表，方便前端一次渲染完整关系视图。
 	user := &User{}
-	if err := DB.Unscoped().Omit("password").First(user, "id = ?", userID).Error; err != nil {
+	if err := DB.Unscoped().Omit("password", "access_token").First(user, "id = ?", userID).Error; err != nil {
 		return nil, nil, nil, 0, nil, err
 	}
 	user.InviteeCount = user.AffCount
@@ -1033,7 +1033,7 @@ func GetUserInviteRelations(userID int, startIdx int, pageSize int) (*User, *Use
 	var inviter *User
 	if user.InviterId > 0 {
 		inviter = &User{}
-		if err := DB.Unscoped().Omit("password").First(inviter, "id = ?", user.InviterId).Error; err != nil {
+		if err := DB.Unscoped().Omit("password", "access_token").First(inviter, "id = ?", user.InviterId).Error; err != nil {
 			if !errors.Is(err, gorm.ErrRecordNotFound) {
 				return nil, nil, nil, 0, nil, err
 			}
@@ -1066,7 +1066,7 @@ func GetUserInviteRelations(userID int, startIdx int, pageSize int) (*User, *Use
 
 	var invitees []*User
 	if err := query.
-		Omit("password").
+		Omit("password", "access_token").
 		Order("id desc").
 		Limit(pageSize).
 		Offset(startIdx).
@@ -1305,7 +1305,7 @@ func GetUserById(id int, selectAll bool) (*User, error) {
 	if selectAll {
 		err = DB.First(&user, "id = ?", id).Error
 	} else {
-		err = DB.Omit("password").First(&user, "id = ?", id).Error
+		err = DB.Omit("password", "access_token").First(&user, "id = ?", id).Error
 	}
 	return &user, err
 }
@@ -1402,12 +1402,8 @@ func HardDeleteUserById(id int) error {
 	if id == 0 {
 		return errors.New("id 为空！")
 	}
-	return DB.Transaction(func(tx *gorm.DB) error {
-		if err := deleteUserOAuthBindingsByUserId(tx, id); err != nil {
-			return err
-		}
-		return tx.Unscoped().Delete(&User{}, "id = ?", id).Error
-	})
+	user := User{Id: id}
+	return user.HardDelete()
 }
 
 func inviteUser(inviterId int) (err error) {
@@ -1702,19 +1698,49 @@ func (user *User) Delete() error {
 	}
 
 	// 清除缓存
-	return invalidateUserCache(user.Id)
+	return InvalidateUserAndTokenCaches(user.Id)
 }
 
 func (user *User) HardDelete() error {
 	if user.Id == 0 {
 		return errors.New("id 为空！")
 	}
-	return DB.Transaction(func(tx *gorm.DB) error {
-		if err := deleteUserOAuthBindingsByUserId(tx, user.Id); err != nil {
+	var tokens []Token
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if common.RedisEnabled {
+			if err := tx.Unscoped().Select("id", commonKeyCol).Where("user_id = ?", user.Id).Find(&tokens).Error; err != nil {
+				return err
+			}
+		}
+		if err := deleteUserAuthenticationData(tx, user.Id); err != nil {
 			return err
 		}
 		return tx.Unscoped().Delete(user).Error
 	})
+	if err != nil {
+		return err
+	}
+	if err := invalidateTokensCache(tokens); err != nil {
+		common.SysError(fmt.Sprintf("failed to invalidate token cache after hard deleting user %d: %v", user.Id, err))
+	}
+	if err := invalidateUserCache(user.Id); err != nil {
+		common.SysError(fmt.Sprintf("failed to invalidate user cache after hard deleting user %d: %v", user.Id, err))
+	}
+	return nil
+}
+
+func deleteUserAuthenticationData(tx *gorm.DB, userId int) error {
+	for _, authenticationData := range []any{
+		&TwoFABackupCode{},
+		&TwoFA{},
+		&PasskeyCredential{},
+		&Token{},
+	} {
+		if err := tx.Unscoped().Where("user_id = ?", userId).Delete(authenticationData).Error; err != nil {
+			return err
+		}
+	}
+	return deleteUserOAuthBindingsByUserId(tx, userId)
 }
 
 // ValidateAndFill check password & user status
