@@ -6,6 +6,10 @@ on:
     paths:
       - ".github/workflows/cleanup-actions-artifacts.yml"
   schedule:
+    # Temporary hourly cleanup campaign on July 20–21 (Singapore time).
+    - cron: "17 * 20,21 7 *"
+      timezone: "Asia/Singapore"
+    # Long-term weekly maintenance.
     - cron: "17 10 * * 0"
       timezone: "Asia/Singapore"
 
@@ -16,39 +20,116 @@ permissions:
 jobs:
   cleanup:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
-      - name: Delete artifacts older than 7 days
+      - name: Delete old artifacts in a rate-limited batch
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           RETENTION_DAYS: "7"
+          BATCH_LIMIT: "400"
+          DELETE_DELAY_SECONDS: "1.3"
         run: |
-          set -euo pipefail
+          set -uo pipefail
 
-          cutoff_epoch=$(date -u -d "${RETENTION_DAYS} days ago" +%s)
+          api_version="2026-03-10"
+          cutoff_iso=$(date -u -d "${RETENTION_DAYS} days ago" +%Y-%m-%dT%H:%M:%SZ)
+          workdir=$(mktemp -d)
+          trap 'rm -rf "$workdir"' EXIT
+
+          echo "Repository: ${REPOSITORY}"
+          echo "Deleting artifacts created before: ${cutoff_iso}"
+          echo "Maximum deletions in this run: ${BATCH_LIMIT}"
+
+          # Take a complete snapshot before deleting. This avoids pagination
+          # shifting while artifacts are being removed.
+          if ! gh api --paginate \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: ${api_version}" \
+            "/repos/${REPOSITORY}/actions/artifacts?per_page=100" \
+            --jq '.artifacts[] | [.id, .created_at, .name, .size_in_bytes] | @tsv' \
+            > "${workdir}/all-artifacts.tsv"; then
+            echo "::error::Unable to list repository artifacts."
+            exit 1
+          fi
+
+          awk -F $'\t' -v cutoff="${cutoff_iso}" '$2 < cutoff' \
+            "${workdir}/all-artifacts.tsv" > "${workdir}/eligible.tsv"
+          head -n "${BATCH_LIMIT}" "${workdir}/eligible.tsv" > "${workdir}/batch.tsv"
+
+          eligible_count=$(wc -l < "${workdir}/eligible.tsv" | tr -d ' ')
+          batch_count=$(wc -l < "${workdir}/batch.tsv" | tr -d ' ')
+
+          echo "Eligible old artifacts found: ${eligible_count}"
+          echo "Artifacts selected for this batch: ${batch_count}"
+
+          if (( batch_count == 0 )); then
+            echo "No artifacts older than ${RETENTION_DAYS} days remain."
+            exit 0
+          fi
+
           deleted=0
+          already_gone=0
+          failed=0
           freed=0
 
           while IFS=$'\t' read -r artifact_id created_at artifact_name size_bytes; do
             [[ -z "${artifact_id:-}" ]] && continue
-            created_epoch=$(date -u -d "$created_at" +%s)
 
-            if (( created_epoch < cutoff_epoch )); then
-              echo "Deleting artifact id=$artifact_id name=$artifact_name created_at=$created_at size=$size_bytes"
-              gh api --method DELETE \
+            success=0
+            for attempt in 1 2 3 4; do
+              if response=$(gh api --method DELETE \
                 -H "Accept: application/vnd.github+json" \
-                -H "X-GitHub-Api-Version: 2026-03-10" \
-                "/repos/${REPOSITORY}/actions/artifacts/${artifact_id}"
-              deleted=$((deleted + 1))
-              freed=$((freed + size_bytes))
-            fi
-          done < <(
-            gh api --paginate \
-              -H "Accept: application/vnd.github+json" \
-              -H "X-GitHub-Api-Version: 2026-03-10" \
-              "/repos/${REPOSITORY}/actions/artifacts?per_page=100" \
-              --jq '.artifacts[] | [.id, .created_at, .name, .size_in_bytes] | @tsv'
-          )
+                -H "X-GitHub-Api-Version: ${api_version}" \
+                "/repos/${REPOSITORY}/actions/artifacts/${artifact_id}" 2>&1); then
+                echo "Deleted id=${artifact_id} name=${artifact_name} created_at=${created_at} size=${size_bytes}"
+                deleted=$((deleted + 1))
+                freed=$((freed + size_bytes))
+                success=1
+                break
+              fi
 
-          echo "Deleted ${deleted} artifacts; requested release of ${freed} bytes."
+              if grep -qiE 'HTTP 404|Not Found' <<<"${response}"; then
+                echo "Artifact id=${artifact_id} is already gone; continuing."
+                already_gone=$((already_gone + 1))
+                success=1
+                break
+              fi
+
+              if grep -qiE 'HTTP 403|HTTP 429|secondary rate limit|rate limit' <<<"${response}"; then
+                wait_seconds=$((attempt * 75))
+                echo "::warning::Rate limit while deleting id=${artifact_id}; waiting ${wait_seconds}s before retry ${attempt}/4."
+                sleep "${wait_seconds}"
+                continue
+              fi
+
+              if grep -qiE 'HTTP 5[0-9][0-9]|Bad Gateway|Service Unavailable' <<<"${response}"; then
+                wait_seconds=$((attempt * 20))
+                echo "::warning::Temporary GitHub API error for id=${artifact_id}; waiting ${wait_seconds}s before retry ${attempt}/4."
+                sleep "${wait_seconds}"
+                continue
+              fi
+
+              echo "::warning::Failed to delete id=${artifact_id} on attempt ${attempt}/4: ${response}"
+              sleep $((attempt * 10))
+            done
+
+            if (( success == 0 )); then
+              failed=$((failed + 1))
+            fi
+
+            # Keep deletion traffic below GitHub's secondary limits.
+            sleep "${DELETE_DELAY_SECONDS}"
+          done < "${workdir}/batch.tsv"
+
+          remaining_estimate=$((eligible_count - deleted - already_gone))
+          (( remaining_estimate < 0 )) && remaining_estimate=0
+
+          echo "Deleted ${deleted} artifacts; already absent ${already_gone}; failed ${failed}."
+          echo "Requested release of ${freed} bytes."
+          echo "Estimated old artifacts remaining: ${remaining_estimate}."
+
+          # Do not fail the whole workflow for isolated deletion errors; the
+          # next hourly/weekly batch will retry any artifacts that remain.
+          exit 0
