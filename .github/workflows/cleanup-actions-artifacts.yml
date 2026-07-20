@@ -6,12 +6,10 @@ on:
     paths:
       - ".github/workflows/cleanup-actions-artifacts.yml"
   schedule:
-    # Temporary hourly cleanup campaign on July 20–21 (Singapore time).
+    # Temporary hourly cleanup campaign on July 20–21, interpreted in UTC.
     - cron: "17 * 20,21 7 *"
-      timezone: "Asia/Singapore"
-    # Long-term weekly maintenance.
-    - cron: "17 10 * * 0"
-      timezone: "Asia/Singapore"
+    # Long-term weekly maintenance: Sunday 02:17 UTC = 10:17 Singapore time.
+    - cron: "17 2 * * 0"
 
 permissions:
   actions: write
@@ -33,7 +31,7 @@ jobs:
         run: |
           set -uo pipefail
 
-          api_version="2026-03-10"
+          api_version="2022-11-28"
           cutoff_iso=$(date -u -d "${RETENTION_DAYS} days ago" +%Y-%m-%dT%H:%M:%SZ)
           workdir=$(mktemp -d)
           trap 'rm -rf "$workdir"' EXIT
