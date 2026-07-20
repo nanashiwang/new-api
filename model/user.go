@@ -164,8 +164,10 @@ type InviteRechargeCommissionSummary struct {
 }
 
 type InviteRechargeCommissionInvitee struct {
-	Alias                   string `json:"alias"`
-	RechargeCommissionQuota int    `json:"recharge_commission_quota"`
+	Alias                   string  `json:"alias"`
+	RegisteredDate          string  `json:"registered_date"`
+	RechargeTotalMoney      float64 `json:"recharge_total_money"`
+	RechargeCommissionQuota int     `json:"recharge_commission_quota"`
 }
 
 func normalizeUserSortOrder(sortOrder string) string {
@@ -1146,7 +1148,7 @@ func GetUserInviteRechargeCommissions(userID int, startIdx int, pageSize int) ([
 
 	var invitees []*User
 	if err := query.
-		Select("id").
+		Select("id", "created_at").
 		Order("id asc").
 		Limit(pageSize).
 		Offset(startIdx).
@@ -1162,21 +1164,27 @@ func GetUserInviteRechargeCommissions(userID int, startIdx int, pageSize int) ([
 	}
 
 	rechargeByInvitee := map[int]int{}
+	rechargeMoneyByInvitee := map[int]float64{}
 	if len(inviteeIDs) > 0 {
 		type inviteeRechargeRow struct {
-			InviteeUserID      int `gorm:"column:invitee_user_id"`
-			RechargeTotalQuota int `gorm:"column:recharge_total_quota"`
+			InviteeUserID      int     `gorm:"column:invitee_user_id"`
+			RechargeTotalQuota int     `gorm:"column:recharge_total_quota"`
+			RechargeTotalMoney float64 `gorm:"column:recharge_total_money"`
 		}
 		var rows []inviteeRechargeRow
 		if err := DB.Model(&InviteCommissionLedger{}).
-			Select("invitee_user_id, COALESCE(SUM(settled_quota), 0) AS recharge_total_quota").
-			Where("inviter_user_id = ? AND status = ? AND invitee_user_id IN ?", userID, InviteCommissionStatusSettled, inviteeIDs).
-			Group("invitee_user_id").
+			Select(`invite_commission_ledgers.invitee_user_id,
+				COALESCE(SUM(invite_commission_ledgers.settled_quota), 0) AS recharge_total_quota,
+				COALESCE(SUM(CASE WHEN top_ups.paid_money > 0 THEN top_ups.paid_money ELSE top_ups.money END), 0) AS recharge_total_money`).
+			Joins("LEFT JOIN top_ups ON top_ups.trade_no = invite_commission_ledgers.topup_trade_no").
+			Where("invite_commission_ledgers.inviter_user_id = ? AND invite_commission_ledgers.status = ? AND invite_commission_ledgers.invitee_user_id IN ?", userID, InviteCommissionStatusSettled, inviteeIDs).
+			Group("invite_commission_ledgers.invitee_user_id").
 			Find(&rows).Error; err != nil {
 			return nil, 0, nil, err
 		}
 		for _, row := range rows {
 			rechargeByInvitee[row.InviteeUserID] = row.RechargeTotalQuota
+			rechargeMoneyByInvitee[row.InviteeUserID] = row.RechargeTotalMoney
 		}
 	}
 
@@ -1185,8 +1193,14 @@ func GetUserInviteRechargeCommissions(userID int, startIdx int, pageSize int) ([
 		if invitee == nil {
 			continue
 		}
+		registeredDate := ""
+		if invitee.CreatedAt > 0 {
+			registeredDate = time.Unix(invitee.CreatedAt, 0).Format("2006-01-02")
+		}
 		items = append(items, &InviteRechargeCommissionInvitee{
 			Alias:                   fmt.Sprintf("用户%d", startIdx+index+1),
+			RegisteredDate:          registeredDate,
+			RechargeTotalMoney:      rechargeMoneyByInvitee[invitee.Id],
 			RechargeCommissionQuota: rechargeByInvitee[invitee.Id],
 		})
 	}

@@ -2,6 +2,7 @@ package model
 
 import (
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/assert"
@@ -11,10 +12,11 @@ import (
 
 func setupUserAffInviteTestDB(t *testing.T) {
 	t.Helper()
-	require.NoError(t, DB.AutoMigrate(&User{}, &Log{}, &InviteCommissionLedger{}, &InviteCommissionDailyCapState{}))
+	require.NoError(t, DB.AutoMigrate(&User{}, &Log{}, &TopUp{}, &InviteCommissionLedger{}, &InviteCommissionDailyCapState{}))
 	require.NoError(t, DB.Exec("DELETE FROM logs").Error)
 	require.NoError(t, DB.Exec("DELETE FROM invite_commission_ledgers").Error)
 	require.NoError(t, DB.Exec("DELETE FROM invite_commission_daily_cap_states").Error)
+	require.NoError(t, DB.Exec("DELETE FROM top_ups").Error)
 	require.NoError(t, DB.Exec("DELETE FROM users").Error)
 }
 
@@ -154,10 +156,15 @@ func TestGetUserInviteRechargeCommissionsAnonymizesAndAggregates(t *testing.T) {
 	setupUserAffInviteTestDB(t)
 
 	inviter := createUserAffInviteTestInviter(t, "commission_inviter", "commission_inviter_aff", common.UserStatusEnabled)
-	invitee1 := &User{Username: "commission_invitee_1", Password: "password123", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "commission_invitee_1_aff", InviterId: inviter.Id}
-	invitee2 := &User{Username: "commission_invitee_2", Password: "password123", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "commission_invitee_2_aff", InviterId: inviter.Id}
+	invitee1 := &User{Username: "commission_invitee_1", Password: "password123", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "commission_invitee_1_aff", InviterId: inviter.Id, CreatedAt: time.Date(2026, 7, 1, 12, 0, 0, 0, time.Local).Unix()}
+	invitee2 := &User{Username: "commission_invitee_2", Password: "password123", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "commission_invitee_2_aff", InviterId: inviter.Id, CreatedAt: time.Date(2026, 7, 2, 12, 0, 0, 0, time.Local).Unix()}
 	require.NoError(t, DB.Create(invitee1).Error)
 	require.NoError(t, DB.Create(invitee2).Error)
+	require.NoError(t, DB.Create(&[]TopUp{
+		{UserId: invitee1.Id, Amount: 100, Money: 100, PaidMoney: 80, TradeNo: "invitee-1-topup-1", Status: common.TopUpStatusSuccess},
+		{UserId: invitee1.Id, Amount: 200, Money: 120, TradeNo: "invitee-1-topup-2", Status: common.TopUpStatusSuccess},
+		{UserId: invitee2.Id, Amount: 300, Money: 300, PaidMoney: 300, TradeNo: "invitee-2-pending", Status: common.TopUpStatusPending},
+	}).Error)
 	require.NoError(t, DB.Create(&[]InviteCommissionLedger{
 		{
 			InviteeUserId:   invitee1.Id,
@@ -200,7 +207,11 @@ func TestGetUserInviteRechargeCommissionsAnonymizesAndAggregates(t *testing.T) {
 	require.Equal(t, 30, summary.RechargeTotalQuota)
 	require.Len(t, items, 2)
 	require.Equal(t, "用户1", items[0].Alias)
+	require.Equal(t, "2026-07-01", items[0].RegisteredDate)
+	assert.InDelta(t, 200, items[0].RechargeTotalMoney, 0.000001)
 	require.Equal(t, 30, items[0].RechargeCommissionQuota)
 	require.Equal(t, "用户2", items[1].Alias)
+	require.Equal(t, "2026-07-02", items[1].RegisteredDate)
+	assert.Zero(t, items[1].RechargeTotalMoney)
 	require.Equal(t, 0, items[1].RechargeCommissionQuota)
 }

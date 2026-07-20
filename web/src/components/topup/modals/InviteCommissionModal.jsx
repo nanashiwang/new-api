@@ -1,9 +1,19 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Card, Modal, Space, Tag, Typography } from '@douyinfe/semi-ui';
-import { API, renderQuota, showError } from '../../../helpers';
+import {
+  API,
+  getPaymentCurrencySymbol,
+  renderQuota,
+  showError,
+} from '../../../helpers';
 import CardTable from '../../common/ui/CardTable';
 
 const { Text } = Typography;
+
+const renderRechargeMoney = (value) => {
+  const amount = Number(value);
+  return `${getPaymentCurrencySymbol()}${Number.isFinite(amount) ? amount.toFixed(2) : '0.00'}`;
+};
 
 const initialData = {
   invitees: {
@@ -78,6 +88,16 @@ const InviteCommissionModal = ({ visible, onCancel, t }) => {
         render: (alias) => alias || '-',
       },
       {
+        title: t('注册时间'),
+        dataIndex: 'registered_date',
+        render: (registeredDate) => registeredDate || '-',
+      },
+      {
+        title: t('充值金额'),
+        dataIndex: 'recharge_total_money',
+        render: (money) => renderRechargeMoney(money),
+      },
+      {
         title: t('充值返佣'),
         dataIndex: 'recharge_commission_quota',
         render: (quota) => (
@@ -102,7 +122,7 @@ const InviteCommissionModal = ({ visible, onCancel, t }) => {
       visible={visible}
       onCancel={onCancel}
       footer={null}
-      width={720}
+      width={860}
       maskClosable={false}
     >
       <div className='space-y-3'>
@@ -119,7 +139,7 @@ const InviteCommissionModal = ({ visible, onCancel, t }) => {
           <div className='mt-2'>
             <Text type='tertiary' size='small'>
               {t(
-                '仅按匿名用户汇总已结算充值返佣，不展示被邀请人的真实账号信息；数据每天 24 点刷新。',
+                '仅按匿名用户汇总已结算充值记录的实付金额和返佣，不展示被邀请人的真实账号信息；数据每天 24 点刷新。',
               )}
             </Text>
           </div>
