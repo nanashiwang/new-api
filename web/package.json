@@ -56,7 +56,8 @@
     "i18n:sync": "bunx i18next-cli sync",
     "i18n:lint": "bunx i18next-cli lint",
     "i18n:audit": "node scripts/i18n-audit.mjs",
-    "test:image-playground-static": "node scripts/image-playground-static-guard.test.mjs"
+    "test:image-playground-static": "node scripts/image-playground-static-guard.test.mjs",
+    "test:playground-sse": "node scripts/playground-sse.test.mjs"
   },
   "eslintConfig": {
     "extends": [

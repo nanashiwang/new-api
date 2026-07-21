@@ -35,7 +35,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { copy } from '../../helpers';
+import { copy, parsePlaygroundSSEData } from '../../helpers';
 
 /**
  * SSEViewer component for displaying Server-Sent Events in an interactive format
@@ -53,35 +53,18 @@ const SSEViewer = ({ sseData }) => {
       return [];
     }
 
-    return sseData.map((item, index) => {
-      let parsed = null;
-      let error = null;
-      let isDone = false;
-
-      if (item === '[DONE]') {
-        isDone = true;
-      } else {
-        try {
-          parsed = typeof item === 'string' ? JSON.parse(item) : item;
-        } catch (e) {
-          error = e.message;
-        }
-      }
-
-      return {
-        index,
-        raw: item,
-        parsed,
-        error,
-        isDone,
-        key: `sse-${index}`,
-      };
-    });
+    return parsePlaygroundSSEData(sseData).map((item, index) => ({
+      ...item,
+      index,
+      key: `sse-${index}`,
+    }));
   }, [sseData]);
 
   const stats = useMemo(() => {
     const total = parsedSSEData.length;
-    const errors = parsedSSEData.filter((item) => item.error).length;
+    const errors = parsedSSEData.filter(
+      (item) => item.error || item.serverError,
+    ).length;
     const done = parsedSSEData.filter((item) => item.isDone).length;
     const valid = total - errors - done;
 
@@ -143,17 +126,23 @@ const SSEViewer = ({ sseData }) => {
       );
     }
 
-    if (item.error) {
+    if (item.error || item.serverError) {
       return (
         <div className='space-y-2'>
           <div className='flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/20 rounded-lg'>
             <XCircle size={16} className='text-red-600' />
             <Typography.Text className='text-red-600'>
-              {t('解析错误')}: {item.error}
+              {item.serverError
+                ? item.serverError
+                : `${t('解析错误')}: ${item.error}`}
             </Typography.Text>
           </div>
           <div className='p-3 bg-gray-100 dark:bg-gray-800 rounded-lg font-mono text-xs overflow-auto'>
-            <pre>{item.raw}</pre>
+            <pre>
+              {typeof item.raw === 'string'
+                ? item.raw
+                : JSON.stringify(item.raw, null, 2)}
+            </pre>
           </div>
         </div>
       );
@@ -280,14 +269,18 @@ const SSEViewer = ({ sseData }) => {
                   <Badge count={`#${item.index + 1}`} type='tertiary' />
                   {item.isDone ? (
                     <span className='text-green-600 font-medium'>[DONE]</span>
-                  ) : item.error ? (
-                    <span className='text-red-600'>{t('解析错误')}</span>
+                  ) : item.error || item.serverError ? (
+                    <span className='text-red-600'>
+                      {item.serverError ? t('请求发生错误') : t('解析错误')}
+                    </span>
                   ) : (
                     <>
                       <span className='text-gray-600'>
-                        {item.parsed?.id ||
-                          item.parsed?.object ||
-                          t('SSE 事件')}
+                        {item.eventType !== 'message'
+                          ? item.eventType
+                          : item.parsed?.id ||
+                            item.parsed?.object ||
+                            t('SSE 事件')}
                       </span>
                       {item.parsed?.choices?.[0]?.delta && (
                         <span className='text-xs text-gray-400'>

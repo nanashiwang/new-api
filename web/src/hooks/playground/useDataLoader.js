@@ -21,6 +21,7 @@ import { useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { API, processModelsData, processGroupsData } from '../../helpers';
 import { API_ENDPOINTS } from '../../constants/playground.constants';
+import { useLatestRequestGuard } from '../common/useLatestRequestGuard';
 
 export const useDataLoader = (
   userState,
@@ -30,10 +31,16 @@ export const useDataLoader = (
   setGroups,
 ) => {
   const { t } = useTranslation();
+  const modelRequestGuard = useLatestRequestGuard();
 
   const loadModels = useCallback(async () => {
+    const requestId = modelRequestGuard.createRequestId();
     try {
-      const res = await API.get(API_ENDPOINTS.USER_MODELS);
+      const res = await API.get(API_ENDPOINTS.USER_MODELS, {
+        params: inputs.group ? { group: inputs.group } : undefined,
+      });
+      if (!modelRequestGuard.isLatestRequest(requestId)) return;
+
       const { success, message, data } = res.data;
 
       if (success) {
@@ -50,9 +57,17 @@ export const useDataLoader = (
         showError(t(message));
       }
     } catch (error) {
+      if (!modelRequestGuard.isLatestRequest(requestId)) return;
       showError(t('加载模型失败'));
     }
-  }, [inputs.model, handleInputChange, setModels, t]);
+  }, [
+    inputs.group,
+    inputs.model,
+    handleInputChange,
+    setModels,
+    t,
+    modelRequestGuard,
+  ]);
 
   const loadGroups = useCallback(async () => {
     try {
