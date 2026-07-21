@@ -47,6 +47,13 @@ import {
 import { Modal, Button, Checkbox } from '@douyinfe/semi-ui';
 import { openCodexUsageModal } from '../../components/table/channels/modals/CodexUsageModal';
 
+const EMPTY_CHANNEL_CONCURRENCY_SNAPSHOT = {
+  loaded: false,
+  enabled: false,
+  defaultMaxConcurrency: 100,
+  byChannelId: {},
+};
+
 export const useChannelsData = () => {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -110,6 +117,10 @@ export const useChannelsData = () => {
   const [selectedTagTestModel, setSelectedTagTestModel] = useState('');
   const [globalPassThroughEnabled, setGlobalPassThroughEnabled] =
     useState(false);
+  const [channelConcurrencySnapshot, setChannelConcurrencySnapshot] = useState(
+    EMPTY_CHANNEL_CONCURRENCY_SNAPSHOT,
+  );
+  const channelConcurrencyRequestRef = useRef(0);
 
   const fetchGlobalPassThroughEnabled = async () => {
     try {
@@ -126,6 +137,55 @@ export const useChannelsData = () => {
       }
     } catch (error) {
       setGlobalPassThroughEnabled(false);
+    }
+  };
+
+  const fetchChannelConcurrencyStats = async () => {
+    const reqId = ++channelConcurrencyRequestRef.current;
+    try {
+      const res = await API.get('/api/channel_concurrency/stats');
+      if (res === undefined || reqId !== channelConcurrencyRequestRef.current) {
+        return;
+      }
+      const { success, data } = res.data || {};
+      if (!success || !data) {
+        setChannelConcurrencySnapshot((current) => ({
+          ...current,
+          loaded: false,
+        }));
+        return;
+      }
+
+      const configuredDefault = Number(data.config?.default_max_concurrency);
+      const defaultMaxConcurrency =
+        Number.isInteger(configuredDefault) && configuredDefault > 0
+          ? configuredDefault
+          : 100;
+      const byChannelId = {};
+      for (const item of data.channels || []) {
+        const channelId = Number(item?.channel_id);
+        if (!Number.isInteger(channelId) || channelId <= 0) continue;
+        byChannelId[channelId] = {
+          inflight: Math.max(0, Number(item.inflight) || 0),
+          maxConcurrency:
+            Number(item.max_concurrency) > 0
+              ? Number(item.max_concurrency)
+              : defaultMaxConcurrency,
+        };
+      }
+      setChannelConcurrencySnapshot({
+        loaded: true,
+        enabled: data.enabled === true,
+        defaultMaxConcurrency,
+        byChannelId,
+      });
+    } catch (error) {
+      if (reqId === channelConcurrencyRequestRef.current) {
+        setChannelConcurrencySnapshot((current) => ({
+          ...current,
+          loaded: false,
+        }));
+      }
     }
   };
 
@@ -154,6 +214,7 @@ export const useChannelsData = () => {
     GROUP: 'group',
     TYPE: 'type',
     STATUS: 'status',
+    CONCURRENCY: 'concurrency',
     RESPONSE_TIME: 'response_time',
     BALANCE: 'balance',
     PRIORITY: 'priority',
@@ -185,6 +246,7 @@ export const useChannelsData = () => {
     fetchGroups().then();
     loadChannelModels().then();
     fetchGlobalPassThroughEnabled().then();
+    fetchChannelConcurrencyStats().then();
   }, []);
 
   // Column visibility management
@@ -195,6 +257,7 @@ export const useChannelsData = () => {
       [COLUMN_KEYS.GROUP]: true,
       [COLUMN_KEYS.TYPE]: true,
       [COLUMN_KEYS.STATUS]: true,
+      [COLUMN_KEYS.CONCURRENCY]: true,
       [COLUMN_KEYS.RESPONSE_TIME]: true,
       [COLUMN_KEYS.BALANCE]: true,
       [COLUMN_KEYS.PRIORITY]: true,
@@ -497,10 +560,11 @@ export const useChannelsData = () => {
   // Refresh
   const refresh = async (page = activePage) => {
     const { searchKeyword, searchGroup, searchModel } = getFormValues();
+    let channelsRequest;
     if (searchKeyword === '' && searchGroup === '' && searchModel === '') {
-      await loadChannels(page, pageSize, idSort, enableTagMode);
+      channelsRequest = loadChannels(page, pageSize, idSort, enableTagMode);
     } else {
-      await searchChannels(
+      channelsRequest = searchChannels(
         enableTagMode,
         activeTypeKey,
         statusFilter,
@@ -509,6 +573,7 @@ export const useChannelsData = () => {
         idSort,
       );
     }
+    await Promise.all([channelsRequest, fetchChannelConcurrencyStats()]);
   };
 
   // Channel management
@@ -1497,6 +1562,7 @@ export const useChannelsData = () => {
     statusFilter,
     compactMode,
     globalPassThroughEnabled,
+    channelConcurrencySnapshot,
 
     // UI 状态s
     showEdit,

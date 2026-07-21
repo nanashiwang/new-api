@@ -339,6 +339,112 @@ const renderResponseTime = (responseTime, t) => {
   }
 };
 
+const getChannelMaxConcurrencyOverride = (record) => {
+  if (!record || record.children !== undefined || !record.setting) return 0;
+  try {
+    const setting =
+      typeof record.setting === 'string'
+        ? JSON.parse(record.setting)
+        : record.setting;
+    const value = Number(setting?.max_concurrency);
+    return Number.isInteger(value) && value > 0 ? value : 0;
+  } catch (error) {
+    return 0;
+  }
+};
+
+const getChannelConcurrency = (record, snapshot) => {
+  if (!record || !snapshot?.loaded || !snapshot.enabled) return null;
+  if (record.children !== undefined) {
+    return record.children.reduce(
+      (total, child) => {
+        const current = getChannelConcurrency(child, snapshot);
+        if (!current) return total;
+        total.inflight += current.inflight;
+        total.maxConcurrency += current.maxConcurrency;
+        return total;
+      },
+      { inflight: 0, maxConcurrency: 0 },
+    );
+  }
+
+  const live = snapshot.byChannelId?.[record.id];
+  const override = getChannelMaxConcurrencyOverride(record);
+  return {
+    inflight: Math.max(0, Number(live?.inflight) || 0),
+    maxConcurrency:
+      Number(live?.maxConcurrency) > 0
+        ? Number(live.maxConcurrency)
+        : override || snapshot.defaultMaxConcurrency || 100,
+  };
+};
+
+const getConcurrencyProgressColor = (percent) => {
+  if (percent >= 100) return 'var(--semi-color-danger)';
+  if (percent >= 80) return 'var(--semi-color-warning)';
+  return 'var(--semi-color-primary)';
+};
+
+const renderChannelConcurrency = (record, snapshot, t) => {
+  if (!snapshot?.loaded) {
+    return <Typography.Text type='tertiary'>-</Typography.Text>;
+  }
+  if (!snapshot.enabled) {
+    return (
+      <Tooltip content={t('请先在运营设置中启用渠道并发控制')}>
+        <Typography.Text type='tertiary' size='small'>
+          {t('未启用')}
+        </Typography.Text>
+      </Tooltip>
+    );
+  }
+
+  const concurrency = getChannelConcurrency(record, snapshot);
+  if (!concurrency || concurrency.maxConcurrency <= 0) {
+    return <Typography.Text type='tertiary'>-</Typography.Text>;
+  }
+  const percent = Math.min(
+    100,
+    (concurrency.inflight / concurrency.maxConcurrency) * 100,
+  );
+  const tooltip =
+    record.children !== undefined
+      ? t('标签内子渠道并发汇总')
+      : t('当前在途请求数 / 实际并发上限');
+
+  return (
+    <Tooltip content={tooltip}>
+      <div style={{ width: 92 }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 3,
+          }}
+        >
+          <Typography.Text
+            size='small'
+            strong={concurrency.inflight >= concurrency.maxConcurrency}
+          >
+            {concurrency.inflight}/{concurrency.maxConcurrency}
+          </Typography.Text>
+          <Typography.Text type='tertiary' size='small'>
+            {Math.round(percent)}%
+          </Typography.Text>
+        </div>
+        <Progress
+          percent={percent}
+          size='small'
+          stroke={getConcurrencyProgressColor(percent)}
+          showInfo={false}
+          style={{ height: 4 }}
+        />
+      </div>
+    </Tooltip>
+  );
+};
+
 const isRequestPassThroughEnabled = (record) => {
   if (!record || record.children !== undefined) {
     return false;
@@ -414,6 +520,7 @@ export const getChannelsColumns = ({
   setCurrentMultiKeyChannel,
   openUpstreamUpdateModal,
   detectChannelUpstreamUpdates,
+  channelConcurrencySnapshot,
 }) => {
   return [
     {
@@ -602,6 +709,13 @@ export const getChannelsColumns = ({
           return renderStatus(text, record, t);
         }
       },
+    },
+    {
+      key: COLUMN_KEYS.CONCURRENCY,
+      title: t('并发'),
+      dataIndex: 'concurrency',
+      render: (text, record) =>
+        renderChannelConcurrency(record, channelConcurrencySnapshot, t),
     },
     {
       key: COLUMN_KEYS.RESPONSE_TIME,

@@ -52,6 +52,7 @@ const ColumnSelectorModal = ({
   setCurrentMultiKeyChannel,
   openUpstreamUpdateModal,
   detectChannelUpstreamUpdates,
+  channelConcurrencySnapshot,
 }) => {
   // Get all columns for display in selector
   const allColumns = getChannelsColumns({
@@ -78,6 +79,7 @@ const ColumnSelectorModal = ({
     setCurrentMultiKeyChannel,
     openUpstreamUpdateModal,
     detectChannelUpstreamUpdates,
+    channelConcurrencySnapshot,
   });
 
   return (
