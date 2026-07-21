@@ -25,6 +25,7 @@ import SettingsSidebarModulesAdmin from '../../pages/Setting/Operation/SettingsS
 import SettingsSensitiveWords from '../../pages/Setting/Operation/SettingsSensitiveWords';
 import SettingsLog from '../../pages/Setting/Operation/SettingsLog';
 import SettingsMonitoring from '../../pages/Setting/Operation/SettingsMonitoring';
+import SettingsChannelConcurrency from '../../pages/Setting/Operation/SettingsChannelConcurrency';
 import SettingsCreditLimit from '../../pages/Setting/Operation/SettingsCreditLimit';
 import SettingsCheckin from '../../pages/Setting/Operation/SettingsCheckin';
 import { API, showError, toBoolean } from '../../helpers';
@@ -82,6 +83,14 @@ const OperationSetting = () => {
     UserScopedCircuitBreakerStatusCodes: '503',
     UserScopedCircuitBreakerTTLSeconds: 60,
     UserScopedCircuitBreakerFailureThreshold: 2,
+    'channel_concurrency_setting.enabled': false,
+    'channel_concurrency_setting.default_max_concurrency': 100,
+    'channel_concurrency_setting.wait_timeout_ms': 3000,
+    'channel_concurrency_setting.max_queue_length': 200,
+    'channel_concurrency_setting.poll_interval_ms': 50,
+    'channel_concurrency_setting.retry_after_seconds': 3,
+    'channel_concurrency_setting.affinity_sticky_enabled': true,
+    'channel_concurrency_setting.affinity_wait_ms': 2000,
     'monitor_setting.auto_test_channel_enabled': false,
     'monitor_setting.auto_test_channel_minutes': 10 /* 签到设置 */,
     'monitor_setting.pre_disable_wait_enabled': false,
@@ -158,6 +167,10 @@ const OperationSetting = () => {
         {/* 监控设置 */}
         <Card style={{ marginTop: '10px' }}>
           <SettingsMonitoring options={inputs} refresh={onRefresh} />
+        </Card>
+        {/* 渠道并发控制 */}
+        <Card style={{ marginTop: '10px' }}>
+          <SettingsChannelConcurrency options={inputs} refresh={onRefresh} />
         </Card>
         {/* 额度设置 */}
         <Card style={{ marginTop: '10px' }}>
