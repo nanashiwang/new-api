@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	appconstant "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/logger"
 	openaichannel "github.com/QuantumNous/new-api/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -55,6 +56,14 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 			types.ErrOptionWithSkipRetry(),
 		)
 	}
+	normalizedInput, normalizedMessageIDs, err := relaycommon.NormalizeResponsesMessageIDs(responsesReq.Input)
+	if err != nil {
+		return types.NewError(fmt.Errorf("failed to normalize responses message IDs: %w", err), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
+	}
+	responsesReq.Input = normalizedInput
+	if normalizedMessageIDs > 0 {
+		logger.LogInfo(c, fmt.Sprintf("normalized %d CC Switch responses message IDs", normalizedMessageIDs))
+	}
 
 	request, err := common.DeepCopy(responsesReq)
 	if err != nil {
@@ -97,6 +106,10 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 					return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 				}
 			}
+			requestBytes, _, err = relaycommon.NormalizeResponsesMessageIDsInJSON(requestBytes)
+			if err != nil {
+				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			}
 			requestBody = bytes.NewBuffer(requestBytes)
 		} else {
 			requestForUpstream, err := common.DeepCopy(request)
@@ -137,6 +150,10 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 				if err != nil {
 					return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 				}
+			}
+			jsonData, _, err = relaycommon.NormalizeResponsesMessageIDsInJSON(jsonData)
+			if err != nil {
+				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 			}
 			service.SyncRelayReasoningEffortFromResponsesPayload(info, jsonData)
 
