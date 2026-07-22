@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/gin-gonic/gin"
@@ -459,6 +460,32 @@ func TestRequestOpenAI2ClaudeMessage_SkipsEmptyTextBlocksInStructuredContent(t *
 	require.Len(t, content, 1)
 	require.NotNil(t, content[0].Text)
 	assert.Equal(t, "hello", *content[0].Text)
+}
+
+func TestRequestOpenAI2ClaudeMessage_PreservesCacheControl(t *testing.T) {
+	var request dto.GeneralOpenAIRequest
+	err := common.Unmarshal([]byte(`{
+		"model":"claude-opus-4-8",
+		"messages":[
+			{"role":"system","content":[{"type":"text","text":"stable system","cache_control":{"type":"ephemeral"}}]},
+			{"role":"user","content":[{"type":"text","text":"stable context","cache_control":{"type":"ephemeral"}}]}
+		]
+	}`), &request)
+	require.NoError(t, err)
+
+	claudeRequest, err := RequestOpenAI2ClaudeMessage(nil, request)
+	require.NoError(t, err)
+
+	system, ok := claudeRequest.System.([]dto.ClaudeMediaMessage)
+	require.True(t, ok)
+	require.Len(t, system, 1)
+	assert.JSONEq(t, `{"type":"ephemeral"}`, string(system[0].CacheControl))
+
+	require.Len(t, claudeRequest.Messages, 1)
+	content, err := claudeRequest.Messages[0].ParseContent()
+	require.NoError(t, err)
+	require.Len(t, content, 1)
+	assert.JSONEq(t, `{"type":"ephemeral"}`, string(content[0].CacheControl))
 }
 
 func TestStreamResponseClaude2OpenAI_EmptyInputJSONDeltaIgnored(t *testing.T) {
