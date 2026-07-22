@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
@@ -18,6 +20,7 @@ func TestGenerateTextOtherInfoIncludesParamOverrideAuditAndStreamStatus(t *testi
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	common.SetContextKey(ctx, constant.ContextKeyClaudeIncrementalCache, true)
 
 	start := time.Unix(100, 0)
 	info := &relaycommon.RelayInfo{
@@ -37,6 +40,9 @@ func TestGenerateTextOtherInfoIncludesParamOverrideAuditAndStreamStatus(t *testi
 	other := GenerateTextOtherInfo(ctx, info, 1, 1, 1, 0, 1, 1, 1)
 	if other["first_effective_output_ms"] != float64(500) {
 		t.Fatalf("unexpected first_effective_output_ms: %#v", other["first_effective_output_ms"])
+	}
+	if other["claude_incremental_cache"] != true {
+		t.Fatalf("expected claude_incremental_cache audit flag, got %#v", other["claude_incremental_cache"])
 	}
 
 	lines, ok := other["po"].([]string)

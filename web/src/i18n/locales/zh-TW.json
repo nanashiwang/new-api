@@ -4803,6 +4803,8 @@
     "Claude -> OpenAI 思考模式映射": "",
     "Claude 会在已有请求头基础上合并并追加这些值，不会覆盖已有 anthropic-beta；重复值会自动去重。": "",
     "Claude 强制 beta=true": "Claude 强制 beta=true",
+    "Claude 增量缓存": "Claude 增量快取",
+    "仅对 OpenAI Chat Completions 转 Claude 的请求生效；每轮在最后一个用户内容块追加缓存断点，使历史缓存随对话增长。首次请求可能产生缓存创建费用": "僅對 OpenAI Chat Completions 轉換為 Claude 的請求生效；每輪在最後一個使用者內容區塊加入快取斷點，使快取歷史隨對話增長。首次請求可能產生快取建立費用",
     "Claude Relay Service 站点账号状态汇总": "Claude Relay Service 站点账号状态汇总",
     "Claude请求头覆盖": "Claude請求頭覆蓋",
     "Claude请求头追加": "",

@@ -64,7 +64,8 @@ const (
 
 	ContextKeyLocalCountTokens ContextKey = "local_count_tokens"
 
-	ContextKeySystemPromptOverride ContextKey = "system_prompt_override"
+	ContextKeySystemPromptOverride   ContextKey = "system_prompt_override"
+	ContextKeyClaudeIncrementalCache ContextKey = "claude_incremental_cache"
 
 	ContextKeyResponsesAutoContinue            ContextKey = "responses_auto_continue"
 	ContextKeyResponsesAutoContinueFromChannel ContextKey = "responses_auto_continue_from_channel"

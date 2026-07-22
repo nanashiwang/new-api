@@ -118,6 +118,7 @@ type ChannelSettings struct {
 	SystemPromptOverride           bool                           `json:"system_prompt_override,omitempty"`
 	ChatCompletionsToResponsesMode ChatCompletionsToResponsesMode `json:"chat_completions_to_responses_mode,omitempty"`
 	ClaudeImageTransportMode       ClaudeImageTransportMode       `json:"claude_image_transport_mode,omitempty"`
+	ClaudeIncrementalCacheEnabled  bool                           `json:"claude_incremental_cache_enabled,omitempty"`
 	ClientRestrictionMode          ClientRestrictionMode          `json:"client_restriction_mode,omitempty"`
 	ClientRestrictionClients       []string                       `json:"client_restriction_clients,omitempty"`
 	QuotaPolicy                    QuotaPolicy                    `json:"quota_policy,omitempty"`

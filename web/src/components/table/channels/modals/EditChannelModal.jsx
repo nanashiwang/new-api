@@ -178,6 +178,7 @@ const EditChannelModal = (props) => {
     proxy: '',
     pass_through_body_enabled: false,
     chat_completions_to_responses_mode: 'inherit',
+    claude_incremental_cache_enabled: false,
     system_prompt: '',
     system_prompt_override: false,
     max_concurrency: 0,
@@ -753,6 +754,8 @@ const EditChannelModal = (props) => {
             parsedSettings.pass_through_body_enabled || false;
           data.chat_completions_to_responses_mode =
             parsedSettings.chat_completions_to_responses_mode || 'inherit';
+          data.claude_incremental_cache_enabled =
+            parsedSettings.claude_incremental_cache_enabled || false;
           data.system_prompt = parsedSettings.system_prompt || '';
           data.system_prompt_override =
             parsedSettings.system_prompt_override || false;
@@ -775,6 +778,7 @@ const EditChannelModal = (props) => {
           data.proxy = '';
           data.pass_through_body_enabled = false;
           data.chat_completions_to_responses_mode = 'inherit';
+          data.claude_incremental_cache_enabled = false;
           data.system_prompt = '';
           data.system_prompt_override = false;
           data.max_concurrency = 0;
@@ -788,6 +792,7 @@ const EditChannelModal = (props) => {
       } else {
         data.force_format = false;
         data.thinking_to_content = false;
+        data.claude_incremental_cache_enabled = false;
         data.proxy = '';
         data.pass_through_body_enabled = false;
         data.chat_completions_to_responses_mode = 'inherit';
@@ -917,6 +922,8 @@ const EditChannelModal = (props) => {
         pass_through_body_enabled: data.pass_through_body_enabled,
         chat_completions_to_responses_mode:
           data.chat_completions_to_responses_mode || 'inherit',
+        claude_incremental_cache_enabled:
+          data.claude_incremental_cache_enabled || false,
         system_prompt: data.system_prompt,
         system_prompt_override: data.system_prompt_override || false,
         max_concurrency: data.max_concurrency || 0,
@@ -1362,6 +1369,7 @@ const EditChannelModal = (props) => {
       proxy: '',
       pass_through_body_enabled: false,
       chat_completions_to_responses_mode: 'inherit',
+      claude_incremental_cache_enabled: false,
       system_prompt: '',
       system_prompt_override: false,
       client_restriction_mode: '',
@@ -1746,6 +1754,8 @@ const EditChannelModal = (props) => {
       pass_through_body_enabled: localInputs.pass_through_body_enabled || false,
       chat_completions_to_responses_mode:
         localInputs.chat_completions_to_responses_mode || 'inherit',
+      claude_incremental_cache_enabled:
+        localInputs.claude_incremental_cache_enabled || false,
       system_prompt: localInputs.system_prompt || '',
       system_prompt_override: localInputs.system_prompt_override || false,
       max_concurrency: Math.max(0, Number(localInputs.max_concurrency) || 0),
@@ -4358,6 +4368,24 @@ const EditChannelModal = (props) => {
                         }
                         extraText={t(
                           '开启后，该渠道请求 Claude 时将强制追加 ?beta=true（无需客户端手动传参）',
+                        )}
+                      />
+                    )}
+
+                    {inputs.type === 14 && (
+                      <Form.Switch
+                        field='claude_incremental_cache_enabled'
+                        label={t('Claude 增量缓存')}
+                        checkedText={t('开')}
+                        uncheckedText={t('关')}
+                        onChange={(value) =>
+                          handleChannelSettingsChange(
+                            'claude_incremental_cache_enabled',
+                            value,
+                          )
+                        }
+                        extraText={t(
+                          '仅对 OpenAI Chat Completions 转 Claude 的请求生效；每轮在最后一个用户内容块追加缓存断点，使历史缓存随对话增长。首次请求可能产生缓存创建费用',
                         )}
                       />
                     )}
