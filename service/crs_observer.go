@@ -445,19 +445,74 @@ func buildCRSCodexUsageWindows(raw map[string]any) []model.CRSUsageWindow {
 		{field: "secondary", key: "secondary", label: "周限"},
 	}
 
-	windows := make([]model.CRSUsageWindow, 0, len(definitions))
+	fiveHourWindows := make([]model.CRSUsageWindow, 0, 1)
+	weeklyWindows := make([]model.CRSUsageWindow, 0, 1)
+	otherWindows := make([]model.CRSUsageWindow, 0, len(definitions))
 	for _, definition := range definitions {
+		rawWindow := getMapOrJSONValue(raw[definition.field])
+		if isEmptyCRSCodexUsageWindow(rawWindow) {
+			continue
+		}
+
+		label, windowType := classifyCRSCodexUsageWindow(rawWindow, definition.label)
 		window, ok := normalizeCRSUsageWindow(
 			definition.key,
-			definition.label,
+			label,
 			"codex_usage",
-			getMapOrJSONValue(raw[definition.field]),
+			rawWindow,
 		)
-		if ok {
-			windows = append(windows, window)
+		if !ok {
+			continue
+		}
+
+		switch windowType {
+		case "five_hour":
+			fiveHourWindows = append(fiveHourWindows, window)
+		case "weekly":
+			weeklyWindows = append(weeklyWindows, window)
+		default:
+			otherWindows = append(otherWindows, window)
 		}
 	}
+
+	windows := make([]model.CRSUsageWindow, 0, len(definitions))
+	windows = append(windows, fiveHourWindows...)
+	windows = append(windows, weeklyWindows...)
+	windows = append(windows, otherWindows...)
 	return windows
+}
+
+func classifyCRSCodexUsageWindow(raw map[string]any, fallbackLabel string) (string, string) {
+	windowMinutes, ok := firstCRSUsageWindowRawNumber(raw, "windowMinutes", "window_minutes")
+	if !ok || windowMinutes <= 0 {
+		if fallbackLabel == "周限" {
+			return fallbackLabel, "weekly"
+		}
+		return fallbackLabel, "five_hour"
+	}
+	if windowMinutes >= 24*60 {
+		return "周限", "weekly"
+	}
+	if windowMinutes >= 60 && float64(int64(windowMinutes)) == windowMinutes && int64(windowMinutes)%60 == 0 {
+		return fmt.Sprintf("%dh", int64(windowMinutes)/60), "five_hour"
+	}
+	return fmt.Sprintf("%dm", int64(windowMinutes)), "five_hour"
+}
+
+func isEmptyCRSCodexUsageWindow(raw map[string]any) bool {
+	if len(raw) == 0 {
+		return true
+	}
+
+	windowMinutes, hasWindowMinutes := firstCRSUsageWindowRawNumber(raw, "windowMinutes", "window_minutes")
+	resetAfterSeconds, hasResetAfter := firstCRSUsageWindowRawNumber(raw, "resetAfterSeconds", "reset_after_seconds")
+	progress, hasProgress := firstCRSUsageWindowRawNumber(raw, "utilization", "usedPercent", "progress", "percentage")
+
+	// CRS may expose an unavailable secondary bucket as an all-zero object whose
+	// synthetic resetAt equals the latest update time. It is not a real limit.
+	return hasResetAfter && resetAfterSeconds <= 0 &&
+		(!hasWindowMinutes || windowMinutes <= 0) &&
+		(!hasProgress || progress <= 0)
 }
 
 func buildCRSSessionUsageWindow(raw map[string]any) (model.CRSUsageWindow, bool) {
@@ -540,12 +595,40 @@ func normalizeCRSUsageWindow(key, label, source string, raw map[string]any) (mod
 }
 
 func firstCRSUsageWindowNumber(raw map[string]any, keys ...string) (float64, bool) {
+	value, ok := firstCRSUsageWindowRawNumber(raw, keys...)
+	if !ok {
+		return 0, false
+	}
+	return clampCRSUsageWindowProgress(value), true
+}
+
+func firstCRSUsageWindowRawNumber(raw map[string]any, keys ...string) (float64, bool) {
 	for _, key := range keys {
 		value, ok := raw[key]
 		if !ok {
 			continue
 		}
-		return clampCRSUsageWindowProgress(getFloatValue(value)), true
+		switch typed := value.(type) {
+		case float64:
+			return typed, true
+		case float32:
+			return float64(typed), true
+		case int:
+			return float64(typed), true
+		case int64:
+			return float64(typed), true
+		case int32:
+			return float64(typed), true
+		case string:
+			text := strings.TrimSpace(typed)
+			if text == "" {
+				continue
+			}
+			number, err := strconv.ParseFloat(text, 64)
+			if err == nil {
+				return number, true
+			}
+		}
 	}
 	return 0, false
 }

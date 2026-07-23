@@ -122,11 +122,13 @@ func TestNormalizeCRSRemoteAccountSnapshotUsesCodexUsageWindowsBeforeSessionWind
 		"codexUsage": map[string]any{
 			"primary": map[string]any{
 				"progress":      48,
+				"windowMinutes": 300,
 				"remainingTime": "2h 36m",
 				"resetAt":       "2026-04-20T18:00:00Z",
 			},
 			"secondary": map[string]any{
 				"progress":      82,
+				"windowMinutes": 10080,
 				"remainingText": "余 2 天",
 				"resetAt":       "2026-04-27T00:00:00Z",
 			},
@@ -163,6 +165,47 @@ func TestNormalizeCRSRemoteAccountSnapshotUsesCodexUsageWindowsBeforeSessionWind
 		Tone:          "warning",
 		Source:        "codex_usage",
 	}, windows[1])
+}
+
+func TestNormalizeCRSRemoteAccountSnapshotClassifiesPrimaryWeeklyAndSkipsEmptySecondary(t *testing.T) {
+	t.Parallel()
+
+	account := map[string]any{
+		"id":   "acct-codex-weekly",
+		"name": "Codex Weekly",
+		"codexUsage": map[string]any{
+			"primary": map[string]any{
+				"usedPercent":       54,
+				"windowMinutes":     10080,
+				"resetAfterSeconds": 5*24*60*60 + 14*60*60,
+				"remainingSeconds":  5*24*60*60 + 14*60*60,
+				"resetAt":           "2026-07-29T16:00:00Z",
+			},
+			"secondary": map[string]any{
+				"usedPercent":       0,
+				"windowMinutes":     0,
+				"resetAfterSeconds": 0,
+				"remainingSeconds":  0,
+				"resetAt":           "2026-07-23T02:32:31.314Z",
+			},
+		},
+	}
+
+	snapshot, err := normalizeCRSRemoteAccountSnapshot(8, "openai", account, nil, 1784773953)
+	require.NoError(t, err)
+
+	windows := decodeUsageWindowsForTest(t, snapshot.UsageWindowsJSON)
+	require.Equal(t, []model.CRSUsageWindow{
+		{
+			Key:           "primary",
+			Label:         "周限",
+			Progress:      54,
+			RemainingText: "5 天 14 小时",
+			ResetAt:       "2026-07-29T16:00:00Z",
+			Tone:          "info",
+			Source:        "codex_usage",
+		},
+	}, windows)
 }
 
 func TestNormalizeCRSRemoteAccountSnapshotUsesBalanceQuota(t *testing.T) {
