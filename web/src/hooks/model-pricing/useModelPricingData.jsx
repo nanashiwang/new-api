@@ -24,6 +24,11 @@ import { Modal } from '@douyinfe/semi-ui';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
 import { getQuotaPerUnit } from '../../helpers/quota';
+import {
+  resolveModelPricingCurrency,
+  resolveModelPricingRate,
+  resolveModelPricingSymbol,
+} from '../../helpers/modelPricingCurrency';
 
 const normalizeSubscriptionPlans = (items) => {
   if (!Array.isArray(items)) return [];
@@ -174,10 +179,16 @@ export const useModelPricingData = () => {
     () => statusState?.status?.custom_currency_symbol ?? '¤',
     [statusState],
   );
+  const quotaDisplayType = useMemo(
+    () => statusState?.status?.quota_display_type ?? 'USD',
+    [statusState],
+  );
 
   useEffect(() => {
-    setCurrency(showWithRecharge ? 'CNY' : 'USD');
-  }, [showWithRecharge]);
+    setCurrency(
+      resolveModelPricingCurrency({ showWithRecharge, quotaDisplayType }),
+    );
+  }, [showWithRecharge, quotaDisplayType]);
 
   // 可用套餐（过滤掉无限额度的）
   const availablePlans = useMemo(
@@ -334,24 +345,28 @@ export const useModelPricingData = () => {
     if (!Number.isFinite(numericUSDPrice) || numericUSDPrice <= 0) {
       return 0;
     }
-
-    if (!showWithRecharge) {
-      return numericUSDPrice;
-    }
-
-    if (priceConvertMode === 'package' && packageEffectiveRate != null) {
-      return numericUSDPrice * packageEffectiveRate;
-    }
-
-    return numericUSDPrice * priceRate;
+    const rate = resolveModelPricingRate({
+      showWithRecharge,
+      currency,
+      priceConvertMode,
+      priceRate,
+      usdExchangeRate,
+      packageEffectiveRate,
+      customExchangeRate,
+    });
+    return numericUSDPrice * rate;
   };
 
   const displayPrice = (usdPrice) => {
     const amount = convertDisplayPriceAmount(usdPrice);
-    const symbol = showWithRecharge ? '¥' : '$';
+    const symbol = resolveModelPricingSymbol(currency, customCurrencySymbol);
     return `${symbol}${amount.toFixed(3)}`;
   };
   displayPrice.toAmount = convertDisplayPriceAmount;
+  displayPrice.currencySymbol = resolveModelPricingSymbol(
+    currency,
+    customCurrencySymbol,
+  );
 
   const setModelsFormat = (models, groupRatio, vendorMap) => {
     for (let i = 0; i < models.length; i++) {

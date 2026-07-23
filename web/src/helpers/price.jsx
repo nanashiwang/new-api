@@ -68,7 +68,8 @@ const formatTokenUnitPrice = ({
       ? displayPrice.toAmount(priceUSD)
       : parseFloat(String(displayPrice(priceUSD)).replace(/[^0-9.]/g, ''));
   const numericValue = rawAmount / unitDivisor;
-  const symbol = getDisplayCurrencySymbol(currency);
+  const symbol =
+    displayPrice?.currencySymbol || getDisplayCurrencySymbol(currency);
   const formattedValue = Number.isFinite(numericValue)
     ? numericValue.toFixed(precision).replace(/\.?0+$/, '')
     : '0';
