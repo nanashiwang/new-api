@@ -130,3 +130,45 @@ func TestCacheGetRandomSatisfiedChannel_SlowTTFTStateDoesNotFilter(t *testing.T)
 		t.Fatalf("expected slow TTFT state not to filter channel 1, got %#v", got)
 	}
 }
+
+func TestCacheGetRandomSatisfiedChannel_NoMemoryCacheFallsBackAfterFilter(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	originDB, originLogDB := model.DB, model.LOG_DB
+	originMemoryCacheEnabled := common.MemoryCacheEnabled
+	model.DB, model.LOG_DB = db, db
+	common.MemoryCacheEnabled = false
+	t.Cleanup(func() {
+		model.DB, model.LOG_DB = originDB, originLogDB
+		common.MemoryCacheEnabled = originMemoryCacheEnabled
+	})
+	if err := db.AutoMigrate(&model.Channel{}, &model.Ability{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	high, low := int64(10), int64(1)
+	channels := []model.Channel{
+		{Id: 1, Name: "filtered-high", Status: common.ChannelStatusEnabled, AutoBan: common.GetPointer(1), Priority: &high},
+		{Id: 2, Name: "available-low", Status: common.ChannelStatusEnabled, AutoBan: common.GetPointer(1), Priority: &low},
+	}
+	if err := db.Create(&channels).Error; err != nil {
+		t.Fatalf("seed channels: %v", err)
+	}
+	abilities := []model.Ability{
+		{Group: "default", Model: "gpt-5.6-sol", ChannelId: 1, Enabled: true, Priority: &high, Weight: 100},
+		{Group: "default", Model: "gpt-5.6-sol", ChannelId: 2, Enabled: true, Priority: &low, Weight: 100},
+	}
+	if err := db.Create(&abilities).Error; err != nil {
+		t.Fatalf("seed abilities: %v", err)
+	}
+	got, err := model.GetRandomSatisfiedChannel("default", "gpt-5.6-sol", 0, nil, nil, func(channel *model.Channel) bool {
+		return channel.Id != 1
+	})
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	if got == nil || got.Id != 2 {
+		t.Fatalf("expected lower-priority channel 2, got %#v", got)
+	}
+}

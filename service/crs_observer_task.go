@@ -9,7 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 )
 
-const crsObserverSyncInterval = 10 * time.Minute
+const crsObserverSyncInterval = time.Minute
 
 var crsObserverSyncOnce sync.Once
 

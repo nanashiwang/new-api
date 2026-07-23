@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 
 	"gorm.io/gorm"
 )
@@ -52,6 +53,7 @@ var (
 	ErrCRSSiteTokenEmpty     = errors.New("crs_site:token_empty")
 	ErrCRSSiteHostInvalid    = errors.New("crs_site:host_invalid")
 	ErrCRSSiteDuplicateHost  = errors.New("crs_site:duplicate_host")
+	ErrCRSSiteInUse          = errors.New("crs_site:in_use")
 	ErrCRSSiteRequestFailure = errors.New("crs_site:request_failed")
 )
 
@@ -349,6 +351,16 @@ func PersistCRSSiteStats(id int, tokenEncrypted string, tokenExpiresAt int64, st
 func DeleteCRSSite(id int) error {
 	if id <= 0 {
 		return ErrCRSSiteNotFound
+	}
+	channels := make([]*Channel, 0)
+	if err := DB.Select("id", "setting").Find(&channels).Error; err != nil {
+		return err
+	}
+	for _, channel := range channels {
+		settings := dto.ChannelSettings{}
+		if channel.Setting != nil && common.Unmarshal([]byte(*channel.Setting), &settings) == nil && settings.CRSSiteID == id {
+			return ErrCRSSiteInUse
+		}
 	}
 	return DB.Delete(&CRSSite{}, id).Error
 }

@@ -132,6 +132,15 @@ func TestChannelSettingsValidateClientRestriction(t *testing.T) {
 	}
 }
 
+func TestChannelSettingsValidateCRSAutoManage(t *testing.T) {
+	if err := (ChannelSettings{CRSAutoManage: true}).Validate(); err == nil {
+		t.Fatal("expected site binding validation error")
+	}
+	if err := (ChannelSettings{CRSSiteID: 6, CRSPlatform: "openai-responses", CRSAutoManage: true}).Validate(); err != nil {
+		t.Fatalf("valid CRS settings rejected: %v", err)
+	}
+}
+
 func TestNormalizeClientRestrictionClients(t *testing.T) {
 	got := NormalizeClientRestrictionClients([]string{" codex-cli ", "", "codex-cli", "cursor"})
 	want := []string{"codex-cli", "cursor"}

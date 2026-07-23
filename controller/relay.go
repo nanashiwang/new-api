@@ -279,6 +279,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		logCRSMemoryPressureShortCircuit(c, channel, newAPIError)
+		service.RecordChannelModelCircuitFailure(channel, relayInfo.OriginModelName, newAPIError)
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
 		service.RecordUserScopedCircuitFailure(c, channel, newAPIError)
 
@@ -375,6 +376,17 @@ func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
 }
 
 func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (*model.Channel, *types.NewAPIError) {
+	if info.ChannelMeta == nil {
+		channelID := c.GetInt("channel_id")
+		if selected, err := model.CacheGetChannel(channelID); err == nil && selected != nil {
+			if service.IsChannelModelCircuitOpen(selected, retryParam.ModelName) {
+				retryParam.ExcludeChannels = appendUniqueInt(retryParam.ExcludeChannels, channelID)
+				info.ChannelMeta = &relaycommon.ChannelMeta{}
+			} else {
+				return selected, nil
+			}
+		}
+	}
 	if info.ChannelMeta == nil {
 		autoBan := c.GetBool("auto_ban")
 		autoBanInt := 1

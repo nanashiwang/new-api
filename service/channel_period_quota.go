@@ -92,20 +92,7 @@ func disablePeriodQuota(scope, scopeKey string, channelId int, periodEnd int64) 
 	if scope == periodQuotaScopeTag {
 		return model.AutoDisableChannelsByTagWithReason(scopeKey, reason, periodEnd)
 	}
-	channel, err := model.GetChannelById(channelId, true)
-	if err != nil {
-		return err
-	}
-	info := channel.GetOtherInfo()
-	info["status_reason"] = reason
-	info["status_time"] = common.GetTimestamp()
-	channel.SetOtherInfo(info)
-	model.SetPeriodQuotaMeta(channel, periodQuotaScopeChannel, scopeKey, periodEnd)
-	channel.Status = common.ChannelStatusAutoDisabled
-	if err := channel.SaveWithoutKey(); err != nil {
-		return err
-	}
-	return model.UpdateAbilityStatus(channel.Id, false)
+	return model.AutoDisableChannelForPeriodQuota(channelId, periodQuotaScopeChannel, scopeKey, periodEnd, reason)
 }
 
 func GetCurrentChannelPeriodQuotaUsage(channelId int) (*model.ChannelQuotaUsage, dto.QuotaPolicy, bool, error) {

@@ -180,7 +180,8 @@ func cacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 		filters = append(filters, clientFilter)
 	}
 	filters = append(filters, func(ch *model.Channel) bool {
-		return !IsChannelUnavailableForRequestContext(param.Ctx, ch)
+		return !IsChannelUnavailableForRequestContext(param.Ctx, ch) &&
+			!IsChannelModelCircuitOpen(ch, param.ModelName)
 	})
 	if IsCodexAutoReviewRequestModel(param.ModelName) {
 		filters = append(filters, func(ch *model.Channel) bool {

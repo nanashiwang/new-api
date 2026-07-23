@@ -327,6 +327,8 @@ func DeleteCRSSite(c *gin.Context) {
 	if err := model.DeleteCRSSite(id); err != nil {
 		if crsSiteNotFound(err) {
 			crsError(c, http.StatusNotFound, "site not found")
+		} else if errors.Is(err, model.ErrCRSSiteInUse) {
+			crsError(c, http.StatusConflict, "site is bound to channels")
 		} else {
 			crsError(c, http.StatusInternalServerError, err.Error())
 		}

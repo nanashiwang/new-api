@@ -224,6 +224,9 @@ func tryAffinityChannel(c *gin.Context, modelName string, usingGroup string, cli
 	if service.IsChannelUnavailableForRequestContext(c, preferred) {
 		return nil, "", false
 	}
+	if service.IsChannelModelCircuitOpen(preferred, modelName) {
+		return nil, "", false
+	}
 	if usingGroup == "auto" {
 		userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
 		autoGroups := service.GetUserAutoGroup(userGroup)
@@ -264,7 +267,7 @@ func selectChannelForRequest(c *gin.Context, modelName string, usingGroup string
 		if service.IsCodexAutoReviewRequestModel(modelName) && !constant.IsCodexAutoReviewCompatibleChannelType(channel.Type) {
 			return nil, usingGroup, types.NewErrorWithStatusCode(errors.New("codex-auto-review only supports codex or openai channel"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
 		}
-		if service.IsChannelUnavailableForRequest(channel) {
+		if service.IsChannelUnavailableForRequest(channel) || service.IsChannelModelCircuitOpen(channel, modelName) {
 			excludeChannels = appendUniqueChannelID(excludeChannels, channel.Id)
 			common.DeleteContextKey(c, constant.ContextKeyTokenSpecificChannelId)
 		} else {

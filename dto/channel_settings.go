@@ -122,6 +122,9 @@ type ChannelSettings struct {
 	ClientRestrictionMode          ClientRestrictionMode          `json:"client_restriction_mode,omitempty"`
 	ClientRestrictionClients       []string                       `json:"client_restriction_clients,omitempty"`
 	QuotaPolicy                    QuotaPolicy                    `json:"quota_policy,omitempty"`
+	CRSSiteID                      int                            `json:"crs_site_id,omitempty"`
+	CRSPlatform                    string                         `json:"crs_platform,omitempty"`
+	CRSAutoManage                  bool                           `json:"crs_auto_manage,omitempty"`
 	// MaxConcurrency 覆盖该渠道的在途并发上限（>0 时生效）。0/缺省表示沿用全局
 	// channel_concurrency_setting.default_max_concurrency。仅在全局开关开启时才起作用。
 	MaxConcurrency int `json:"max_concurrency,omitempty"`
@@ -142,6 +145,15 @@ func (s ChannelSettings) Validate() error {
 	}
 	if s.MaxConcurrency < 0 {
 		return fmt.Errorf("max_concurrency cannot be negative")
+	}
+	if s.CRSSiteID < 0 {
+		return fmt.Errorf("crs_site_id cannot be negative")
+	}
+	if s.CRSAutoManage && s.CRSSiteID <= 0 {
+		return fmt.Errorf("crs_auto_manage requires crs_site_id")
+	}
+	if s.CRSAutoManage && s.CRSPlatform != "openai" && s.CRSPlatform != "openai-responses" {
+		return fmt.Errorf("crs_auto_manage requires a valid crs_platform")
 	}
 	return nil
 }

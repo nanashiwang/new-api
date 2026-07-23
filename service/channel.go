@@ -26,6 +26,14 @@ func DisableChannel(channelError types.ChannelError, reason string) {
 		common.SysLog(fmt.Sprintf("通道「%s」（#%d）未启用自动禁用功能，跳过禁用操作", channelError.ChannelName, channelError.ChannelId))
 		return
 	}
+	if channel, err := model.GetChannelById(channelError.ChannelId, true); err == nil {
+		if claimed, claimErr := model.ClaimCRSAutoDisabledChannel(channel, reason); claimErr != nil {
+			common.SysError(fmt.Sprintf("claim CRS auto-disabled channel failed: channel_id=%d err=%v", channelError.ChannelId, claimErr))
+		} else if claimed {
+			common.SysLog(fmt.Sprintf("通道「%s」（#%d）存在新的自动禁用原因，已取消 CRS 自动恢复所有权", channelError.ChannelName, channelError.ChannelId))
+			return
+		}
+	}
 
 	if err := model.ClearChannelPreDisable(channelError.ChannelId, channelError.UsingKey); err != nil {
 		common.SysError(fmt.Sprintf("clear channel pending disable failed: channel_id=%d err=%v", channelError.ChannelId, err))

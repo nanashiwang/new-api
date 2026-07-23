@@ -493,7 +493,26 @@ const EditChannelModal = (props) => {
     system_prompt: '',
     client_restriction_mode: '',
     client_restriction_clients: [],
+    crs_site_id: 0,
+    crs_platform: 'openai-responses',
+    crs_auto_manage: false,
   });
+  const [crsSites, setCrsSites] = useState([]);
+
+  useEffect(() => {
+    if (!props.visible) return;
+    let cancelled = false;
+    API.get('/api/crs/sites')
+      .then((res) => {
+        if (!cancelled && res.data?.success) {
+          setCrsSites(res.data.data || []);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [props.visible]);
   const showApiConfigCard = true; // 控制是否显示 API 配置卡片
   const getInitValues = () => ({ ...originInputs });
 
@@ -764,6 +783,10 @@ const EditChannelModal = (props) => {
             parsedSettings.client_restriction_mode || '';
           data.client_restriction_clients =
             parsedSettings.client_restriction_clients || [];
+          data.crs_site_id = Number(parsedSettings.crs_site_id) || 0;
+          data.crs_platform =
+            parsedSettings.crs_platform || 'openai-responses';
+          data.crs_auto_manage = parsedSettings.crs_auto_manage === true;
           const qp = parsedSettings.quota_policy || {};
           data.quota_policy_enabled = !!qp.enabled;
           data.quota_policy_period = qp.period || 'day';
@@ -784,6 +807,9 @@ const EditChannelModal = (props) => {
           data.max_concurrency = 0;
           data.client_restriction_mode = '';
           data.client_restriction_clients = [];
+          data.crs_site_id = 0;
+          data.crs_platform = 'openai-responses';
+          data.crs_auto_manage = false;
           data.quota_policy_enabled = false;
           data.quota_policy_period = 'day';
           data.quota_policy_quota_limit = 0;
@@ -801,6 +827,9 @@ const EditChannelModal = (props) => {
         data.max_concurrency = 0;
         data.client_restriction_mode = '';
         data.client_restriction_clients = [];
+        data.crs_site_id = 0;
+        data.crs_platform = 'openai-responses';
+        data.crs_auto_manage = false;
         data.quota_policy_enabled = false;
         data.quota_policy_period = 'day';
         data.quota_policy_quota_limit = 0;
@@ -927,6 +956,9 @@ const EditChannelModal = (props) => {
         system_prompt: data.system_prompt,
         system_prompt_override: data.system_prompt_override || false,
         max_concurrency: data.max_concurrency || 0,
+        crs_site_id: data.crs_site_id || 0,
+        crs_platform: data.crs_platform || 'openai-responses',
+        crs_auto_manage: data.crs_auto_manage || false,
       });
       initialModelsRef.current = (data.models || [])
         .map((model) => (model || '').trim())
@@ -1374,6 +1406,9 @@ const EditChannelModal = (props) => {
       system_prompt_override: false,
       client_restriction_mode: '',
       client_restriction_clients: [],
+      crs_site_id: 0,
+      crs_platform: 'openai-responses',
+      crs_auto_manage: false,
     });
     // 重置密钥模式状态
     setKeyMode('append');
@@ -1745,6 +1780,10 @@ const EditChannelModal = (props) => {
       showError(t('白名单模式至少选择一个客户端'));
       return;
     }
+    if (localInputs.crs_auto_manage && !(Number(localInputs.crs_site_id) > 0)) {
+      showError(t('开启 CRS 自动管理前请选择 CRS 站点'));
+      return;
+    }
 
     // 生成渠道额外设置JSON
     const channelExtraSettings = {
@@ -1761,6 +1800,9 @@ const EditChannelModal = (props) => {
       max_concurrency: Math.max(0, Number(localInputs.max_concurrency) || 0),
       client_restriction_mode: localInputs.client_restriction_mode || '',
       client_restriction_clients: normalizedClientRestrictionClients,
+      crs_site_id: Math.max(0, Number(localInputs.crs_site_id) || 0),
+      crs_platform: localInputs.crs_platform || 'openai-responses',
+      crs_auto_manage: localInputs.crs_auto_manage === true,
       quota_policy: {
         enabled: !!localInputs.quota_policy_enabled,
         period: localInputs.quota_policy_period || 'day',
@@ -4457,6 +4499,52 @@ const EditChannelModal = (props) => {
                       placeholder={t('0 表示使用全局默认')}
                       extraText={t(
                         '该渠道的在途并发上限，0 表示使用全局默认值。需在「运营设置」开启渠道并发控制后生效；超过上限时请求会切换到其它未满渠道，全部满时进入有界等待或返回 503',
+                      )}
+                    />
+
+                    <Form.Select
+                      field='crs_site_id'
+                      label={t('绑定 CRS 站点')}
+                      placeholder={t('不绑定')}
+                      optionList={crsSites.map((site) => ({
+                        label: site.name || site.host,
+                        value: site.id,
+                      }))}
+                      showClear
+                      filter
+                      onChange={(value) => {
+                        const siteId = Number(value) || 0;
+                        handleChannelSettingsChange('crs_site_id', siteId);
+                        if (!siteId) {
+                          handleChannelSettingsChange('crs_auto_manage', false);
+                        }
+                      }}
+                      extraText={t('显式绑定账号池，避免按域名猜测渠道归属')}
+                    />
+
+                    <Form.Select
+                      field='crs_platform'
+                      label={t('CRS 账号池类型')}
+                      optionList={[
+                        { label: 'OpenAI Responses', value: 'openai-responses' },
+                        { label: 'OpenAI', value: 'openai' },
+                      ]}
+                      onChange={(value) =>
+                        handleChannelSettingsChange('crs_platform', value)
+                      }
+                    />
+
+                    <Form.Switch
+                      field='crs_auto_manage'
+                      label={t('CRS 自动禁用与恢复')}
+                      checkedText={t('开')}
+                      uncheckedText={t('关')}
+                      disabled={!inputs.crs_site_id}
+                      onChange={(value) =>
+                        handleChannelSettingsChange('crs_auto_manage', value)
+                      }
+                      extraText={t(
+                        '账号池连续两次不可用时禁用，连续两次恢复后仅恢复由 CRS 禁用的渠道',
                       )}
                     />
 

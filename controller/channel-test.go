@@ -1164,7 +1164,12 @@ func testAllChannels(notify bool) error {
 			}
 
 			// enable channel
-			if !isChannelEnabled && service.ShouldEnableChannel(newAPIError, channel.Status) {
+			if newAPIError == nil && model.IsCRSAutoDisabledChannel(channel) {
+				if err := model.MarkCRSRecoveryProbeSuccess(channel.Id, common.GetTimestamp()); err != nil {
+					common.SysError(fmt.Sprintf("mark CRS recovery probe failed: channel=%d err=%v", channel.Id, err))
+				}
+			}
+			if !isChannelEnabled && service.ShouldEnableChannel(newAPIError, channel.Status) && !model.IsCRSAutoDisabledChannel(channel) {
 				service.EnableChannel(channel.Id, common.GetContextKeyString(result.context, constant.ContextKeyChannelKey), channel.Name)
 			}
 

@@ -698,28 +698,41 @@ func accountDueForLowBalanceCheck(account ProfitBoardUpstreamAccount, now int64,
 }
 
 func autoDisableProfitBoardLowBalanceChannel(channelId int, reason string) (bool, error) {
-	channel, err := GetChannelById(channelId, true)
-	if err != nil {
-		return false, err
+	for attempt := 0; attempt < 2; attempt++ {
+		channel, err := GetChannelById(channelId, true)
+		if err != nil {
+			return false, err
+		}
+		if channel.Status != common.ChannelStatusEnabled {
+			claimed, err := ClaimCRSAutoDisabledChannel(channel, reason)
+			if err != nil || claimed {
+				return false, err
+			}
+			continue
+		}
+		originalOtherInfo := channel.OtherInfo
+		info := channel.GetOtherInfo()
+		info["status_reason"] = reason
+		info["status_time"] = common.GetTimestamp()
+		channel.SetOtherInfo(info)
+		result := DB.Model(&Channel{}).
+			Where("id = ? AND status = ? AND other_info = ?", channel.Id, common.ChannelStatusEnabled, originalOtherInfo).
+			Updates(map[string]any{"status": common.ChannelStatusAutoDisabled, "other_info": channel.OtherInfo})
+		if result.Error != nil {
+			return false, result.Error
+		}
+		if result.RowsAffected != 1 {
+			continue
+		}
+		if err := UpdateAbilityStatus(channel.Id, false); err != nil {
+			common.SysLog(fmt.Sprintf("failed to update ability status: channel_id=%d, error=%v", channel.Id, err))
+		}
+		if common.MemoryCacheEnabled {
+			CacheUpdateChannelStatus(channel.Id, common.ChannelStatusAutoDisabled)
+		}
+		return true, nil
 	}
-	if channel.Status != common.ChannelStatusEnabled {
-		return false, nil
-	}
-	info := channel.GetOtherInfo()
-	info["status_reason"] = reason
-	info["status_time"] = common.GetTimestamp()
-	channel.SetOtherInfo(info)
-	channel.Status = common.ChannelStatusAutoDisabled
-	if err := channel.SaveWithoutKey(); err != nil {
-		return false, err
-	}
-	if err := UpdateAbilityStatus(channel.Id, false); err != nil {
-		common.SysLog(fmt.Sprintf("failed to update ability status: channel_id=%d, error=%v", channel.Id, err))
-	}
-	if common.MemoryCacheEnabled {
-		CacheUpdateChannelStatus(channel.Id, common.ChannelStatusAutoDisabled)
-	}
-	return true, nil
+	return false, nil
 }
 
 func collectProfitBoardLowBalanceBoundChannels(accountID int) (map[int]*profitBoardLowBalanceBoundChannel, error) {
@@ -848,9 +861,6 @@ func checkProfitBoardUpstreamAccountLowBalance(accountID int, force bool) (*Prof
 	disabledCount := 0
 	for _, channel := range channels {
 		result.MatchedChannelIDs = append(result.MatchedChannelIDs, channel.Id)
-		if channel.Status != common.ChannelStatusEnabled {
-			continue
-		}
 		disabled, disableErr := autoDisableProfitBoardLowBalanceChannel(channel.Id, reason)
 		if disableErr != nil {
 			return nil, disableErr

@@ -10,6 +10,7 @@ import (
 	neturl "net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -17,6 +18,8 @@ import (
 )
 
 var errCRSObserverEndpointUnsupported = errors.New("crs_observer:endpoint_unsupported")
+
+var crsObserverSiteLocks sync.Map
 
 const crsObserverUsageRefreshTimeout = 45 * time.Second
 
@@ -50,10 +53,19 @@ type CRSObserverSummary struct {
 	EmptyQuotaCount  int `json:"empty_quota_count"`
 }
 
+type crsObserverFetchResult struct {
+	Snapshots        []*model.CRSAccountSnapshot
+	PlatformComplete map[string]bool
+}
+
 func SyncCRSObserverSite(site *model.CRSSite) error {
 	if site == nil {
 		return errors.New("crs_observer:nil_site")
 	}
+	lockValue, _ := crsObserverSiteLocks.LoadOrStore(site.Id, &sync.Mutex{})
+	lock := lockValue.(*sync.Mutex)
+	lock.Lock()
+	defer lock.Unlock()
 
 	_, err := RefreshCRSSite(site)
 	if err != nil {
@@ -66,9 +78,19 @@ func SyncCRSObserverSite(site *model.CRSSite) error {
 		return err
 	}
 
-	snapshots, fetchErr := fetchCRSObserverSnapshots(site, token, now)
-	if replaceErr := model.ReplaceCRSAccountSnapshots(site.Id, snapshots); replaceErr != nil {
-		return replaceErr
+	result, fetchErr := fetchCRSObserverSnapshots(site, token, now)
+	if fetchErr == nil {
+		if replaceErr := model.ReplaceCRSAccountSnapshots(site.Id, result.Snapshots); replaceErr != nil {
+			return replaceErr
+		}
+	}
+	for platform, complete := range result.PlatformComplete {
+		if !complete {
+			continue
+		}
+		if reconcileErr := ReconcileCRSManagedChannels(site.Id, platform, result.Snapshots, now); reconcileErr != nil {
+			return reconcileErr
+		}
 	}
 	if fetchErr != nil {
 		return fetchErr
@@ -116,10 +138,14 @@ func BuildCRSObserverSummary(sites []*model.CRSSite, accounts []*model.CRSAccoun
 	return summary
 }
 
-func fetchCRSObserverSnapshots(site *model.CRSSite, token string, syncedAt int64) ([]*model.CRSAccountSnapshot, error) {
+func fetchCRSObserverSnapshots(site *model.CRSSite, token string, syncedAt int64) (crsObserverFetchResult, error) {
 	snapshots := make([]*model.CRSAccountSnapshot, 0)
 	warnings := make([]string, 0)
 	currentToken := token
+	platformComplete := map[string]bool{
+		"openai":           false,
+		"openai-responses": false,
+	}
 
 	for _, endpoint := range crsRemoteAccountEndpoints {
 		accounts, refreshed, err := fetchCRSRemoteAccountList(site, currentToken, endpoint.Path)
@@ -132,6 +158,9 @@ func fetchCRSObserverSnapshots(site *model.CRSSite, token string, syncedAt int64
 			}
 			warnings = append(warnings, fmt.Sprintf("%s: %v", endpoint.Platform, err))
 			continue
+		}
+		if isCRSOpenAIPlatform(endpoint.Platform) {
+			platformComplete[endpoint.Platform] = true
 		}
 		if endpoint.Platform == "openai" {
 			usageByAccount, usageRefreshed, usageErr := fetchCRSRemoteOpenAIUsage(site, currentToken)
@@ -159,6 +188,9 @@ func fetchCRSObserverSnapshots(site *model.CRSSite, token string, syncedAt int64
 
 			snapshot, normalizeErr := normalizeCRSRemoteAccountSnapshot(site.Id, endpoint.Platform, account, balancePayload, syncedAt)
 			if normalizeErr != nil {
+				if isCRSOpenAIPlatform(endpoint.Platform) {
+					platformComplete[endpoint.Platform] = false
+				}
 				warnings = append(warnings, fmt.Sprintf("%s:%s: %v", endpoint.Platform, getStringValue(account["id"]), normalizeErr))
 				continue
 			}
@@ -170,9 +202,13 @@ func fetchCRSObserverSnapshots(site *model.CRSSite, token string, syncedAt int64
 	}
 
 	if len(warnings) == 0 {
-		return snapshots, nil
+		return crsObserverFetchResult{Snapshots: snapshots, PlatformComplete: platformComplete}, nil
 	}
-	return snapshots, errors.New(strings.Join(warnings, "; "))
+	return crsObserverFetchResult{Snapshots: snapshots, PlatformComplete: platformComplete}, errors.New(strings.Join(warnings, "; "))
+}
+
+func isCRSOpenAIPlatform(platform string) bool {
+	return platform == "openai" || platform == "openai-responses"
 }
 
 func fetchCRSRemoteAccountList(site *model.CRSSite, token, path string) ([]map[string]any, string, error) {
@@ -323,7 +359,7 @@ func fetchCRSAuthJSONRequestOnce(baseURL, token, method, path string, body any, 
 		return nil, err
 	}
 
-	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusMethodNotAllowed {
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
 		return nil, fmt.Errorf("%w: %s", errCRSObserverEndpointUnsupported, strings.TrimSpace(string(raw)))
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {

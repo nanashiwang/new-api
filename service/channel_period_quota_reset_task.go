@@ -89,12 +89,8 @@ func recoverPeriodQuotaUsage(usage model.ChannelQuotaUsage) bool {
 		if err != nil || !shouldRecoverPeriodQuotaChannel(ch, usage.PeriodEnd) {
 			return false
 		}
-		ch.Status = common.ChannelStatusEnabled
-		model.ClearPeriodQuotaMeta(ch)
-		if err := ch.SaveWithoutKey(); err != nil {
-			return false
-		}
-		return model.UpdateAbilityStatus(ch.Id, true) == nil
+		recovered, err := model.RecoverPeriodQuotaChannel(ch, usage.PeriodEnd)
+		return err == nil && recovered
 	}
 	if usage.Scope == periodQuotaScopeTag {
 		channels, err := model.GetChannelsByTag(usage.ScopeKey, false, true)
@@ -106,14 +102,10 @@ func recoverPeriodQuotaUsage(usage model.ChannelQuotaUsage) bool {
 			if !shouldRecoverPeriodQuotaChannel(ch, usage.PeriodEnd) {
 				continue
 			}
-			ch.Status = common.ChannelStatusEnabled
-			model.ClearPeriodQuotaMeta(ch)
-			if ch.SaveWithoutKey() == nil {
+			recovered, recoverErr := model.RecoverPeriodQuotaChannel(ch, usage.PeriodEnd)
+			if recoverErr == nil && recovered {
 				ok = true
 			}
-		}
-		if ok {
-			_ = model.UpdateAbilityStatusByTag(usage.ScopeKey, true)
 		}
 		return ok
 	}

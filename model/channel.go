@@ -793,17 +793,11 @@ func AutoDisableChannelsByTagWithReason(tag, reason string, periodEnd int64) err
 		if channel == nil {
 			continue
 		}
-		info := channel.GetOtherInfo()
-		info["status_reason"] = reason
-		info["status_time"] = common.GetTimestamp()
-		channel.SetOtherInfo(info)
-		SetPeriodQuotaMeta(channel, "tag", tag, periodEnd)
-		channel.Status = common.ChannelStatusAutoDisabled
-		if err := channel.SaveWithoutKey(); err != nil {
+		if err := AutoDisableChannelForPeriodQuota(channel.Id, "tag", tag, periodEnd, reason); err != nil {
 			return err
 		}
 	}
-	return UpdateAbilityStatusByTag(tag, false)
+	return nil
 }
 
 func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *string, group *string, priority *int64, weight *uint, autoBan *int, paramOverride *string, headerOverride *string, baseURL *string) error {
@@ -974,7 +968,15 @@ func (channel *Channel) ValidateSettings() error {
 			return err
 		}
 	}
-	return channelParams.Validate()
+	if err := channelParams.Validate(); err != nil {
+		return err
+	}
+	if channelParams.CRSAutoManage {
+		if _, err := GetCRSSiteByID(channelParams.CRSSiteID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (channel *Channel) GetSetting() dto.ChannelSettings {
