@@ -154,3 +154,35 @@ func TestResponseOpenAIResponses2Claude_MarksUnavailableWhenNoSourcesExist(t *te
 	require.Equal(t, "web_search_tool_result", claudeResp.Content[1].Type)
 	require.Equal(t, "unavailable", claudeResp.Content[1].ErrorCode)
 }
+
+func TestResponseOpenAIResponses2Claude_SanitizesShutdownApprovalToolCall(t *testing.T) {
+	t.Parallel()
+
+	resp := &dto.OpenAIResponsesResponse{
+		ID:    "resp_shutdown",
+		Model: "gpt-5.6-sol",
+		Output: []dto.ResponsesOutput{
+			{
+				Type:      "function_call",
+				ID:        "fc_shutdown",
+				CallId:    "call_shutdown",
+				Name:      "SendMessage",
+				Arguments: dto.ResponsesArguments(`{"type":"shutdown_response","approve":true,"reason":"done","message":{"type":"shutdown_response","approve":true,"reason":"done"}}`),
+			},
+		},
+	}
+
+	claudeResp := ResponseOpenAIResponses2Claude(resp, "msg_shutdown")
+	require.NotNil(t, claudeResp)
+	require.Equal(t, "tool_use", claudeResp.StopReason)
+	require.Len(t, claudeResp.Content, 1)
+	require.Equal(t, "tool_use", claudeResp.Content[0].Type)
+	require.Equal(t, "call_shutdown", claudeResp.Content[0].Id)
+
+	input, ok := claudeResp.Content[0].Input.(map[string]any)
+	require.True(t, ok)
+	require.NotContains(t, input, "reason")
+	message, ok := input["message"].(map[string]any)
+	require.True(t, ok)
+	require.NotContains(t, message, "reason")
+}

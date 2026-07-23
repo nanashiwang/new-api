@@ -216,6 +216,8 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	toolCallIndexByID := make(map[string]int)
 	toolCallNameByID := make(map[string]string)
 	toolCallArgsByID := make(map[string]string)
+	// SendMessage needs complete JSON before conditional Claude fields can be repaired.
+	toolCallBufferedArgsByID := make(map[string]string)
 	toolCallNameSent := make(map[string]bool)
 	toolCallCanonicalIDByItemID := make(map[string]string)
 	hasSentReasoningSummary := false
@@ -502,7 +504,10 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			itemID := strings.TrimSpace(streamResp.Item.ID)
 			callID := strings.TrimSpace(streamResp.Item.CallId)
 			if callID == "" {
-				callID = itemID
+				callID = toolCallCanonicalIDByItemID[itemID]
+				if callID == "" {
+					callID = itemID
+				}
 			}
 			if itemID != "" && callID != "" {
 				toolCallCanonicalIDByItemID[itemID] = callID
@@ -510,9 +515,27 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			name := strings.TrimSpace(streamResp.Item.Name)
 			if name != "" {
 				toolCallNameByID[callID] = name
+			} else {
+				name = toolCallNameByID[callID]
 			}
 
 			newArgs := streamResp.Item.ArgumentsString()
+			isClaudeSendMessage := info.RelayFormat == types.RelayFormatClaude &&
+				strings.EqualFold(name, "SendMessage")
+			if isClaudeSendMessage && streamResp.Type == dto.ResponsesOutputTypeItemAdded {
+				toolCallBufferedArgsByID[callID] += newArgs
+				if !sendToolCallDelta(callID, name, "") {
+					return false
+				}
+				break
+			}
+			if isClaudeSendMessage {
+				if newArgs == "" {
+					newArgs = toolCallBufferedArgsByID[callID]
+				}
+				newArgs = service.SanitizeClaudeToolArguments(name, newArgs)
+				delete(toolCallBufferedArgsByID, callID)
+			}
 			prevArgs := toolCallArgsByID[callID]
 			argsDelta := ""
 			if newArgs != "" {
@@ -535,6 +558,11 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 				callID = itemID
 			}
 			if callID == "" {
+				break
+			}
+			name := toolCallNameByID[callID]
+			if info.RelayFormat == types.RelayFormatClaude && strings.EqualFold(name, "SendMessage") {
+				toolCallBufferedArgsByID[callID] += streamResp.Delta
 				break
 			}
 			toolCallArgsByID[callID] += streamResp.Delta

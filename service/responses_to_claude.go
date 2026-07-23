@@ -21,6 +21,12 @@ func ResponseOpenAIResponses2Claude(resp *dto.OpenAIResponsesResponse, id string
 
 	contents := buildClaudeContentsFromResponses(resp)
 	stopReason := stopReasonOpenAI2Claude("stop")
+	for _, content := range contents {
+		if content.Type == "tool_use" {
+			stopReason = "tool_use"
+			break
+		}
+	}
 	if stopReason == "null" || stopReason == "" {
 		stopReason = "end_turn"
 	}
@@ -210,6 +216,24 @@ func buildClaudeContentsFromResponses(resp *dto.OpenAIResponsesResponse) []dto.C
 				resultBlock.ErrorCode = "unavailable"
 			}
 			contents = append(contents, resultBlock)
+		case "function_call":
+			arguments := out.ArgumentsString()
+			var input any = map[string]any{}
+			if arguments != "" {
+				if err := common.Unmarshal([]byte(arguments), &input); err != nil {
+					input = arguments
+				}
+			}
+			toolUseID := strings.TrimSpace(out.CallId)
+			if toolUseID == "" {
+				toolUseID = strings.TrimSpace(out.ID)
+			}
+			contents = append(contents, dto.ClaudeMediaMessage{
+				Type:  "tool_use",
+				Id:    toolUseID,
+				Name:  out.Name,
+				Input: SanitizeClaudeToolInput(out.Name, input),
+			})
 		case "message":
 			if out.Role != "" && out.Role != "assistant" {
 				continue

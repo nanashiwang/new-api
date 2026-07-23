@@ -747,7 +747,7 @@ func ResponseOpenAI2Claude(openAIResponse *dto.OpenAITextResponse, info *relayco
 				claudeContent.Name = toolUse.Function.Name
 				var mapParams map[string]interface{}
 				if err := common.Unmarshal([]byte(toolUse.Function.Arguments), &mapParams); err == nil {
-					claudeContent.Input = mapParams
+					claudeContent.Input = SanitizeClaudeToolInput(toolUse.Function.Name, mapParams)
 				} else {
 					claudeContent.Input = toolUse.Function.Arguments
 				}

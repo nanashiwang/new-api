@@ -181,6 +181,73 @@ func TestOaiResponsesToChatStreamHandler_ClaudeWebSearchEmitsAnthropicBlocks(t *
 	require.Contains(t, responseBody, `"web_search_requests":1`)
 }
 
+func TestOaiResponsesToChatStreamHandler_ClaudeSanitizesShutdownApproval(t *testing.T) {
+	setResponsesStreamTestTimeout(t)
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	arguments := `{"type":"shutdown_response","approve":true,"reason":"done","message":{"type":"shutdown_response","approve":true,"reason":"done"}}`
+	body := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_shutdown","model":"gpt-5.6-sol","created_at":1700000000}}`,
+		`data: {"type":"response.output_item.added","item":{"type":"function_call","id":"fc_shutdown","call_id":"call_shutdown","name":"SendMessage"}}`,
+		`data: {"type":"response.function_call_arguments.delta","item_id":"fc_shutdown","delta":"{\"type\":\"shutdown_response\",\"approve\":true,"}`,
+		`data: {"type":"response.function_call_arguments.delta","item_id":"fc_shutdown","delta":"\"reason\":\"done\"}"}`,
+		`data: {"type":"response.output_item.done","item":{"type":"function_call","id":"fc_shutdown","call_id":"call_shutdown","arguments":` + mustJSONQuote(t, arguments) + `}}`,
+		`data: {"type":"response.completed","response":{"id":"resp_shutdown","model":"gpt-5.6-sol","status":"completed","usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}}`,
+		`data: [DONE]`,
+	}, "\n")
+
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type": []string{"text/event-stream"},
+		},
+		Body: io.NopCloser(strings.NewReader(body)),
+	}
+
+	usage, relayErr := OaiResponsesToChatStreamHandler(c, &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "gpt-5.6-sol",
+		},
+	}, resp)
+	require.Nil(t, relayErr)
+	require.NotNil(t, usage)
+
+	var streamedArguments strings.Builder
+	for _, line := range strings.Split(recorder.Body.String(), "\n") {
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if !strings.HasPrefix(strings.TrimSpace(line), "data:") || data == "" {
+			continue
+		}
+		var event map[string]any
+		if common.Unmarshal([]byte(data), &event) != nil {
+			continue
+		}
+		delta, _ := event["delta"].(map[string]any)
+		partialJSON, _ := delta["partial_json"].(string)
+		streamedArguments.WriteString(partialJSON)
+	}
+
+	var decoded map[string]any
+	require.NoError(t, common.Unmarshal([]byte(streamedArguments.String()), &decoded), recorder.Body.String())
+	require.NotContains(t, decoded, "reason")
+	message, ok := decoded["message"].(map[string]any)
+	require.True(t, ok)
+	require.NotContains(t, message, "reason")
+	require.Contains(t, recorder.Body.String(), `"stop_reason":"tool_use"`)
+}
+
+func mustJSONQuote(t *testing.T, value string) string {
+	t.Helper()
+	encoded, err := common.Marshal(value)
+	require.NoError(t, err)
+	return string(encoded)
+}
+
 func TestOaiResponsesToChatStreamHandler_ReturnsIncompleteError(t *testing.T) {
 	t.Parallel()
 	setResponsesStreamTestTimeout(t)
