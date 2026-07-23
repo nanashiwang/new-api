@@ -10,14 +10,21 @@ assert.equal(
     showWithRecharge: true,
     quotaDisplayType: 'CUSTOM',
   }),
-  'CUSTOM',
+  'CNY',
+);
+assert.equal(
+  resolveModelPricingCurrency({
+    showWithRecharge: false,
+    quotaDisplayType: 'USD',
+  }),
+  'USD',
 );
 assert.equal(
   resolveModelPricingCurrency({
     showWithRecharge: false,
     quotaDisplayType: 'CUSTOM',
   }),
-  'USD',
+  'CUSTOM',
 );
 assert.equal(
   resolveModelPricingCurrency({
@@ -30,14 +37,13 @@ assert.equal(
 assert.equal(
   resolveModelPricingRate({
     showWithRecharge: true,
-    currency: 'CUSTOM',
+    currency: 'CNY',
     priceConvertMode: 'recharge',
     priceRate: 7.2,
-    usdExchangeRate: 7.2,
     packageEffectiveRate: null,
     customExchangeRate: 12.5,
   }),
-  12.5,
+  7.2,
 );
 assert.equal(
   resolveModelPricingRate({
@@ -45,7 +51,6 @@ assert.equal(
     currency: 'CNY',
     priceConvertMode: 'package',
     priceRate: 7.2,
-    usdExchangeRate: 7.2,
     packageEffectiveRate: 6.4,
     customExchangeRate: 12.5,
   }),
@@ -53,27 +58,14 @@ assert.equal(
 );
 assert.equal(
   resolveModelPricingRate({
-    showWithRecharge: true,
-    currency: 'CUSTOM',
-    priceConvertMode: 'package',
-    priceRate: 7.2,
-    usdExchangeRate: 7.2,
-    packageEffectiveRate: 6.4,
-    customExchangeRate: 12.5,
-  }),
-  (6.4 * 12.5) / 7.2,
-);
-assert.equal(
-  resolveModelPricingRate({
-    showWithRecharge: true,
+    showWithRecharge: false,
     currency: 'CUSTOM',
     priceConvertMode: 'recharge',
     priceRate: 6.5,
-    usdExchangeRate: 7.2,
     packageEffectiveRate: null,
     customExchangeRate: 12.5,
   }),
-  (6.5 * 12.5) / 7.2,
+  12.5,
 );
 assert.equal(
   resolveModelPricingRate({
@@ -81,7 +73,6 @@ assert.equal(
     currency: 'USD',
     priceConvertMode: 'recharge',
     priceRate: 7.2,
-    usdExchangeRate: 7.2,
     packageEffectiveRate: null,
     customExchangeRate: 12.5,
   }),
@@ -89,27 +80,14 @@ assert.equal(
 );
 assert.equal(
   resolveModelPricingRate({
-    showWithRecharge: true,
+    showWithRecharge: false,
     currency: 'CUSTOM',
     priceConvertMode: 'recharge',
     priceRate: 7.2,
-    usdExchangeRate: 7.2,
     packageEffectiveRate: null,
     customExchangeRate: 0,
   }),
   1,
-);
-assert.equal(
-  resolveModelPricingRate({
-    showWithRecharge: true,
-    currency: 'CUSTOM',
-    priceConvertMode: 'recharge',
-    priceRate: 7.2,
-    usdExchangeRate: 0,
-    packageEffectiveRate: null,
-    customExchangeRate: 12.5,
-  }),
-  12.5,
 );
 
 assert.equal(resolveModelPricingSymbol('CUSTOM', 'G'), 'G');

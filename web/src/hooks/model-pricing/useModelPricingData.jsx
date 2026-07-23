@@ -350,7 +350,6 @@ export const useModelPricingData = () => {
       currency,
       priceConvertMode,
       priceRate,
-      usdExchangeRate,
       packageEffectiveRate,
       customExchangeRate,
     });

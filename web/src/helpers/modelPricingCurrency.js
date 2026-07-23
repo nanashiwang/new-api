@@ -26,8 +26,8 @@ export const resolveModelPricingCurrency = ({
   showWithRecharge,
   quotaDisplayType,
 }) => {
-  if (!showWithRecharge) return 'USD';
-  return quotaDisplayType === 'CUSTOM' ? 'CUSTOM' : 'CNY';
+  if (showWithRecharge) return 'CNY';
+  return quotaDisplayType === 'CUSTOM' ? 'CUSTOM' : 'USD';
 };
 
 export const resolveModelPricingRate = ({
@@ -35,24 +35,17 @@ export const resolveModelPricingRate = ({
   currency,
   priceConvertMode,
   priceRate,
-  usdExchangeRate,
   packageEffectiveRate,
   customExchangeRate,
 }) => {
-  if (!showWithRecharge) return 1;
+  if (!showWithRecharge) {
+    return currency === 'CUSTOM' ? positiveRate(customExchangeRate) : 1;
+  }
   const cnyRate =
     priceConvertMode === 'package' && packageEffectiveRate != null
       ? positiveRate(packageEffectiveRate)
       : positiveRate(priceRate);
-  if (currency !== 'CUSTOM') return cnyRate;
-
-  // Recharge/package rates are CNY per USD of quota. Convert that actual
-  // CNY cost into the configured custom currency without losing discounts.
-  const marketCnyRate = positiveRate(usdExchangeRate, 0);
-  const customRate = positiveRate(customExchangeRate);
-  return marketCnyRate > 0
-    ? (cnyRate * customRate) / marketCnyRate
-    : customRate;
+  return cnyRate;
 };
 
 export const resolveModelPricingSymbol = (currency, customCurrencySymbol) => {
