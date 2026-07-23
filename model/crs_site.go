@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -327,6 +328,10 @@ func UpdateCRSSite(site *CRSSite, updatePassword bool) error {
 
 // PersistCRSSiteStats 将最新一次 dashboard 结果、token、状态写入。
 func PersistCRSSiteStats(id int, tokenEncrypted string, tokenExpiresAt int64, stats string, status int, syncErr string) error {
+	return PersistCRSSiteStatsContext(context.Background(), id, tokenEncrypted, tokenExpiresAt, stats, status, syncErr)
+}
+
+func PersistCRSSiteStatsContext(ctx context.Context, id int, tokenEncrypted string, tokenExpiresAt int64, stats string, status int, syncErr string) error {
 	if id <= 0 {
 		return ErrCRSSiteNotFound
 	}
@@ -344,7 +349,7 @@ func PersistCRSSiteStats(id int, tokenEncrypted string, tokenExpiresAt int64, st
 		updates["token_encrypted"] = tokenEncrypted
 		updates["token_expires_at"] = tokenExpiresAt
 	}
-	return DB.Model(&CRSSite{}).Where("id = ?", id).Updates(updates).Error
+	return DB.WithContext(ctx).Model(&CRSSite{}).Where("id = ?", id).Updates(updates).Error
 }
 
 // DeleteCRSSite 删除指定站点。

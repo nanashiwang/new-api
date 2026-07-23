@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"strings"
 
@@ -104,11 +105,15 @@ func (s *CRSAccountSnapshot) BeforeUpdate(tx *gorm.DB) error {
 }
 
 func ReplaceCRSAccountSnapshots(siteID int, snapshots []*CRSAccountSnapshot) error {
+	return ReplaceCRSAccountSnapshotsContext(context.Background(), siteID, snapshots)
+}
+
+func ReplaceCRSAccountSnapshotsContext(ctx context.Context, siteID int, snapshots []*CRSAccountSnapshot) error {
 	if siteID <= 0 {
 		return errors.New("crs_account_snapshot:invalid_site_id")
 	}
 
-	return DB.Transaction(func(tx *gorm.DB) error {
+	return DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("site_id = ?", siteID).Delete(&CRSAccountSnapshot{}).Error; err != nil {
 			return err
 		}

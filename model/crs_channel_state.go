@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -60,11 +61,15 @@ func IsCRSAutoDisabledChannel(channel *Channel) bool {
 }
 
 func ObserveCRSManagedChannel(channelID, siteID int, platform string, observedAt int64, healthy bool) (CRSChannelTransition, error) {
+	return ObserveCRSManagedChannelContext(context.Background(), channelID, siteID, platform, observedAt, healthy)
+}
+
+func ObserveCRSManagedChannelContext(ctx context.Context, channelID, siteID int, platform string, observedAt int64, healthy bool) (CRSChannelTransition, error) {
 	if channelID <= 0 || siteID <= 0 || platform == "" || observedAt <= 0 {
 		return CRSChannelTransitionNone, errors.New("crs_channel:invalid_observation")
 	}
 	transition := CRSChannelTransitionNone
-	err := DB.Transaction(func(tx *gorm.DB) error {
+	err := DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		channel := &Channel{}
 		if err := tx.First(channel, "id = ?", channelID).Error; err != nil {
 			return err

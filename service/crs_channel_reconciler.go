@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/QuantumNous/new-api/common"
@@ -8,12 +9,16 @@ import (
 )
 
 func ReconcileCRSManagedChannels(siteID int, platform string, snapshots []*model.CRSAccountSnapshot, observedAt int64) error {
+	return ReconcileCRSManagedChannelsContext(context.Background(), siteID, platform, snapshots, observedAt)
+}
+
+func ReconcileCRSManagedChannelsContext(ctx context.Context, siteID int, platform string, snapshots []*model.CRSAccountSnapshot, observedAt int64) error {
 	total, healthy, complete := summarizeCRSOpenAIHealth(platform, snapshots)
 	if !complete || total == 0 {
 		return nil
 	}
 	channels := make([]*model.Channel, 0)
-	if err := model.DB.Find(&channels).Error; err != nil {
+	if err := model.DB.WithContext(ctx).Find(&channels).Error; err != nil {
 		return err
 	}
 	for _, channel := range channels {
@@ -24,7 +29,7 @@ func ReconcileCRSManagedChannels(siteID int, platform string, snapshots []*model
 		if healthy == 0 {
 			OpenChannelShortCircuit(channel)
 		}
-		transition, err := model.ObserveCRSManagedChannel(channel.Id, siteID, platform, observedAt, healthy > 0)
+		transition, err := model.ObserveCRSManagedChannelContext(ctx, channel.Id, siteID, platform, observedAt, healthy > 0)
 		if err != nil {
 			return err
 		}

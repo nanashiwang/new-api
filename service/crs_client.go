@@ -124,6 +124,10 @@ func validateCRSURL(rawURL string) error {
 
 // LoginCRS 用 username/password 调用 CRS 的 /web/auth/login 端点，返回 session token 及过期时长（秒）。
 func LoginCRS(baseURL, username, password string) (token string, expiresIn int64, err error) {
+	return loginCRSContext(context.Background(), baseURL, username, password)
+}
+
+func loginCRSContext(parent context.Context, baseURL, username, password string) (token string, expiresIn int64, err error) {
 	loginURL := strings.TrimRight(baseURL, "/") + "/web/auth/login"
 	if urlErr := validateCRSURL(loginURL); urlErr != nil {
 		return "", 0, fmt.Errorf("%w: %v", model.ErrCRSSiteHostInvalid, urlErr)
@@ -134,7 +138,7 @@ func LoginCRS(baseURL, username, password string) (token string, expiresIn int64
 		return "", 0, jsonErr
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), crsClientTimeout)
+	ctx, cancel := context.WithTimeout(parent, crsClientTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, loginURL, bytes.NewReader(body))
@@ -182,12 +186,16 @@ func LoginCRS(baseURL, username, password string) (token string, expiresIn int64
 
 // FetchCRSDashboard 调用 CRS 的 /admin/dashboard 端点，返回原始 JSON bytes 及解析后的数据。
 func FetchCRSDashboard(baseURL, token string) ([]byte, *CRSDashboardData, error) {
+	return fetchCRSDashboardContext(context.Background(), baseURL, token)
+}
+
+func fetchCRSDashboardContext(parent context.Context, baseURL, token string) ([]byte, *CRSDashboardData, error) {
 	dashURL := strings.TrimRight(baseURL, "/") + "/admin/dashboard"
 	if urlErr := validateCRSURL(dashURL); urlErr != nil {
 		return nil, nil, fmt.Errorf("%w: %v", model.ErrCRSSiteHostInvalid, urlErr)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), crsClientTimeout)
+	ctx, cancel := context.WithTimeout(parent, crsClientTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, dashURL, nil)
@@ -232,6 +240,10 @@ func FetchCRSDashboard(baseURL, token string) ([]byte, *CRSDashboardData, error)
 // RefreshCRSSite 完整刷新流程：确保 token 有效 → 拉取 dashboard → 持久化结果。
 // 返回最新解析的 CRSDashboardData（供调用方即时返回给前端）。
 func RefreshCRSSite(site *model.CRSSite) (*CRSDashboardData, error) {
+	return refreshCRSSiteContext(context.Background(), site)
+}
+
+func refreshCRSSiteContext(ctx context.Context, site *model.CRSSite) (*CRSDashboardData, error) {
 	if site == nil {
 		return nil, errors.New("crs_site:nil")
 	}
@@ -241,42 +253,50 @@ func RefreshCRSSite(site *model.CRSSite) (*CRSDashboardData, error) {
 		return nil, model.ErrCRSSiteHostRequired
 	}
 
-	token, err := resolveOrRenewCRSToken(site)
+	token, err := resolveOrRenewCRSTokenContext(ctx, site)
 	if err != nil {
 		syncErr := err.Error()
-		_ = model.PersistCRSSiteStats(site.Id, "", 0, "", model.CRSSiteStatusError, syncErr)
+		_ = model.PersistCRSSiteStatsContext(ctx, site.Id, "", 0, "", model.CRSSiteStatusError, syncErr)
 		return nil, err
 	}
 
-	rawBytes, dashData, err := fetchCRSDashboardWithRetry(site, token)
+	rawBytes, dashData, err := fetchCRSDashboardWithRetryContext(ctx, site, token)
 	if err != nil {
 		syncErr := err.Error()
-		_ = model.PersistCRSSiteStats(site.Id, "", 0, "", model.CRSSiteStatusError, syncErr)
+		_ = model.PersistCRSSiteStatsContext(ctx, site.Id, "", 0, "", model.CRSSiteStatusError, syncErr)
 		return nil, err
 	}
 
 	rawStr := string(rawBytes)
-	_ = model.PersistCRSSiteStats(site.Id, "", 0, rawStr, model.CRSSiteStatusSynced, "")
+	_ = model.PersistCRSSiteStatsContext(ctx, site.Id, "", 0, rawStr, model.CRSSiteStatusSynced, "")
 	return dashData, nil
 }
 
 // fetchCRSDashboardWithRetry 在 FetchCRSDashboard 返回 401 时,自动强制重新登录并重试一次。
 // 涵盖了上游 CRS Redis 重启 / session 被驱逐 / 24h 不活跃过期等本地 TTL 还未到的场景。
 func fetchCRSDashboardWithRetry(site *model.CRSSite, token string) ([]byte, *CRSDashboardData, error) {
+	return fetchCRSDashboardWithRetryContext(context.Background(), site, token)
+}
+
+func fetchCRSDashboardWithRetryContext(ctx context.Context, site *model.CRSSite, token string) ([]byte, *CRSDashboardData, error) {
 	baseURL := site.BaseURL()
-	raw, data, err := FetchCRSDashboard(baseURL, token)
+	raw, data, err := fetchCRSDashboardContext(ctx, baseURL, token)
 	if err == nil || !isCRSAuthExpired(err) {
 		return raw, data, err
 	}
-	newToken, renewErr := forceRenewCRSToken(site)
+	newToken, renewErr := forceRenewCRSTokenContext(ctx, site)
 	if renewErr != nil {
 		return nil, nil, err // 保留原始 401 错误,而非把登录失败错误透传
 	}
-	return FetchCRSDashboard(baseURL, newToken)
+	return fetchCRSDashboardContext(ctx, baseURL, newToken)
 }
 
 // resolveOrRenewCRSToken 从缓存取 token（至少还有 60 秒有效期），过期则重新登录。
 func resolveOrRenewCRSToken(site *model.CRSSite) (string, error) {
+	return resolveOrRenewCRSTokenContext(context.Background(), site)
+}
+
+func resolveOrRenewCRSTokenContext(ctx context.Context, site *model.CRSSite) (string, error) {
 	now := common.GetTimestamp()
 	if site.TokenExpiresAt > now+60 {
 		if tok, err := site.DecryptToken(); err == nil && tok != "" {
@@ -289,7 +309,7 @@ func resolveOrRenewCRSToken(site *model.CRSSite) (string, error) {
 		return "", model.ErrCRSSitePassRequired
 	}
 
-	token, expiresIn, err := LoginCRS(site.BaseURL(), site.Username, password)
+	token, expiresIn, err := loginCRSContext(ctx, site.BaseURL(), site.Username, password)
 	if err != nil {
 		return "", err
 	}
@@ -300,7 +320,7 @@ func resolveOrRenewCRSToken(site *model.CRSSite) (string, error) {
 	if encErr != nil {
 		return token, nil // 加密失败不阻断，只是下次仍会重新登录
 	}
-	_ = model.PersistCRSSiteStats(site.Id, encrypted, expiresAt, "", 0, "")
+	_ = model.PersistCRSSiteStatsContext(ctx, site.Id, encrypted, expiresAt, "", 0, "")
 	site.TokenEncrypted = encrypted
 	site.TokenExpiresAt = expiresAt
 	return token, nil
@@ -310,9 +330,13 @@ func resolveOrRenewCRSToken(site *model.CRSSite) (string, error) {
 // 内存中的 site.TokenEncrypted/TokenExpiresAt 被清零,resolveOrRenewCRSToken 因此一定会重登,
 // 重登成功后会把新 token 持久化到 DB。
 func forceRenewCRSToken(site *model.CRSSite) (string, error) {
+	return forceRenewCRSTokenContext(context.Background(), site)
+}
+
+func forceRenewCRSTokenContext(ctx context.Context, site *model.CRSSite) (string, error) {
 	site.TokenEncrypted = ""
 	site.TokenExpiresAt = 0
-	return resolveOrRenewCRSToken(site)
+	return resolveOrRenewCRSTokenContext(ctx, site)
 }
 
 // isCRSAuthExpired 判断 err 是否对应 CRS 端 session 失效(HTTP 401 或上游典型文案)。
@@ -349,8 +373,14 @@ func computeCRSTokenExpiresAt(now, expiresIn int64) int64 {
 	}
 }
 
-// RefreshAllCRSSites 并发刷新所有站点，返回每个站点 ID 和错误（nil 表示成功）。
+// RefreshAllCRSSites 使用固定数量 worker 刷新站点，避免批量刷新创建无界 goroutine。
 func RefreshAllCRSSites() map[int]error {
+	return RefreshAllCRSSitesContext(context.Background())
+}
+
+func RefreshAllCRSSitesContext(ctx context.Context) map[int]error {
+	ctx, cancel := context.WithTimeout(ctx, crsObserverSiteSyncTimeout)
+	defer cancel()
 	sites, err := model.ListCRSSites()
 	results := make(map[int]error, len(sites))
 	if err != nil {
@@ -360,13 +390,23 @@ func RefreshAllCRSSites() map[int]error {
 		id  int
 		err error
 	}
-	ch := make(chan pair, len(sites))
-	for _, s := range sites {
-		go func(site *model.CRSSite) {
-			refreshErr := SyncCRSObserverSite(site)
-			ch <- pair{id: site.Id, err: refreshErr}
-		}(s)
+	if len(sites) == 0 {
+		return results
 	}
+	workerCount := min(crsObserverMaxConcurrentSites, len(sites))
+	jobs := make(chan *model.CRSSite, len(sites))
+	ch := make(chan pair, len(sites))
+	for range workerCount {
+		go func() {
+			for site := range jobs {
+				ch <- pair{id: site.Id, err: syncCRSObserverSiteWaiting(ctx, site)}
+			}
+		}()
+	}
+	for _, site := range sites {
+		jobs <- site
+	}
+	close(jobs)
 	for range sites {
 		p := <-ch
 		results[p.id] = p.err

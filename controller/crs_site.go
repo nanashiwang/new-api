@@ -373,7 +373,7 @@ func RefreshCRSSiteByID(c *gin.Context) {
 
 // RefreshAllCRSSites POST /api/crs/refresh_all
 func RefreshAllCRSSites(c *gin.Context) {
-	results := service.RefreshAllCRSSites()
+	results := service.RefreshAllCRSSitesContext(c.Request.Context())
 	summary := make([]gin.H, 0, len(results))
 	for id, err := range results {
 		item := gin.H{"id": id, "success": err == nil}

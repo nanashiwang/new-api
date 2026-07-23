@@ -18,10 +18,15 @@ import (
 )
 
 var errCRSObserverEndpointUnsupported = errors.New("crs_observer:endpoint_unsupported")
+var ErrCRSObserverSyncBusy = errors.New("crs_observer:sync_busy")
 
 var crsObserverSiteLocks sync.Map
 
 const crsObserverUsageRefreshTimeout = 45 * time.Second
+const crsObserverSiteSyncTimeout = 3 * time.Minute
+const crsObserverMaxConcurrentSites = 4
+
+var crsObserverSyncSlots = make(chan struct{}, crsObserverMaxConcurrentSites)
 
 type crsRemoteAccountEndpoint struct {
 	Platform string
@@ -62,25 +67,97 @@ func SyncCRSObserverSite(site *model.CRSSite) error {
 	if site == nil {
 		return errors.New("crs_observer:nil_site")
 	}
-	lockValue, _ := crsObserverSiteLocks.LoadOrStore(site.Id, &sync.Mutex{})
-	lock := lockValue.(*sync.Mutex)
-	lock.Lock()
-	defer lock.Unlock()
+	if !tryAcquireCRSObserverSyncSlot() {
+		return ErrCRSObserverSyncBusy
+	}
+	defer releaseCRSObserverSyncSlot()
 
-	_, err := RefreshCRSSite(site)
+	lock := getCRSObserverSiteLock(site.Id)
+	if !lock.TryLock() {
+		return ErrCRSObserverSyncBusy
+	}
+	defer lock.Unlock()
+	return syncCRSObserverSiteLocked(site)
+}
+
+func tryAcquireCRSObserverSyncSlot() bool {
+	select {
+	case crsObserverSyncSlots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func acquireCRSObserverSyncSlot(ctx context.Context) error {
+	select {
+	case crsObserverSyncSlots <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func releaseCRSObserverSyncSlot() {
+	<-crsObserverSyncSlots
+}
+
+func syncCRSObserverSiteWaiting(ctx context.Context, site *model.CRSSite) error {
+	if site == nil {
+		return errors.New("crs_observer:nil_site")
+	}
+	lock := getCRSObserverSiteLock(site.Id)
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if err := acquireCRSObserverSyncSlot(ctx); err != nil {
+			return err
+		}
+		if lock.TryLock() {
+			break
+		}
+		releaseCRSObserverSyncSlot()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+	defer releaseCRSObserverSyncSlot()
+	defer lock.Unlock()
+	return syncCRSObserverSiteLockedContext(ctx, site)
+}
+
+func getCRSObserverSiteLock(siteID int) *sync.Mutex {
+	lockValue, _ := crsObserverSiteLocks.LoadOrStore(siteID, &sync.Mutex{})
+	return lockValue.(*sync.Mutex)
+}
+
+func syncCRSObserverSiteLocked(site *model.CRSSite) error {
+	return syncCRSObserverSiteLockedContext(context.Background(), site)
+}
+
+func syncCRSObserverSiteLockedContext(parent context.Context, site *model.CRSSite) error {
+	ctx, cancel := context.WithTimeout(parent, crsObserverSiteSyncTimeout)
+	defer cancel()
+
+	_, err := refreshCRSSiteContext(ctx, site)
 	if err != nil {
 		return err
 	}
 
 	now := common.GetTimestamp()
-	token, err := resolveOrRenewCRSToken(site)
+	token, err := resolveOrRenewCRSTokenContext(ctx, site)
 	if err != nil {
 		return err
 	}
 
-	result, fetchErr := fetchCRSObserverSnapshots(site, token, now)
+	result, fetchErr := fetchCRSObserverSnapshots(ctx, site, token, now)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
 	if fetchErr == nil {
-		if replaceErr := model.ReplaceCRSAccountSnapshots(site.Id, result.Snapshots); replaceErr != nil {
+		if replaceErr := model.ReplaceCRSAccountSnapshotsContext(ctx, site.Id, result.Snapshots); replaceErr != nil {
 			return replaceErr
 		}
 	}
@@ -88,7 +165,7 @@ func SyncCRSObserverSite(site *model.CRSSite) error {
 		if !complete {
 			continue
 		}
-		if reconcileErr := ReconcileCRSManagedChannels(site.Id, platform, result.Snapshots, now); reconcileErr != nil {
+		if reconcileErr := ReconcileCRSManagedChannelsContext(ctx, site.Id, platform, result.Snapshots, now); reconcileErr != nil {
 			return reconcileErr
 		}
 	}
@@ -138,7 +215,7 @@ func BuildCRSObserverSummary(sites []*model.CRSSite, accounts []*model.CRSAccoun
 	return summary
 }
 
-func fetchCRSObserverSnapshots(site *model.CRSSite, token string, syncedAt int64) (crsObserverFetchResult, error) {
+func fetchCRSObserverSnapshots(ctx context.Context, site *model.CRSSite, token string, syncedAt int64) (crsObserverFetchResult, error) {
 	snapshots := make([]*model.CRSAccountSnapshot, 0)
 	warnings := make([]string, 0)
 	currentToken := token
@@ -148,7 +225,10 @@ func fetchCRSObserverSnapshots(site *model.CRSSite, token string, syncedAt int64
 	}
 
 	for _, endpoint := range crsRemoteAccountEndpoints {
-		accounts, refreshed, err := fetchCRSRemoteAccountList(site, currentToken, endpoint.Path)
+		if err := ctx.Err(); err != nil {
+			return crsObserverFetchResult{Snapshots: snapshots, PlatformComplete: platformComplete}, err
+		}
+		accounts, refreshed, err := fetchCRSRemoteAccountList(ctx, site, currentToken, endpoint.Path)
 		if refreshed != "" {
 			currentToken = refreshed
 		}
@@ -163,7 +243,7 @@ func fetchCRSObserverSnapshots(site *model.CRSSite, token string, syncedAt int64
 			platformComplete[endpoint.Platform] = true
 		}
 		if endpoint.Platform == "openai" {
-			usageByAccount, usageRefreshed, usageErr := fetchCRSRemoteOpenAIUsage(site, currentToken)
+			usageByAccount, usageRefreshed, usageErr := fetchCRSRemoteOpenAIUsage(ctx, site, currentToken)
 			if usageRefreshed != "" {
 				currentToken = usageRefreshed
 			}
@@ -172,8 +252,14 @@ func fetchCRSObserverSnapshots(site *model.CRSSite, token string, syncedAt int64
 			}
 		}
 		for _, account := range accounts {
+			if err := ctx.Err(); err != nil {
+				if isCRSOpenAIPlatform(endpoint.Platform) {
+					platformComplete[endpoint.Platform] = false
+				}
+				return crsObserverFetchResult{Snapshots: snapshots, PlatformComplete: platformComplete}, err
+			}
 			var balancePayload map[string]any
-			balancePayload, refreshed, err = fetchCRSRemoteAccountBalance(site, currentToken, endpoint.Platform, getStringValue(account["id"]))
+			balancePayload, refreshed, err = fetchCRSRemoteAccountBalance(ctx, site, currentToken, endpoint.Platform, getStringValue(account["id"]))
 			if refreshed != "" {
 				currentToken = refreshed
 			}
@@ -211,8 +297,8 @@ func isCRSOpenAIPlatform(platform string) bool {
 	return platform == "openai" || platform == "openai-responses"
 }
 
-func fetchCRSRemoteAccountList(site *model.CRSSite, token, path string) ([]map[string]any, string, error) {
-	payload, refreshed, err := fetchCRSAuthJSON(site, token, path)
+func fetchCRSRemoteAccountList(ctx context.Context, site *model.CRSSite, token, path string) ([]map[string]any, string, error) {
+	payload, refreshed, err := fetchCRSAuthJSON(ctx, site, token, path)
 	if err != nil {
 		return nil, refreshed, err
 	}
@@ -224,8 +310,9 @@ func fetchCRSRemoteAccountList(site *model.CRSSite, token, path string) ([]map[s
 	return items, refreshed, nil
 }
 
-func fetchCRSRemoteOpenAIUsage(site *model.CRSSite, token string) (map[string]map[string]any, string, error) {
+func fetchCRSRemoteOpenAIUsage(ctx context.Context, site *model.CRSSite, token string) (map[string]map[string]any, string, error) {
 	payload, refreshed, err := fetchCRSAuthJSONRequest(
+		ctx,
 		site,
 		token,
 		http.MethodPost,
@@ -277,7 +364,7 @@ func mergeCRSRemoteOpenAIUsage(accounts []map[string]any, usageByAccount map[str
 	}
 }
 
-func fetchCRSRemoteAccountBalance(site *model.CRSSite, token, platform, accountID string) (map[string]any, string, error) {
+func fetchCRSRemoteAccountBalance(ctx context.Context, site *model.CRSSite, token, platform, accountID string) (map[string]any, string, error) {
 	if strings.TrimSpace(accountID) == "" {
 		return nil, "", errors.New("crs_observer:empty_account_id")
 	}
@@ -286,7 +373,7 @@ func fetchCRSRemoteAccountBalance(site *model.CRSSite, token, platform, accountI
 	query.Set("queryApi", "false")
 	path := fmt.Sprintf("/admin/accounts/%s/balance?%s", neturl.PathEscape(accountID), query.Encode())
 
-	payload, refreshed, err := fetchCRSAuthJSON(site, token, path)
+	payload, refreshed, err := fetchCRSAuthJSON(ctx, site, token, path)
 	if err != nil {
 		return nil, refreshed, err
 	}
@@ -299,35 +386,31 @@ func fetchCRSRemoteAccountBalance(site *model.CRSSite, token, platform, accountI
 
 // fetchCRSAuthJSON 包装 fetchCRSAuthJSONOnce,如果首次返回 401(上游 session 已失效)则强制重新登录后重试一次。
 // 第二个返回值为非空字符串表示 token 已被刷新,调用方应在后续调用中使用该新 token,避免循环里反复触发登录。
-func fetchCRSAuthJSON(site *model.CRSSite, token, path string) (any, string, error) {
-	return fetchCRSAuthJSONRequest(site, token, http.MethodGet, path, nil, crsClientTimeout)
+func fetchCRSAuthJSON(ctx context.Context, site *model.CRSSite, token, path string) (any, string, error) {
+	return fetchCRSAuthJSONRequest(ctx, site, token, http.MethodGet, path, nil, crsClientTimeout)
 }
 
-func fetchCRSAuthJSONRequest(site *model.CRSSite, token, method, path string, body any, timeout time.Duration) (any, string, error) {
+func fetchCRSAuthJSONRequest(ctx context.Context, site *model.CRSSite, token, method, path string, body any, timeout time.Duration) (any, string, error) {
 	baseURL := site.BaseURL()
-	payload, err := fetchCRSAuthJSONRequestOnce(baseURL, token, method, path, body, timeout)
+	payload, err := fetchCRSAuthJSONRequestOnce(ctx, baseURL, token, method, path, body, timeout)
 	if err == nil || !isCRSAuthExpired(err) {
 		return payload, "", err
 	}
-	newToken, renewErr := forceRenewCRSToken(site)
+	newToken, renewErr := forceRenewCRSTokenContext(ctx, site)
 	if renewErr != nil {
 		return nil, "", err // 保留原始 401 错误
 	}
-	payload, retryErr := fetchCRSAuthJSONRequestOnce(baseURL, newToken, method, path, body, timeout)
+	payload, retryErr := fetchCRSAuthJSONRequestOnce(ctx, baseURL, newToken, method, path, body, timeout)
 	return payload, newToken, retryErr
 }
 
-func fetchCRSAuthJSONOnce(baseURL, token, path string) (any, error) {
-	return fetchCRSAuthJSONRequestOnce(baseURL, token, http.MethodGet, path, nil, crsClientTimeout)
-}
-
-func fetchCRSAuthJSONRequestOnce(baseURL, token, method, path string, body any, timeout time.Duration) (any, error) {
+func fetchCRSAuthJSONRequestOnce(parent context.Context, baseURL, token, method, path string, body any, timeout time.Duration) (any, error) {
 	fullURL := strings.TrimRight(baseURL, "/") + path
 	if err := validateCRSURL(fullURL); err != nil {
 		return nil, fmt.Errorf("%w: %v", model.ErrCRSSiteHostInvalid, err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 
 	var requestBody io.Reader
