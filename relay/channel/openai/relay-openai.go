@@ -136,6 +136,10 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 			}
 		}
 		if len(data) > 0 {
+			// Some providers append metadata chunks after the standard usage chunk.
+			// Keep the latest valid usage instead of assuming it is the final SSE event.
+			updateUsageFromStreamData(data, &usage, &containStreamUsage)
+
 			// 对音频模型，保存倒数第二个stream data
 			if isAudioModel && lastStreamData != "" {
 				secondLastStreamData = lastStreamData

@@ -194,6 +194,24 @@ func handleLastResponse(lastStreamData string, responseId *string, createAt *int
 	return nil
 }
 
+func updateUsageFromStreamData(data string, usage **dto.Usage, containStreamUsage *bool) {
+	if data == "" || usage == nil || containStreamUsage == nil {
+		return
+	}
+
+	var streamResponse dto.ChatCompletionsStreamResponse
+	if err := common.Unmarshal(common.StringToByteSlice(data), &streamResponse); err != nil {
+		return
+	}
+	normalizeOpenAIUsage(streamResponse.Usage)
+	if !service.ValidUsage(streamResponse.Usage) {
+		return
+	}
+
+	*usage = streamResponse.Usage
+	*containStreamUsage = true
+}
+
 func HandleFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, lastStreamData string,
 	responseId string, createAt int64, model string, systemFingerprint string,
 	usage *dto.Usage, containStreamUsage bool) {
