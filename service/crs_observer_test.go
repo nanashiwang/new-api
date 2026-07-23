@@ -208,6 +208,56 @@ func TestNormalizeCRSRemoteAccountSnapshotClassifiesPrimaryWeeklyAndSkipsEmptySe
 	}, windows)
 }
 
+func TestParseAndMergeCRSRemoteOpenAIUsage(t *testing.T) {
+	t.Parallel()
+
+	payload := map[string]any{
+		"success": true,
+		"data": map[string]any{
+			"accounts": []any{
+				map[string]any{
+					"id": "acct-live-usage",
+					"codexUsage": map[string]any{
+						"primary": map[string]any{
+							"usedPercent":      31,
+							"windowMinutes":    300,
+							"remainingSeconds": 2 * 60 * 60,
+						},
+						"secondary": map[string]any{
+							"usedPercent":      54,
+							"windowMinutes":    10080,
+							"remainingSeconds": 5*24*60*60 + 14*60*60,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	usageByAccount, err := parseCRSRemoteOpenAIUsage(payload)
+	require.NoError(t, err)
+	require.Contains(t, usageByAccount, "acct-live-usage")
+
+	accounts := []map[string]any{
+		{
+			"id": "acct-live-usage",
+			"codexUsage": map[string]any{
+				"primary": map[string]any{"usedPercent": 54, "windowMinutes": 10080},
+			},
+		},
+	}
+	mergeCRSRemoteOpenAIUsage(accounts, usageByAccount)
+
+	snapshot, err := normalizeCRSRemoteAccountSnapshot(8, "openai", accounts[0], nil, 1784773953)
+	require.NoError(t, err)
+	windows := decodeUsageWindowsForTest(t, snapshot.UsageWindowsJSON)
+	require.Len(t, windows, 2)
+	require.Equal(t, "5h", windows[0].Label)
+	require.EqualValues(t, 31, windows[0].Progress)
+	require.Equal(t, "周限", windows[1].Label)
+	require.EqualValues(t, 54, windows[1].Progress)
+}
+
 func TestNormalizeCRSRemoteAccountSnapshotUsesBalanceQuota(t *testing.T) {
 	t.Parallel()
 

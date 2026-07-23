@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -16,6 +17,8 @@ import (
 )
 
 var errCRSObserverEndpointUnsupported = errors.New("crs_observer:endpoint_unsupported")
+
+const crsObserverUsageRefreshTimeout = 45 * time.Second
 
 type crsRemoteAccountEndpoint struct {
 	Platform string
@@ -130,6 +133,15 @@ func fetchCRSObserverSnapshots(site *model.CRSSite, token string, syncedAt int64
 			warnings = append(warnings, fmt.Sprintf("%s: %v", endpoint.Platform, err))
 			continue
 		}
+		if endpoint.Platform == "openai" {
+			usageByAccount, usageRefreshed, usageErr := fetchCRSRemoteOpenAIUsage(site, currentToken)
+			if usageRefreshed != "" {
+				currentToken = usageRefreshed
+			}
+			if usageErr == nil {
+				mergeCRSRemoteOpenAIUsage(accounts, usageByAccount)
+			}
+		}
 		for _, account := range accounts {
 			var balancePayload map[string]any
 			balancePayload, refreshed, err = fetchCRSRemoteAccountBalance(site, currentToken, endpoint.Platform, getStringValue(account["id"]))
@@ -176,6 +188,59 @@ func fetchCRSRemoteAccountList(site *model.CRSSite, token, path string) ([]map[s
 	return items, refreshed, nil
 }
 
+func fetchCRSRemoteOpenAIUsage(site *model.CRSSite, token string) (map[string]map[string]any, string, error) {
+	payload, refreshed, err := fetchCRSAuthJSONRequest(
+		site,
+		token,
+		http.MethodPost,
+		"/admin/openai-accounts/usage/refresh",
+		map[string]any{
+			"limit":         10,
+			"concurrency":   5,
+			"maxAgeSeconds": 900,
+		},
+		crsObserverUsageRefreshTimeout,
+	)
+	if err != nil {
+		return nil, refreshed, err
+	}
+	usageByAccount, err := parseCRSRemoteOpenAIUsage(payload)
+	return usageByAccount, refreshed, err
+}
+
+func parseCRSRemoteOpenAIUsage(payload any) (map[string]map[string]any, error) {
+	root, ok := payload.(map[string]any)
+	if !ok {
+		return nil, errors.New("crs_observer:invalid_openai_usage_payload")
+	}
+	if success, exists := root["success"].(bool); exists && !success {
+		return nil, errors.New(firstNonEmpty(getStringValue(root["message"]), getStringValue(root["error"])))
+	}
+	data := getMapValue(root["data"])
+	items, err := coerceMapArray(data["accounts"])
+	if err != nil {
+		return nil, err
+	}
+
+	usageByAccount := make(map[string]map[string]any, len(items))
+	for _, item := range items {
+		accountID := getStringValue(item["id"])
+		usage := getMapOrJSONValue(item["codexUsage"])
+		if accountID != "" && len(usage) > 0 {
+			usageByAccount[accountID] = usage
+		}
+	}
+	return usageByAccount, nil
+}
+
+func mergeCRSRemoteOpenAIUsage(accounts []map[string]any, usageByAccount map[string]map[string]any) {
+	for _, account := range accounts {
+		if usage := usageByAccount[getStringValue(account["id"])]; len(usage) > 0 {
+			account["codexUsage"] = usage
+		}
+	}
+}
+
 func fetchCRSRemoteAccountBalance(site *model.CRSSite, token, platform, accountID string) (map[string]any, string, error) {
 	if strings.TrimSpace(accountID) == "" {
 		return nil, "", errors.New("crs_observer:empty_account_id")
@@ -199,8 +264,12 @@ func fetchCRSRemoteAccountBalance(site *model.CRSSite, token, platform, accountI
 // fetchCRSAuthJSON 包装 fetchCRSAuthJSONOnce,如果首次返回 401(上游 session 已失效)则强制重新登录后重试一次。
 // 第二个返回值为非空字符串表示 token 已被刷新,调用方应在后续调用中使用该新 token,避免循环里反复触发登录。
 func fetchCRSAuthJSON(site *model.CRSSite, token, path string) (any, string, error) {
+	return fetchCRSAuthJSONRequest(site, token, http.MethodGet, path, nil, crsClientTimeout)
+}
+
+func fetchCRSAuthJSONRequest(site *model.CRSSite, token, method, path string, body any, timeout time.Duration) (any, string, error) {
 	baseURL := site.BaseURL()
-	payload, err := fetchCRSAuthJSONOnce(baseURL, token, path)
+	payload, err := fetchCRSAuthJSONRequestOnce(baseURL, token, method, path, body, timeout)
 	if err == nil || !isCRSAuthExpired(err) {
 		return payload, "", err
 	}
@@ -208,25 +277,40 @@ func fetchCRSAuthJSON(site *model.CRSSite, token, path string) (any, string, err
 	if renewErr != nil {
 		return nil, "", err // 保留原始 401 错误
 	}
-	payload, retryErr := fetchCRSAuthJSONOnce(baseURL, newToken, path)
+	payload, retryErr := fetchCRSAuthJSONRequestOnce(baseURL, newToken, method, path, body, timeout)
 	return payload, newToken, retryErr
 }
 
 func fetchCRSAuthJSONOnce(baseURL, token, path string) (any, error) {
+	return fetchCRSAuthJSONRequestOnce(baseURL, token, http.MethodGet, path, nil, crsClientTimeout)
+}
+
+func fetchCRSAuthJSONRequestOnce(baseURL, token, method, path string, body any, timeout time.Duration) (any, error) {
 	fullURL := strings.TrimRight(baseURL, "/") + path
 	if err := validateCRSURL(fullURL); err != nil {
 		return nil, fmt.Errorf("%w: %v", model.ErrCRSSiteHostInvalid, err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), crsClientTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
+	var requestBody io.Reader
+	if body != nil {
+		encoded, err := common.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		requestBody = bytes.NewReader(encoded)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, fullURL, requestBody)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	resp, err := newCRSHTTPClient().Do(req)
 	if err != nil {
@@ -239,7 +323,7 @@ func fetchCRSAuthJSONOnce(baseURL, token, path string) (any, error) {
 		return nil, err
 	}
 
-	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusBadRequest {
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusMethodNotAllowed {
 		return nil, fmt.Errorf("%w: %s", errCRSObserverEndpointUnsupported, strings.TrimSpace(string(raw)))
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
