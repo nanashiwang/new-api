@@ -71,6 +71,7 @@ const (
 	ContextKeyResponsesAutoContinueFromChannel ContextKey = "responses_auto_continue_from_channel"
 	ContextKeyResponsesAutoContinueToChannel   ContextKey = "responses_auto_continue_to_channel"
 	ContextKeyResponsesAutoContinueEndReason   ContextKey = "responses_auto_continue_end_reason"
+	ContextKeyResponsesStreamErrorWritten      ContextKey = "responses_stream_error_written"
 
 	// ContextKeyFileSourcesToCleanup stores file sources that need cleanup when request ends
 	ContextKeyFileSourcesToCleanup ContextKey = "file_sources_to_cleanup"

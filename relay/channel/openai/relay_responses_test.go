@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -10,9 +11,12 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -63,6 +67,15 @@ func newResponsesStreamHTTPResponseWithReadError(body string, err error) *http.R
 	return resp
 }
 
+func newResponsesStreamCooldownCounter() (*ResponsesStreamHandlerOptions, *int) {
+	count := 0
+	return &ResponsesStreamHandlerOptions{
+		scheduleCooldown: func(string) {
+			count++
+		},
+	}, &count
+}
+
 func TestShouldScheduleMissingResponsesCompletedCooldownSkipsClientGone(t *testing.T) {
 	t.Parallel()
 
@@ -82,6 +95,139 @@ func TestShouldScheduleMissingResponsesCompletedCooldownKeepsUpstreamErrors(t *t
 	require.True(t, shouldScheduleMissingResponsesCompletedCooldown(nil))
 }
 
+func TestOaiResponsesStreamHandler_ResponseFailedReturnsOriginalErrorWithoutCooldown(t *testing.T) {
+	t.Parallel()
+	setResponsesStreamTestTimeout(t)
+
+	c, recorder := newResponsesStreamTestContext()
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gpt-5.5"}}
+	body := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_policy","model":"gpt-5.5"}}`,
+		`data: {"type":"response.failed","response":{"id":"resp_policy","status":"failed","error":{"message":"request rejected by policy","type":"invalid_request_error","code":"cyber_policy"}}}`,
+		`data: [DONE]`,
+	}, "\n")
+	opts, cooldowns := newResponsesStreamCooldownCounter()
+
+	usage, err := OaiResponsesStreamHandlerWithOptions(c, info, newResponsesStreamHTTPResponse(body), opts)
+
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.Equal(t, http.StatusBadRequest, err.StatusCode)
+	require.Equal(t, types.ErrorCode("cyber_policy"), err.GetErrorCode())
+	require.True(t, types.IsSkipRetryError(err))
+	require.Equal(t, 0, *cooldowns)
+	require.Contains(t, recorder.Body.String(), "event: response.failed")
+	require.Contains(t, recorder.Body.String(), `"code":"cyber_policy"`)
+	require.NotContains(t, recorder.Body.String(), "event: response.completed")
+	require.NotContains(t, recorder.Body.String(), service.ResponsesStreamMissingCompletedReason)
+	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesStreamErrorWritten))
+}
+
+func TestOaiResponsesStreamHandler_EventOnlyResponseFailedIsRecognized(t *testing.T) {
+	t.Parallel()
+	setResponsesStreamTestTimeout(t)
+
+	c, recorder := newResponsesStreamTestContext()
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gpt-5.5"}}
+	body := strings.Join([]string{
+		`event: response.failed`,
+		`data: {"response":{"id":"resp_policy","status":"failed","error":{"message":"request rejected by policy","type":"invalid_request_error","code":"cyber_policy"}},"provider_trace":"kept"}`,
+	}, "\n")
+	opts, cooldowns := newResponsesStreamCooldownCounter()
+
+	usage, err := OaiResponsesStreamHandlerWithOptions(c, info, newResponsesStreamHTTPResponse(body), opts)
+
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.Equal(t, http.StatusBadRequest, err.StatusCode)
+	require.Equal(t, types.ErrorCode("cyber_policy"), err.GetErrorCode())
+	require.Equal(t, 0, *cooldowns)
+	require.Contains(t, recorder.Body.String(), "event: response.failed")
+	require.Contains(t, recorder.Body.String(), `"type":"response.failed"`)
+	require.Contains(t, recorder.Body.String(), `"provider_trace":"kept"`)
+	require.NotContains(t, recorder.Body.String(), "event: response.completed")
+}
+
+func TestOaiResponsesStreamHandler_CompletedWithFailedStatusNeverSignalsSuccess(t *testing.T) {
+	t.Parallel()
+	setResponsesStreamTestTimeout(t)
+
+	c, recorder := newResponsesStreamTestContext()
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gpt-5.5"}}
+	body := `data: {"type":"response.completed","response":{"id":"resp_failed","status":"failed","error":{"message":"upstream rejected request","type":"invalid_request_error","code":"invalid_request"}}}` + "\n"
+	opts, cooldowns := newResponsesStreamCooldownCounter()
+
+	usage, err := OaiResponsesStreamHandlerWithOptions(c, info, newResponsesStreamHTTPResponse(body), opts)
+
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.Equal(t, http.StatusBadRequest, err.StatusCode)
+	require.Equal(t, 0, *cooldowns)
+	require.Contains(t, recorder.Body.String(), "event: response.failed")
+	require.Contains(t, recorder.Body.String(), `"type":"response.failed"`)
+	require.NotContains(t, recorder.Body.String(), "event: response.completed")
+}
+
+func TestOaiResponsesStreamHandler_TopLevelContextLimitErrorDoesNotCooldown(t *testing.T) {
+	t.Parallel()
+	setResponsesStreamTestTimeout(t)
+
+	c, recorder := newResponsesStreamTestContext()
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gpt-5.5"}}
+	body := `data: {"error":{"message":"maximum context length exceeded","type":"invalid_request_error","code":"context_length_exceeded"}}` + "\n"
+	opts, cooldowns := newResponsesStreamCooldownCounter()
+
+	usage, err := OaiResponsesStreamHandlerWithOptions(c, info, newResponsesStreamHTTPResponse(body), opts)
+
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.Equal(t, http.StatusBadRequest, err.StatusCode)
+	require.Equal(t, types.ErrorCode("context_length_exceeded"), err.GetErrorCode())
+	require.True(t, types.IsSkipRetryError(err))
+	require.Equal(t, 0, *cooldowns)
+	require.Contains(t, recorder.Body.String(), "event: error")
+	require.NotContains(t, recorder.Body.String(), "event: response.completed")
+	require.NotContains(t, recorder.Body.String(), service.ResponsesStreamMissingCompletedReason)
+}
+
+func TestOaiResponsesStreamHandler_DoneWithoutSemanticTerminalIsChannelFault(t *testing.T) {
+	t.Parallel()
+	setResponsesStreamTestTimeout(t)
+
+	c, recorder := newResponsesStreamTestContext()
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gpt-5.5"}}
+	opts, cooldowns := newResponsesStreamCooldownCounter()
+
+	usage, err := OaiResponsesStreamHandlerWithOptions(c, info, newResponsesStreamHTTPResponse("data: [DONE]\n"), opts)
+
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.Equal(t, 1, *cooldowns)
+	require.Equal(t, relaycommon.StreamEndReasonDone, info.StreamStatus.EndReason)
+	require.Contains(t, recorder.Body.String(), "event: response.failed")
+	require.NotContains(t, recorder.Body.String(), "event: response.completed")
+}
+
+func TestOaiResponsesStreamHandler_ClientCancelDoesNotCooldownOrBill(t *testing.T) {
+	t.Parallel()
+	setResponsesStreamTestTimeout(t)
+
+	c, recorder := newResponsesStreamTestContext()
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gpt-5.5"}}
+	opts, cooldowns := newResponsesStreamCooldownCounter()
+
+	usage, err := OaiResponsesStreamHandlerWithOptions(c, info, newResponsesStreamHTTPResponseWithReadError("", context.Canceled), opts)
+
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.True(t, types.IsSkipRetryError(err))
+	require.Equal(t, types.ErrorCodeDoRequestFailed, err.GetErrorCode())
+	require.Equal(t, 0, *cooldowns)
+	require.Equal(t, relaycommon.StreamEndReasonClientGone, info.StreamStatus.EndReason)
+	require.Empty(t, recorder.Body.String())
+	require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesStreamErrorWritten))
+}
+
 func TestOaiResponsesStreamHandler_FailsWhenMissingCompletedWithoutOutputAfterEOF(t *testing.T) {
 	t.Parallel()
 	setResponsesStreamTestTimeout(t)
@@ -97,10 +243,12 @@ func TestOaiResponsesStreamHandler_FailsWhenMissingCompletedWithoutOutputAfterEO
 		`data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.5","created_at":1700000000}}`,
 	}, "\n")
 
-	usage, err := OaiResponsesStreamHandler(c, info, newResponsesStreamHTTPResponse(body))
-	require.Nil(t, err)
-	require.NotNil(t, usage)
-	require.Equal(t, 0, usage.TotalTokens)
+	opts, cooldowns := newResponsesStreamCooldownCounter()
+	usage, err := OaiResponsesStreamHandlerWithOptions(c, info, newResponsesStreamHTTPResponse(body), opts)
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.True(t, types.IsSkipRetryError(err))
+	require.Equal(t, 1, *cooldowns)
 	require.NotNil(t, info.StreamStatus)
 	require.True(t, info.StreamStatus.HasErrors())
 	require.True(t, info.FirstEffectiveOutputTime.IsZero())
@@ -111,9 +259,10 @@ func TestOaiResponsesStreamHandler_FailsWhenMissingCompletedWithoutOutputAfterEO
 	require.Contains(t, responseBody, `"status":"failed"`)
 	require.Contains(t, responseBody, `stream end: eof`)
 	require.NotContains(t, responseBody, "event: response.completed")
+	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesStreamErrorWritten))
 }
 
-func TestOaiResponsesStreamHandler_SynthesizesCompletedWhenMissingWithOutput(t *testing.T) {
+func TestOaiResponsesStreamHandler_FailsInsteadOfSynthesizingCompletedWhenOutputIsPartial(t *testing.T) {
 	t.Parallel()
 	setResponsesStreamTestTimeout(t)
 
@@ -129,18 +278,20 @@ func TestOaiResponsesStreamHandler_SynthesizesCompletedWhenMissingWithOutput(t *
 		`data: {"type":"response.output_text.delta","delta":"partial output"}`,
 	}, "\n")
 
-	usage, err := OaiResponsesStreamHandler(c, info, newResponsesStreamHTTPResponse(body))
-	require.Nil(t, err)
-	require.NotNil(t, usage)
+	opts, cooldowns := newResponsesStreamCooldownCounter()
+	usage, err := OaiResponsesStreamHandlerWithOptions(c, info, newResponsesStreamHTTPResponse(body), opts)
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.True(t, types.IsSkipRetryError(err))
+	require.Equal(t, 1, *cooldowns)
 	require.NotNil(t, info.StreamStatus)
 	require.True(t, info.StreamStatus.HasErrors())
 	require.False(t, info.FirstEffectiveOutputTime.IsZero())
 
 	responseBody := recorder.Body.String()
 	require.Contains(t, responseBody, "partial output")
-	require.Contains(t, responseBody, "event: response.completed")
-	require.Contains(t, responseBody, `"input_tokens":0`)
-	require.NotContains(t, responseBody, "event: response.failed")
+	require.Contains(t, responseBody, "event: response.failed")
+	require.NotContains(t, responseBody, "event: response.completed")
 }
 
 func TestOaiResponsesStreamHandler_FailsWhenMissingCompletedWithoutOutputAfterScannerError(t *testing.T) {
@@ -156,10 +307,12 @@ func TestOaiResponsesStreamHandler_FailsWhenMissingCompletedWithoutOutputAfterSc
 
 	body := `data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.5","created_at":1700000000}}` + "\n"
 
-	usage, err := OaiResponsesStreamHandler(c, info, newResponsesStreamHTTPResponseWithReadError(body, errors.New("upstream read timeout")))
-	require.Nil(t, err)
-	require.NotNil(t, usage)
-	require.Equal(t, 0, usage.TotalTokens)
+	opts, cooldowns := newResponsesStreamCooldownCounter()
+	usage, err := OaiResponsesStreamHandlerWithOptions(c, info, newResponsesStreamHTTPResponseWithReadError(body, errors.New("upstream read timeout")), opts)
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.True(t, types.IsSkipRetryError(err))
+	require.Equal(t, 1, *cooldowns)
 	require.NotNil(t, info.StreamStatus)
 	require.Equal(t, relaycommon.StreamEndReasonScannerErr, info.StreamStatus.EndReason)
 	require.True(t, info.StreamStatus.HasErrors())
@@ -171,7 +324,7 @@ func TestOaiResponsesStreamHandler_FailsWhenMissingCompletedWithoutOutputAfterSc
 	require.NotContains(t, responseBody, "event: response.completed")
 }
 
-func TestOaiResponsesStreamHandler_SynthesizesCompletedWhenOutputExistsAfterScannerError(t *testing.T) {
+func TestOaiResponsesStreamHandler_DoesNotSynthesizeCompletedWhenOutputExistsAfterScannerError(t *testing.T) {
 	t.Parallel()
 	setResponsesStreamTestTimeout(t)
 
@@ -187,17 +340,20 @@ func TestOaiResponsesStreamHandler_SynthesizesCompletedWhenOutputExistsAfterScan
 		`data: {"type":"response.output_text.delta","delta":"partial output"}`,
 	}, "\n") + "\n"
 
-	usage, err := OaiResponsesStreamHandler(c, info, newResponsesStreamHTTPResponseWithReadError(body, errors.New("upstream read timeout")))
-	require.Nil(t, err)
-	require.NotNil(t, usage)
+	opts, cooldowns := newResponsesStreamCooldownCounter()
+	usage, err := OaiResponsesStreamHandlerWithOptions(c, info, newResponsesStreamHTTPResponseWithReadError(body, errors.New("upstream read timeout")), opts)
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.True(t, types.IsSkipRetryError(err))
+	require.Equal(t, 1, *cooldowns)
 	require.NotNil(t, info.StreamStatus)
 	require.Equal(t, relaycommon.StreamEndReasonScannerErr, info.StreamStatus.EndReason)
 	require.True(t, info.StreamStatus.HasErrors())
 
 	responseBody := recorder.Body.String()
 	require.Contains(t, responseBody, "partial output")
-	require.Contains(t, responseBody, "event: response.completed")
-	require.NotContains(t, responseBody, "event: response.failed")
+	require.Contains(t, responseBody, "event: response.failed")
+	require.NotContains(t, responseBody, "event: response.completed")
 }
 
 func TestOaiResponsesStreamHandler_AutoContinuesBeforeSyntheticCompleted(t *testing.T) {
@@ -283,12 +439,14 @@ func TestOaiResponsesStreamHandler_DoesNotDuplicateCompleted(t *testing.T) {
 		`data: [DONE]`,
 	}, "\n")
 
-	usage, err := OaiResponsesStreamHandler(c, info, newResponsesStreamHTTPResponse(body))
+	opts, cooldowns := newResponsesStreamCooldownCounter()
+	usage, err := OaiResponsesStreamHandlerWithOptions(c, info, newResponsesStreamHTTPResponse(body), opts)
 	require.Nil(t, err)
 	require.NotNil(t, usage)
 	require.Equal(t, 3, usage.PromptTokens)
 	require.Equal(t, 4, usage.CompletionTokens)
 	require.Equal(t, 7, usage.TotalTokens)
+	require.Equal(t, 0, *cooldowns)
 	require.False(t, info.StreamStatus.HasErrors())
 
 	require.Equal(t, 1, strings.Count(recorder.Body.String(), "event: response.completed"))
@@ -385,10 +543,9 @@ func TestOaiResponsesStreamHandler_FailsWhenCompletedHasNoOutput(t *testing.T) {
 	}, "\n")
 
 	usage, err := OaiResponsesStreamHandler(c, info, newResponsesStreamHTTPResponse(body))
-	require.Nil(t, err)
-	require.NotNil(t, usage)
-	require.Equal(t, 3, usage.PromptTokens)
-	require.Equal(t, 37, usage.CompletionTokens)
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.True(t, types.IsSkipRetryError(err))
 	require.True(t, info.StreamStatus.HasErrors())
 
 	responseBody := recorder.Body.String()

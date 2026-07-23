@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -239,6 +240,7 @@ type ResponsesStreamHandlerOptions struct {
 	AutoContinue            func(ResponsesStreamAutoContinueContext) (*dto.Usage, bool)
 	ContinuationOutputOnly  bool
 	DisableAutoContinuation bool
+	scheduleCooldown        func(string)
 }
 
 func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response, opts *ResponsesStreamHandlerOptions) (*dto.Usage, *types.NewAPIError) {
@@ -252,19 +254,24 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 	var usage = &dto.Usage{}
 	var responseTextBuilder strings.Builder
 	completed := false
-	terminalWithoutCompleted := false
+	var terminalError *types.NewAPIError
 	hasEffectiveOutput := false
 	responseID := ""
 	responseModel := ""
 	responseCreatedAt := 0
 	hasNonTextOutput := false
+	failureForwarded := false
 
 	helper.StreamScannerHandler(c, resp, info, func(data string) bool {
 
 		// 检查当前数据是否包含 completed 状态和 usage 信息
 		var streamResponse dto.ResponsesStreamResponse
 		if err := common.UnmarshalJsonStr(data, &streamResponse); err == nil {
-			delayCompletedEvent := streamResponse.Type == "response.completed"
+			explicitFailure := isResponsesStreamFailureEvent(streamResponse)
+			if explicitFailure && (streamResponse.Type == "" || streamResponse.Type == "response.completed") {
+				data = normalizeResponsesStreamFailureEvent(&streamResponse, data)
+			}
+			delayCompletedEvent := streamResponse.Type == "response.completed" && !explicitFailure
 			effectiveOutput := isEffectiveResponsesStreamOutput(streamResponse)
 			if effectiveOutput {
 				info.SetFirstEffectiveOutputTime()
@@ -272,6 +279,7 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 			if !delayCompletedEvent {
 				if shouldSendResponsesStreamData(streamResponse, opts) {
 					sendResponsesStreamData(c, streamResponse, data)
+					failureForwarded = explicitFailure
 				}
 				if effectiveOutput {
 					hasEffectiveOutput = true
@@ -291,14 +299,19 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 					responseCreatedAt = streamResponse.Response.CreatedAt
 				}
 			}
-			if streamResponse.Error != nil {
-				terminalWithoutCompleted = true
-			}
 			if delayCompletedEvent && effectiveOutput {
 				hasEffectiveOutput = true
 			}
 			if delayCompletedEvent && isNonTextResponsesStreamOutput(streamResponse) {
 				hasNonTextOutput = true
+			}
+			if explicitFailure {
+				terminalError = newResponsesStreamEventError(streamResponse)
+				terminalError = types.NewError(terminalError, terminalError.GetErrorCode(), types.ErrOptionWithSkipRetry())
+				if failureForwarded {
+					common.SetContextKey(c, constant.ContextKeyResponsesStreamErrorWritten, true)
+				}
+				return false
 			}
 			switch streamResponse.Type {
 			case "response.completed":
@@ -331,8 +344,10 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 					if info != nil && info.StreamStatus != nil {
 						info.StreamStatus.RecordError(reason)
 					}
-					scheduleResponsesStreamCooldown(c, reason)
+					scheduleResponsesStreamCooldownWithOptions(c, opts, reason)
 					sendSyntheticResponsesFailed(c, info, usage, reason, responseID, responseModel, responseCreatedAt)
+					terminalError = types.NewOpenAIError(errors.New(reason), types.ErrorCodeBadResponseBody, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
+					return false
 				} else {
 					if shouldSendResponsesStreamData(streamResponse, opts) {
 						sendResponsesStreamData(c, streamResponse, data)
@@ -341,8 +356,6 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 			case "response.output_text.delta":
 				// 处理输出文本
 				responseTextBuilder.WriteString(streamResponse.Delta)
-			case "response.failed", "response.incomplete", "error":
-				terminalWithoutCompleted = true
 			case dto.ResponsesOutputTypeItemDone:
 				// 函数调用处理
 				if streamResponse.Item != nil {
@@ -362,6 +375,19 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 		}
 		return true
 	})
+
+	if terminalError != nil {
+		if info != nil && info.StreamStatus != nil {
+			info.StreamStatus.RecordError("responses stream terminated with explicit failure: " + string(terminalError.GetErrorCode()))
+		}
+		return nil, terminalError
+	}
+
+	if info != nil && info.StreamStatus != nil && info.StreamStatus.EndReason == relaycommon.StreamEndReasonClientGone {
+		return nil, types.NewError(context.Canceled, types.ErrorCodeDoRequestFailed,
+			types.ErrOptionWithSkipRetry(),
+			types.ErrOptionWithHideErrMsg("client canceled while receiving responses stream"))
+	}
 
 	if usage.CompletionTokens == 0 {
 		// 计算输出文本的 token 数量
@@ -385,12 +411,12 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 			info.StreamStatus.RecordError(reason)
 		}
 		if shouldScheduleMissingResponsesCompletedCooldown(info) {
-			scheduleResponsesStreamCooldown(c, reason)
+			scheduleResponsesStreamCooldownWithOptions(c, opts, reason)
 		}
 		if info != nil && info.IsChannelTest {
 			return usage, types.NewOpenAIError(errors.New(reason), types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 		}
-		if shouldAutoContinueResponsesStream(c, info, opts, terminalWithoutCompleted, hasEffectiveOutput, hasNonTextOutput, responseTextBuilder.String()) {
+		if shouldAutoContinueResponsesStream(c, info, opts, false, hasEffectiveOutput, hasNonTextOutput, responseTextBuilder.String()) {
 			continuedUsage, continued := opts.AutoContinue(ResponsesStreamAutoContinueContext{
 				Usage:              usage,
 				OutputText:         responseTextBuilder.String(),
@@ -406,13 +432,8 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 				return usage, nil
 			}
 		}
-		if !terminalWithoutCompleted {
-			if shouldFailMissingResponsesCompleted(hasEffectiveOutput) {
-				sendSyntheticResponsesFailed(c, info, usage, reason, responseID, responseModel, responseCreatedAt)
-			} else {
-				sendSyntheticResponsesCompleted(c, info, usage, responseID, responseModel, responseCreatedAt)
-			}
-		}
+		sendSyntheticResponsesFailed(c, info, usage, reason, responseID, responseModel, responseCreatedAt)
+		return nil, types.NewOpenAIError(errors.New(reason), types.ErrorCodeBadResponseBody, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
 	}
 
 	return usage, nil
@@ -423,7 +444,7 @@ func shouldSendResponsesStreamData(streamResponse dto.ResponsesStreamResponse, o
 		return true
 	}
 	switch streamResponse.Type {
-	case "response.output_text.delta", "response.completed", "response.failed", "response.incomplete", "error":
+	case "response.output_text.delta", "response.completed", "response.failed", "response.incomplete", "response.error", "error":
 		return true
 	default:
 		return false
@@ -516,8 +537,45 @@ func isNonTextResponsesOutput(output dto.ResponsesOutput) bool {
 	}
 }
 
-func shouldFailMissingResponsesCompleted(hasEffectiveOutput bool) bool {
-	return !hasEffectiveOutput
+func isResponsesStreamFailureEvent(streamResponse dto.ResponsesStreamResponse) bool {
+	if streamResponse.Error != nil {
+		return true
+	}
+	if streamResponse.Response != nil {
+		status := strings.ToLower(strings.TrimSpace(streamResponse.Response.Status))
+		if hasResponsesOpenAIError(streamResponse.Response.GetOpenAIError()) || status == "failed" || status == "incomplete" || status == "cancelled" || status == "canceled" {
+			return true
+		}
+	}
+	switch streamResponse.Type {
+	case "error", "response.error", "response.failed", "response.incomplete":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeResponsesStreamFailureEvent(streamResponse *dto.ResponsesStreamResponse, data string) string {
+	if streamResponse == nil {
+		return data
+	}
+	eventType := "error"
+	if streamResponse.Response != nil {
+		eventType = "response.failed"
+	}
+	streamResponse.Type = eventType
+
+	// Preserve provider-specific fields while making the SSE event and JSON type agree.
+	var payload map[string]any
+	if err := common.UnmarshalJsonStr(data, &payload); err != nil {
+		return data
+	}
+	payload["type"] = eventType
+	normalized, err := common.Marshal(payload)
+	if err != nil {
+		return data
+	}
+	return string(normalized)
 }
 
 func shouldScheduleMissingResponsesCompletedCooldown(info *relaycommon.RelayInfo) bool {
@@ -541,6 +599,14 @@ func scheduleResponsesStreamCooldown(c *gin.Context, reason string) {
 	}
 }
 
+func scheduleResponsesStreamCooldownWithOptions(c *gin.Context, opts *ResponsesStreamHandlerOptions, reason string) {
+	if opts != nil && opts.scheduleCooldown != nil {
+		opts.scheduleCooldown(reason)
+		return
+	}
+	scheduleResponsesStreamCooldown(c, reason)
+}
+
 func formatScopedCooldownTrips(trips []service.CRSShortCircuitTrip) string {
 	if len(trips) == 0 {
 		return ""
@@ -554,43 +620,6 @@ func formatScopedCooldownTrips(trips []service.CRSShortCircuitTrip) string {
 		parts = append(parts, fmt.Sprintf("%s=%s ttl=%ds %s", trip.Scope, trip.Key, trip.TTLSeconds, state))
 	}
 	return "; scopes: " + strings.Join(parts, "; ")
-}
-
-func sendSyntheticResponsesCompleted(c *gin.Context, info *relaycommon.RelayInfo, usage *dto.Usage, responseID, model string, createdAt int) {
-	if c == nil {
-		return
-	}
-	if responseID == "" {
-		responseID = "resp_" + c.GetString(common.RequestIdKey)
-	}
-	if model == "" && info != nil {
-		model = info.UpstreamModelName
-		if model == "" {
-			model = info.OriginModelName
-		}
-	}
-	if createdAt == 0 {
-		createdAt = int(time.Now().Unix())
-	}
-	responseUsage := normalizeResponsesUsage(usage)
-	streamResponse := dto.ResponsesStreamResponse{
-		Type: "response.completed",
-		Response: &dto.OpenAIResponsesResponse{
-			ID:        responseID,
-			Object:    "response",
-			CreatedAt: createdAt,
-			Status:    "completed",
-			Model:     model,
-			Output:    []dto.ResponsesOutput{},
-			Usage:     &responseUsage,
-		},
-	}
-	jsonData, err := common.Marshal(streamResponse)
-	if err != nil {
-		logger.LogError(c, "failed to marshal synthetic responses completed event: "+err.Error())
-		return
-	}
-	sendResponsesStreamData(c, streamResponse, string(jsonData))
 }
 
 func sendSyntheticResponsesFailed(c *gin.Context, info *relaycommon.RelayInfo, usage *dto.Usage, reason, responseID, model string, createdAt int) {
@@ -639,6 +668,7 @@ func sendSyntheticResponsesFailed(c *gin.Context, info *relaycommon.RelayInfo, u
 		return
 	}
 	sendResponsesStreamData(c, streamResponse, string(jsonData))
+	common.SetContextKey(c, constant.ContextKeyResponsesStreamErrorWritten, true)
 }
 
 func normalizeResponsesUsage(usage *dto.Usage) dto.Usage {

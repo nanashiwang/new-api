@@ -73,20 +73,44 @@ func newResponsesIncompleteError(resp *dto.OpenAIResponsesResponse) *types.NewAP
 
 func newResponsesStreamEventError(streamResp dto.ResponsesStreamResponse) *types.NewAPIError {
 	if streamResp.Response != nil {
-		if oaiErr := streamResp.Response.GetOpenAIError(); oaiErr != nil && oaiErr.Type != "" {
-			return types.WithOpenAIError(*oaiErr, http.StatusInternalServerError)
+		if oaiErr := streamResp.Response.GetOpenAIError(); hasResponsesOpenAIError(oaiErr) {
+			return types.WithOpenAIError(*oaiErr, responsesStreamErrorStatus(*oaiErr))
 		}
 		if strings.EqualFold(strings.TrimSpace(streamResp.Response.Status), "incomplete") {
 			return newResponsesIncompleteError(streamResp.Response)
 		}
 	}
-	if oaiErr := dto.GetOpenAIError(streamResp.Error); oaiErr != nil && oaiErr.Type != "" {
-		return types.WithOpenAIError(*oaiErr, http.StatusInternalServerError)
+	if oaiErr := dto.GetOpenAIError(streamResp.Error); hasResponsesOpenAIError(oaiErr) {
+		return types.WithOpenAIError(*oaiErr, responsesStreamErrorStatus(*oaiErr))
 	}
 	if streamResp.Type == "response.incomplete" {
 		return newResponsesIncompleteError(streamResp.Response)
 	}
 	return types.NewOpenAIError(fmt.Errorf("responses stream error: %s", streamResp.Type), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+}
+
+func hasResponsesOpenAIError(err *types.OpenAIError) bool {
+	return err != nil && (strings.TrimSpace(err.Message) != "" || strings.TrimSpace(err.Type) != "" || err.Code != nil)
+}
+
+func responsesStreamErrorStatus(err types.OpenAIError) int {
+	signal := strings.ToLower(strings.Join([]string{
+		strings.TrimSpace(err.Type),
+		strings.TrimSpace(fmt.Sprintf("%v", err.Code)),
+		strings.TrimSpace(err.Message),
+	}, " "))
+	for _, requestError := range []string{
+		"invalid_request",
+		"cyber_policy",
+		"context_length_exceeded",
+		"maximum context length",
+		"context window",
+	} {
+		if strings.Contains(signal, requestError) {
+			return http.StatusBadRequest
+		}
+	}
+	return http.StatusInternalServerError
 }
 
 func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
