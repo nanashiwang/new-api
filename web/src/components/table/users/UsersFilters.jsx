@@ -108,6 +108,32 @@ const UsersFilters = ({
     ],
     [t],
   );
+  const contentSafetyStatusOptions = useMemo(
+    () => [
+      { label: t('全部风控状态'), value: '' },
+      { label: t('正常（近30天无记录）'), value: 'normal' },
+      { label: t('已触发（至少1次）'), value: 'triggered' },
+      { label: t('警告 1/3'), value: 'warning_1' },
+      { label: t('警告 2/3'), value: 'warning_2' },
+      { label: t('最终警告 3/3'), value: 'final_warning' },
+      { label: t('风控停用'), value: 'disabled' },
+      { label: t('待复核'), value: 'review_required' },
+    ],
+    [t],
+  );
+  const contentSafetyCodeOptions = useMemo(
+    () =>
+      [
+        'cyber_policy',
+        'content_filter',
+        'safety',
+        'policy_violation',
+        'content_policy_violation',
+        'safety_policy_violation',
+        'safety_violation',
+      ].map((code) => ({ label: code, value: code })),
+    [],
+  );
   // 两种排序可同时生效（例如 ID 降序 + 钱包额度升序）。
   // ID 与钱包额度排序使用独立文案，避免 "asc/desc" 歧义。
   const idSortDirectionOptions = useMemo(
@@ -138,8 +164,10 @@ const UsersFilters = ({
   // 统计已启用的高级筛选数量，用于徽标提示隐藏条件。
   const activeAdvancedCount = useMemo(() => {
     if (!advancedFilters) return 0;
-    return Object.values(advancedFilters).filter(
-      (value) => value !== '' && value !== null && value !== undefined,
+    return Object.values(advancedFilters).filter((value) =>
+      Array.isArray(value)
+        ? value.length > 0
+        : value !== '' && value !== null && value !== undefined,
     ).length;
   }, [advancedFilters]);
 
@@ -403,6 +431,48 @@ const UsersFilters = ({
                 style={{ width: '100%' }}
               />
             </div>
+          </div>
+
+          <div className='rounded-lg border border-[var(--semi-color-border)] p-3'>
+            <Text type='tertiary' size='small'>
+              {t('内容风控')}
+            </Text>
+            <div className='grid grid-cols-1 gap-2 mt-2'>
+              <Select
+                value={draftAdvancedFilters.searchContentSafetyStatus}
+                onChange={(value) =>
+                  setDraftAdvancedFilters((prev) => ({
+                    ...prev,
+                    searchContentSafetyStatus:
+                      value === null || value === undefined ? '' : value,
+                  }))
+                }
+                optionList={contentSafetyStatusOptions}
+                placeholder={t('风控状态')}
+                showClear
+                style={{ width: '100%' }}
+              />
+              <Select
+                multiple
+                value={draftAdvancedFilters.searchContentSafetyCodes || []}
+                onChange={(value) =>
+                  setDraftAdvancedFilters((prev) => ({
+                    ...prev,
+                    searchContentSafetyCodes: Array.isArray(value) ? value : [],
+                  }))
+                }
+                optionList={contentSafetyCodeOptions}
+                placeholder={t('官方拒绝类型')}
+                showClear
+                maxTagCount={2}
+                style={{ width: '100%' }}
+              />
+            </div>
+            <Text type='tertiary' size='small' className='block mt-2'>
+              {t(
+                '仅统计最近30天上游明确内容安全拒绝；不包含上下文超限、限流、网络或服务器错误。',
+              )}
+            </Text>
           </div>
 
           <div className='rounded-lg border border-[var(--semi-color-border)] p-3'>

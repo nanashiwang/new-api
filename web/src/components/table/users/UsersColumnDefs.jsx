@@ -257,6 +257,56 @@ const renderStatistics = (text, record, showEnableDisableModal, t) => {
   );
 };
 
+const renderContentSafety = (record, t) => {
+  const level = record?.content_safety_level || 'normal';
+  const count = Number(record?.content_safety_count || 0);
+  const metaByLevel = {
+    normal: { label: t('正常'), color: 'grey' },
+    warning_1: { label: t('警告 1/3'), color: 'yellow' },
+    warning_2: { label: t('警告 2/3'), color: 'orange' },
+    final_warning: { label: t('最终警告 3/3'), color: 'red' },
+    disabled: { label: t('风控停用'), color: 'red' },
+    review_required: { label: t('待复核'), color: 'orange' },
+  };
+  const meta = metaByLevel[level] || metaByLevel.review_required;
+  const tooltipContent = (
+    <div className='text-xs max-w-sm break-all'>
+      <div className='font-semibold mb-1'>
+        {count > 0
+          ? t('已确认的上游内容安全拒绝')
+          : t('最近30天无上游内容安全拒绝记录')}
+      </div>
+      <div>{t('最近30天触发次数')}: {count}</div>
+      <div>{t('最近触发时间')}: {renderTimestamp(record?.content_safety_last_at)}</div>
+      <div>{t('最近错误码')}: {record?.content_safety_last_code || '-'}</div>
+      <div>{t('最近使用模型')}: {record?.content_safety_last_model || '-'}</div>
+      <div>{t('最近渠道 ID')}: {record?.content_safety_last_channel_id || '-'}</div>
+      <div>{t('最近请求 ID')}: {record?.content_safety_last_request_id || '-'}</div>
+      <div>{t('当前处理状态')}: {meta.label}</div>
+      <div className='mt-1 opacity-80'>
+        {t('该记录表示上游明确拒绝，不代表已判定用户主观恶意。')}
+      </div>
+    </div>
+  );
+
+  return (
+    <Tooltip content={tooltipContent} position='top'>
+      <Tag
+        color={meta.color}
+        shape='circle'
+        size='small'
+        style={
+          level === 'disabled'
+            ? { backgroundColor: '#7f1d1d', color: '#fff' }
+            : undefined
+        }
+      >
+        {meta.label}
+      </Tag>
+    </Tooltip>
+  );
+};
+
 const renderWalletQuota = (text, record) => {
   const walletQuota = Number(record?.quota || 0);
   return (
@@ -659,6 +709,12 @@ export const getUsersColumns = ({
       dataIndex: 'info',
       render: (text, record, index) =>
         renderStatistics(text, record, showEnableDisableModal, t),
+    },
+    {
+      title: t('内容风控'),
+      dataIndex: 'content_safety_level',
+      key: 'content_safety_level',
+      render: (text, record) => renderContentSafety(record, t),
     },
     {
       title: t('套餐情况'),

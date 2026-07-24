@@ -393,6 +393,16 @@ func SearchUsers(c *gin.Context) {
 	}
 	registerSource := strings.TrimSpace(c.Query("register_source"))
 	registerIP := strings.TrimSpace(c.Query("register_ip"))
+	contentSafetyStatus, err := parseContentSafetyStatus(c.Query("content_safety_status"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	contentSafetyCodes, err := parseContentSafetyCodes(c.Query("content_safety_codes"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 
 	sortBy, sortOrder, idSortOrder, balanceSortOrder, usedQuotaSortOrder, err := parseUserSortQuery(c)
 	if err != nil {
@@ -418,6 +428,8 @@ func SearchUsers(c *gin.Context) {
 		UsedBalanceMax:        usedBalanceMax,
 		RegisterSource:        registerSource,
 		RegisterIP:            registerIP,
+		ContentSafetyStatus:   contentSafetyStatus,
+		ContentSafetyCodes:    contentSafetyCodes,
 		SortBy:                sortBy,
 		SortOrder:             sortOrder,
 		IdSortOrder:           idSortOrder,
@@ -435,6 +447,43 @@ func SearchUsers(c *gin.Context) {
 	pageInfo.SetItems(users)
 	common.ApiSuccess(c, pageInfo)
 	return
+}
+
+func parseContentSafetyStatus(raw string) (string, error) {
+	status := strings.ToLower(strings.TrimSpace(raw))
+	allowed := map[string]struct{}{
+		"": {}, model.ContentSafetyLevelNormal: {}, model.ContentSafetyLevelTriggered: {},
+		model.ContentSafetyLevelWarning1: {}, model.ContentSafetyLevelWarning2: {},
+		model.ContentSafetyLevelFinalWarning: {}, model.ContentSafetyLevelDisabled: {},
+		model.ContentSafetyLevelReviewRequired: {},
+	}
+	if _, ok := allowed[status]; !ok {
+		return "", errors.New("参数 content_safety_status 无效")
+	}
+	return status, nil
+}
+
+func parseContentSafetyCodes(raw string) ([]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	codes := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, item := range strings.Split(raw, ",") {
+		code := strings.ToLower(strings.TrimSpace(item))
+		if code == "" {
+			continue
+		}
+		if !service.IsContentSafetyPolicyCode(code) {
+			return nil, fmt.Errorf("参数 content_safety_codes 包含无效错误码: %s", code)
+		}
+		if _, ok := seen[code]; ok {
+			continue
+		}
+		seen[code] = struct{}{}
+		codes = append(codes, code)
+	}
+	return codes, nil
 }
 
 func GetUserInviteRelations(c *gin.Context) {

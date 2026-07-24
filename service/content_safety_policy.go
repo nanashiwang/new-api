@@ -38,12 +38,16 @@ func IsContentSafetyPolicyError(err *types.NewAPIError) bool {
 	}
 	oai := err.ToOpenAIError()
 	for _, candidate := range []string{string(err.GetErrorCode()), fmt.Sprintf("%v", oai.Code), oai.Type} {
-		candidate = strings.ToLower(strings.TrimSpace(candidate))
-		if _, ok := contentSafetyPolicyCodes[candidate]; ok {
+		if IsContentSafetyPolicyCode(candidate) {
 			return true
 		}
 	}
 	return false
+}
+
+func IsContentSafetyPolicyCode(code string) bool {
+	_, ok := contentSafetyPolicyCodes[strings.ToLower(strings.TrimSpace(code))]
+	return ok
 }
 
 // NormalizeContentSafetyPolicyError preserves the upstream error while making

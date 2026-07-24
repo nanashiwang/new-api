@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 
@@ -14,6 +15,17 @@ const (
 	ContentSafetyActionDisabled        = "disabled"
 	ContentSafetyActionAlreadyDisabled = "already_disabled"
 	ContentSafetyActionReviewRequired  = "review_required"
+)
+
+const (
+	ContentSafetyLevelNormal         = "normal"
+	ContentSafetyLevelWarning1       = "warning_1"
+	ContentSafetyLevelWarning2       = "warning_2"
+	ContentSafetyLevelFinalWarning   = "final_warning"
+	ContentSafetyLevelDisabled       = "disabled"
+	ContentSafetyLevelReviewRequired = "review_required"
+	ContentSafetyLevelTriggered      = "triggered"
+	contentSafetyWindow              = 30 * 24 * time.Hour
 )
 
 type ContentSafetyViolation struct {
@@ -56,6 +68,134 @@ type ContentSafetyEnforcementResult struct {
 	UserStatus int
 	UserRole   int
 	Username   string
+}
+
+func contentSafetyLevelForUser(user *User, count int) string {
+	switch count {
+	case 0:
+		return ContentSafetyLevelNormal
+	case 1:
+		return ContentSafetyLevelWarning1
+	case 2:
+		return ContentSafetyLevelWarning2
+	case 3:
+		return ContentSafetyLevelFinalWarning
+	default:
+		if user.Role == common.RoleCommonUser && user.Status == common.UserStatusDisabled {
+			return ContentSafetyLevelDisabled
+		}
+		return ContentSafetyLevelReviewRequired
+	}
+}
+
+func applyUserContentSafetyFilters(tx *gorm.DB, query *gorm.DB, params UserSearchParams) *gorm.DB {
+	status := strings.TrimSpace(params.ContentSafetyStatus)
+	if status == "" && len(params.ContentSafetyCodes) == 0 {
+		return query
+	}
+	if !tx.Migrator().HasTable(&ContentSafetyViolation{}) {
+		if status == ContentSafetyLevelNormal && len(params.ContentSafetyCodes) == 0 {
+			return query
+		}
+		return query.Where("1 = 0")
+	}
+
+	cutoff := time.Now().Add(-contentSafetyWindow).Unix()
+	countSQL := "SELECT COUNT(1) FROM content_safety_violations csv WHERE csv.user_id = users.id AND csv.created_at >= ?"
+	switch status {
+	case ContentSafetyLevelNormal:
+		query = query.Where("("+countSQL+") = 0", cutoff)
+	case ContentSafetyLevelTriggered:
+		query = query.Where("("+countSQL+") >= 1", cutoff)
+	case ContentSafetyLevelWarning1:
+		query = query.Where("("+countSQL+") = 1", cutoff)
+	case ContentSafetyLevelWarning2:
+		query = query.Where("("+countSQL+") = 2", cutoff)
+	case ContentSafetyLevelFinalWarning:
+		query = query.Where("("+countSQL+") = 3", cutoff)
+	case ContentSafetyLevelDisabled:
+		query = query.Where("("+countSQL+") >= 4 AND role = ? AND status = ?", cutoff, common.RoleCommonUser, common.UserStatusDisabled)
+	case ContentSafetyLevelReviewRequired:
+		query = query.Where("("+countSQL+") >= 4 AND NOT (role = ? AND status = ?)", cutoff, common.RoleCommonUser, common.UserStatusDisabled)
+	}
+
+	if len(params.ContentSafetyCodes) > 0 {
+		codeExists := tx.Model(&ContentSafetyViolation{}).
+			Select("1").
+			Where("content_safety_violations.user_id = users.id").
+			Where("content_safety_violations.created_at >= ?", cutoff).
+			Where("content_safety_violations.error_code IN ?", params.ContentSafetyCodes)
+		query = query.Where("EXISTS (?)", codeExists)
+	}
+	return query
+}
+
+func AttachUserContentSafetyMetadata(tx *gorm.DB, users []*User) error {
+	if len(users) == 0 {
+		return nil
+	}
+	for _, user := range users {
+		if user != nil {
+			user.ContentSafetyLevel = ContentSafetyLevelNormal
+		}
+	}
+	if !tx.Migrator().HasTable(&ContentSafetyViolation{}) {
+		return nil
+	}
+
+	userIDs := make([]int, 0, len(users))
+	usersByID := make(map[int]*User, len(users))
+	for _, user := range users {
+		if user == nil {
+			continue
+		}
+		userIDs = append(userIDs, user.Id)
+		usersByID[user.Id] = user
+	}
+	if len(userIDs) == 0 {
+		return nil
+	}
+
+	cutoff := time.Now().Add(-contentSafetyWindow).Unix()
+	var counts []struct {
+		UserId int
+		Count  int
+	}
+	if err := tx.Model(&ContentSafetyViolation{}).
+		Select("user_id, COUNT(1) AS count").
+		Where("user_id IN ? AND created_at >= ?", userIDs, cutoff).
+		Group("user_id").Scan(&counts).Error; err != nil {
+		return err
+	}
+	for _, row := range counts {
+		if user := usersByID[row.UserId]; user != nil {
+			user.ContentSafetyCount = row.Count
+			user.ContentSafetyLevel = contentSafetyLevelForUser(user, row.Count)
+		}
+	}
+
+	var latest []ContentSafetyViolation
+	latestSQL := `NOT EXISTS (
+		SELECT 1 FROM content_safety_violations newer
+		WHERE newer.user_id = v.user_id AND newer.created_at >= ?
+		AND (newer.created_at > v.created_at OR (newer.created_at = v.created_at AND newer.id > v.id))
+	)`
+	if err := tx.Table("content_safety_violations AS v").
+		Where("v.user_id IN ? AND v.created_at >= ?", userIDs, cutoff).
+		Where(latestSQL, cutoff).
+		Scan(&latest).Error; err != nil {
+		return err
+	}
+	for _, violation := range latest {
+		if user := usersByID[violation.UserId]; user != nil {
+			user.ContentSafetyLastAt = violation.CreatedAt
+			user.ContentSafetyLastCode = violation.ErrorCode
+			user.ContentSafetyLastModel = violation.ModelName
+			user.ContentSafetyLastChannelID = violation.ChannelId
+			user.ContentSafetyLastRequestID = violation.RequestId
+		}
+	}
+	return nil
 }
 
 func RecordContentSafetyViolation(params RecordContentSafetyViolationParams) (*ContentSafetyEnforcementResult, error) {

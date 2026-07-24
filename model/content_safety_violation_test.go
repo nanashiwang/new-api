@@ -29,7 +29,7 @@ func setupContentSafetyViolationTestDB(t *testing.T) {
 		DB, LOG_DB = originalDB, originalLogDB
 		common.RedisEnabled = originalRedisEnabled
 	})
-	require.NoError(t, db.AutoMigrate(&User{}, &Log{}, &ContentSafetyViolation{}))
+	require.NoError(t, db.AutoMigrate(&User{}, &Log{}, &UserSubscription{}, &ContentSafetyViolation{}))
 }
 
 func createContentSafetyTestUser(t *testing.T, username string, role int) *User {
@@ -190,4 +190,115 @@ func TestGetContentSafetyViolationsFiltersAndJoinsUsername(t *testing.T) {
 
 func TestTruncateSafetyAuditValueKeepsUTF8Valid(t *testing.T) {
 	require.Equal(t, "安全策", truncateSafetyAuditValue("安全策略", 3))
+}
+
+func createSafetyMetadataEvents(t *testing.T, userID int, count int, code string, now int64) {
+	t.Helper()
+	for sequence := 1; sequence <= count; sequence++ {
+		require.NoError(t, DB.Create(&ContentSafetyViolation{
+			UserId: userID, ChannelId: 300 + sequence,
+			RequestId: fmt.Sprintf("metadata-%d-%d", userID, sequence),
+			EventKey:  fmt.Sprintf("metadata-event-%d-%d", userID, sequence),
+			ModelName: "gpt-5.6-sol", ErrorType: "invalid_request", ErrorCode: code,
+			CreatedAt: now + int64(sequence), WindowCount: sequence, Action: ContentSafetyActionWarning,
+		}).Error)
+	}
+}
+
+func TestAttachUserContentSafetyMetadataDerivesFairEnforcementLabels(t *testing.T) {
+	setupContentSafetyViolationTestDB(t)
+	now := time.Now().Add(-time.Minute).Unix()
+	normal := createContentSafetyTestUser(t, "metadata-normal", common.RoleCommonUser)
+	manualDisabled := createContentSafetyTestUser(t, "metadata-manual", common.RoleCommonUser)
+	require.NoError(t, DB.Model(manualDisabled).Update("status", common.UserStatusDisabled).Error)
+	manualDisabled.Status = common.UserStatusDisabled
+	warning1 := createContentSafetyTestUser(t, "metadata-one", common.RoleCommonUser)
+	warning2 := createContentSafetyTestUser(t, "metadata-two", common.RoleCommonUser)
+	finalWarning := createContentSafetyTestUser(t, "metadata-three", common.RoleCommonUser)
+	disabled := createContentSafetyTestUser(t, "metadata-disabled", common.RoleCommonUser)
+	require.NoError(t, DB.Model(disabled).Update("status", common.UserStatusDisabled).Error)
+	disabled.Status = common.UserStatusDisabled
+	admin := createContentSafetyTestUser(t, "metadata-admin", common.RoleAdminUser)
+	reenabled := createContentSafetyTestUser(t, "metadata-reenabled", common.RoleCommonUser)
+
+	createSafetyMetadataEvents(t, warning1.Id, 1, "cyber_policy", now)
+	createSafetyMetadataEvents(t, warning2.Id, 2, "content_filter", now)
+	createSafetyMetadataEvents(t, finalWarning.Id, 3, "safety", now)
+	createSafetyMetadataEvents(t, disabled.Id, 4, "policy_violation", now)
+	createSafetyMetadataEvents(t, admin.Id, 4, "cyber_policy", now)
+	createSafetyMetadataEvents(t, reenabled.Id, 4, "cyber_policy", now)
+	require.NoError(t, DB.Create(&ContentSafetyViolation{
+		UserId: normal.Id, EventKey: "outside-window", ErrorCode: "cyber_policy",
+		CreatedAt: time.Now().Add(-31 * 24 * time.Hour).Unix(),
+	}).Error)
+
+	users := []*User{normal, manualDisabled, warning1, warning2, finalWarning, disabled, admin, reenabled}
+	require.NoError(t, AttachUserContentSafetyMetadata(DB, users))
+	require.Equal(t, ContentSafetyLevelNormal, normal.ContentSafetyLevel)
+	require.Equal(t, ContentSafetyLevelNormal, manualDisabled.ContentSafetyLevel)
+	require.Equal(t, ContentSafetyLevelWarning1, warning1.ContentSafetyLevel)
+	require.Equal(t, ContentSafetyLevelWarning2, warning2.ContentSafetyLevel)
+	require.Equal(t, ContentSafetyLevelFinalWarning, finalWarning.ContentSafetyLevel)
+	require.Equal(t, ContentSafetyLevelDisabled, disabled.ContentSafetyLevel)
+	require.Equal(t, ContentSafetyLevelReviewRequired, admin.ContentSafetyLevel)
+	require.Equal(t, ContentSafetyLevelReviewRequired, reenabled.ContentSafetyLevel)
+	require.Equal(t, 2, warning2.ContentSafetyCount)
+	require.Equal(t, "content_filter", warning2.ContentSafetyLastCode)
+	require.NotEmpty(t, warning2.ContentSafetyLastRequestID)
+}
+
+func TestUserContentSafetyFiltersApplyBeforePaginationAndUseExactCodes(t *testing.T) {
+	setupContentSafetyViolationTestDB(t)
+	now := time.Now().Add(-time.Minute).Unix()
+	for index := 1; index <= 5; index++ {
+		user := createContentSafetyTestUser(t, fmt.Sprintf("filter-%d", index), common.RoleCommonUser)
+		createSafetyMetadataEvents(t, user.Id, index, "cyber_policy", now)
+		if index == 4 {
+			require.NoError(t, DB.Model(user).Update("status", common.UserStatusDisabled).Error)
+		}
+	}
+	otherCode := createContentSafetyTestUser(t, "filter-other-code", common.RoleCommonUser)
+	createSafetyMetadataEvents(t, otherCode.Id, 1, "content_filter", now)
+
+	page, total, err := SearchUsersWithParams(UserSearchParams{
+		ContentSafetyStatus: ContentSafetyLevelTriggered,
+		ContentSafetyCodes:  []string{"cyber_policy"},
+		SortBy:              "id",
+		SortOrder:           "asc",
+		PageSize:            2,
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 5, total)
+	require.Len(t, page, 2)
+	require.Equal(t, ContentSafetyLevelWarning1, page[0].ContentSafetyLevel)
+
+	var finalWarnings int64
+	query := applyUserContentSafetyFilters(DB, DB.Unscoped().Model(&User{}), UserSearchParams{
+		ContentSafetyStatus: ContentSafetyLevelFinalWarning,
+	})
+	require.NoError(t, query.Count(&finalWarnings).Error)
+	require.EqualValues(t, 1, finalWarnings)
+
+	var exactCodeMatches int64
+	query = applyUserContentSafetyFilters(DB, DB.Unscoped().Model(&User{}), UserSearchParams{
+		ContentSafetyCodes: []string{"content_filter"},
+	})
+	require.NoError(t, query.Count(&exactCodeMatches).Error)
+	require.EqualValues(t, 1, exactCodeMatches)
+}
+
+func TestAttachUserContentSafetyMetadataWithoutAuditTableIsNormal(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&User{}))
+	user := &User{Id: 1, Role: common.RoleCommonUser, Status: common.UserStatusDisabled}
+	require.NoError(t, AttachUserContentSafetyMetadata(db, []*User{user}))
+	require.Equal(t, ContentSafetyLevelNormal, user.ContentSafetyLevel)
+
+	query := applyUserContentSafetyFilters(db, db.Unscoped().Model(&User{}), UserSearchParams{
+		ContentSafetyStatus: ContentSafetyLevelTriggered,
+	})
+	var total int64
+	require.NoError(t, query.Count(&total).Error)
+	require.Zero(t, total)
 }

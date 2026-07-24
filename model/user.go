@@ -125,6 +125,13 @@ type User struct {
 	RegisterIPBlacklistRuleID     int    `json:"register_ip_blacklist_rule_id,omitempty" gorm:"-"`
 	RegisterIPBlacklistCIDR       string `json:"register_ip_blacklist_cidr,omitempty" gorm:"-"`
 	RegisterIPBlacklistReason     string `json:"register_ip_blacklist_reason,omitempty" gorm:"-"`
+	ContentSafetyCount            int    `json:"content_safety_count" gorm:"-"`
+	ContentSafetyLevel            string `json:"content_safety_level" gorm:"-"`
+	ContentSafetyLastAt           int64  `json:"content_safety_last_at" gorm:"-"`
+	ContentSafetyLastCode         string `json:"content_safety_last_code" gorm:"-"`
+	ContentSafetyLastModel        string `json:"content_safety_last_model" gorm:"-"`
+	ContentSafetyLastChannelID    int    `json:"content_safety_last_channel_id" gorm:"-"`
+	ContentSafetyLastRequestID    string `json:"content_safety_last_request_id" gorm:"-"`
 }
 
 type UserSearchParams struct {
@@ -144,6 +151,8 @@ type UserSearchParams struct {
 	UsedBalanceMax        *int
 	RegisterSource        string
 	RegisterIP            string
+	ContentSafetyStatus   string
+	ContentSafetyCodes    []string
 	SortBy                string
 	SortOrder             string
 	IdSortOrder           string
@@ -453,6 +462,10 @@ func GetAllUsers(pageInfo *common.PageInfo, sortBy string, sortOrder string, idS
 		tx.Rollback()
 		return nil, 0, err
 	}
+	if err = AttachUserContentSafetyMetadata(tx, users); err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
 
 	// Commit transaction
 	if err = tx.Commit().Error; err != nil {
@@ -599,6 +612,7 @@ func SearchUsersWithParams(params UserSearchParams) ([]*User, int64, error) {
 	if registerIP != "" {
 		query = query.Where("register_ip = ?", registerIP)
 	}
+	query = applyUserContentSafetyFilters(tx, query, params)
 	if params.InviteeUserID != nil {
 		// 通过子查询拿到"被邀请人 -> 邀请人ID"，然后反查邀请人用户。
 		// 子查询同样走参数绑定，避免原始 SQL 拼接带来的注入风险。
@@ -649,6 +663,10 @@ func SearchUsersWithParams(params UserSearchParams) ([]*User, int64, error) {
 		return nil, 0, err
 	}
 	if err = AttachUserIPBlacklistMetadata(tx, users); err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
+	if err = AttachUserContentSafetyMetadata(tx, users); err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}

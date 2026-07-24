@@ -41,6 +41,8 @@ const DEFAULT_ADVANCED_FILTERS = {
   searchUsedBalanceMax: '',
   searchRegisterSource: '',
   searchRegisterIp: '',
+  searchContentSafetyStatus: '',
+  searchContentSafetyCodes: [],
   // 复合排序支持 ID、钱包额度、已使用额度同时生效。
   searchIdSortOrder: '',
   searchWalletSortOrder: '',
@@ -58,7 +60,13 @@ const getInitialAdvancedFilters = () => {
     if (!parsed || typeof parsed !== 'object') {
       return DEFAULT_ADVANCED_FILTERS;
     }
-    return { ...DEFAULT_ADVANCED_FILTERS, ...parsed };
+    return {
+      ...DEFAULT_ADVANCED_FILTERS,
+      ...parsed,
+      searchContentSafetyCodes: Array.isArray(parsed.searchContentSafetyCodes)
+        ? parsed.searchContentSafetyCodes
+        : [],
+    };
   } catch (error) {
     return DEFAULT_ADVANCED_FILTERS;
   }
@@ -135,6 +143,12 @@ export const useUsersData = () => {
       searchUsedBalanceMax: next.searchUsedBalanceMax ?? '',
       searchRegisterSource: next.searchRegisterSource ?? '',
       searchRegisterIp: next.searchRegisterIp ?? '',
+      searchContentSafetyStatus: next.searchContentSafetyStatus ?? '',
+      searchContentSafetyCodes: Array.isArray(next.searchContentSafetyCodes)
+        ? next.searchContentSafetyCodes.filter(
+            (code) => typeof code === 'string' && code.trim() !== '',
+          )
+        : [],
       searchIdSortOrder: next.searchIdSortOrder ?? '',
       searchWalletSortOrder: next.searchWalletSortOrder ?? '',
       searchUsedQuotaSortOrder: next.searchUsedQuotaSortOrder ?? '',
@@ -143,8 +157,10 @@ export const useUsersData = () => {
 
   const hasAdvancedFilters = (filters) => {
     const normalized = normalizeAdvancedFilters(filters);
-    return Object.values(normalized).some(
-      (value) => value !== '' && value !== null && value !== undefined,
+    return Object.values(normalized).some((value) =>
+      Array.isArray(value)
+        ? value.length > 0
+        : value !== '' && value !== null && value !== undefined,
     );
   };
 
@@ -368,6 +384,14 @@ export const useUsersData = () => {
       }
       if (resolvedAdvanced.searchRegisterIp !== '') {
         params.register_ip = resolvedAdvanced.searchRegisterIp.trim();
+      }
+      if (resolvedAdvanced.searchContentSafetyStatus !== '') {
+        params.content_safety_status =
+          resolvedAdvanced.searchContentSafetyStatus;
+      }
+      if (resolvedAdvanced.searchContentSafetyCodes.length > 0) {
+        params.content_safety_codes =
+          resolvedAdvanced.searchContentSafetyCodes.join(',');
       }
       const res = await API.get('/api/user/search', { params });
       if (!isLatestRequest(reqId)) {
