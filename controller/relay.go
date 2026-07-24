@@ -172,6 +172,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	defer func() {
 		// Only return quota if downstream failed and quota was actually pre-consumed
 		if newAPIError != nil {
+			newAPIError = service.NormalizeContentSafetyPolicyError(newAPIError)
 			newAPIError = service.NormalizeViolationFeeError(newAPIError)
 			if relayInfo.Billing != nil {
 				relayInfo.Billing.Refund(c)
@@ -262,7 +263,19 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			return
 		}
 
+		newAPIError = service.NormalizeContentSafetyPolicyError(newAPIError)
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
+		if service.IsContentSafetyPolicyError(newAPIError) {
+			result, auditErr := service.RecordContentSafetyPolicyViolation(c, relayInfo, newAPIError)
+			if auditErr != nil {
+				logger.LogError(c, fmt.Sprintf("content safety audit failed: user_id=%d request_id=%s error_code=%s err=%v",
+					relayInfo.UserId, relayInfo.RequestId, newAPIError.GetErrorCode(), auditErr))
+			} else if result != nil && !result.Duplicate && result.Violation != nil {
+				logger.LogWarn(c, fmt.Sprintf("content safety event recorded: user_id=%d token_id=%d channel_id=%d request_id=%s error_code=%s window_count=%d action=%s",
+					relayInfo.UserId, relayInfo.TokenId, relayInfo.ChannelId, relayInfo.RequestId,
+					result.Violation.ErrorCode, result.Violation.WindowCount, result.Violation.Action))
+			}
+		}
 
 		lastRelayError = newAPIError
 
