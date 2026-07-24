@@ -313,7 +313,7 @@ func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
 			url = fmt.Sprintf("%s/v1/models", baseURL)
 		}
 	case constant.ChannelTypeMoonshot:
-		if plan, ok := constant.ChannelSpecialBases[baseURL]; ok && plan.OpenAIBaseURL != "" {
+		if plan, ok := constant.ResolveChannelSpecialBase(baseURL); ok && plan.OpenAIBaseURL != "" {
 			url = fmt.Sprintf("%s/models", plan.OpenAIBaseURL)
 		} else {
 			url = fmt.Sprintf("%s/v1/models", baseURL)

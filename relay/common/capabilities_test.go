@@ -41,6 +41,20 @@ func TestResolveChannelCapabilitiesXAINativeTextProtocols(t *testing.T) {
 	}
 }
 
+func TestResolveChannelCapabilitiesMoonshotNativeTextProtocols(t *testing.T) {
+	caps := ResolveChannelCapabilities(constant.ChannelTypeMoonshot, "https://api.kimi.com/coding", dto.ChannelOtherSettings{})
+
+	if !caps.SupportsChatStreamOptions {
+		t.Fatalf("expected Moonshot to support chat stream options, got %+v", caps)
+	}
+	if caps.SupportsResponsesAPI || caps.SupportsResponsesStreamOptions {
+		t.Fatalf("expected Moonshot Responses support to remain disabled until implemented, got %+v", caps)
+	}
+	if !caps.NativeTextFormats.Supports(types.RelayFormatOpenAI) || !caps.NativeTextFormats.Supports(types.RelayFormatClaude) {
+		t.Fatalf("expected Moonshot to expose native OpenAI and Claude protocols, got %+v", caps)
+	}
+}
+
 func TestResolveChannelCapabilitiesHonorsOverrides(t *testing.T) {
 	caps := ResolveChannelCapabilities(constant.ChannelTypeOpenAI, "https://nan.meta-api.vip/v1", dto.ChannelOtherSettings{
 		ChatStreamOptionsMode:      dto.CapabilityModeEnabled,

@@ -1,5 +1,7 @@
 package constant
 
+import "strings"
+
 const (
 	ChannelTypeUnknown        = 0
 	ChannelTypeOpenAI         = 1
@@ -206,4 +208,22 @@ var ChannelSpecialBases = map[string]ChannelSpecialBase{
 		ClaudeBaseURL: "https://ark.cn-beijing.volces.com/api/coding",
 		OpenAIBaseURL: "https://ark.cn-beijing.volces.com/api/coding/v3",
 	},
+}
+
+var channelSpecialBaseAliases = map[string]string{
+	"https://api.kimi.com/coding":    "kimi-coding-plan",
+	"https://api.kimi.com/coding/v1": "kimi-coding-plan",
+}
+
+func ResolveChannelSpecialBase(baseURL string) (ChannelSpecialBase, bool) {
+	normalized := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if plan, ok := ChannelSpecialBases[normalized]; ok {
+		return plan, true
+	}
+	planName, ok := channelSpecialBaseAliases[normalized]
+	if !ok {
+		return ChannelSpecialBase{}, false
+	}
+	plan, ok := ChannelSpecialBases[planName]
+	return plan, ok
 }

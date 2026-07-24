@@ -95,9 +95,11 @@ var defaultChannelCapabilities = map[int]ChannelCapabilities{
 		SupportsResponsesStreamOptions: true,
 	},
 	constant.ChannelTypeMoonshot: {
-		SupportsChatStreamOptions:      true,
-		SupportsResponsesAPI:           true,
-		SupportsResponsesStreamOptions: true,
+		SupportsChatStreamOptions: true,
+		NativeTextFormats: NewTextProtocolSet(
+			types.RelayFormatOpenAI,
+			types.RelayFormatClaude,
+		),
 	},
 	constant.ChannelTypeMiniMax: {
 		SupportsChatStreamOptions:      true,
