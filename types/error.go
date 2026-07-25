@@ -61,9 +61,10 @@ const (
 	ErrorCodeChannelResponseTimeExceeded  ErrorCode = "channel:response_time_exceeded"
 
 	// client request error
-	ErrorCodeReadRequestBodyFailed ErrorCode = "read_request_body_failed"
-	ErrorCodeConvertRequestFailed  ErrorCode = "convert_request_failed"
-	ErrorCodeAccessDenied          ErrorCode = "access_denied"
+	ErrorCodeReadRequestBodyFailed     ErrorCode = "read_request_body_failed"
+	ErrorCodeConvertRequestFailed      ErrorCode = "convert_request_failed"
+	ErrorCodeAccessDenied              ErrorCode = "access_denied"
+	ErrorCodeConversationStateNotFound ErrorCode = "conversation_state_not_found"
 
 	// request error
 	ErrorCodeBadRequestBody ErrorCode = "bad_request_body"
@@ -437,6 +438,14 @@ func IsSkipRetryError(err *NewAPIError) bool {
 func ErrOptionWithSkipRetry() NewAPIErrorOptions {
 	return func(e *NewAPIError) {
 		e.skipRetry = true
+	}
+}
+
+// ErrOptionWithInternalErrorCode changes gateway classification without
+// replacing the structured upstream error returned to the client.
+func ErrOptionWithInternalErrorCode(errorCode ErrorCode) NewAPIErrorOptions {
+	return func(e *NewAPIError) {
+		e.errorCode = errorCode
 	}
 }
 

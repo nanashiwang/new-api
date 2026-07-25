@@ -84,6 +84,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	statusCodeMappingStr := c.GetString("status_code_mapping")
 	passThrough := model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled
 	strippedStreamOptions := false
+	conversationStateRecovery := responsesConversationStateRecovery{}
 	var httpResp *http.Response
 	for {
 		var requestBody io.Reader
@@ -184,6 +185,14 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		}
 
 		newAPIError = service.RelayErrorHandler(c.Request.Context(), httpResp, false)
+		newAPIError = service.NormalizeResponsesConversationStateError(newAPIError)
+		if conversationStateRecovery.prepare(c, info, request, responsesReq, passThrough, newAPIError) {
+			logCompatFallback(c, info, "conversation_state_missing_reasoning_reference")
+			continue
+		}
+		if service.IsResponsesConversationStateError(newAPIError) {
+			return newAPIError
+		}
 		service.ResetStatusCode(newAPIError, statusCodeMappingStr)
 		return newAPIError
 	}

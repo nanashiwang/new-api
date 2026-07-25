@@ -265,6 +265,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		newAPIError = service.NormalizeContentSafetyPolicyError(newAPIError)
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
+		newAPIError = service.NormalizeResponsesConversationStateError(newAPIError)
 		if service.IsContentSafetyPolicyError(newAPIError) {
 			result, auditErr := service.RecordContentSafetyPolicyViolation(c, relayInfo, newAPIError)
 			if auditErr != nil {
@@ -278,6 +279,20 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		lastRelayError = newAPIError
+		if service.IsResponsesConversationStateError(newAPIError) {
+			attachUpstreamDiagnosticsFromContext(c, newAPIError)
+			message := fmt.Sprintf(
+				"responses conversation state unavailable: classification=%s channel=%d model=%s",
+				types.ErrorCodeConversationStateNotFound,
+				channel.Id,
+				relayInfo.OriginModelName,
+			)
+			if diagnostics := newAPIError.UpstreamDiagnosticsLogString(); diagnostics != "" {
+				message = fmt.Sprintf("%s upstream={%s}", message, diagnostics)
+			}
+			logger.LogInfo(c, message)
+			break
+		}
 
 		if service.IsChannelModelMismatchError(newAPIError) {
 			if _, ok := c.Get("specific_channel_id"); ok {
