@@ -22,11 +22,14 @@ import {
   buildCRSGroupOptions,
   buildCRSUsageWindows,
   filterCRSAccounts,
+  getCRSAccountHealth,
   getCRSLatestSyncAt,
   getCRSPlatformBadgeLabel,
   getCRSQuotaState,
+  getCRSUsagePercentages,
   isValidCRSPort,
   joinCRSHostPort,
+  sortCRSAccountsByAttention,
   splitCRSHostPort,
 } from './crsDashboard.utils.js';
 
@@ -41,6 +44,133 @@ assert.deepEqual(
     { label: 'alpha', value: 'alpha' },
     { label: 'beta', value: 'beta' },
   ],
+);
+
+const healthNow = 1_800_000_000;
+
+assert.deepEqual(getCRSUsagePercentages(null), {
+  usedPercent: null,
+  remainingPercent: null,
+});
+assert.deepEqual(getCRSUsagePercentages(0), {
+  usedPercent: 0,
+  remainingPercent: 100,
+});
+
+assert.deepEqual(
+  getCRSAccountHealth(
+    {
+      is_active: true,
+      schedulable: true,
+      quota_unlimited: true,
+      quota_total: 0,
+      quota_remaining: 0,
+      last_synced_at: healthNow - 30,
+    },
+    healthNow,
+  ),
+  {
+    key: 'available',
+    score: 0,
+    isStale: false,
+    maxProgress: null,
+    remainingPercent: null,
+    quotaState: 'unlimited',
+  },
+);
+
+assert.equal(
+  getCRSAccountHealth(
+    {
+      is_active: true,
+      schedulable: true,
+      usage_windows: [{ key: '5h', progress: 94 }],
+      last_synced_at: healthNow - 30,
+    },
+    healthNow,
+  ).key,
+  'critical',
+);
+
+assert.equal(
+  getCRSAccountHealth(
+    {
+      is_active: true,
+      schedulable: true,
+      rate_limited: true,
+      usage_windows: [{ key: '5h', progress: 12 }],
+      last_synced_at: healthNow - 30,
+    },
+    healthNow,
+  ).key,
+  'rate_limited',
+);
+
+assert.equal(
+  getCRSAccountHealth(
+    {
+      is_active: true,
+      schedulable: true,
+      sync_error: 'upstream timeout',
+      last_synced_at: healthNow - 600,
+    },
+    healthNow,
+  ).key,
+  'sync_error',
+);
+
+assert.equal(
+  getCRSAccountHealth(
+    {
+      is_active: true,
+      schedulable: true,
+      last_synced_at: healthNow - 301,
+    },
+    healthNow,
+  ).key,
+  'stale',
+);
+
+assert.deepEqual(
+  sortCRSAccountsByAttention(
+    [
+      {
+        id: 1,
+        name: 'Healthy',
+        is_active: true,
+        schedulable: true,
+        last_synced_at: healthNow - 10,
+      },
+      {
+        id: 2,
+        name: 'Limited',
+        is_active: true,
+        schedulable: true,
+        rate_limited: true,
+        last_synced_at: healthNow - 10,
+      },
+      {
+        id: 3,
+        name: 'Stale',
+        is_active: true,
+        schedulable: true,
+        last_synced_at: healthNow - 1000,
+      },
+    ],
+    healthNow,
+  ).map((item) => item.id),
+  [3, 2, 1],
+);
+
+assert.deepEqual(
+  filterCRSAccounts(
+    [
+      { id: 1, site_id: 10, name: 'First' },
+      { id: 2, site_id: 20, name: 'Second' },
+    ],
+    { siteId: 20 },
+  ).map((item) => item.id),
+  [2],
 );
 
 assert.deepEqual(buildCRSGroupOptions([{ id: 1, group: 'alpha' }], 'gamma'), [

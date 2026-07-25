@@ -126,6 +126,128 @@ func TestQueryCRSAccountSnapshotsFiltersLowQuota(t *testing.T) {
 	require.Equal(t, "acct-low", rows[0].RemoteAccountID)
 }
 
+func TestQueryCRSAccountSnapshotsFiltersHealthAndOrdersAttention(t *testing.T) {
+	db := setupCRSObserverTestDB(t)
+
+	site := &model.CRSSite{
+		Name:              "health-demo",
+		Host:              "health.example.com",
+		Scheme:            "https",
+		Username:          "admin",
+		PasswordEncrypted: "enc-password",
+	}
+	require.NoError(t, db.Create(site).Error)
+
+	now := int64(1_800_000_000)
+	require.NoError(t, model.ReplaceCRSAccountSnapshots(site.Id, []*model.CRSAccountSnapshot{
+		{
+			RemoteAccountID: "acct-healthy",
+			Platform:        "openai-responses",
+			Name:            "Healthy",
+			IsActive:        true,
+			Schedulable:     true,
+			QuotaUnlimited:  true,
+			LastSyncedAt:    now,
+		},
+		{
+			RemoteAccountID: "acct-limited",
+			Platform:        "openai-responses",
+			Name:            "Limited",
+			IsActive:        true,
+			Schedulable:     true,
+			RateLimited:     true,
+			LastSyncedAt:    now,
+		},
+		{
+			RemoteAccountID: "acct-stale",
+			Platform:        "openai-responses",
+			Name:            "Stale",
+			IsActive:        true,
+			Schedulable:     true,
+			LastSyncedAt:    now - model.CRSAccountStaleAfterSeconds - 1,
+		},
+		{
+			RemoteAccountID: "acct-boundary",
+			Platform:        "openai-responses",
+			Name:            "Boundary",
+			IsActive:        true,
+			Schedulable:     true,
+			QuotaUnlimited:  true,
+			LastSyncedAt:    now - model.CRSAccountStaleAfterSeconds,
+		},
+		{
+			RemoteAccountID: "acct-empty",
+			Platform:        "openai-responses",
+			Name:            "Empty",
+			IsActive:        true,
+			Schedulable:     true,
+			QuotaTotal:      100,
+			QuotaRemaining:  0,
+			LastSyncedAt:    now,
+		},
+		{
+			RemoteAccountID: "acct-error",
+			Platform:        "openai-responses",
+			Name:            "Error",
+			IsActive:        true,
+			Schedulable:     true,
+			SyncError:       "refresh failed",
+			LastSyncedAt:    now,
+		},
+	}))
+
+	available, total, err := model.QueryCRSAccountSnapshots(model.CRSAccountSnapshotQuery{
+		SiteID:      site.Id,
+		HealthState: "available",
+		StaleBefore: now - model.CRSAccountStaleAfterSeconds,
+		Page:        1,
+		PageSize:    20,
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, total)
+	require.ElementsMatch(t, []string{"acct-healthy", "acct-boundary"}, []string{
+		available[0].RemoteAccountID,
+		available[1].RemoteAccountID,
+	})
+
+	attention, total, err := model.QueryCRSAccountSnapshots(model.CRSAccountSnapshotQuery{
+		SiteID:         site.Id,
+		HealthState:    "attention",
+		StaleBefore:    now - model.CRSAccountStaleAfterSeconds,
+		AttentionFirst: true,
+		Page:           1,
+		PageSize:       20,
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 4, total)
+	require.Equal(t, []string{"acct-error", "acct-stale", "acct-limited", "acct-empty"}, []string{
+		attention[0].RemoteAccountID,
+		attention[1].RemoteAccountID,
+		attention[2].RemoteAccountID,
+		attention[3].RemoteAccountID,
+	})
+
+	empty, total, err := model.QueryCRSAccountSnapshots(model.CRSAccountSnapshotQuery{
+		SiteID:      site.Id,
+		QuotaState:  "empty",
+		StaleBefore: now - model.CRSAccountStaleAfterSeconds,
+		Page:        1,
+		PageSize:    20,
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Equal(t, "acct-empty", empty[0].RemoteAccountID)
+
+	defaultOrder, _, err := model.QueryCRSAccountSnapshots(model.CRSAccountSnapshotQuery{
+		SiteID:      site.Id,
+		StaleBefore: now - model.CRSAccountStaleAfterSeconds,
+		Page:        1,
+		PageSize:    20,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "acct-boundary", defaultOrder[0].RemoteAccountID)
+}
+
 func TestCRSAccountSnapshotTextFieldsDoNotDeclareDefaultValues(t *testing.T) {
 	t.Parallel()
 

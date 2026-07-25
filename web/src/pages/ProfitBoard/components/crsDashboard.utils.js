@@ -17,6 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 const QUOTA_LOW_THRESHOLD = 10;
+const CRS_USAGE_WARNING_THRESHOLD = 70;
+const CRS_USAGE_CRITICAL_THRESHOLD = 90;
+
+export const CRS_ACCOUNT_STALE_AFTER_SECONDS = 5 * 60;
 
 const CRS_PLATFORM_DISPLAY_NAMES = {
   claude: 'Claude',
@@ -49,9 +53,19 @@ const CRS_TONE_LEVELS = ['muted', 'success', 'info', 'warning', 'danger'];
 const normalizeText = (value) => String(value || '').trim();
 
 const clampProgress = (value) => {
+  if (value === null || value === undefined || value === '') return null;
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return null;
   return Math.min(100, Math.max(0, numeric));
+};
+
+export const getCRSUsagePercentages = (progress) => {
+  const usedPercent = clampProgress(progress);
+  return {
+    usedPercent,
+    remainingPercent:
+      usedPercent === null ? null : Math.max(0, 100 - usedPercent),
+  };
 };
 
 const normalizeTone = (tone, progress) => {
@@ -93,7 +107,9 @@ const getCRSSubscriptionDisplayName = (account) => {
 
 const getCRSPlatformDisplayName = (platform) => {
   const normalizedPlatform = normalizeText(platform).toLowerCase();
-  return CRS_PLATFORM_DISPLAY_NAMES[normalizedPlatform] || normalizeText(platform);
+  return (
+    CRS_PLATFORM_DISPLAY_NAMES[normalizedPlatform] || normalizeText(platform)
+  );
 };
 
 const getCRSAccountTypeDisplayName = (account) => {
@@ -280,7 +296,8 @@ export const buildCRSUsageWindows = (account = {}) => {
     clampProgress(account?.quota_percentage) ??
     (Number(account?.quota_total || 0) > 0
       ? clampProgress(
-          (Number(account?.quota_used || 0) / Number(account?.quota_total || 0)) *
+          (Number(account?.quota_used || 0) /
+            Number(account?.quota_total || 0)) *
             100,
         )
       : null);
@@ -312,9 +329,92 @@ export const buildCRSUsageWindows = (account = {}) => {
   return [];
 };
 
+export const getCRSAccountHealth = (
+  account = {},
+  nowSeconds = Math.floor(Date.now() / 1000),
+) => {
+  const windows = buildCRSUsageWindows(account);
+  const progresses = windows
+    .map((window) => clampProgress(window?.progress))
+    .filter((progress) => progress !== null);
+  const maxProgress = progresses.length > 0 ? Math.max(...progresses) : null;
+  const remainingPercent =
+    maxProgress === null ? null : Math.max(0, 100 - maxProgress);
+  const quotaState = getCRSQuotaState(account);
+  const lastSyncedAt = Number(account?.last_synced_at || 0);
+  const isStale =
+    lastSyncedAt <= 0 ||
+    (Number.isFinite(Number(nowSeconds)) &&
+      Number(nowSeconds) - lastSyncedAt > CRS_ACCOUNT_STALE_AFTER_SECONDS);
+
+  let key = 'available';
+  let score = 0;
+  if (normalizeText(account?.sync_error || account?.error_message)) {
+    key = 'sync_error';
+    score = 100;
+  } else if (isStale) {
+    key = 'stale';
+    score = 95;
+  } else if (account?.rate_limited) {
+    key = 'rate_limited';
+    score = 90;
+  } else if (account?.is_active === false) {
+    key = 'inactive';
+    score = 80;
+  } else if (account?.schedulable === false) {
+    key = 'unschedulable';
+    score = 70;
+  } else if (quotaState === 'empty' || maxProgress >= 100) {
+    key = 'empty';
+    score = 60;
+  } else if (
+    maxProgress !== null &&
+    maxProgress >= CRS_USAGE_CRITICAL_THRESHOLD
+  ) {
+    key = 'critical';
+    score = 50;
+  } else if (
+    quotaState === 'low' ||
+    (maxProgress !== null && maxProgress >= CRS_USAGE_WARNING_THRESHOLD)
+  ) {
+    key = 'warning';
+    score = 40;
+  }
+
+  return {
+    key,
+    score,
+    isStale,
+    maxProgress,
+    remainingPercent,
+    quotaState,
+  };
+};
+
+export const sortCRSAccountsByAttention = (
+  accounts = [],
+  nowSeconds = Math.floor(Date.now() / 1000),
+) =>
+  [...accounts].sort((left, right) => {
+    const leftHealth = getCRSAccountHealth(left, nowSeconds);
+    const rightHealth = getCRSAccountHealth(right, nowSeconds);
+    if (leftHealth.score !== rightHealth.score) {
+      return rightHealth.score - leftHealth.score;
+    }
+    if (leftHealth.remainingPercent !== rightHealth.remainingPercent) {
+      if (leftHealth.remainingPercent === null) return 1;
+      if (rightHealth.remainingPercent === null) return -1;
+      return leftHealth.remainingPercent - rightHealth.remainingPercent;
+    }
+    return `${normalizeText(left?.site_name)}\u0000${normalizeText(left?.name)}`.localeCompare(
+      `${normalizeText(right?.site_name)}\u0000${normalizeText(right?.name)}`,
+      'zh-CN',
+    );
+  });
+
 export const filterCRSAccounts = (
   accounts = [],
-  { keyword = '', platform = '', quotaState = '' } = {},
+  { keyword = '', platform = '', quotaState = '', siteId = 0 } = {},
 ) => {
   const normalizedKeyword = String(keyword || '')
     .trim()
@@ -323,6 +423,9 @@ export const filterCRSAccounts = (
   const normalizedQuotaState = String(quotaState || '').trim();
 
   return accounts.filter((account) => {
+    if (Number(siteId) > 0 && Number(account?.site_id) !== Number(siteId)) {
+      return false;
+    }
     if (normalizedPlatform && account?.platform !== normalizedPlatform) {
       return false;
     }

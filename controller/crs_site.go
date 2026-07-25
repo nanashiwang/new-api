@@ -478,13 +478,16 @@ func GetCRSAccounts(c *gin.Context) {
 	siteID, _ := strconv.Atoi(c.DefaultQuery("site_id", "0"))
 
 	rows, total, err := model.QueryCRSAccountSnapshots(model.CRSAccountSnapshotQuery{
-		SiteID:     siteID,
-		Platform:   c.Query("platform"),
-		Status:     c.Query("status"),
-		Keyword:    c.Query("keyword"),
-		QuotaState: c.Query("quota_state"),
-		Page:       page,
-		PageSize:   pageSize,
+		SiteID:         siteID,
+		Platform:       c.Query("platform"),
+		Status:         c.Query("status"),
+		HealthState:    c.Query("health_state"),
+		Keyword:        c.Query("keyword"),
+		QuotaState:     c.Query("quota_state"),
+		StaleBefore:    common.GetTimestamp() - model.CRSAccountStaleAfterSeconds,
+		AttentionFirst: c.DefaultQuery("attention_first", "true") != "false",
+		Page:           page,
+		PageSize:       pageSize,
 	})
 	if err != nil {
 		crsError(c, http.StatusInternalServerError, err.Error())

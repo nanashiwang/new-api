@@ -1,6 +1,25 @@
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { API } from '../../../helpers/api';
 import { showError, showSuccess } from '../../../helpers';
+import { useLatestRequestGuard } from '../../../hooks/common/useLatestRequestGuard';
 
 export function useCRSData() {
   const [sites, setSites] = useState([]);
@@ -17,6 +36,7 @@ export function useCRSData() {
   const [siteDetail, setSiteDetail] = useState(null);
   const [loadingSiteDetail, setLoadingSiteDetail] = useState(false);
   const mountedRef = useRef(true);
+  const accountsRequestGuard = useLatestRequestGuard();
   const lastAccountsQueryRef = useRef({
     page: 1,
     page_size: 50,
@@ -56,6 +76,7 @@ export function useCRSData() {
 
   const loadAccounts = useCallback(
     async (query = {}) => {
+      const requestId = accountsRequestGuard.createRequestId();
       const nextQuery = {
         ...lastAccountsQueryRef.current,
         ...query,
@@ -69,7 +90,10 @@ export function useCRSData() {
           params.set(key, String(value));
         });
         const res = await API.get(`/api/crs/accounts?${params.toString()}`);
-        if (res.data?.success) {
+        if (
+          accountsRequestGuard.isLatestRequest(requestId) &&
+          res.data?.success
+        ) {
           safeSet(setAccounts, res.data.data ?? []);
           safeSet(setAccountsTotal, res.data.total ?? 0);
           return res.data;
@@ -77,11 +101,13 @@ export function useCRSData() {
       } catch (err) {
         // handled by interceptor
       } finally {
-        safeSet(setLoadingAccounts, false);
+        if (accountsRequestGuard.isLatestRequest(requestId)) {
+          safeSet(setLoadingAccounts, false);
+        }
       }
       return null;
     },
-    [safeSet],
+    [accountsRequestGuard, safeSet],
   );
 
   const loadSiteAccounts = useCallback(
@@ -173,7 +199,7 @@ export function useCRSData() {
         const res = await API.post('/api/crs/sites', payload);
         if (res.data?.success) {
           showSuccess('站点已创建');
-          await Promise.all([loadOverview(), loadAccounts({ page: 1 })]);
+          await Promise.all([loadOverview(), loadAccounts()]);
           return true;
         }
         showError(res.data?.message ?? '创建失败');
@@ -224,7 +250,7 @@ export function useCRSData() {
         const res = await API.delete(`/api/crs/sites/${id}`);
         if (res.data?.success) {
           showSuccess('站点已删除');
-          await Promise.all([loadOverview(), loadAccounts({ page: 1 })]);
+          await Promise.all([loadOverview(), loadAccounts()]);
           if (siteDetail?.site?.id === id) {
             safeSet(setSiteDetail, null);
           }

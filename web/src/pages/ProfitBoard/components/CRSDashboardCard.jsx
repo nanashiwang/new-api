@@ -29,17 +29,11 @@ import {
   Tooltip,
   Typography,
 } from '@douyinfe/semi-ui';
-import {
-  Eye,
-  Pencil,
-  Plus,
-  RefreshCw,
-  Server,
-  Trash2,
-} from 'lucide-react';
+import { Eye, Pencil, Plus, RefreshCw, Server, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { timestamp2string } from '../../../helpers/date';
 import { useCRSData } from '../hooks/useCRSData';
+import CRSAccountUsageOverview from './CRSAccountUsageOverview';
 import CRSSiteDetailSideSheet from './CRSSiteDetailSideSheet';
 import CRSSiteModal from './CRSSiteModal';
 import { buildCRSGroupOptions, getCRSLatestSyncAt } from './crsDashboard.utils';
@@ -408,7 +402,10 @@ export default function CRSDashboardCard({ t: tProp }) {
     sites,
     aggregate,
     observer,
+    accounts,
+    accountsTotal,
     loadingOverview,
+    loadingAccounts,
     refreshingAll,
     refreshingSiteId,
     savingSite,
@@ -416,6 +413,7 @@ export default function CRSDashboardCard({ t: tProp }) {
     siteDetail,
     loadingSiteDetail,
     loadOverview,
+    loadAccounts,
     loadSiteAccounts,
     setSiteDetail,
     refreshSite,
@@ -454,6 +452,11 @@ export default function CRSDashboardCard({ t: tProp }) {
       accounts: [],
     });
     await loadSiteAccounts(fullSite.id);
+  };
+
+  const openSiteDetailById = (siteId) => {
+    const site = siteMap.get(Number(siteId));
+    if (site) openSiteDetail(site);
   };
 
   const closeSiteDetail = () => {
@@ -599,6 +602,18 @@ export default function CRSDashboardCard({ t: tProp }) {
         </Card>
       ) : null}
 
+      <CRSAccountUsageOverview
+        accounts={accounts}
+        total={accountsTotal}
+        loading={loadingAccounts}
+        sites={sites}
+        aggregate={aggregate}
+        observer={observer}
+        loadAccounts={loadAccounts}
+        onOpenSite={openSiteDetailById}
+        t={tFn}
+      />
+
       <Card
         bordered
         headerStyle={{ padding: '10px 16px' }}
@@ -606,9 +621,7 @@ export default function CRSDashboardCard({ t: tProp }) {
         title={
           <div className='flex items-center gap-2'>
             <Server size={14} className='text-semi-color-text-2' />
-            <span className='text-sm font-semibold'>
-              {tFn('CRS 站点列表')}
-            </span>
+            <span className='text-sm font-semibold'>{tFn('CRS 站点列表')}</span>
             <Badge count={sites.length} overflowCount={99} />
           </div>
         }

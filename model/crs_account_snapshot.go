@@ -3,11 +3,14 @@ package model
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
 )
+
+const CRSAccountStaleAfterSeconds int64 = 5 * 60
 
 type CRSAccountSnapshot struct {
 	Id                        int     `json:"id" gorm:"primaryKey;autoIncrement"`
@@ -69,13 +72,16 @@ type CRSUsageWindow struct {
 }
 
 type CRSAccountSnapshotQuery struct {
-	SiteID     int
-	Platform   string
-	Status     string
-	Keyword    string
-	QuotaState string
-	Page       int
-	PageSize   int
+	SiteID         int
+	Platform       string
+	Status         string
+	HealthState    string
+	Keyword        string
+	QuotaState     string
+	StaleBefore    int64
+	AttentionFirst bool
+	Page           int
+	PageSize       int
 }
 
 func (s *CRSAccountSnapshot) TableName() string {
@@ -165,6 +171,45 @@ func QueryCRSAccountSnapshots(query CRSAccountSnapshotQuery) ([]*CRSAccountSnaps
 	if status := strings.TrimSpace(query.Status); status != "" {
 		db = db.Where("status = ?", status)
 	}
+	switch strings.TrimSpace(query.HealthState) {
+	case "available":
+		db = db.Where(
+			"is_active = ? AND schedulable = ? AND rate_limited = ? AND sync_error = ? AND error_message = ? AND (quota_unlimited = ? OR quota_total <= ? OR quota_remaining > ?)",
+			true,
+			true,
+			false,
+			"",
+			"",
+			true,
+			0,
+			0,
+		)
+		if query.StaleBefore > 0 {
+			db = db.Where("last_synced_at >= ?", query.StaleBefore)
+		}
+	case "attention":
+		conditions := "is_active = ? OR schedulable = ? OR rate_limited = ? OR sync_error <> ? OR error_message <> ? OR (quota_unlimited = ? AND quota_total > ? AND quota_remaining <= ?)"
+		args := []any{false, false, true, "", "", false, 0, 0}
+		if query.StaleBefore > 0 {
+			conditions += " OR last_synced_at < ?"
+			args = append(args, query.StaleBefore)
+		}
+		db = db.Where("("+conditions+")", args...)
+	case "rate_limited":
+		db = db.Where("rate_limited = ?", true)
+	case "inactive":
+		db = db.Where("is_active = ?", false)
+	case "unschedulable":
+		db = db.Where("is_active = ? AND schedulable = ?", true, false)
+	case "sync_error":
+		db = db.Where("sync_error <> ? OR error_message <> ?", "", "")
+	case "stale":
+		if query.StaleBefore > 0 {
+			db = db.Where("last_synced_at < ?", query.StaleBefore)
+		} else {
+			db = db.Where("1 = 0")
+		}
+	}
 	if keyword := strings.TrimSpace(query.Keyword); keyword != "" {
 		like := "%" + keyword + "%"
 		db = db.Where(
@@ -178,7 +223,7 @@ func QueryCRSAccountSnapshots(query CRSAccountSnapshotQuery) ([]*CRSAccountSnaps
 	case "low":
 		db = db.Where("quota_unlimited = ? AND quota_remaining > 0 AND quota_remaining <= ?", false, 10)
 	case "empty":
-		db = db.Where("quota_unlimited = ? AND quota_remaining <= ?", false, 0)
+		db = db.Where("quota_unlimited = ? AND quota_total > ? AND quota_remaining <= ?", false, 0, 0)
 	case "unlimited":
 		db = db.Where("quota_unlimited = ?", true)
 	}
@@ -200,11 +245,31 @@ func QueryCRSAccountSnapshots(query CRSAccountSnapshotQuery) ([]*CRSAccountSnaps
 		pageSize = 200
 	}
 
-	err := db.Order("rate_limited DESC").
-		Order("quota_remaining ASC").
-		Order("updated_time DESC").
-		Offset((page - 1) * pageSize).
+	if query.AttentionFirst {
+		attentionOrder := "CASE " +
+			"WHEN sync_error <> '' OR error_message <> '' THEN 0 " +
+			staleAttentionOrder(query.StaleBefore) +
+			"WHEN rate_limited THEN 2 " +
+			"WHEN NOT is_active THEN 3 " +
+			"WHEN NOT schedulable THEN 4 " +
+			"WHEN NOT quota_unlimited AND quota_total > 0 AND quota_remaining <= 0 THEN 5 " +
+			"ELSE 6 END ASC"
+		db = db.Order(attentionOrder).
+			Order("quota_remaining ASC").
+			Order("updated_time DESC")
+	} else {
+		db = db.Order("updated_time DESC").Order("name ASC")
+	}
+
+	err := db.Offset((page - 1) * pageSize).
 		Limit(pageSize).
 		Find(&result).Error
 	return result, total, err
+}
+
+func staleAttentionOrder(staleBefore int64) string {
+	if staleBefore <= 0 {
+		return ""
+	}
+	return "WHEN last_synced_at < " + strconv.FormatInt(staleBefore, 10) + " THEN 1 "
 }
