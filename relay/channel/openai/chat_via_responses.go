@@ -146,7 +146,7 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 // (OaiResponsesToChatAggregateHandler)两条路径共用,保证转换与计费口径完全一致。
 func finishResponsesToChatConversion(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response, responsesResp *dto.OpenAIResponsesResponse) (*dto.Usage, *types.NewAPIError) {
 	chatId := helper.GetResponseID(c)
-	chatResp, usage, err := service.ResponsesResponseToChatCompletionsResponse(responsesResp, chatId)
+	chatResp, usage, err := service.ResponsesResponseToChatCompletionsResponseWithToolProtocol(responsesResp, chatId, info.ChatToolProtocol)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
@@ -211,6 +211,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		sawToolCall      bool
 		streamErr        *types.NewAPIError
 		upstreamResponse string
+		legacyToolCallID string
 	)
 
 	toolCallIndexByID := make(map[string]int)
@@ -338,9 +339,17 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		if callID == "" {
 			return true
 		}
-		if outputText.Len() > 0 {
-			// Prefer streaming assistant text over tool calls to match non-stream behavior.
-			return true
+		if info.ChatToolProtocol == dto.ChatToolProtocolLegacy {
+			if legacyToolCallID == "" {
+				legacyToolCallID = callID
+			} else if legacyToolCallID != callID {
+				streamErr = types.NewOpenAIError(
+					fmt.Errorf("legacy functions protocol cannot represent multiple function calls"),
+					types.ErrorCodeBadResponse,
+					http.StatusBadGateway,
+				)
+				return false
+			}
 		}
 		if !sendStartIfNeeded() {
 			return false
@@ -358,17 +367,22 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			name = toolCallNameByID[callID]
 		}
 
-		tool := dto.ToolCallResponse{
-			ID:   callID,
-			Type: "function",
-			Function: dto.FunctionResponse{
-				Arguments: argsDelta,
-			},
-		}
-		tool.SetIndex(idx)
+		function := dto.FunctionResponse{Arguments: argsDelta}
 		if name != "" && !toolCallNameSent[callID] {
-			tool.Function.Name = name
+			function.Name = name
 			toolCallNameSent[callID] = true
+		}
+		delta := dto.ChatCompletionsStreamResponseChoiceDelta{}
+		if info.ChatToolProtocol == dto.ChatToolProtocolLegacy {
+			delta.FunctionCall = &function
+		} else {
+			tool := dto.ToolCallResponse{
+				ID:       callID,
+				Type:     "function",
+				Function: function,
+			}
+			tool.SetIndex(idx)
+			delta.ToolCalls = []dto.ToolCallResponse{tool}
 		}
 
 		chunk := &dto.ChatCompletionsStreamResponse{
@@ -379,9 +393,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			Choices: []dto.ChatCompletionsStreamResponseChoice{
 				{
 					Index: 0,
-					Delta: dto.ChatCompletionsStreamResponseChoiceDelta{
-						ToolCalls: []dto.ToolCallResponse{tool},
-					},
+					Delta: delta,
 				},
 			},
 		}
@@ -391,11 +403,63 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		sawToolCall = true
 
 		// Include tool call data in the local builder for fallback token estimation.
-		if tool.Function.Name != "" {
-			usageText.WriteString(tool.Function.Name)
+		if function.Name != "" {
+			usageText.WriteString(function.Name)
 		}
 		if argsDelta != "" {
 			usageText.WriteString(argsDelta)
+		}
+		return true
+	}
+
+	emitCompletedToolCalls := func(response *dto.OpenAIResponsesResponse) bool {
+		if response == nil {
+			return true
+		}
+		for _, output := range response.Output {
+			if output.Type != "function_call" {
+				continue
+			}
+			callID := strings.TrimSpace(output.CallId)
+			if callID == "" {
+				callID = strings.TrimSpace(output.ID)
+			}
+			if callID == "" {
+				streamErr = types.NewOpenAIError(
+					fmt.Errorf("completed function call is missing call_id"),
+					types.ErrorCodeBadResponse,
+					http.StatusBadGateway,
+				)
+				return false
+			}
+
+			name := strings.TrimSpace(output.Name)
+			fullArgs := output.ArgumentsString()
+			previousArgs := toolCallArgsByID[callID]
+			argsDelta := ""
+			switch {
+			case previousArgs == "":
+				argsDelta = fullArgs
+			case fullArgs == previousArgs:
+			case strings.HasPrefix(fullArgs, previousArgs):
+				argsDelta = fullArgs[len(previousArgs):]
+			default:
+				streamErr = types.NewOpenAIError(
+					fmt.Errorf("completed function call arguments do not match streamed arguments"),
+					types.ErrorCodeBadResponse,
+					http.StatusBadGateway,
+				)
+				return false
+			}
+			if fullArgs != "" {
+				toolCallArgsByID[callID] = fullArgs
+			}
+			if toolCallNameSent[callID] && argsDelta == "" {
+				continue
+			}
+			if !sendToolCallDelta(callID, name, argsDelta) {
+				return false
+			}
 		}
 		return true
 	}
@@ -617,6 +681,9 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 						}
 					}
 				}
+				if !emitCompletedToolCalls(streamResp.Response) {
+					return false
+				}
 			}
 
 			if info.RelayFormat == types.RelayFormatClaude &&
@@ -643,8 +710,11 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 					info.ClaudeConvertInfo.Usage = usage
 				}
 				finishReason := "stop"
-				if sawToolCall && outputText.Len() == 0 {
+				if sawToolCall {
 					finishReason = "tool_calls"
+					if info.ChatToolProtocol == dto.ChatToolProtocolLegacy {
+						finishReason = "function_call"
+					}
 				}
 				stop := helper.GenerateStopResponse(responseId, createAt, model, finishReason)
 				if !sendChatChunk(stop) {
@@ -681,8 +751,11 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			info.ClaudeConvertInfo.Usage = usage
 		}
 		finishReason := "stop"
-		if sawToolCall && outputText.Len() == 0 {
+		if sawToolCall {
 			finishReason = "tool_calls"
+			if info.ChatToolProtocol == dto.ChatToolProtocolLegacy {
+				finishReason = "function_call"
+			}
 		}
 		stop := helper.GenerateStopResponse(responseId, createAt, model, finishReason)
 		if !sendChatChunk(stop) {

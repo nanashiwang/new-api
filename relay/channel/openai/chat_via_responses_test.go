@@ -9,6 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -63,6 +64,106 @@ func TestOaiResponsesToChatStreamHandler_CountsWebSearchCalls(t *testing.T) {
 	require.NotContains(t, recorder.Body.String(), `"input_tokens"`)
 	require.NotContains(t, recorder.Body.String(), `"output_tokens"`)
 	require.NotContains(t, recorder.Body.String(), `"claude_cache_creation_`)
+}
+
+func TestOaiResponsesToChatStreamHandler_PreservesTextBeforeModernToolCall(t *testing.T) {
+	t.Parallel()
+	setResponsesStreamTestTimeout(t)
+
+	recorder, usage, relayErr := runTextThenToolCallStream(t, dto.ChatToolProtocolModern)
+	require.Nil(t, relayErr)
+	require.NotNil(t, usage)
+	responseBody := recorder.Body.String()
+	require.Contains(t, responseBody, `"content":"I will check it."`)
+	require.Contains(t, responseBody, `"tool_calls":[{"index":0,"id":"call_lookup"`)
+	require.Contains(t, responseBody, `"name":"lookup"`)
+	require.Contains(t, responseBody, `"arguments":"{\"q\":\"status\"}"`)
+	require.Equal(t, 1, strings.Count(responseBody, `"arguments":"{\"q\":\"status\"}"`))
+	require.Contains(t, responseBody, `"finish_reason":"tool_calls"`)
+	require.NotContains(t, responseBody, `"finish_reason":"stop"`)
+}
+
+func TestOaiResponsesToChatStreamHandler_ProjectsTextBeforeLegacyFunctionCall(t *testing.T) {
+	t.Parallel()
+	setResponsesStreamTestTimeout(t)
+
+	recorder, usage, relayErr := runTextThenToolCallStream(t, dto.ChatToolProtocolLegacy)
+	require.Nil(t, relayErr)
+	require.NotNil(t, usage)
+	responseBody := recorder.Body.String()
+	require.Contains(t, responseBody, `"content":"I will check it."`)
+	require.Contains(t, responseBody, `"function_call":{"name":"lookup","arguments":""}`)
+	require.Contains(t, responseBody, `"function_call":{"arguments":"{\"q\":\"status\"}"}`)
+	require.Equal(t, 1, strings.Count(responseBody, `"arguments":"{\"q\":\"status\"}"`))
+	require.Contains(t, responseBody, `"finish_reason":"function_call"`)
+	require.NotContains(t, responseBody, `"tool_calls"`)
+}
+
+func TestOaiResponsesToChatStreamHandler_EmitsFunctionCallFoundOnlyAtCompletion(t *testing.T) {
+	t.Parallel()
+	setResponsesStreamTestTimeout(t)
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	body := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_terminal_tool","model":"gpt-5","created_at":1700000000}}`,
+		`data: {"type":"response.completed","response":{"id":"resp_terminal_tool","model":"gpt-5","created_at":1700000000,"status":"completed","usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15},"output":[{"type":"function_call","id":"fc_terminal","call_id":"call_terminal","name":"lookup","arguments":"{\"q\":\"status\"}"}]}}`,
+		`data: [DONE]`,
+	}, "\n")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+
+	usage, relayErr := OaiResponsesToChatStreamHandler(c, &relaycommon.RelayInfo{
+		RelayFormat:      types.RelayFormatOpenAI,
+		ChatToolProtocol: dto.ChatToolProtocolModern,
+		ChannelMeta:      &relaycommon.ChannelMeta{UpstreamModelName: "gpt-5"},
+	}, resp)
+	require.Nil(t, relayErr)
+	require.NotNil(t, usage)
+	responseBody := recorder.Body.String()
+	require.Contains(t, responseBody, `"id":"call_terminal"`)
+	require.Contains(t, responseBody, `"name":"lookup"`)
+	require.Contains(t, responseBody, `"arguments":"{\"q\":\"status\"}"`)
+	require.Contains(t, responseBody, `"finish_reason":"tool_calls"`)
+}
+
+func runTextThenToolCallStream(t *testing.T, protocol dto.ChatToolProtocol) (*httptest.ResponseRecorder, *dto.Usage, *types.NewAPIError) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	body := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_tool","model":"gpt-5","created_at":1700000000}}`,
+		`data: {"type":"response.output_text.delta","delta":"I will check it."}`,
+		`data: {"type":"response.output_item.added","item":{"type":"function_call","id":"fc_lookup","call_id":"call_lookup","name":"lookup","arguments":""}}`,
+		`data: {"type":"response.function_call_arguments.delta","item_id":"fc_lookup","delta":"{\"q\":\"status\"}"}`,
+		`data: {"type":"response.output_item.done","item":{"type":"function_call","id":"fc_lookup","call_id":"call_lookup","name":"lookup","arguments":"{\"q\":\"status\"}"}}`,
+		`data: {"type":"response.completed","response":{"id":"resp_tool","model":"gpt-5","created_at":1700000000,"status":"completed","usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"I will check it."}]},{"type":"function_call","id":"fc_lookup","call_id":"call_lookup","name":"lookup","arguments":"{\"q\":\"status\"}"}]}}`,
+		`data: [DONE]`,
+	}, "\n")
+
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type": []string{"text/event-stream"},
+		},
+		Body: io.NopCloser(strings.NewReader(body)),
+	}
+	usage, relayErr := OaiResponsesToChatStreamHandler(c, &relaycommon.RelayInfo{
+		RelayFormat:      types.RelayFormatOpenAI,
+		ChatToolProtocol: protocol,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "gpt-5",
+		},
+	}, resp)
+	return recorder, usage, relayErr
 }
 
 func TestOaiResponsesToChatHandler_AcceptsObjectToolChoiceAndProjectsUsage(t *testing.T) {

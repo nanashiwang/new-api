@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -228,6 +229,79 @@ func TestChatCompletionsViaResponses_RemovesStreamOptionsForNonStreamRequest(t *
 	require.Len(t, adaptor.requests, 1)
 	require.NotContains(t, adaptor.requests[0], `"stream_options"`)
 	require.NotContains(t, adaptor.requests[0], `"stream":true`)
+}
+
+func TestChatCompletionsViaResponses_NormalizesLegacyFunctionsBeforeUpstream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	info := &relaycommon.RelayInfo{
+		TokenId:         402,
+		UserId:          401,
+		RelayMode:       relayconstant.RelayModeChatCompletions,
+		OriginModelName: "gpt-5",
+		RelayFormat:     types.RelayFormatOpenAI,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:         403,
+			UpstreamModelName: "gpt-5",
+		},
+	}
+	request := &dto.GeneralOpenAIRequest{
+		Model:        "gpt-5",
+		Functions:    json.RawMessage(`[{"name":"lookup","parameters":{"type":"object"}}]`),
+		FunctionCall: json.RawMessage(`{"name":"lookup"}`),
+		Messages:     []dto.Message{{Role: "user", Content: "hello"}},
+	}
+	adaptor := &responsesRetryTestAdaptor{
+		responses: []*http.Response{
+			newResponsesRetryNonStreamSuccessHTTPResponse(t, "ok"),
+		},
+	}
+
+	usage, newAPIError := chatCompletionsViaResponses(ctx, info, adaptor, request)
+	require.Nil(t, newAPIError)
+	require.NotNil(t, usage)
+	require.Equal(t, dto.ChatToolProtocolLegacy, info.ChatToolProtocol)
+	require.Len(t, adaptor.requests, 1)
+	require.Contains(t, adaptor.requests[0], `"tools":[{"description":"","name":"lookup","parameters":{"type":"object"},"type":"function"}]`)
+	require.Contains(t, adaptor.requests[0], `"tool_choice":{"name":"lookup","type":"function"}`)
+	require.Contains(t, adaptor.requests[0], `"parallel_tool_calls":false`)
+	require.NotContains(t, adaptor.requests[0], `"functions"`)
+	require.NotContains(t, adaptor.requests[0], `"function_call"`)
+}
+
+func TestChatCompletionsViaResponses_RejectsMixedToolProtocolsBeforeUpstream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode:       relayconstant.RelayModeChatCompletions,
+		OriginModelName: "gpt-5",
+		RelayFormat:     types.RelayFormatOpenAI,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "gpt-5",
+		},
+	}
+	request := &dto.GeneralOpenAIRequest{
+		Model:     "gpt-5",
+		Functions: json.RawMessage(`[{"name":"legacy"}]`),
+		Tools: []dto.ToolCallRequest{{
+			Type:     "function",
+			Function: dto.FunctionRequest{Name: "modern"},
+		}},
+		Messages: []dto.Message{{Role: "user", Content: "hello"}},
+	}
+	adaptor := &responsesRetryTestAdaptor{}
+
+	usage, newAPIError := chatCompletionsViaResponses(ctx, info, adaptor, request)
+	require.Nil(t, usage)
+	require.NotNil(t, newAPIError)
+	require.Equal(t, http.StatusBadRequest, newAPIError.StatusCode)
+	require.Contains(t, newAPIError.Error(), "ambiguous tool protocol")
+	require.Empty(t, adaptor.requests)
 }
 
 // 方案B 分派解耦回归:客户端非流式,但上游(codex 被强制流式)返回 SSE →

@@ -105,6 +105,14 @@ type GeneralOpenAIRequest struct {
 	SearchMode             string          `json:"search_mode,omitempty"`
 }
 
+type ChatToolProtocol string
+
+const (
+	ChatToolProtocolNone   ChatToolProtocol = "none"
+	ChatToolProtocolModern ChatToolProtocol = "modern"
+	ChatToolProtocolLegacy ChatToolProtocol = "legacy"
+)
+
 // createFileSource 根据数据内容创建正确类型的 FileSource
 func createFileSource(data string) *types.FileSource {
 	if strings.HasPrefix(data, "http://") || strings.HasPrefix(data, "https://") {
@@ -304,6 +312,7 @@ type Message struct {
 	Prefix           *bool           `json:"prefix,omitempty"`
 	ReasoningContent string          `json:"reasoning_content,omitempty"`
 	Reasoning        string          `json:"reasoning,omitempty"`
+	FunctionCall     json.RawMessage `json:"function_call,omitempty"`
 	ToolCalls        json.RawMessage `json:"tool_calls,omitempty"`
 	ToolCallId       string          `json:"tool_call_id,omitempty"`
 	parsedContent    []MediaContent

@@ -91,6 +91,12 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 	if err := common.Unmarshal(chatJSON, &overriddenChatReq); err != nil {
 		return nil, types.NewError(err, types.ErrorCodeChannelParamOverrideInvalid, types.ErrOptionWithSkipRetry())
 	}
+	toolProtocol, err := service.NormalizeChatToolProtocol(&overriddenChatReq)
+	if err != nil {
+		return nil, types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	}
+	info.ChatToolProtocol = toolProtocol
+	info.ChatToolCount = len(overriddenChatReq.Tools)
 
 	requestForResponses := &overriddenChatReq
 	var fallbackChatReq *dto.GeneralOpenAIRequest

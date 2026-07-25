@@ -4,10 +4,15 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 )
 
 func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesResponse, id string) (*dto.OpenAITextResponse, *dto.Usage, error) {
+	return ResponsesResponseToChatCompletionsResponseWithToolProtocol(resp, id, dto.ChatToolProtocolModern)
+}
+
+func ResponsesResponseToChatCompletionsResponseWithToolProtocol(resp *dto.OpenAIResponsesResponse, id string, protocol dto.ChatToolProtocol) (*dto.OpenAITextResponse, *dto.Usage, error) {
 	if resp == nil {
 		return nil, nil, errors.New("response is nil")
 	}
@@ -71,7 +76,11 @@ func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesRespons
 
 	finishReason := "stop"
 	if len(toolCalls) > 0 {
-		finishReason = "tool_calls"
+		if protocol == dto.ChatToolProtocolLegacy {
+			finishReason = "function_call"
+		} else {
+			finishReason = "tool_calls"
+		}
 	}
 
 	msg := dto.Message{
@@ -80,7 +89,18 @@ func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesRespons
 		ReasoningContent: reasoningSummary,
 	}
 	if len(toolCalls) > 0 {
-		msg.SetToolCalls(toolCalls)
+		if protocol == dto.ChatToolProtocolLegacy {
+			if len(toolCalls) != 1 {
+				return nil, nil, errors.New("legacy functions protocol cannot represent multiple function calls")
+			}
+			functionCall, err := common.Marshal(toolCalls[0].Function)
+			if err != nil {
+				return nil, nil, err
+			}
+			msg.FunctionCall = functionCall
+		} else {
+			msg.SetToolCalls(toolCalls)
+		}
 		if text == "" {
 			msg.Content = nil
 		}

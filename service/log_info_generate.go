@@ -104,6 +104,10 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	if relayInfo.ReasoningEffort != "" {
 		other["reasoning_effort"] = relayInfo.ReasoningEffort
 	}
+	if relayInfo.ChatToolProtocol != "" && relayInfo.ChatToolProtocol != dto.ChatToolProtocolNone {
+		other["chat_tool_protocol"] = relayInfo.ChatToolProtocol
+		other["chat_tools_count"] = relayInfo.ChatToolCount
+	}
 	if relayInfo.IsModelMapped {
 		other["is_model_mapped"] = true
 		other["upstream_model_name"] = relayInfo.UpstreamModelName

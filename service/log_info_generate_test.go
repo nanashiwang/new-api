@@ -29,6 +29,8 @@ func TestGenerateTextOtherInfoIncludesParamOverrideAuditAndStreamStatus(t *testi
 		FirstEffectiveOutputTime: start.Add(500 * time.Millisecond),
 		IsStream:                 true,
 		ChannelMeta:              &relaycommon.ChannelMeta{},
+		ChatToolProtocol:         dto.ChatToolProtocolLegacy,
+		ChatToolCount:            3,
 		ParamOverrideAudit: []string{
 			"copy metadata.target_model -> model",
 		},
@@ -43,6 +45,9 @@ func TestGenerateTextOtherInfoIncludesParamOverrideAuditAndStreamStatus(t *testi
 	}
 	if other["claude_incremental_cache"] != true {
 		t.Fatalf("expected claude_incremental_cache audit flag, got %#v", other["claude_incremental_cache"])
+	}
+	if other["chat_tool_protocol"] != dto.ChatToolProtocolLegacy || other["chat_tools_count"] != 3 {
+		t.Fatalf("unexpected chat tool diagnostics: protocol=%#v count=%#v", other["chat_tool_protocol"], other["chat_tools_count"])
 	}
 
 	lines, ok := other["po"].([]string)

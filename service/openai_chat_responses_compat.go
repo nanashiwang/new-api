@@ -9,8 +9,16 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 	return openaicompat.ChatCompletionsRequestToResponsesRequest(req)
 }
 
+func NormalizeChatToolProtocol(req *dto.GeneralOpenAIRequest) (dto.ChatToolProtocol, error) {
+	return openaicompat.NormalizeChatToolProtocol(req)
+}
+
 func ResponsesResponseToChatCompletionsResponse(resp *dto.OpenAIResponsesResponse, id string) (*dto.OpenAITextResponse, *dto.Usage, error) {
 	return openaicompat.ResponsesResponseToChatCompletionsResponse(resp, id)
+}
+
+func ResponsesResponseToChatCompletionsResponseWithToolProtocol(resp *dto.OpenAIResponsesResponse, id string, protocol dto.ChatToolProtocol) (*dto.OpenAITextResponse, *dto.Usage, error) {
+	return openaicompat.ResponsesResponseToChatCompletionsResponseWithToolProtocol(resp, id, protocol)
 }
 
 func ExtractOutputTextFromResponses(resp *dto.OpenAIResponsesResponse) string {

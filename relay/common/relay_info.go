@@ -193,21 +193,21 @@ type RelayInfo struct {
 	// 写入 SSE 响应头(text/event-stream)。用于「codex 恒定强制上游流式、但客户端要非流式」
 	// 的聚合场景:内部读上游 SSE,但最终以单个 JSON body 返回,因此绝不能提前把响应头设成 SSE。
 	SuppressStreamResponseHeaders bool
-	ClientWs                *websocket.Conn
-	TargetWs                *websocket.Conn
-	InputAudioFormat        string
-	OutputAudioFormat       string
-	RealtimeTools           []dto.RealTimeTool
-	IsFirstRequest          bool
-	AudioUsage              bool
-	ReasoningEffort         string
-	UserSetting             dto.UserSetting
-	UserEmail               string
-	UserQuota               int
-	RelayFormat             types.RelayFormat
-	SendResponseCount       int
-	ReceivedResponseCount   int
-	FinalPreConsumedQuota   int // 最终预消耗的配额
+	ClientWs                      *websocket.Conn
+	TargetWs                      *websocket.Conn
+	InputAudioFormat              string
+	OutputAudioFormat             string
+	RealtimeTools                 []dto.RealTimeTool
+	IsFirstRequest                bool
+	AudioUsage                    bool
+	ReasoningEffort               string
+	UserSetting                   dto.UserSetting
+	UserEmail                     string
+	UserQuota                     int
+	RelayFormat                   types.RelayFormat
+	SendResponseCount             int
+	ReceivedResponseCount         int
+	FinalPreConsumedQuota         int // 最终预消耗的配额
 	// ForcePreConsume 为 true 时禁用 BillingSession 的信任额度旁路，
 	// 强制预扣全额。用于异步任务（视频/音乐生成等），因为请求返回后任务仍在运行，
 	// 必须在提交前锁定全额。
@@ -241,6 +241,8 @@ type RelayInfo struct {
 	ParamOverrideAudit                    []string
 	StreamStatus                          *StreamStatus
 	ResponsesCompletedSummary             *ResponsesCompletedSummary
+	ChatToolProtocol                      dto.ChatToolProtocol
+	ChatToolCount                         int
 
 	PriceData types.PriceData
 
