@@ -132,6 +132,14 @@ type User struct {
 	ContentSafetyLastModel        string `json:"content_safety_last_model" gorm:"-"`
 	ContentSafetyLastChannelID    int    `json:"content_safety_last_channel_id" gorm:"-"`
 	ContentSafetyLastRequestID    string `json:"content_safety_last_request_id" gorm:"-"`
+	ContentSafetyBurstCount       int    `json:"content_safety_burst_count" gorm:"-"`
+	ContentSafetyCooldownCount    int    `json:"content_safety_cooldown_count" gorm:"-"`
+	ContentSafetyCooldownUntil    int64  `json:"content_safety_cooldown_until" gorm:"-"`
+	ContentSafetyReviewCaseID     int64  `json:"content_safety_review_case_id" gorm:"-"`
+	ContentSafetyLastCategory     string `json:"content_safety_last_category" gorm:"-"`
+	ContentSafetyReasonSource     string `json:"content_safety_reason_source" gorm:"-"`
+	ContentSafetyReasonConfidence string `json:"content_safety_reason_confidence" gorm:"-"`
+	ContentSafetyReasonSummary    string `json:"content_safety_reason_summary" gorm:"-"`
 }
 
 type UserSearchParams struct {

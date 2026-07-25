@@ -8,9 +8,9 @@ import (
 )
 
 func TestParseContentSafetyStatusUsesClosedAllowlist(t *testing.T) {
-	status, err := parseContentSafetyStatus(" FINAL_WARNING ")
+	status, err := parseContentSafetyStatus(" REVIEW_PENDING ")
 	require.NoError(t, err)
-	require.Equal(t, model.ContentSafetyLevelFinalWarning, status)
+	require.Equal(t, model.ContentSafetyLevelReviewPending, status)
 
 	_, err = parseContentSafetyStatus("disabled OR 1=1")
 	require.Error(t, err)

@@ -454,8 +454,9 @@ func parseContentSafetyStatus(raw string) (string, error) {
 	allowed := map[string]struct{}{
 		"": {}, model.ContentSafetyLevelNormal: {}, model.ContentSafetyLevelTriggered: {},
 		model.ContentSafetyLevelWarning1: {}, model.ContentSafetyLevelWarning2: {},
-		model.ContentSafetyLevelFinalWarning: {}, model.ContentSafetyLevelDisabled: {},
-		model.ContentSafetyLevelReviewRequired: {},
+		model.ContentSafetyLevelCoolingOff: {}, model.ContentSafetyLevelObserved: {},
+		model.ContentSafetyLevelFocus: {}, model.ContentSafetyLevelReviewPending: {},
+		model.ContentSafetyLevelAdminDisabled: {}, model.ContentSafetyLevelLegacyDisabled: {},
 	}
 	if _, ok := allowed[status]; !ok {
 		return "", errors.New("参数 content_safety_status 无效")

@@ -12,6 +12,9 @@ import (
 
 const (
 	ContentSafetyActionWarning         = "warning"
+	ContentSafetyActionCooldownStarted = "cooldown_started"
+	ContentSafetyActionCooldownActive  = "cooldown_active"
+	// Historical actions remain readable, but new events never produce them.
 	ContentSafetyActionDisabled        = "disabled"
 	ContentSafetyActionAlreadyDisabled = "already_disabled"
 	ContentSafetyActionReviewRequired  = "review_required"
@@ -21,71 +24,117 @@ const (
 	ContentSafetyLevelNormal         = "normal"
 	ContentSafetyLevelWarning1       = "warning_1"
 	ContentSafetyLevelWarning2       = "warning_2"
-	ContentSafetyLevelFinalWarning   = "final_warning"
-	ContentSafetyLevelDisabled       = "disabled"
-	ContentSafetyLevelReviewRequired = "review_required"
+	ContentSafetyLevelCoolingOff     = "cooling_off"
+	ContentSafetyLevelObserved       = "observed"
+	ContentSafetyLevelFocus          = "focus"
+	ContentSafetyLevelReviewPending  = "review_pending"
+	ContentSafetyLevelAdminDisabled  = "admin_disabled"
+	ContentSafetyLevelLegacyDisabled = "legacy_disabled"
 	ContentSafetyLevelTriggered      = "triggered"
 	contentSafetyWindow              = 30 * 24 * time.Hour
+	contentSafetyBurstWindow         = 10 * time.Minute
 )
 
 type ContentSafetyViolation struct {
-	Id          int64  `json:"id"`
-	UserId      int    `json:"user_id" gorm:"index;index:idx_safety_user_created,priority:1"`
-	Username    string `json:"username" gorm:"->"`
-	TokenId     int    `json:"token_id" gorm:"index"`
-	ChannelId   int    `json:"channel_id" gorm:"index"`
-	RequestId   string `json:"request_id" gorm:"type:varchar(64);index"`
-	EventKey    string `json:"-" gorm:"type:char(64);uniqueIndex"`
-	ModelName   string `json:"model_name" gorm:"type:varchar(128);index"`
-	ErrorType   string `json:"error_type" gorm:"type:varchar(64)"`
-	ErrorCode   string `json:"error_code" gorm:"type:varchar(64);index"`
-	InputHash   string `json:"-" gorm:"type:char(64)"`
-	IsStream    bool   `json:"is_stream"`
-	CreatedAt   int64  `json:"created_at" gorm:"bigint;index;index:idx_safety_user_created,priority:2"`
-	WindowCount int    `json:"window_count"`
-	Action      string `json:"action" gorm:"type:varchar(32);index"`
+	Id                int64  `json:"id"`
+	UserId            int    `json:"user_id" gorm:"index;index:idx_safety_user_created,priority:1;index:idx_safety_user_cooldown,priority:1"`
+	Username          string `json:"username" gorm:"->"`
+	TokenId           int    `json:"token_id" gorm:"index"`
+	ChannelId         int    `json:"channel_id" gorm:"index"`
+	RequestId         string `json:"request_id" gorm:"type:varchar(64);index"`
+	EventKey          string `json:"-" gorm:"type:char(64);uniqueIndex"`
+	ModelName         string `json:"model_name" gorm:"type:varchar(128);index"`
+	ErrorType         string `json:"error_type" gorm:"type:varchar(64)"`
+	ErrorCode         string `json:"error_code" gorm:"type:varchar(64);index"`
+	OfficialMessage   string `json:"official_message" gorm:"type:varchar(512)"`
+	FineCategory      string `json:"fine_category" gorm:"type:varchar(64);index"`
+	ReasonSource      string `json:"reason_source" gorm:"type:varchar(32)"`
+	ReasonConfidence  string `json:"reason_confidence" gorm:"type:varchar(16)"`
+	ReasonSummary     string `json:"reason_summary" gorm:"type:varchar(512)"`
+	ClassifierVersion string `json:"classifier_version" gorm:"type:varchar(32)"`
+	InputHash         string `json:"-" gorm:"type:char(64)"`
+	IsStream          bool   `json:"is_stream"`
+	CreatedAt         int64  `json:"created_at" gorm:"bigint;index;index:idx_safety_user_created,priority:2"`
+	WindowCount       int    `json:"window_count"`
+	BurstCount        int    `json:"burst_count"`
+	CooldownUntil     int64  `json:"cooldown_until" gorm:"bigint;index;index:idx_safety_user_cooldown,priority:2"`
+	WarningReadAt     int64  `json:"warning_read_at" gorm:"bigint;index"`
+	Action            string `json:"action" gorm:"type:varchar(32);index"`
 }
 
 type RecordContentSafetyViolationParams struct {
-	UserId       int
-	TokenId      int
-	ChannelId    int
-	RequestId    string
-	EventKey     string
-	ModelName    string
-	ErrorType    string
-	ErrorCode    string
-	InputHash    string
-	IsStream     bool
-	CreatedAt    int64
-	WindowStart  int64
-	DisableAfter int
+	UserId               int
+	TokenId              int
+	ChannelId            int
+	RequestId            string
+	EventKey             string
+	ModelName            string
+	ErrorType            string
+	ErrorCode            string
+	OfficialMessage      string
+	FineCategory         string
+	ReasonSource         string
+	ReasonConfidence     string
+	ReasonSummary        string
+	ClassifierVersion    string
+	InputHash            string
+	IsStream             bool
+	CreatedAt            int64
+	WindowStart          int64
+	BurstWindowStart     int64
+	BurstThreshold       int
+	CooldownSeconds      int64
+	ReviewAfterCooldowns int
 }
 
 type ContentSafetyEnforcementResult struct {
 	Violation  *ContentSafetyViolation
+	ReviewCase *ContentSafetyReviewCase
 	Duplicate  bool
 	UserStatus int
 	UserRole   int
 	Username   string
 }
 
-func contentSafetyLevelForUser(user *User, count int) string {
-	switch count {
-	case 0:
-		return ContentSafetyLevelNormal
-	case 1:
-		return ContentSafetyLevelWarning1
-	case 2:
-		return ContentSafetyLevelWarning2
-	case 3:
-		return ContentSafetyLevelFinalWarning
-	default:
-		if user.Role == common.RoleCommonUser && user.Status == common.UserStatusDisabled {
-			return ContentSafetyLevelDisabled
-		}
-		return ContentSafetyLevelReviewRequired
+type ContentSafetyState struct {
+	Level            string                  `json:"level"`
+	WindowCount      int                     `json:"window_count"`
+	BurstCount       int                     `json:"burst_count"`
+	CooldownCount    int                     `json:"cooldown_count"`
+	CooldownUntil    int64                   `json:"cooldown_until"`
+	ReviewCaseId     int64                   `json:"review_case_id"`
+	HasUnreadWarning bool                    `json:"has_unread_warning"`
+	LatestViolation  *ContentSafetyViolation `json:"latest_violation,omitempty"`
+}
+
+func contentSafetyLevelForState(user *User, state *ContentSafetyState, now int64, approvedDisable bool, legacyDisable bool) string {
+	if approvedDisable && user.Status == common.UserStatusDisabled {
+		return ContentSafetyLevelAdminDisabled
 	}
+	if legacyDisable && user.Status == common.UserStatusDisabled {
+		return ContentSafetyLevelLegacyDisabled
+	}
+	if state.ReviewCaseId > 0 {
+		return ContentSafetyLevelReviewPending
+	}
+	if state.CooldownUntil > now {
+		return ContentSafetyLevelCoolingOff
+	}
+	if state.CooldownCount >= 2 {
+		return ContentSafetyLevelFocus
+	}
+	if state.LatestViolation != nil && now-state.LatestViolation.CreatedAt < int64(contentSafetyBurstWindow.Seconds()) && state.LatestViolation.CooldownUntil == 0 {
+		switch state.LatestViolation.BurstCount {
+		case 1:
+			return ContentSafetyLevelWarning1
+		case 2:
+			return ContentSafetyLevelWarning2
+		}
+	}
+	if state.WindowCount > 0 {
+		return ContentSafetyLevelObserved
+	}
+	return ContentSafetyLevelNormal
 }
 
 func applyUserContentSafetyFilters(tx *gorm.DB, query *gorm.DB, params UserSearchParams) *gorm.DB {
@@ -100,29 +149,69 @@ func applyUserContentSafetyFilters(tx *gorm.DB, query *gorm.DB, params UserSearc
 		return query.Where("1 = 0")
 	}
 
-	cutoff := time.Now().Add(-contentSafetyWindow).Unix()
+	now := time.Now().Unix()
+	cutoff := now - int64(contentSafetyWindow.Seconds())
+	burstCutoff := now - int64(contentSafetyBurstWindow.Seconds())
 	countSQL := "SELECT COUNT(1) FROM content_safety_violations csv WHERE csv.user_id = users.id AND csv.created_at >= ?"
+	episodeSQL := "SELECT COUNT(1) FROM content_safety_violations cse WHERE cse.user_id = users.id AND cse.created_at >= ? AND cse.action = 'cooldown_started'"
+	activeSQL := "SELECT COUNT(1) FROM content_safety_violations csa WHERE csa.user_id = users.id AND csa.cooldown_until > ?"
+	lastCooldownSQL := "SELECT COALESCE(MAX(csl.cooldown_until), 0) FROM content_safety_violations csl WHERE csl.user_id = users.id"
+	recentSQL := "SELECT COUNT(1) FROM content_safety_violations csr WHERE csr.user_id = users.id AND csr.created_at >= ? AND csr.created_at > (" + lastCooldownSQL + ")"
+	hasReviewTable := tx.Migrator().HasTable(&ContentSafetyReviewCase{})
+	pendingSQL := "SELECT COUNT(1) FROM content_safety_review_cases csp WHERE csp.user_id = users.id AND csp.status = 'pending'"
+	approvedSQL := "SELECT COUNT(1) FROM content_safety_review_cases csa2 WHERE csa2.user_id = users.id AND csa2.status = 'approved_disable'"
+	legacySQL := "SELECT COUNT(1) FROM content_safety_violations csh WHERE csh.user_id = users.id AND csh.action IN ('disabled','already_disabled')"
+
 	switch status {
 	case ContentSafetyLevelNormal:
 		query = query.Where("("+countSQL+") = 0", cutoff)
 	case ContentSafetyLevelTriggered:
 		query = query.Where("("+countSQL+") >= 1", cutoff)
 	case ContentSafetyLevelWarning1:
-		query = query.Where("("+countSQL+") = 1", cutoff)
+		condition := "(" + recentSQL + ") = 1 AND (" + activeSQL + ") = 0"
+		if hasReviewTable {
+			condition += " AND (" + pendingSQL + ") = 0 AND (" + approvedSQL + ") = 0"
+		}
+		query = query.Where(condition, burstCutoff, now)
 	case ContentSafetyLevelWarning2:
-		query = query.Where("("+countSQL+") = 2", cutoff)
-	case ContentSafetyLevelFinalWarning:
-		query = query.Where("("+countSQL+") = 3", cutoff)
-	case ContentSafetyLevelDisabled:
-		query = query.Where("("+countSQL+") >= 4 AND role = ? AND status = ?", cutoff, common.RoleCommonUser, common.UserStatusDisabled)
-	case ContentSafetyLevelReviewRequired:
-		query = query.Where("("+countSQL+") >= 4 AND NOT (role = ? AND status = ?)", cutoff, common.RoleCommonUser, common.UserStatusDisabled)
+		condition := "(" + recentSQL + ") = 2 AND (" + activeSQL + ") = 0"
+		if hasReviewTable {
+			condition += " AND (" + pendingSQL + ") = 0 AND (" + approvedSQL + ") = 0"
+		}
+		query = query.Where(condition, burstCutoff, now)
+	case ContentSafetyLevelCoolingOff:
+		query = query.Where("("+activeSQL+") >= 1", now)
+	case ContentSafetyLevelObserved:
+		condition := "(" + countSQL + ") >= 1 AND (" + episodeSQL + ") < 2 AND (" + activeSQL + ") = 0 AND (" + recentSQL + ") NOT IN (1, 2)"
+		if hasReviewTable {
+			condition += " AND (" + pendingSQL + ") = 0 AND (" + approvedSQL + ") = 0"
+		}
+		query = query.Where(condition, cutoff, cutoff, now, burstCutoff)
+	case ContentSafetyLevelFocus:
+		condition := "(" + episodeSQL + ") >= 2 AND (" + activeSQL + ") = 0"
+		if hasReviewTable {
+			condition += " AND (" + pendingSQL + ") = 0 AND (" + approvedSQL + ") = 0"
+		}
+		query = query.Where(condition, cutoff, now)
+	case ContentSafetyLevelReviewPending:
+		if hasReviewTable {
+			query = query.Where("(" + pendingSQL + ") >= 1")
+		} else {
+			query = query.Where("1 = 0")
+		}
+	case ContentSafetyLevelAdminDisabled:
+		if hasReviewTable {
+			query = query.Where("("+approvedSQL+") >= 1 AND status = ?", common.UserStatusDisabled)
+		} else {
+			query = query.Where("1 = 0")
+		}
+	case ContentSafetyLevelLegacyDisabled:
+		query = query.Where("("+legacySQL+") >= 1 AND status = ?", common.UserStatusDisabled)
 	}
 
 	if len(params.ContentSafetyCodes) > 0 {
 		codeExists := tx.Model(&ContentSafetyViolation{}).
-			Select("1").
-			Where("content_safety_violations.user_id = users.id").
+			Select("1").Where("content_safety_violations.user_id = users.id").
 			Where("content_safety_violations.created_at >= ?", cutoff).
 			Where("content_safety_violations.error_code IN ?", params.ContentSafetyCodes)
 		query = query.Where("EXISTS (?)", codeExists)
@@ -145,73 +234,177 @@ func AttachUserContentSafetyMetadata(tx *gorm.DB, users []*User) error {
 
 	userIDs := make([]int, 0, len(users))
 	usersByID := make(map[int]*User, len(users))
+	states := make(map[int]*ContentSafetyState, len(users))
 	for _, user := range users {
 		if user == nil {
 			continue
 		}
 		userIDs = append(userIDs, user.Id)
 		usersByID[user.Id] = user
+		states[user.Id] = &ContentSafetyState{Level: ContentSafetyLevelNormal}
 	}
 	if len(userIDs) == 0 {
 		return nil
 	}
 
-	cutoff := time.Now().Add(-contentSafetyWindow).Unix()
-	var counts []struct {
-		UserId int
-		Count  int
-	}
-	if err := tx.Model(&ContentSafetyViolation{}).
-		Select("user_id, COUNT(1) AS count").
-		Where("user_id IN ? AND created_at >= ?", userIDs, cutoff).
-		Group("user_id").Scan(&counts).Error; err != nil {
+	now := time.Now().Unix()
+	cutoff := now - int64(contentSafetyWindow.Seconds())
+	var counts []struct{ UserId, Count int }
+	if err := tx.Model(&ContentSafetyViolation{}).Select("user_id, COUNT(1) AS count").
+		Where("user_id IN ? AND created_at >= ?", userIDs, cutoff).Group("user_id").Scan(&counts).Error; err != nil {
 		return err
 	}
 	for _, row := range counts {
-		if user := usersByID[row.UserId]; user != nil {
-			user.ContentSafetyCount = row.Count
-			user.ContentSafetyLevel = contentSafetyLevelForUser(user, row.Count)
-		}
+		states[row.UserId].WindowCount = row.Count
 	}
 
-	var latest []ContentSafetyViolation
+	var episodes []struct{ UserId, Count int }
+	if err := tx.Model(&ContentSafetyViolation{}).Select("user_id, COUNT(1) AS count").
+		Where("user_id IN ? AND created_at >= ? AND action = ?", userIDs, cutoff, ContentSafetyActionCooldownStarted).
+		Group("user_id").Scan(&episodes).Error; err != nil {
+		return err
+	}
+	for _, row := range episodes {
+		states[row.UserId].CooldownCount = row.Count
+	}
+
+	var cooldowns []struct {
+		UserId        int
+		CooldownUntil int64
+	}
+	if err := tx.Model(&ContentSafetyViolation{}).Select("user_id, MAX(cooldown_until) AS cooldown_until").
+		Where("user_id IN ?", userIDs).Group("user_id").Scan(&cooldowns).Error; err != nil {
+		return err
+	}
+	for _, row := range cooldowns {
+		states[row.UserId].CooldownUntil = row.CooldownUntil
+	}
+
+	latest := make([]ContentSafetyViolation, 0, len(userIDs))
 	latestSQL := `NOT EXISTS (
 		SELECT 1 FROM content_safety_violations newer
 		WHERE newer.user_id = v.user_id AND newer.created_at >= ?
 		AND (newer.created_at > v.created_at OR (newer.created_at = v.created_at AND newer.id > v.id))
 	)`
-	if err := tx.Table("content_safety_violations AS v").
-		Where("v.user_id IN ? AND v.created_at >= ?", userIDs, cutoff).
-		Where(latestSQL, cutoff).
-		Scan(&latest).Error; err != nil {
+	if err := tx.Table("content_safety_violations AS v").Where("v.user_id IN ? AND v.created_at >= ?", userIDs, cutoff).
+		Where(latestSQL, cutoff).Scan(&latest).Error; err != nil {
 		return err
 	}
+	legacyDisabled := make(map[int]bool)
 	for _, violation := range latest {
-		if user := usersByID[violation.UserId]; user != nil {
-			user.ContentSafetyLastAt = violation.CreatedAt
-			user.ContentSafetyLastCode = violation.ErrorCode
-			user.ContentSafetyLastModel = violation.ModelName
-			user.ContentSafetyLastChannelID = violation.ChannelId
-			user.ContentSafetyLastRequestID = violation.RequestId
+		copy := violation
+		state := states[violation.UserId]
+		state.LatestViolation = &copy
+		state.BurstCount = violation.BurstCount
+		state.HasUnreadWarning = violation.WarningReadAt == 0
+	}
+	var legacyRows []struct{ UserId int }
+	if err := tx.Model(&ContentSafetyViolation{}).Distinct("user_id").
+		Where("user_id IN ? AND action IN ?", userIDs, []string{ContentSafetyActionDisabled, ContentSafetyActionAlreadyDisabled}).
+		Scan(&legacyRows).Error; err != nil {
+		return err
+	}
+	for _, row := range legacyRows {
+		legacyDisabled[row.UserId] = true
+	}
+
+	approvedDisable := make(map[int]bool)
+	if tx.Migrator().HasTable(&ContentSafetyReviewCase{}) {
+		var pending []ContentSafetyReviewCase
+		if err := tx.Where("user_id IN ? AND status = ?", userIDs, ContentSafetyReviewPending).Find(&pending).Error; err != nil {
+			return err
+		}
+		for _, reviewCase := range pending {
+			states[reviewCase.UserId].ReviewCaseId = reviewCase.Id
+		}
+		var approved []struct{ UserId int }
+		if err := tx.Model(&ContentSafetyReviewCase{}).Distinct("user_id").
+			Where("user_id IN ? AND status = ?", userIDs, ContentSafetyReviewApprovedDisable).Scan(&approved).Error; err != nil {
+			return err
+		}
+		for _, row := range approved {
+			approvedDisable[row.UserId] = true
+		}
+	}
+
+	for userID, state := range states {
+		user := usersByID[userID]
+		state.Level = contentSafetyLevelForState(user, state, now, approvedDisable[userID], legacyDisabled[userID])
+		user.ContentSafetyLevel = state.Level
+		user.ContentSafetyCount = state.WindowCount
+		user.ContentSafetyBurstCount = state.BurstCount
+		user.ContentSafetyCooldownCount = state.CooldownCount
+		user.ContentSafetyCooldownUntil = state.CooldownUntil
+		user.ContentSafetyReviewCaseID = state.ReviewCaseId
+		if latestViolation := state.LatestViolation; latestViolation != nil {
+			user.ContentSafetyLastAt = latestViolation.CreatedAt
+			user.ContentSafetyLastCode = latestViolation.ErrorCode
+			user.ContentSafetyLastModel = latestViolation.ModelName
+			user.ContentSafetyLastChannelID = latestViolation.ChannelId
+			user.ContentSafetyLastRequestID = latestViolation.RequestId
+			user.ContentSafetyLastCategory = latestViolation.FineCategory
+			user.ContentSafetyReasonSource = latestViolation.ReasonSource
+			user.ContentSafetyReasonConfidence = latestViolation.ReasonConfidence
+			user.ContentSafetyReasonSummary = latestViolation.ReasonSummary
 		}
 	}
 	return nil
+}
+
+func GetUserContentSafetyState(userID int) (*ContentSafetyState, error) {
+	var user User
+	if err := DB.Select("id", "status", "role").First(&user, userID).Error; err != nil {
+		return nil, err
+	}
+	if err := AttachUserContentSafetyMetadata(DB, []*User{&user}); err != nil {
+		return nil, err
+	}
+	state := &ContentSafetyState{
+		Level: user.ContentSafetyLevel, WindowCount: user.ContentSafetyCount,
+		BurstCount: user.ContentSafetyBurstCount, CooldownCount: user.ContentSafetyCooldownCount,
+		CooldownUntil: user.ContentSafetyCooldownUntil, ReviewCaseId: user.ContentSafetyReviewCaseID,
+	}
+	if user.ContentSafetyLastAt > 0 {
+		var latest ContentSafetyViolation
+		if err := DB.Where("user_id = ? AND created_at = ?", userID, user.ContentSafetyLastAt).
+			Order("id DESC").First(&latest).Error; err != nil {
+			return nil, err
+		}
+		state.LatestViolation = &latest
+		state.HasUnreadWarning = latest.WarningReadAt == 0
+	}
+	return state, nil
+}
+
+func GetActiveContentSafetyCooldown(userID int, now int64) (int64, error) {
+	if userID <= 0 {
+		return 0, nil
+	}
+	var cooldownUntil int64
+	err := DB.Model(&ContentSafetyViolation{}).Select("COALESCE(MAX(cooldown_until), 0)").
+		Where("user_id = ? AND cooldown_until > ?", userID, now).Scan(&cooldownUntil).Error
+	return cooldownUntil, err
+}
+
+func AcknowledgeContentSafetyWarnings(userID int, now int64) error {
+	if userID <= 0 {
+		return errors.New("invalid content safety warning identity")
+	}
+	return DB.Model(&ContentSafetyViolation{}).Where("user_id = ? AND warning_read_at = 0", userID).
+		Update("warning_read_at", now).Error
 }
 
 func RecordContentSafetyViolation(params RecordContentSafetyViolationParams) (*ContentSafetyEnforcementResult, error) {
 	if params.UserId <= 0 || params.EventKey == "" || params.ErrorCode == "" {
 		return nil, errors.New("invalid content safety violation identity")
 	}
-	if params.DisableAfter <= 0 {
-		return nil, errors.New("invalid content safety disable threshold")
+	if params.BurstThreshold <= 0 || params.CooldownSeconds <= 0 || params.ReviewAfterCooldowns <= 0 {
+		return nil, errors.New("invalid content safety enforcement policy")
 	}
 
 	result := &ContentSafetyEnforcementResult{}
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		// A harmless row update serializes enforcement for one user on SQLite,
-		// MySQL, and PostgreSQL, preventing concurrent fourth events from escaping.
-		lockResult := tx.Model(&User{}).
-			Where("id = ?", params.UserId).
+		lockResult := tx.Model(&User{}).Where("id = ?", params.UserId).
 			UpdateColumn("status", gorm.Expr("status"))
 		if lockResult.Error != nil {
 			return lockResult.Error
@@ -221,66 +414,78 @@ func RecordContentSafetyViolation(params RecordContentSafetyViolationParams) (*C
 		if err := tx.Select("id", "username", "role", "status").First(&user, params.UserId).Error; err != nil {
 			return err
 		}
-		result.UserStatus = user.Status
-		result.UserRole = user.Role
-		result.Username = user.Username
+		result.UserStatus, result.UserRole, result.Username = user.Status, user.Role, user.Username
 
 		var existing ContentSafetyViolation
 		if err := tx.Where("event_key = ?", params.EventKey).First(&existing).Error; err == nil {
-			result.Violation = &existing
-			result.Duplicate = true
+			result.Violation, result.Duplicate = &existing, true
 			return nil
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
 
+		var latestCooldownUntil int64
+		if err := tx.Model(&ContentSafetyViolation{}).Select("COALESCE(MAX(cooldown_until), 0)").
+			Where("user_id = ?", params.UserId).Scan(&latestCooldownUntil).Error; err != nil {
+			return err
+		}
+		burstStart := params.BurstWindowStart
+		if latestCooldownUntil > burstStart {
+			burstStart = latestCooldownUntil
+		}
+
 		violation := &ContentSafetyViolation{
-			UserId:    params.UserId,
-			TokenId:   params.TokenId,
-			ChannelId: params.ChannelId,
-			RequestId: truncateSafetyAuditValue(params.RequestId, 64),
-			EventKey:  params.EventKey,
-			ModelName: truncateSafetyAuditValue(params.ModelName, 128),
-			ErrorType: truncateSafetyAuditValue(params.ErrorType, 64),
-			ErrorCode: truncateSafetyAuditValue(params.ErrorCode, 64),
-			InputHash: params.InputHash,
-			IsStream:  params.IsStream,
-			CreatedAt: params.CreatedAt,
+			UserId: params.UserId, TokenId: params.TokenId, ChannelId: params.ChannelId,
+			RequestId: truncateSafetyAuditValue(params.RequestId, 64), EventKey: params.EventKey,
+			ModelName: truncateSafetyAuditValue(params.ModelName, 128), ErrorType: truncateSafetyAuditValue(params.ErrorType, 64),
+			ErrorCode: truncateSafetyAuditValue(params.ErrorCode, 64), OfficialMessage: truncateSafetyAuditValue(params.OfficialMessage, 512),
+			FineCategory: truncateSafetyAuditValue(params.FineCategory, 64), ReasonSource: truncateSafetyAuditValue(params.ReasonSource, 32),
+			ReasonConfidence: truncateSafetyAuditValue(params.ReasonConfidence, 16), ReasonSummary: truncateSafetyAuditValue(params.ReasonSummary, 512),
+			ClassifierVersion: truncateSafetyAuditValue(params.ClassifierVersion, 32), InputHash: truncateSafetyAuditValue(params.InputHash, 64),
+			IsStream: params.IsStream, CreatedAt: params.CreatedAt, Action: ContentSafetyActionWarning,
 		}
 		if err := tx.Create(violation).Error; err != nil {
 			return err
 		}
 
-		var windowCount int64
-		if err := tx.Model(&ContentSafetyViolation{}).
-			Where("user_id = ? AND created_at >= ?", params.UserId, params.WindowStart).
+		var windowCount, burstCount int64
+		if err := tx.Model(&ContentSafetyViolation{}).Where("user_id = ? AND created_at >= ?", params.UserId, params.WindowStart).
 			Count(&windowCount).Error; err != nil {
 			return err
 		}
-		violation.WindowCount = int(windowCount)
-
-		violation.Action = ContentSafetyActionWarning
-		if violation.WindowCount >= params.DisableAfter {
-			if user.Role >= common.RoleAdminUser {
-				violation.Action = ContentSafetyActionReviewRequired
-			} else if user.Status == common.UserStatusDisabled {
-				violation.Action = ContentSafetyActionAlreadyDisabled
-			} else {
-				if err := tx.Model(&User{}).Where("id = ?", user.Id).
-					UpdateColumn("status", common.UserStatusDisabled).Error; err != nil {
-					return err
-				}
-				user.Status = common.UserStatusDisabled
-				result.UserStatus = user.Status
-				violation.Action = ContentSafetyActionDisabled
-			}
+		if err := tx.Model(&ContentSafetyViolation{}).Where("user_id = ? AND created_at >= ? AND created_at <= ?", params.UserId, burstStart, params.CreatedAt).
+			Count(&burstCount).Error; err != nil {
+			return err
 		}
-
+		violation.WindowCount, violation.BurstCount = int(windowCount), int(burstCount)
+		if latestCooldownUntil > params.CreatedAt {
+			violation.Action = ContentSafetyActionCooldownActive
+			violation.CooldownUntil = latestCooldownUntil
+		} else if violation.BurstCount >= params.BurstThreshold {
+			violation.Action = ContentSafetyActionCooldownStarted
+			violation.CooldownUntil = params.CreatedAt + params.CooldownSeconds
+		}
 		if err := tx.Model(violation).Updates(map[string]any{
-			"window_count": violation.WindowCount,
-			"action":       violation.Action,
+			"window_count": violation.WindowCount, "burst_count": violation.BurstCount,
+			"cooldown_until": violation.CooldownUntil, "action": violation.Action,
 		}).Error; err != nil {
 			return err
+		}
+
+		if violation.Action == ContentSafetyActionCooldownStarted {
+			var cooldownCount int64
+			if err := tx.Model(&ContentSafetyViolation{}).
+				Where("user_id = ? AND created_at >= ? AND action = ?", params.UserId, params.WindowStart, ContentSafetyActionCooldownStarted).
+				Count(&cooldownCount).Error; err != nil {
+				return err
+			}
+			if int(cooldownCount) >= params.ReviewAfterCooldowns {
+				reviewCase, err := createPendingContentSafetyReviewCase(tx, violation, int(cooldownCount))
+				if err != nil {
+					return err
+				}
+				result.ReviewCase = reviewCase
+			}
 		}
 		violation.Username = user.Username
 		result.Violation = violation
@@ -315,8 +520,7 @@ func GetContentSafetyViolations(query ContentSafetyViolationQuery, pageInfo *com
 	if pageInfo == nil {
 		pageInfo = &common.PageInfo{Page: 1, PageSize: common.ItemsPerPage}
 	}
-	base := DB.Table("content_safety_violations AS violations").
-		Joins("LEFT JOIN users ON users.id = violations.user_id")
+	base := DB.Table("content_safety_violations AS violations").Joins("LEFT JOIN users ON users.id = violations.user_id")
 	if query.UserId > 0 {
 		base = base.Where("violations.user_id = ?", query.UserId)
 	}
@@ -344,10 +548,8 @@ func GetContentSafetyViolations(query ContentSafetyViolationQuery, pageInfo *com
 		return nil, 0, err
 	}
 	items := make([]ContentSafetyViolation, 0, pageInfo.GetPageSize())
-	if err := base.Select("violations.*, users.username AS username").
-		Order("violations.id DESC").
-		Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).
-		Scan(&items).Error; err != nil {
+	if err := base.Select("violations.*, users.username AS username").Order("violations.id DESC").
+		Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Scan(&items).Error; err != nil {
 		return nil, 0, err
 	}
 	return items, total, nil

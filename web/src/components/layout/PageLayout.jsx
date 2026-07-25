@@ -42,6 +42,7 @@ import { StatusContext } from '../../context/Status';
 import { useLocation } from 'react-router-dom';
 import GlobalTopProgress from '../common/ui/GlobalTopProgress';
 import UserOnboarding from '../onboarding/UserOnboarding';
+import ContentSafetyNotice from '../content-safety/ContentSafetyNotice';
 const { Sider, Content, Header } = Layout;
 const SiderBar = lazy(() => import('./SiderBar'));
 
@@ -155,6 +156,7 @@ const PageLayout = () => {
     return (
       <>
         <GlobalTopProgress />
+        <ContentSafetyNotice />
         <ErrorBoundary>
           <App />
         </ErrorBoundary>
@@ -233,6 +235,7 @@ const PageLayout = () => {
             minWidth: 0,
           }}
         >
+          <ContentSafetyNotice />
           <Content
             style={{
               flex: '1 0 auto',

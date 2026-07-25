@@ -415,9 +415,12 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.GET("/self", middleware.UserAuth(), controller.GetUserLogs)
 		logRoute.GET("/self/search", middleware.UserAuth(), middleware.SearchRateLimit(), controller.SearchUserLogs)
 		contentSafetyRoute := apiRouter.Group("/content-safety")
-		contentSafetyRoute.Use(middleware.AdminAuth())
 		{
-			contentSafetyRoute.GET("/violations", controller.GetContentSafetyViolations)
+			contentSafetyRoute.GET("/self", middleware.UserAuth(), controller.GetSelfContentSafetyState)
+			contentSafetyRoute.POST("/self/acknowledge", middleware.UserAuth(), controller.AcknowledgeSelfContentSafetyWarnings)
+			contentSafetyRoute.GET("/violations", middleware.AdminAuth(), controller.GetContentSafetyViolations)
+			contentSafetyRoute.GET("/review-cases", middleware.AdminAuth(), controller.GetContentSafetyReviewCases)
+			contentSafetyRoute.POST("/review-cases/:id/resolve", middleware.AdminAuth(), controller.ResolveContentSafetyReviewCase)
 		}
 
 		dataRoute := apiRouter.Group("/data")

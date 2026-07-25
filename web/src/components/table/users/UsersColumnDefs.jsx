@@ -33,6 +33,7 @@ import {
   renderQuota,
   timestamp2string,
 } from '../../../helpers';
+import { formatContentSafetyCategory } from '../../../helpers/contentSafety';
 
 const { Text } = Typography;
 
@@ -257,18 +258,21 @@ const renderStatistics = (text, record, showEnableDisableModal, t) => {
   );
 };
 
-const renderContentSafety = (record, t) => {
+const renderContentSafety = (record, t, showReviewModal) => {
   const level = record?.content_safety_level || 'normal';
   const count = Number(record?.content_safety_count || 0);
   const metaByLevel = {
     normal: { label: t('正常'), color: 'grey' },
     warning_1: { label: t('警告 1/3'), color: 'yellow' },
-    warning_2: { label: t('警告 2/3'), color: 'orange' },
-    final_warning: { label: t('最终警告 3/3'), color: 'red' },
-    disabled: { label: t('风控停用'), color: 'red' },
-    review_required: { label: t('待复核'), color: 'orange' },
+    warning_2: { label: t('严重警告 2/3'), color: 'orange' },
+    cooling_off: { label: t('冷静中'), color: 'red' },
+    observed: { label: t('已记录'), color: 'light-blue' },
+    focus: { label: t('重点关注'), color: 'orange' },
+    review_pending: { label: t('待管理员复核'), color: 'red' },
+    admin_disabled: { label: t('管理员已停用'), color: 'red' },
+    legacy_disabled: { label: t('历史停用待复核'), color: 'red' },
   };
-  const meta = metaByLevel[level] || metaByLevel.review_required;
+  const meta = metaByLevel[level] || metaByLevel.observed;
   const tooltipContent = (
     <div className='text-xs max-w-sm break-all'>
       <div className='font-semibold mb-1'>
@@ -276,15 +280,57 @@ const renderContentSafety = (record, t) => {
           ? t('已确认的上游内容安全拒绝')
           : t('最近30天无上游内容安全拒绝记录')}
       </div>
-      <div>{t('最近30天触发次数')}: {count}</div>
-      <div>{t('最近触发时间')}: {renderTimestamp(record?.content_safety_last_at)}</div>
-      <div>{t('最近错误码')}: {record?.content_safety_last_code || '-'}</div>
-      <div>{t('最近使用模型')}: {record?.content_safety_last_model || '-'}</div>
-      <div>{t('最近渠道 ID')}: {record?.content_safety_last_channel_id || '-'}</div>
-      <div>{t('最近请求 ID')}: {record?.content_safety_last_request_id || '-'}</div>
-      <div>{t('当前处理状态')}: {meta.label}</div>
+      <div>
+        {t('最近30天触发次数')}: {count}
+      </div>
+      <div>
+        {t('当前10分钟窗口')}: {Number(record?.content_safety_burst_count || 0)}
+        /3
+      </div>
+      <div>
+        {t('最近30天冷静期次数')}:{' '}
+        {Number(record?.content_safety_cooldown_count || 0)}
+      </div>
+      <div>
+        {t('冷静期结束时间')}:{' '}
+        {renderTimestamp(record?.content_safety_cooldown_until)}
+      </div>
+      <div>
+        {t('最近触发时间')}: {renderTimestamp(record?.content_safety_last_at)}
+      </div>
+      <div>
+        {t('最近错误码')}: {record?.content_safety_last_code || '-'}
+      </div>
+      <div>
+        {t('本地细分类')}:{' '}
+        {formatContentSafetyCategory(record?.content_safety_last_category, t)}
+      </div>
+      <div>
+        {t('分类来源')}:{' '}
+        {record?.content_safety_reason_source === 'local_rule'
+          ? t('本地规则推断')
+          : record?.content_safety_reason_source || '-'}
+      </div>
+      <div>
+        {t('分类置信度')}: {record?.content_safety_reason_confidence || '-'}
+      </div>
+      <div>
+        {t('最近使用模型')}: {record?.content_safety_last_model || '-'}
+      </div>
+      <div>
+        {t('最近渠道 ID')}: {record?.content_safety_last_channel_id || '-'}
+      </div>
+      <div>
+        {t('最近请求 ID')}: {record?.content_safety_last_request_id || '-'}
+      </div>
+      <div>
+        {t('当前处理状态')}: {meta.label}
+      </div>
       <div className='mt-1 opacity-80'>
         {t('该记录表示上游明确拒绝，不代表已判定用户主观恶意。')}
+      </div>
+      <div className='mt-1 font-semibold'>
+        {t('点击标签查看脱敏证据并进行人工复核')}
       </div>
     </div>
   );
@@ -295,10 +341,11 @@ const renderContentSafety = (record, t) => {
         color={meta.color}
         shape='circle'
         size='small'
+        onClick={() => showReviewModal?.(record)}
         style={
-          level === 'disabled'
-            ? { backgroundColor: '#7f1d1d', color: '#fff' }
-            : undefined
+          level === 'admin_disabled' || level === 'legacy_disabled'
+            ? { backgroundColor: '#7f1d1d', color: '#fff', cursor: 'pointer' }
+            : { cursor: 'pointer' }
         }
       >
         {meta.label}
@@ -339,8 +386,7 @@ const renderSubscriptionQuota = (text, record, t) => {
   }
 
   const pct = Math.min(100, Math.max(0, (remaining / total) * 100));
-  const barColor =
-    pct > 30 ? '#10b981' : pct > 10 ? '#f59e0b' : '#ef4444';
+  const barColor = pct > 30 ? '#10b981' : pct > 10 ? '#f59e0b' : '#ef4444';
 
   const formatResetPeriod = (period) => {
     const map = {
@@ -369,7 +415,9 @@ const renderSubscriptionQuota = (text, record, t) => {
               paddingBottom: idx < items.length - 1 ? 8 : 0,
               marginBottom: idx < items.length - 1 ? 8 : 0,
               borderBottom:
-                idx < items.length - 1 ? '1px solid rgba(255,255,255,0.1)' : 'none',
+                idx < items.length - 1
+                  ? '1px solid rgba(255,255,255,0.1)'
+                  : 'none',
             }}
           >
             <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 12 }}>
@@ -377,15 +425,22 @@ const renderSubscriptionQuota = (text, record, t) => {
             </div>
             <div style={{ fontSize: 11, opacity: 0.85, lineHeight: 1.6 }}>
               {item.has_unlimited ? (
-                <div>{t('额度')}: {t('不限额')}</div>
+                <div>
+                  {t('额度')}: {t('不限额')}
+                </div>
               ) : (
                 <div>
-                  {t('额度')}: {renderQuota(item.remaining)} / {renderQuota(item.total)}
+                  {t('额度')}: {renderQuota(item.remaining)} /{' '}
+                  {renderQuota(item.total)}
                 </div>
               )}
-              <div>{t('刷新周期')}: {formatResetPeriod(item.reset_period)}</div>
+              <div>
+                {t('刷新周期')}: {formatResetPeriod(item.reset_period)}
+              </div>
               {item.next_reset_time > 0 && (
-                <div>{t('下次刷新')}: {formatDate(item.next_reset_time)}</div>
+                <div>
+                  {t('下次刷新')}: {formatDate(item.next_reset_time)}
+                </div>
               )}
             </div>
           </div>
@@ -402,7 +457,14 @@ const renderSubscriptionQuota = (text, record, t) => {
   return (
     <Tooltip content={tooltipContent} position='top'>
       <Tag color='white' shape='circle' style={{ cursor: 'default' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 2,
+          }}
+        >
           <span style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
             {renderQuota(remaining)} / {renderQuota(total)}
           </span>
@@ -521,7 +583,11 @@ const renderInviteInfo = (
               })
             }
           >
-            <Tag color='white' shape='circle' className='!text-xs cursor-pointer'>
+            <Tag
+              color='white'
+              shape='circle'
+              className='!text-xs cursor-pointer'
+            >
               {inviterText}
             </Tag>
           </Button>
@@ -674,6 +740,7 @@ export const getUsersColumns = ({
   showResetPasskeyModal,
   showResetTwoFAModal,
   showUserSubscriptionsModal,
+  showContentSafetyReviewModal,
   showInviteRelationsModal,
   openInviteRelationsUser,
   blacklistUserIP,
@@ -714,7 +781,8 @@ export const getUsersColumns = ({
       title: t('内容风控'),
       dataIndex: 'content_safety_level',
       key: 'content_safety_level',
-      render: (text, record) => renderContentSafety(record, t),
+      render: (text, record) =>
+        renderContentSafety(record, t, showContentSafetyReviewModal),
     },
     {
       title: t('套餐情况'),

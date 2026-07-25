@@ -114,10 +114,13 @@ const UsersFilters = ({
       { label: t('正常（近30天无记录）'), value: 'normal' },
       { label: t('已触发（至少1次）'), value: 'triggered' },
       { label: t('警告 1/3'), value: 'warning_1' },
-      { label: t('警告 2/3'), value: 'warning_2' },
-      { label: t('最终警告 3/3'), value: 'final_warning' },
-      { label: t('风控停用'), value: 'disabled' },
-      { label: t('待复核'), value: 'review_required' },
+      { label: t('严重警告 2/3'), value: 'warning_2' },
+      { label: t('冷静中（自动恢复）'), value: 'cooling_off' },
+      { label: t('已记录历史'), value: 'observed' },
+      { label: t('重点关注（2次冷静期）'), value: 'focus' },
+      { label: t('待管理员复核'), value: 'review_pending' },
+      { label: t('管理员审核后停用'), value: 'admin_disabled' },
+      { label: t('历史自动停用待复核'), value: 'legacy_disabled' },
     ],
     [t],
   );
@@ -404,7 +407,9 @@ const UsersFilters = ({
                   setDraftAdvancedFilters((prev) => ({
                     ...prev,
                     searchInviterId:
-                      value === null || value === undefined ? '' : String(value),
+                      value === null || value === undefined
+                        ? ''
+                        : String(value),
                   }))
                 }
                 min={1}
@@ -422,7 +427,9 @@ const UsersFilters = ({
                   setDraftAdvancedFilters((prev) => ({
                     ...prev,
                     searchInviteeUserId:
-                      value === null || value === undefined ? '' : String(value),
+                      value === null || value === undefined
+                        ? ''
+                        : String(value),
                   }))
                 }
                 min={1}
@@ -490,7 +497,9 @@ const UsersFilters = ({
                   setDraftAdvancedFilters((prev) => ({
                     ...prev,
                     searchWalletMin:
-                      value === null || value === undefined ? '' : String(value),
+                      value === null || value === undefined
+                        ? ''
+                        : String(value),
                   }))
                 }
                 min={0}
@@ -508,7 +517,9 @@ const UsersFilters = ({
                   setDraftAdvancedFilters((prev) => ({
                     ...prev,
                     searchWalletMax:
-                      value === null || value === undefined ? '' : String(value),
+                      value === null || value === undefined
+                        ? ''
+                        : String(value),
                   }))
                 }
                 min={0}
@@ -527,7 +538,9 @@ const UsersFilters = ({
                   setDraftAdvancedFilters((prev) => ({
                     ...prev,
                     searchUsedBalanceMin:
-                      value === null || value === undefined ? '' : String(value),
+                      value === null || value === undefined
+                        ? ''
+                        : String(value),
                   }))
                 }
                 min={0}
@@ -545,7 +558,9 @@ const UsersFilters = ({
                   setDraftAdvancedFilters((prev) => ({
                     ...prev,
                     searchUsedBalanceMax:
-                      value === null || value === undefined ? '' : String(value),
+                      value === null || value === undefined
+                        ? ''
+                        : String(value),
                   }))
                 }
                 min={0}

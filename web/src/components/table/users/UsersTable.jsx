@@ -33,6 +33,7 @@ import ResetPasskeyModal from './modals/ResetPasskeyModal';
 import ResetTwoFAModal from './modals/ResetTwoFAModal';
 import UserSubscriptionsModal from './modals/UserSubscriptionsModal';
 import UserInviteRelationsSheet from './modals/UserInviteRelationsSheet';
+import ContentSafetyReviewModal from './modals/ContentSafetyReviewModal';
 
 const initialInviteRelationsState = {
   visible: false,
@@ -73,6 +74,8 @@ const UsersTable = (usersData) => {
   const [showResetTwoFAModal, setShowResetTwoFAModal] = useState(false);
   const [showUserSubscriptionsModal, setShowUserSubscriptionsModal] =
     useState(false);
+  const [showContentSafetyReviewModal, setShowContentSafetyReviewModal] =
+    useState(false);
   const [inviteRelationsState, setInviteRelationsState] = useState(
     initialInviteRelationsState,
   );
@@ -112,6 +115,11 @@ const UsersTable = (usersData) => {
   const showUserSubscriptionsUserModal = (user) => {
     setModalUser(user);
     setShowUserSubscriptionsModal(true);
+  };
+
+  const showContentSafetyReviewUserModal = (user) => {
+    setModalUser(user);
+    setShowContentSafetyReviewModal(true);
   };
 
   const showInviteRelationsUserModal = (user) => {
@@ -206,6 +214,7 @@ const UsersTable = (usersData) => {
       showResetPasskeyModal: showResetPasskeyUserModal,
       showResetTwoFAModal: showResetTwoFAUserModal,
       showUserSubscriptionsModal: showUserSubscriptionsUserModal,
+      showContentSafetyReviewModal: showContentSafetyReviewUserModal,
       showInviteRelationsModal: showInviteRelationsUserModal,
       openInviteRelationsUser: showInviteRelationsUserModal,
       blacklistUserIP,
@@ -221,6 +230,7 @@ const UsersTable = (usersData) => {
     showResetPasskeyUserModal,
     showResetTwoFAUserModal,
     showUserSubscriptionsUserModal,
+    showContentSafetyReviewUserModal,
     showInviteRelationsUserModal,
     blacklistUserIP,
   ]);
@@ -330,6 +340,14 @@ const UsersTable = (usersData) => {
         user={modalUser}
         t={t}
         onSuccess={() => refresh?.()}
+      />
+
+      <ContentSafetyReviewModal
+        visible={showContentSafetyReviewModal}
+        onCancel={() => setShowContentSafetyReviewModal(false)}
+        user={modalUser}
+        onChanged={() => refresh?.()}
+        t={t}
       />
 
       <UserInviteRelationsSheet

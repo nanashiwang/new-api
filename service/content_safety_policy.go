@@ -18,8 +18,11 @@ import (
 )
 
 const (
-	ContentSafetyPolicyWindow       = 30 * 24 * time.Hour
-	ContentSafetyPolicyDisableAfter = 4
+	ContentSafetyPolicyWindow               = 30 * 24 * time.Hour
+	ContentSafetyPolicyBurstWindow          = 10 * time.Minute
+	ContentSafetyPolicyCooldown             = 10 * time.Minute
+	ContentSafetyPolicyBurstThreshold       = 3
+	ContentSafetyPolicyReviewAfterCooldowns = 3
 )
 
 var contentSafetyPolicyCodes = map[string]struct{}{
@@ -78,6 +81,7 @@ func RecordContentSafetyPolicyViolation(c *gin.Context, info *relaycommon.RelayI
 	}
 	oai := err.ToOpenAIError()
 	errorCode := canonicalContentSafetyPolicyCode(err)
+	classification := classifyContentSafetyViolation(c, err, errorCode)
 	requestID := strings.TrimSpace(info.RequestId)
 	if requestID == "" {
 		requestID = fmt.Sprintf("generated:%d", info.StartTime.UnixNano())
@@ -85,29 +89,26 @@ func RecordContentSafetyPolicyViolation(c *gin.Context, info *relaycommon.RelayI
 	eventKey := common.GenerateHMAC(fmt.Sprintf("%d\x00%s\x00%s", info.UserId, requestID, errorCode))
 
 	result, recordErr := model.RecordContentSafetyViolation(model.RecordContentSafetyViolationParams{
-		UserId:       info.UserId,
-		TokenId:      info.TokenId,
-		ChannelId:    info.ChannelId,
-		RequestId:    requestID,
-		EventKey:     eventKey,
-		ModelName:    info.OriginModelName,
-		ErrorType:    oai.Type,
-		ErrorCode:    errorCode,
-		InputHash:    inputHash,
-		IsStream:     info.IsStream,
-		CreatedAt:    now.Unix(),
-		WindowStart:  now.Add(-ContentSafetyPolicyWindow).Unix(),
-		DisableAfter: ContentSafetyPolicyDisableAfter,
+		UserId: info.UserId, TokenId: info.TokenId, ChannelId: info.ChannelId,
+		RequestId: requestID, EventKey: eventKey, ModelName: info.OriginModelName,
+		ErrorType: oai.Type, ErrorCode: errorCode,
+		OfficialMessage:   classification.OfficialMessage,
+		FineCategory:      classification.FineCategory,
+		ReasonSource:      classification.ReasonSource,
+		ReasonConfidence:  classification.ReasonConfidence,
+		ReasonSummary:     classification.ReasonSummary,
+		ClassifierVersion: classification.ClassifierVersion,
+		InputHash:         inputHash, IsStream: info.IsStream, CreatedAt: now.Unix(),
+		WindowStart:          now.Add(-ContentSafetyPolicyWindow).Unix(),
+		BurstWindowStart:     now.Add(-ContentSafetyPolicyBurstWindow).Unix(),
+		BurstThreshold:       ContentSafetyPolicyBurstThreshold,
+		CooldownSeconds:      int64(ContentSafetyPolicyCooldown.Seconds()),
+		ReviewAfterCooldowns: ContentSafetyPolicyReviewAfterCooldowns,
 	})
 	if recordErr != nil || result == nil || result.Duplicate || result.Violation == nil {
 		return result, recordErr
 	}
 
-	if result.Violation.Action == model.ContentSafetyActionDisabled {
-		if cacheErr := model.InvalidateUserAndTokenCaches(info.UserId); cacheErr != nil {
-			common.SysError(fmt.Sprintf("content safety user cache invalidation failed: user_id=%d err=%v", info.UserId, cacheErr))
-		}
-	}
 	recordContentSafetyUserNotice(result)
 	return result, nil
 }
@@ -163,12 +164,12 @@ func recordContentSafetyUserNotice(result *model.ContentSafetyEnforcementResult)
 	count := result.Violation.WindowCount
 	var content string
 	switch result.Violation.Action {
-	case model.ContentSafetyActionDisabled:
-		content = fmt.Sprintf("账户因在 30 天内第 %d 次触发上游内容安全策略而被自动停用，请联系管理员复核。", count)
-	case model.ContentSafetyActionReviewRequired:
-		content = fmt.Sprintf("内容安全事件已记录（30 天内第 %d 次），该账户需要人工复核。", count)
+	case model.ContentSafetyActionCooldownStarted:
+		content = fmt.Sprintf("内容安全冷静期已开始：10 分钟内连续 %d 次请求被上游策略拒绝，模型请求将暂停 10 分钟。30 天历史累计 %d 次；不会自动永久停用，重复冷静期将提交管理员复核。", result.Violation.BurstCount, count)
+	case model.ContentSafetyActionCooldownActive:
+		content = fmt.Sprintf("内容安全事件已记录：该请求与并发请求重叠在已开始的冷静期内。30 天历史累计 %d 次，冷静期不会因此延长。", count)
 	default:
-		content = fmt.Sprintf("内容安全警告：上游拒绝了违反内容安全策略的请求（30 天内第 %d 次）；累计 %d 次将自动停用普通用户账户。", count, ContentSafetyPolicyDisableAfter)
+		content = fmt.Sprintf("重要内容安全警告：上游明确拒绝了本次请求。当前 10 分钟窗口为 %d/%d，达到 %d 次将进入 10 分钟冷静期；30 天历史累计 %d 次。该记录不等同于认定主观恶意。", result.Violation.BurstCount, ContentSafetyPolicyBurstThreshold, ContentSafetyPolicyBurstThreshold, count)
 	}
 	model.RecordLog(result.Violation.UserId, model.LogTypeSystem, content)
 }
