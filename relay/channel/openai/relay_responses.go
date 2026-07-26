@@ -268,6 +268,9 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 		var streamResponse dto.ResponsesStreamResponse
 		if err := common.UnmarshalJsonStr(data, &streamResponse); err == nil {
 			explicitFailure := isResponsesStreamFailureEvent(streamResponse)
+			if explicitFailure {
+				data = decorateResponsesPolicyFailureData(streamResponse, data)
+			}
 			if explicitFailure && (streamResponse.Type == "" || streamResponse.Type == "response.completed") {
 				data = normalizeResponsesStreamFailureEvent(&streamResponse, data)
 			}
@@ -437,6 +440,35 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 	}
 
 	return usage, nil
+}
+
+func decorateResponsesPolicyFailureData(streamResponse dto.ResponsesStreamResponse, data string) string {
+	apiErr := newResponsesStreamEventError(streamResponse)
+	if !service.IsContentSafetyPolicyError(apiErr) {
+		return data
+	}
+	var payload map[string]any
+	if err := common.UnmarshalJsonStr(data, &payload); err != nil {
+		return data
+	}
+	warning := "本站警告：上游内容安全策略已拒绝并记录本次请求；请勿重复提交类似内容，反复触发将进入冷静期并提交管理员复核。"
+	decorate := func(raw any) {
+		if object, ok := raw.(map[string]any); ok {
+			message, _ := object["message"].(string)
+			if !strings.Contains(message, "本站警告") {
+				object["message"] = warning + " 原始提示：" + message
+			}
+		}
+	}
+	decorate(payload["error"])
+	if response, ok := payload["response"].(map[string]any); ok {
+		decorate(response["error"])
+	}
+	encoded, err := common.Marshal(payload)
+	if err != nil {
+		return data
+	}
+	return string(encoded)
 }
 
 func shouldSendResponsesStreamData(streamResponse dto.ResponsesStreamResponse, opts *ResponsesStreamHandlerOptions) bool {

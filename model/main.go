@@ -314,6 +314,8 @@ func migrateDB() error {
 		&IPBlacklist{},
 		&ContentSafetyViolation{},
 		&ContentSafetyReviewCase{},
+		&ContentSafetyEvidence{},
+		&ContentSafetyNotification{},
 	)
 	if err != nil {
 		return err

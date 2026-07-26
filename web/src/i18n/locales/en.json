@@ -5206,5 +5206,20 @@
   "支持多个邮箱，使用逗号、分号或换行分隔；留空则使用超级管理员的通知方式": "Multiple emails supported, separated by comma, semicolon or newline; leave empty to use the root user's notification method",
   "验证码发送成功，请检查邮箱（未收到请翻垃圾箱或广告邮件）": "Verification code sent. Please check your inbox (also check spam/junk folder if not received).",
   "重置邮件发送成功，请检查邮箱（未收到请翻垃圾箱或广告邮件）": "Reset email sent. Please check your inbox (also check spam/junk folder if not received).",
-  "没收到验证码？请检查垃圾箱/广告邮件（QQ邮箱常见），或等倒计时结束后重发": "Didn't get the code? Check your spam/junk folder, or resend after the countdown ends."
+  "没收到验证码？请检查垃圾箱/广告邮件（QQ邮箱常见），或等倒计时结束后重发": "Didn't get the code? Check your spam/junk folder, or resend after the countdown ends.",
+  "读取加密证据失败": "Failed to load encrypted evidence",
+  "系统仅在上游明确拒绝时加密保存最近用户消息和有限上下文，普通日志与列表不含正文。请结合官方错误码、角色归属、规则来源、置信度和多次历史记录审核；单条记录不能直接证明用户主观恶意。": "Only after an explicit upstream rejection, the system encrypts the latest user message and limited nearby context. Ordinary logs and lists contain no prompt text. Review the official code, message roles, rule source, confidence, and repeated history; one event alone does not prove malicious intent.",
+  "已加密取证": "Encrypted evidence captured",
+  "无可用正文证据": "No prompt evidence available",
+  "邮件": "Email",
+  "未创建邮件通知": "No email notification created",
+  "受限证据，不可直接展示": "Restricted evidence; direct viewing disabled",
+  "审计并查看加密证据": "Audit and view encrypted evidence",
+  "没有捕获到可用用户正文": "No usable user-authored text captured",
+  "角色分离的请求证据": "Role-separated request evidence",
+  "待发送": "Pending",
+  "发送中": "Sending",
+  "已发送": "Sent",
+  "发送失败": "Failed",
+  "已跳过": "Skipped"
 }

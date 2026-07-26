@@ -177,7 +177,7 @@ func sendSMTPMessage(receiver string, message []byte) error {
 		SysLog(fmt.Sprintf("smtp send attempt %d/%d failed, retrying: %v", attempt, smtpMaxAttempts, err))
 		time.Sleep(time.Duration(attempt) * 2 * time.Second)
 	}
-	SysError(fmt.Sprintf("failed to send email to %s: %v", receiver, err))
+	SysError(fmt.Sprintf("failed to send email to %s: %v", MaskEmail(receiver), err))
 	return err
 }
 

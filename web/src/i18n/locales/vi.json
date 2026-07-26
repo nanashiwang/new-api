@@ -5600,5 +5600,20 @@
     "额度耗尽": "Đã hết hạn mức"
   },
   "?????? 0 ??? 7 ????": {},
-  "?????? 0 ???????": {}
+  "?????? 0 ???????": {},
+  "读取加密证据失败": "Không thể tải bằng chứng đã mã hóa",
+  "系统仅在上游明确拒绝时加密保存最近用户消息和有限上下文，普通日志与列表不含正文。请结合官方错误码、角色归属、规则来源、置信度和多次历史记录审核；单条记录不能直接证明用户主观恶意。": "Chỉ sau khi dịch vụ thượng nguồn từ chối rõ ràng, hệ thống mới mã hóa tin nhắn người dùng gần nhất và ngữ cảnh giới hạn. Nhật ký và danh sách thông thường không chứa nội dung yêu cầu. Hãy xem xét mã chính thức, vai trò, nguồn quy tắc, độ tin cậy và lịch sử; một sự kiện không đủ chứng minh ý đồ xấu.",
+  "已加密取证": "Đã lưu bằng chứng mã hóa",
+  "无可用正文证据": "Không có bằng chứng nội dung",
+  "邮件": "Email",
+  "未创建邮件通知": "Chưa tạo thông báo email",
+  "受限证据，不可直接展示": "Bằng chứng hạn chế, không thể hiển thị trực tiếp",
+  "审计并查看加密证据": "Kiểm tra và xem bằng chứng mã hóa",
+  "没有捕获到可用用户正文": "Không thu được nội dung người dùng phù hợp",
+  "角色分离的请求证据": "Bằng chứng yêu cầu tách theo vai trò",
+  "待发送": "Đang chờ gửi",
+  "发送中": "Đang gửi",
+  "已发送": "Đã gửi",
+  "发送失败": "Gửi thất bại",
+  "已跳过": "Đã bỏ qua"
 }

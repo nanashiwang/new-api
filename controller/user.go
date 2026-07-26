@@ -1056,6 +1056,14 @@ func UpdateUser(c *gin.Context) {
 			},
 		)
 	}
+	if originUser.Status == common.UserStatusDisabled && updatedUser.Status == common.UserStatusEnabled {
+		if state, stateErr := model.GetUserContentSafetyState(updatedUser.Id); stateErr == nil && state.WindowCount > 0 {
+			model.RecordLogWithAdminInfo(updatedUser.Id, model.LogTypeManage,
+				fmt.Sprintf("管理员重新启用了存在内容安全历史的用户；30 天记录 %d 次、冷静期 %d 次，历史记录继续累计", state.WindowCount, state.CooldownCount),
+				map[string]interface{}{"admin_id": c.GetInt("id"), "admin_username": c.GetString("username")},
+			)
+		}
+	}
 
 	// 补充套餐和令牌元数据，确保管理页面执行更新用户操作后，返回的对象带有完整的状态，防止表格因数据覆盖而显示异常。
 	_ = model.AttachUserSubscriptionMetadata(model.DB, []*model.User{&updatedUser})

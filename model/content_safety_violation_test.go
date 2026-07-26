@@ -27,7 +27,7 @@ func setupContentSafetyViolationTestDB(t *testing.T) {
 	t.Cleanup(func() {
 		DB, LOG_DB, common.RedisEnabled = originalDB, originalLogDB, originalRedisEnabled
 	})
-	require.NoError(t, db.AutoMigrate(&User{}, &Log{}, &UserSubscription{}, &ContentSafetyViolation{}, &ContentSafetyReviewCase{}))
+	require.NoError(t, db.AutoMigrate(&User{}, &Log{}, &UserSubscription{}, &ContentSafetyViolation{}, &ContentSafetyReviewCase{}, &ContentSafetyEvidence{}, &ContentSafetyNotification{}))
 }
 
 func createContentSafetyTestUser(t *testing.T, username string, role int) *User {
@@ -331,6 +331,25 @@ func TestAttachUserContentSafetyMetadataWithoutAuditTableIsNormal(t *testing.T) 
 	var total int64
 	require.NoError(t, query.Count(&total).Error)
 	require.Zero(t, total)
+}
+
+func TestContentSafetyNotificationRateLimitIsEnforcedInTransaction(t *testing.T) {
+	setupContentSafetyViolationTestDB(t)
+	user := createContentSafetyTestUser(t, "notification-limit", common.RoleCommonUser)
+	now := time.Now().Unix()
+	for index := 1; index <= 4; index++ {
+		notification := &ContentSafetyNotification{
+			ViolationId: int64(index), UserId: user.Id, DeliveryKey: fmt.Sprintf("delivery-%d", index),
+			Kind: ContentSafetyActionWarning, Recipient: "user@example.com", RecipientSource: "email",
+			TemplateVersion: "test-v1", Status: ContentSafetyNotificationPending, CreatedAt: now, UpdatedAt: now,
+		}
+		created, err := CreateContentSafetyNotification(notification, now-3600, 3)
+		require.NoError(t, err)
+		require.Equal(t, index <= 3, created)
+	}
+	var count int64
+	require.NoError(t, DB.Model(&ContentSafetyNotification{}).Where("user_id = ?", user.Id).Count(&count).Error)
+	require.EqualValues(t, 3, count)
 }
 
 func TestTruncateSafetyAuditValueKeepsUTF8Valid(t *testing.T) {

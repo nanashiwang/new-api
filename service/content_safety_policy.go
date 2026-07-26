@@ -26,13 +26,19 @@ const (
 )
 
 var contentSafetyPolicyCodes = map[string]struct{}{
-	"content_filter":           {},
-	"content_policy_violation": {},
-	"cyber_policy":             {},
-	"policy_violation":         {},
-	"safety":                   {},
-	"safety_policy_violation":  {},
-	"safety_violation":         {},
+	"content_filter":                  {},
+	"content_policy":                  {},
+	"content_policy_violation":        {},
+	"cyber_policy":                    {},
+	"moderation_blocked":              {},
+	"policy_violation":                {},
+	"prompt_blocked":                  {},
+	"prohibited_content":              {},
+	"responsible_ai_policy_violation": {},
+	"safety":                          {},
+	"blocked_by_safety":               {},
+	"safety_policy_violation":         {},
+	"safety_violation":                {},
 }
 
 func IsContentSafetyPolicyError(err *types.NewAPIError) bool {
@@ -109,6 +115,12 @@ func RecordContentSafetyPolicyViolation(c *gin.Context, info *relaycommon.RelayI
 		return result, recordErr
 	}
 
+	if evidenceErr := captureContentSafetyEvidence(c, result); evidenceErr != nil {
+		common.SysError(fmt.Sprintf("content safety evidence capture failed: violation_id=%d err=%s", result.Violation.Id, sanitizeContentSafetyAuditText(evidenceErr.Error(), 256)))
+	}
+	if notificationErr := scheduleContentSafetyEmail(result); notificationErr != nil {
+		common.SysError(fmt.Sprintf("content safety email scheduling failed: violation_id=%d err=%s", result.Violation.Id, sanitizeContentSafetyAuditText(notificationErr.Error(), 256)))
+	}
 	recordContentSafetyUserNotice(result)
 	return result, nil
 }

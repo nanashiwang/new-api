@@ -419,6 +419,7 @@ func SetApiRouter(router *gin.Engine) {
 			contentSafetyRoute.GET("/self", middleware.UserAuth(), controller.GetSelfContentSafetyState)
 			contentSafetyRoute.POST("/self/acknowledge", middleware.UserAuth(), controller.AcknowledgeSelfContentSafetyWarnings)
 			contentSafetyRoute.GET("/violations", middleware.AdminAuth(), controller.GetContentSafetyViolations)
+			contentSafetyRoute.GET("/violations/:id/evidence", middleware.AdminAuth(), controller.GetContentSafetyViolationEvidence)
 			contentSafetyRoute.GET("/review-cases", middleware.AdminAuth(), controller.GetContentSafetyReviewCases)
 			contentSafetyRoute.POST("/review-cases/:id/resolve", middleware.AdminAuth(), controller.ResolveContentSafetyReviewCase)
 		}

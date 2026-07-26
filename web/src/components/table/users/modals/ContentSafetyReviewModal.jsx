@@ -17,6 +17,15 @@ import { formatContentSafetyCategory } from '../../../../helpers/contentSafety';
 
 const { Text, Title } = Typography;
 
+const getEmailStatusLabel = (status, t) =>
+  ({
+    pending: t('待发送'),
+    sending: t('发送中'),
+    sent: t('已发送'),
+    failed: t('发送失败'),
+    skipped: t('已跳过'),
+  })[status] || status;
+
 const ContentSafetyReviewModal = ({
   visible,
   onCancel,
@@ -30,6 +39,8 @@ const ContentSafetyReviewModal = ({
   const [violations, setViolations] = useState([]);
   const [reviewCases, setReviewCases] = useState([]);
   const [note, setNote] = useState('');
+  const [evidenceByViolation, setEvidenceByViolation] = useState({});
+  const [evidenceLoading, setEvidenceLoading] = useState(0);
 
   const load = useCallback(async () => {
     if (!visible || !user?.id) return;
@@ -63,6 +74,7 @@ const ContentSafetyReviewModal = ({
   useEffect(() => {
     if (visible) {
       setNote('');
+      setEvidenceByViolation({});
       load();
     }
   }, [load, visible]);
@@ -109,6 +121,26 @@ const ContentSafetyReviewModal = ({
     });
   };
 
+  const revealEvidence = async (violationId) => {
+    setEvidenceLoading(violationId);
+    try {
+      const response = await API.get(
+        `/api/content-safety/violations/${violationId}/evidence`,
+        { disableDuplicate: true },
+      );
+      if (!response?.data?.success)
+        throw new Error(response?.data?.message || t('读取加密证据失败'));
+      setEvidenceByViolation((current) => ({
+        ...current,
+        [violationId]: response.data.data,
+      }));
+    } catch (error) {
+      showError(error?.message || t('读取加密证据失败'));
+    } finally {
+      setEvidenceLoading(0);
+    }
+  };
+
   return (
     <Modal
       title={`${t('内容风控人工复核')} · ${user?.username || '-'}`}
@@ -130,7 +162,7 @@ const ContentSafetyReviewModal = ({
             </div>
             <Text type='tertiary' className='mt-2 block'>
               {t(
-                '系统不保存完整请求正文。请结合官方错误码、脱敏消息、规则来源、置信度和多次历史记录审核；单条记录不能直接证明用户主观恶意。',
+                '系统仅在上游明确拒绝时加密保存最近用户消息和有限上下文，普通日志与列表不含正文。请结合官方错误码、角色归属、规则来源、置信度和多次历史记录审核；单条记录不能直接证明用户主观恶意。',
               )}
             </Text>
           </div>
@@ -212,6 +244,23 @@ const ContentSafetyReviewModal = ({
                     <Text type='tertiary'>
                       {timestamp2string(item.created_at)}
                     </Text>
+                    <Tag color={item.evidence_available ? 'blue' : 'grey'}>
+                      {item.evidence_available
+                        ? t('已加密取证')
+                        : t('无可用正文证据')}
+                    </Tag>
+                    {item.email_status ? (
+                      <Tag
+                        color={
+                          item.email_status === 'sent' ? 'green' : 'orange'
+                        }
+                      >
+                        {t('邮件')} ·{' '}
+                        {getEmailStatusLabel(item.email_status, t)}
+                      </Tag>
+                    ) : (
+                      <Tag color='grey'>{t('未创建邮件通知')}</Tag>
+                    )}
                   </div>
                   <dl className='mt-3 grid gap-2 text-sm md:grid-cols-2'>
                     <div>
@@ -243,6 +292,45 @@ const ContentSafetyReviewModal = ({
                     <Text type='tertiary'>{t('原因说明')}: </Text>
                     {item.reason_summary || '-'}
                   </p>
+                  <div className='mt-3'>
+                    <Button
+                      size='small'
+                      loading={evidenceLoading === item.id}
+                      disabled={
+                        !item.evidence_available ||
+                        item.fine_category === 'child_sexual_content'
+                      }
+                      onClick={() => revealEvidence(item.id)}
+                    >
+                      {item.fine_category === 'child_sexual_content'
+                        ? t('受限证据，不可直接展示')
+                        : item.evidence_available
+                          ? t('审计并查看加密证据')
+                          : t('没有捕获到可用用户正文')}
+                    </Button>
+                  </div>
+                  {evidenceByViolation[item.id]?.captured_messages ? (
+                    <div className='mt-3 space-y-2 rounded-lg border border-orange-200 bg-orange-50 p-3'>
+                      <Text strong>{t('角色分离的请求证据')}</Text>
+                      {evidenceByViolation[item.id].captured_messages.map(
+                        (message, index) => (
+                          <div
+                            key={`${message.index}-${message.role}-${index}`}
+                            className='rounded border border-orange-100 bg-white p-2 text-sm'
+                          >
+                            <Tag
+                              color={message.role === 'user' ? 'red' : 'grey'}
+                            >
+                              {message.role}
+                            </Tag>
+                            <pre className='mb-0 mt-2 whitespace-pre-wrap break-words font-sans'>
+                              {message.content}
+                            </pre>
+                          </div>
+                        ),
+                      )}
+                    </div>
+                  ) : null}
                 </article>
               ))}
             </div>

@@ -23,6 +23,20 @@ import (
 
 var responsesStreamTokenEncoderOnce sync.Once
 
+func TestDecorateResponsesPolicyFailureDataAddsVisibleWarningOnlyForSafety(t *testing.T) {
+	policyData := `{"type":"response.failed","response":{"status":"failed","error":{"message":"rejected","type":"invalid_request","code":"cyber_policy"}}}`
+	var policyEvent dto.ResponsesStreamResponse
+	require.NoError(t, common.UnmarshalJsonStr(policyData, &policyEvent))
+	decorated := decorateResponsesPolicyFailureData(policyEvent, policyData)
+	require.Contains(t, decorated, "本站警告")
+	require.Contains(t, decorated, "cyber_policy")
+
+	contextData := `{"type":"error","error":{"message":"too long","type":"invalid_request","code":"context_length_exceeded"}}`
+	var contextEvent dto.ResponsesStreamResponse
+	require.NoError(t, common.UnmarshalJsonStr(contextData, &contextEvent))
+	require.Equal(t, contextData, decorateResponsesPolicyFailureData(contextEvent, contextData))
+}
+
 func newResponsesStreamTestContext() (*gin.Context, *httptest.ResponseRecorder) {
 	responsesStreamTokenEncoderOnce.Do(service.InitTokenEncoders)
 	gin.SetMode(gin.TestMode)

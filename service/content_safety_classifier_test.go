@@ -37,12 +37,20 @@ func TestClassifyContentSafetyViolationStoresDerivedCategoryWithoutPrompt(t *tes
 	require.Equal(t, "local_rule", result.ReasonSource)
 	require.Equal(t, "medium", result.ReasonConfidence)
 	require.Contains(t, result.ReasonSummary, "本地推断")
-	require.Contains(t, result.ReasonSummary, "未保存原始请求正文")
+	require.Contains(t, result.ReasonSummary, "受限证据另行加密保存")
 	stored := strings.Join([]string{result.OfficialMessage, result.ReasonSummary}, " ")
 	require.NotContains(t, stored, "victim@example.com")
 	require.NotContains(t, stored, "sk-testfixture123456")
 	require.NotContains(t, stored, "token=secret")
 	require.NotContains(t, stored, "fake login page")
+}
+
+func TestClassifyContentSafetyViolationDoesNotAttributeAssistantHistoryToUser(t *testing.T) {
+	c := contentSafetyClassifierContext(t, `{"messages":[{"role":"user","content":"Please summarize the prior answer"},{"role":"assistant","content":"malware keylogger ransomware"}]}`)
+	err := types.WithOpenAIError(types.OpenAIError{Message: "request rejected", Type: "invalid_request", Code: "content_filter"}, 400)
+	result := classifyContentSafetyViolation(c, err, "content_filter")
+	require.Equal(t, "safety_policy_other", result.FineCategory)
+	require.Equal(t, "low", result.ReasonConfidence)
 }
 
 func TestClassifyContentSafetyViolationUsesTruthfulFallback(t *testing.T) {
@@ -62,4 +70,11 @@ func TestSanitizeContentSafetyAuditTextRedactsCommonSecrets(t *testing.T) {
 	require.NotContains(t, result, "555 123 4567")
 	require.NotContains(t, result, "hunter2")
 	require.NotContains(t, result, "q=secret")
+}
+
+func TestRedactContentSafetyRequestEcho(t *testing.T) {
+	request := "please repeat this uniquely identifying risky request body"
+	message := "upstream rejected excerpt: uniquely identifying risky request body"
+	require.Equal(t, "[upstream message redacted because it echoed request content]", redactContentSafetyRequestEcho(message, request))
+	require.Equal(t, "generic policy rejection", redactContentSafetyRequestEcho("generic policy rejection", request))
 }

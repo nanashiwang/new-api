@@ -81,6 +81,21 @@ func GetContentSafetyViolations(c *gin.Context) {
 	common.ApiSuccess(c, pageInfo)
 }
 
+func GetContentSafetyViolationEvidence(c *gin.Context) {
+	violationID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || violationID <= 0 {
+		common.ApiError(c, errors.New("无效的风控记录 ID"))
+		return
+	}
+	view, err := service.GetContentSafetyEvidenceForReview(violationID)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.SysLog(fmt.Sprintf("content safety evidence reviewed: admin_id=%d violation_id=%d", c.GetInt("id"), violationID))
+	common.ApiSuccess(c, view)
+}
+
 func GetContentSafetyReviewCases(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	userID, _ := strconv.Atoi(c.Query("user_id"))

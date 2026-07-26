@@ -117,6 +117,9 @@ func main() {
 	service.StartCodexCredentialAutoRefreshTask()
 	service.StartCRSObserverSyncTask()
 	service.StartSlowTTFTBaselineTask()
+	if common.IsMasterNode {
+		service.StartContentSafetyMaintenanceTask()
+	}
 
 	// Subscription quota reset task (daily/weekly/monthly/custom)
 	service.StartSubscriptionQuotaResetTask()

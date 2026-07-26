@@ -60,6 +60,9 @@ type ContentSafetyViolation struct {
 	CooldownUntil     int64  `json:"cooldown_until" gorm:"bigint;index;index:idx_safety_user_cooldown,priority:2"`
 	WarningReadAt     int64  `json:"warning_read_at" gorm:"bigint;index"`
 	Action            string `json:"action" gorm:"type:varchar(32);index"`
+	EvidenceAvailable bool   `json:"evidence_available" gorm:"->"`
+	EmailStatus       string `json:"email_status" gorm:"->"`
+	EmailSource       string `json:"email_source" gorm:"->"`
 }
 
 type RecordContentSafetyViolationParams struct {
@@ -548,7 +551,15 @@ func GetContentSafetyViolations(query ContentSafetyViolationQuery, pageInfo *com
 		return nil, 0, err
 	}
 	items := make([]ContentSafetyViolation, 0, pageInfo.GetPageSize())
-	if err := base.Select("violations.*, users.username AS username").Order("violations.id DESC").
+	selectClause := "violations.*, users.username AS username"
+	if DB.Migrator().HasTable(&ContentSafetyEvidence{}) {
+		selectClause += ", EXISTS (SELECT 1 FROM content_safety_evidences evidence WHERE evidence.violation_id = violations.id) AS evidence_available"
+	}
+	if DB.Migrator().HasTable(&ContentSafetyNotification{}) {
+		selectClause += ", COALESCE((SELECT notification.status FROM content_safety_notifications notification WHERE notification.violation_id = violations.id ORDER BY notification.id DESC LIMIT 1), '') AS email_status"
+		selectClause += ", COALESCE((SELECT notification.recipient_source FROM content_safety_notifications notification WHERE notification.violation_id = violations.id ORDER BY notification.id DESC LIMIT 1), '') AS email_source"
+	}
+	if err := base.Select(selectClause).Order("violations.id DESC").
 		Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Scan(&items).Error; err != nil {
 		return nil, 0, err
 	}

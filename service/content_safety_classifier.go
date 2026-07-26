@@ -66,8 +66,8 @@ func compileSafetyPatterns(patterns ...string) []*regexp.Regexp {
 
 func classifyContentSafetyViolation(c *gin.Context, err *types.NewAPIError, errorCode string) ContentSafetyClassification {
 	oai := err.ToOpenAIError()
-	officialMessage := sanitizeContentSafetyAuditText(oai.Message, 512)
 	requestText := extractContentSafetyRequestText(c)
+	officialMessage := redactContentSafetyRequestEcho(sanitizeContentSafetyAuditText(oai.Message, 512), requestText)
 	searchText := strings.ToLower(strings.Join([]string{oai.Message, requestText}, "\n"))
 
 	for _, rule := range contentSafetyRules {
@@ -85,7 +85,7 @@ func classifyContentSafetyViolation(c *gin.Context, err *types.NewAPIError, erro
 		return ContentSafetyClassification{
 			OfficialMessage: officialMessage, FineCategory: rule.category,
 			ReasonSource: "local_rule", ReasonConfidence: "medium",
-			ReasonSummary:     fmt.Sprintf("官方 %s 拒绝；本地规则识别到%s风险信号。该分类为本地推断，不代表上游提供了同名子类型；未保存原始请求正文。", errorCode, strings.Join(matched, "、")),
+			ReasonSummary:     fmt.Sprintf("官方 %s 拒绝；本地规则识别到%s风险信号。该分类为本地推断，不代表上游提供了同名子类型；分类结果不包含请求正文，受限证据另行加密保存。", errorCode, strings.Join(matched, "、")),
 			ClassifierVersion: contentSafetyClassifierVersion,
 		}
 	}
@@ -97,9 +97,23 @@ func classifyContentSafetyViolation(c *gin.Context, err *types.NewAPIError, erro
 	return ContentSafetyClassification{
 		OfficialMessage: officialMessage, FineCategory: category,
 		ReasonSource: "local_rule", ReasonConfidence: "low",
-		ReasonSummary:     fmt.Sprintf("官方 %s 拒绝；本地规则未识别到足够明确的细分类信号，因此归入“%s”。该分类为本地推断；未保存原始请求正文。", errorCode, label),
+		ReasonSummary:     fmt.Sprintf("官方 %s 拒绝；本地规则未识别到足够明确的细分类信号，因此归入“%s”。该分类为本地推断；分类结果不包含请求正文，受限证据另行加密保存。", errorCode, label),
 		ClassifierVersion: contentSafetyClassifierVersion,
 	}
+}
+
+func redactContentSafetyRequestEcho(officialMessage, requestText string) string {
+	officialLower := strings.ToLower(officialMessage)
+	requestRunes := []rune(strings.ToLower(strings.TrimSpace(requestText)))
+	if len(requestRunes) < 24 {
+		return officialMessage
+	}
+	for start := 0; start+24 <= len(requestRunes); start += 12 {
+		if strings.Contains(officialLower, string(requestRunes[start:start+24])) {
+			return "[upstream message redacted because it echoed request content]"
+		}
+	}
+	return officialMessage
 }
 
 func extractContentSafetyRequestText(c *gin.Context) string {
@@ -118,45 +132,13 @@ func extractContentSafetyRequestText(c *gin.Context) string {
 	if common.Unmarshal(body, &payload) != nil {
 		return ""
 	}
-	parts := make([]string, 0, 16)
-	collectContentSafetyStrings(payload, "", &parts, 0)
-	return strings.Join(parts, "\n")
-}
-
-func collectContentSafetyStrings(value any, key string, parts *[]string, total int) int {
-	if total >= 200000 {
-		return total
-	}
-	switch typed := value.(type) {
-	case string:
-		if isContentSafetyTextKey(key) {
-			remaining := 200000 - total
-			runes := []rune(typed)
-			if len(runes) > remaining {
-				runes = runes[:remaining]
-			}
-			*parts = append(*parts, string(runes))
-			return total + len(runes)
-		}
-	case []any:
-		for _, item := range typed {
-			total = collectContentSafetyStrings(item, key, parts, total)
-		}
-	case map[string]any:
-		for childKey, item := range typed {
-			total = collectContentSafetyStrings(item, strings.ToLower(childKey), parts, total)
+	messages := extractRoleAwareSafetyMessages(payload)
+	for index := len(messages) - 1; index >= 0; index-- {
+		if messages[index].Role == "user" {
+			return truncateContentSafetyText(messages[index].Content, 200000)
 		}
 	}
-	return total
-}
-
-func isContentSafetyTextKey(key string) bool {
-	switch key {
-	case "input", "content", "text", "prompt", "instructions", "message", "messages", "query":
-		return true
-	default:
-		return false
-	}
+	return ""
 }
 
 func compactSafetySignals(values []string) []string {

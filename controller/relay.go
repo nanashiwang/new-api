@@ -301,6 +301,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 					relayInfo.UserId, relayInfo.TokenId, relayInfo.ChannelId, relayInfo.RequestId,
 					result.Violation.ErrorCode, result.Violation.WindowCount, result.Violation.Action))
 			}
+			if result != nil && result.Violation != nil {
+				newAPIError = service.EnrichContentSafetyClientError(newAPIError, result)
+			}
 		}
 
 		lastRelayError = newAPIError

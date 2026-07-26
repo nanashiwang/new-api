@@ -105,6 +105,43 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
 	return helper.ObjectData(c, lastStreamResponse)
 }
 
+func chatCompletionsStreamEventError(data string) *types.NewAPIError {
+	var payload map[string]any
+	if common.UnmarshalJsonStr(data, &payload) != nil {
+		return nil
+	}
+	if openAIError := dto.GetOpenAIError(payload["error"]); hasResponsesOpenAIError(openAIError) {
+		return types.WithOpenAIError(*openAIError, responsesStreamErrorStatus(*openAIError))
+	}
+	var streamResponse dto.ChatCompletionsStreamResponse
+	if common.UnmarshalJsonStr(data, &streamResponse) != nil {
+		return nil
+	}
+	for _, choice := range streamResponse.Choices {
+		if choice.FinishReason != nil && *choice.FinishReason == constant.FinishReasonContentFilter {
+			return types.WithOpenAIError(types.OpenAIError{
+				Message: "upstream rejected the request with finish_reason=content_filter",
+				Type:    "invalid_request", Code: "content_filter",
+			}, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+		}
+	}
+	return nil
+}
+
+func decorateChatCompletionsPolicyFailureData(data string, apiErr *types.NewAPIError) string {
+	if apiErr == nil {
+		return data
+	}
+	openAIError := apiErr.ToOpenAIError()
+	openAIError.Message = "本站警告：上游内容安全策略已拒绝并记录本次请求；请勿重复提交类似内容，反复触发将进入冷静期并提交管理员复核。"
+	payload := map[string]any{"error": openAIError}
+	encoded, err := common.Marshal(payload)
+	if err != nil {
+		return data
+	}
+	return string(encoded)
+}
+
 func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	if resp == nil || resp.Body == nil {
 		logger.LogError(c, "invalid response or response body")
@@ -124,6 +161,7 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	var streamItems []string // store stream items
 	var lastStreamData string
 	var secondLastStreamData string // 存储倒数第二个stream data，用于音频模型
+	var terminalError *types.NewAPIError
 
 	// 检查是否为音频模型
 	isAudioModel := strings.Contains(strings.ToLower(model), "audio")
@@ -136,6 +174,23 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 			}
 		}
 		if len(data) > 0 {
+			if eventError := chatCompletionsStreamEventError(data); eventError != nil {
+				terminalError = eventError
+				if service.IsContentSafetyPolicyError(eventError) {
+					terminalError = service.NormalizeContentSafetyPolicyError(eventError)
+					if info.RelayFormat == types.RelayFormatOpenAI {
+						_ = sendStreamData(c, info, decorateChatCompletionsPolicyFailureData(data, eventError), false, false)
+						common.SetContextKey(c, constant.ContextKeyResponsesStreamErrorWritten, true)
+					}
+				} else if info.SendResponseCount > 0 && info.RelayFormat == types.RelayFormatOpenAI {
+					// Once partial output reached the client, retrying on another channel
+					// would splice two unrelated streams together.
+					_ = sendStreamData(c, info, data, false, false)
+					common.SetContextKey(c, constant.ContextKeyResponsesStreamErrorWritten, true)
+					terminalError = types.WithOpenAIError(eventError.ToOpenAIError(), eventError.StatusCode, types.ErrOptionWithSkipRetry())
+				}
+				return false
+			}
 			// Some providers append metadata chunks after the standard usage chunk.
 			// Keep the latest valid usage instead of assuming it is the final SSE event.
 			updateUsageFromStreamData(data, &usage, &containStreamUsage)
@@ -150,6 +205,9 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 		}
 		return true
 	})
+	if terminalError != nil {
+		return nil, terminalError
+	}
 
 	// 对音频模型，从倒数第二个stream data中提取usage信息
 	if isAudioModel && secondLastStreamData != "" {
@@ -238,7 +296,10 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 	for _, choice := range simpleResponse.Choices {
 		if choice.FinishReason == constant.FinishReasonContentFilter {
 			common.SetContextKey(c, constant.ContextKeyAdminRejectReason, "openai_finish_reason=content_filter")
-			break
+			return nil, types.WithOpenAIError(types.OpenAIError{
+				Message: "upstream rejected the request with finish_reason=content_filter",
+				Type:    "invalid_request", Code: "content_filter",
+			}, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 		}
 	}
 
