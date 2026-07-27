@@ -484,6 +484,7 @@ func GetCRSAccounts(c *gin.Context) {
 		HealthState:    c.Query("health_state"),
 		Keyword:        c.Query("keyword"),
 		QuotaState:     c.Query("quota_state"),
+		Sort:           c.Query("sort"),
 		StaleBefore:    common.GetTimestamp() - model.CRSAccountStaleAfterSeconds,
 		AttentionFirst: c.DefaultQuery("attention_first", "true") != "false",
 		Page:           page,

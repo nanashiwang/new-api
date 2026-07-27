@@ -20,7 +20,6 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Button,
   Card,
-  Checkbox,
   Empty,
   Input,
   Pagination,
@@ -31,7 +30,7 @@ import {
   Tag,
   Typography,
 } from '@douyinfe/semi-ui';
-import { RefreshCw, Search, WalletCards } from 'lucide-react';
+import { Eye, RefreshCw, Search, WalletCards } from 'lucide-react';
 import { useDebounce } from 'use-debounce';
 import { useIsMobile } from '@/hooks/common/useIsMobile';
 import { timestamp2string } from '../../../helpers/date';
@@ -44,7 +43,6 @@ import {
   getCRSAccountHealth,
   getCRSPlatformBadgeLabel,
   getCRSUsagePercentages,
-  sortCRSAccountsByAttention,
 } from './crsDashboard.utils';
 
 const { Text, Title } = Typography;
@@ -59,6 +57,14 @@ const HEALTH_META = {
   unschedulable: { color: 'orange' },
   sync_error: { color: 'red' },
   stale: { color: 'grey' },
+};
+
+const SUMMARY_FILTER_META = {
+  all: { color: 'blue' },
+  schedulable: { color: 'green' },
+  rate_limited: { color: 'red' },
+  low: { color: 'amber' },
+  empty: { color: 'red' },
 };
 
 const getHealthLabel = (key, t) => {
@@ -107,12 +113,40 @@ const HealthTag = ({ account, t }) => {
   );
 };
 
+const SummaryFilterTag = ({ filterKey, active, count, label, onClick }) => {
+  const meta = SUMMARY_FILTER_META[filterKey] || SUMMARY_FILTER_META.all;
+  return (
+    <Tag
+      color={meta.color}
+      size='large'
+      className={`cursor-pointer select-none ${active ? '' : 'opacity-80'}`}
+      style={
+        active
+          ? {
+              outline: '2px solid var(--semi-color-primary)',
+              outlineOffset: 1,
+            }
+          : undefined
+      }
+      role='button'
+      tabIndex={0}
+      aria-pressed={active}
+      onClick={onClick}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onClick();
+        }
+      }}
+    >
+      {label} {count}
+    </Tag>
+  );
+};
+
 const AccountStatus = ({ account, t, showHealth = true }) => (
   <div className='flex flex-wrap items-center gap-1'>
     {showHealth ? <HealthTag account={account} t={t} /> : null}
-    <Tag color='cyan' size='small'>
-      {getCRSPlatformBadgeLabel(account)}
-    </Tag>
     {account?.rate_limited && account?.rate_limit_minutes_remaining > 0 ? (
       <Tag color='orange' size='small'>
         {t('{{minutes}} 分钟后恢复', {
@@ -120,6 +154,23 @@ const AccountStatus = ({ account, t, showHealth = true }) => (
         })}
       </Tag>
     ) : null}
+  </div>
+);
+
+const AccountSource = ({ account, onOpenSite }) => (
+  <div className='flex min-w-0 flex-col items-start gap-1'>
+    <Button
+      theme='borderless'
+      type='primary'
+      size='small'
+      className='-ml-3 max-w-full'
+      onClick={() => onOpenSite?.(account.site_id)}
+    >
+      <span className='truncate'>{account.site_name || '-'}</span>
+    </Button>
+    <Tag color='cyan' size='small'>
+      {getCRSPlatformBadgeLabel(account)}
+    </Tag>
   </div>
 );
 
@@ -234,26 +285,37 @@ const DailyUsage = ({ account, t }) => {
   );
 };
 
-const SyncState = ({ account, t }) => {
-  const health = getCRSAccountHealth(account);
+const RecoveryState = ({ account, t }) => {
+  if (!account?.rate_limited) {
+    return (
+      <Text type='tertiary' size='small'>
+        {t('无需等待')}
+      </Text>
+    );
+  }
   return (
     <div className='flex flex-col gap-1 text-xs'>
-      {account?.rate_limited ? (
-        <Text type='danger' size='small'>
-          {account.rate_limit_minutes_remaining > 0
-            ? t('{{minutes}} 分钟后恢复', {
-                minutes: account.rate_limit_minutes_remaining,
-              })
-            : t('等待上游恢复')}
-        </Text>
-      ) : null}
+      <Text type='danger' strong size='small'>
+        {account.rate_limit_minutes_remaining > 0
+          ? t('{{minutes}} 分钟后恢复', {
+              minutes: account.rate_limit_minutes_remaining,
+            })
+          : t('等待上游恢复')}
+      </Text>
       {account?.rate_limit_reset_at ? (
         <Text type='tertiary' size='small'>
           {account.rate_limit_reset_at}
         </Text>
       ) : null}
+    </div>
+  );
+};
+
+const SyncState = ({ account, t }) => {
+  const health = getCRSAccountHealth(account);
+  return (
+    <div className='flex flex-col gap-1 text-xs'>
       <Text type={health.isStale ? 'warning' : 'tertiary'} size='small'>
-        {t('同步')}:{' '}
         {account?.last_synced_at
           ? timestamp2string(account.last_synced_at)
           : t('尚未同步')}
@@ -267,7 +329,43 @@ const SyncState = ({ account, t }) => {
   );
 };
 
-const MobileAccountCard = ({ account, onOpenSite, t }) => (
+const AccountActions = ({
+  account,
+  onOpenSite,
+  onRefreshSite,
+  refreshingSiteId,
+  t,
+}) => (
+  <div className='flex items-center gap-1'>
+    <Button
+      theme='borderless'
+      type='tertiary'
+      size='small'
+      icon={<Eye size={14} />}
+      aria-label={t('查看站点')}
+      title={t('查看站点')}
+      onClick={() => onOpenSite?.(account.site_id)}
+    />
+    <Button
+      theme='borderless'
+      type='tertiary'
+      size='small'
+      icon={<RefreshCw size={14} />}
+      loading={refreshingSiteId === account.site_id}
+      aria-label={t('刷新所属站点')}
+      title={t('刷新所属站点')}
+      onClick={() => onRefreshSite?.(account.site_id)}
+    />
+  </div>
+);
+
+const MobileAccountCard = ({
+  account,
+  onOpenSite,
+  onRefreshSite,
+  refreshingSiteId,
+  t,
+}) => (
   <Card bordered bodyStyle={{ padding: 12 }}>
     <div className='flex flex-col gap-3'>
       <div className='flex items-start justify-between gap-2'>
@@ -275,20 +373,22 @@ const MobileAccountCard = ({ account, onOpenSite, t }) => (
           <div className='truncate font-semibold'>
             {account.name || account.remote_account_id}
           </div>
-          <Button
-            theme='borderless'
-            size='small'
-            className='-ml-3 mt-0.5'
-            onClick={() => onOpenSite?.(account.site_id)}
-          >
-            {account.site_name || '-'}
-          </Button>
         </div>
-        <HealthTag account={account} t={t} />
+        <div className='flex items-center gap-1'>
+          <HealthTag account={account} t={t} />
+          <AccountActions
+            account={account}
+            onOpenSite={onOpenSite}
+            onRefreshSite={onRefreshSite}
+            refreshingSiteId={refreshingSiteId}
+            t={t}
+          />
+        </div>
       </div>
+      <AccountSource account={account} onOpenSite={onOpenSite} />
       <AccountStatus account={account} t={t} showHealth={false} />
       <AccountQuota account={account} t={t} />
-      <div className='grid grid-cols-1 gap-3 border-t border-semi-color-border pt-3 sm:grid-cols-2'>
+      <div className='grid grid-cols-1 gap-3 border-t border-semi-color-border pt-3 sm:grid-cols-3'>
         <div>
           <Text type='tertiary' size='small'>
             {t('今日使用')}
@@ -297,7 +397,13 @@ const MobileAccountCard = ({ account, onOpenSite, t }) => (
         </div>
         <div>
           <Text type='tertiary' size='small'>
-            {t('恢复 / 同步')}
+            {t('恢复状态')}
+          </Text>
+          <RecoveryState account={account} t={t} />
+        </div>
+        <div>
+          <Text type='tertiary' size='small'>
+            {t('最近同步')}
           </Text>
           <SyncState account={account} t={t} />
         </div>
@@ -315,6 +421,8 @@ export default function CRSAccountUsageOverview({
   observer,
   loadAccounts,
   onOpenSite,
+  onRefreshSite,
+  refreshingSiteId,
   t,
 }) {
   const isMobile = useIsMobile();
@@ -325,7 +433,7 @@ export default function CRSAccountUsageOverview({
   const [healthState, setHealthState] = useState('');
   const [quotaState, setQuotaState] = useState('');
   const [keyword, setKeyword] = useState('');
-  const [attentionFirst, setAttentionFirst] = useState(true);
+  const [sortMode, setSortMode] = useState('attention');
   const [debouncedKeyword] = useDebounce(keyword, 300);
 
   const requestAccounts = useCallback(
@@ -338,10 +446,10 @@ export default function CRSAccountUsageOverview({
         health_state: healthState,
         quota_state: quotaState,
         keyword: debouncedKeyword,
-        attention_first: attentionFirst,
+        sort: sortMode,
+        attention_first: sortMode === 'attention',
       }),
     [
-      attentionFirst,
       debouncedKeyword,
       healthState,
       loadAccounts,
@@ -350,6 +458,7 @@ export default function CRSAccountUsageOverview({
       platform,
       quotaState,
       siteId,
+      sortMode,
     ],
   );
 
@@ -390,13 +499,24 @@ export default function CRSAccountUsageOverview({
   const healthOptions = useMemo(
     () => [
       { label: t('全部状态'), value: '' },
-      { label: t('可用'), value: 'available' },
+      { label: t('可调度'), value: 'schedulable' },
+      { label: t('健康可用'), value: 'available' },
       { label: t('需关注'), value: 'attention' },
       { label: t('限速中'), value: 'rate_limited' },
       { label: t('未激活'), value: 'inactive' },
       { label: t('不可调度'), value: 'unschedulable' },
       { label: t('同步异常'), value: 'sync_error' },
       { label: t('数据过期'), value: 'stale' },
+    ],
+    [t],
+  );
+
+  const sortOptions = useMemo(
+    () => [
+      { label: t('风险最高优先'), value: 'attention' },
+      { label: t('剩余额度最低'), value: 'quota_remaining' },
+      { label: t('今日请求最多'), value: 'daily_requests' },
+      { label: t('同步最旧优先'), value: 'last_synced' },
     ],
     [t],
   );
@@ -411,16 +531,36 @@ export default function CRSAccountUsageOverview({
     [t],
   );
 
-  const displayedAccounts = useMemo(
-    () =>
-      attentionFirst ? sortCRSAccountsByAttention(accounts) : [...accounts],
-    [accounts, attentionFirst],
-  );
+  const displayedAccounts = accounts;
+
+  const activeSummaryFilter = useMemo(() => {
+    if (healthState === 'schedulable' && !quotaState) return 'schedulable';
+    if (healthState === 'rate_limited' && !quotaState) return 'rate_limited';
+    if (!healthState && quotaState === 'low') return 'low';
+    if (!healthState && quotaState === 'empty') return 'empty';
+    if (!healthState && !quotaState) return 'all';
+    return '';
+  }, [healthState, quotaState]);
+
+  const applySummaryFilter = (filterKey) => {
+    const filters = {
+      all: { health: '', quota: '' },
+      schedulable: { health: 'schedulable', quota: '' },
+      rate_limited: { health: 'rate_limited', quota: '' },
+      low: { health: '', quota: 'low' },
+      empty: { health: '', quota: 'empty' },
+    };
+    const next = filters[filterKey] || filters.all;
+    setHealthState(next.health);
+    setQuotaState(next.quota);
+    setPage(1);
+  };
 
   const columns = [
     {
-      title: t('账号 / 站点'),
+      title: t('账号'),
       dataIndex: 'name',
+      width: 260,
       render: (_, record) => (
         <div className='min-w-0'>
           <div className='truncate font-medium'>
@@ -429,40 +569,61 @@ export default function CRSAccountUsageOverview({
           <div className='mt-0.5 break-all text-xs text-semi-color-text-2'>
             {record.remote_account_id}
           </div>
-          <Button
-            theme='borderless'
-            size='small'
-            className='-ml-3 mt-0.5'
-            onClick={() => onOpenSite?.(record.site_id)}
-          >
-            {record.site_name || '-'}
-          </Button>
         </div>
+      ),
+    },
+    {
+      title: t('来源'),
+      dataIndex: 'site_name',
+      width: 175,
+      render: (_, record) => (
+        <AccountSource account={record} onOpenSite={onOpenSite} />
       ),
     },
     {
       title: t('状态'),
       dataIndex: 'status',
-      width: 210,
+      width: 155,
       render: (_, record) => <AccountStatus account={record} t={t} />,
     },
     {
       title: t('额度余量'),
       dataIndex: 'usage_windows',
-      width: 320,
+      width: 340,
       render: (_, record) => <AccountQuota account={record} t={t} />,
     },
     {
       title: t('今日使用'),
       dataIndex: 'usage_daily_requests',
-      width: 120,
+      width: 145,
       render: (_, record) => <DailyUsage account={record} t={t} />,
     },
     {
-      title: t('恢复 / 同步'),
+      title: t('恢复状态'),
+      dataIndex: 'rate_limit_minutes_remaining',
+      width: 165,
+      render: (_, record) => <RecoveryState account={record} t={t} />,
+    },
+    {
+      title: t('最近同步'),
       dataIndex: 'last_synced_at',
       width: 190,
       render: (_, record) => <SyncState account={record} t={t} />,
+    },
+    {
+      title: t('操作'),
+      dataIndex: 'actions',
+      width: 90,
+      fixed: 'right',
+      render: (_, record) => (
+        <AccountActions
+          account={record}
+          onOpenSite={onOpenSite}
+          onRefreshSite={onRefreshSite}
+          refreshingSiteId={refreshingSiteId}
+          t={t}
+        />
+      ),
     },
   ];
 
@@ -502,19 +663,41 @@ export default function CRSAccountUsageOverview({
     >
       <div className='mb-3 flex flex-col gap-3'>
         <div className='flex flex-wrap items-center gap-2'>
-          <Tag color='green'>
-            {t('可调度')} {observer?.schedulable_count ?? 0}/
-            {observer?.total_accounts ?? 0}
-          </Tag>
-          <Tag color={(observer?.rate_limited_count ?? 0) > 0 ? 'red' : 'grey'}>
-            {t('限速中')} {observer?.rate_limited_count ?? 0}
-          </Tag>
-          <Tag color={(observer?.low_quota_count ?? 0) > 0 ? 'amber' : 'grey'}>
-            {t('低额度')} {observer?.low_quota_count ?? 0}
-          </Tag>
-          <Tag color={(observer?.empty_quota_count ?? 0) > 0 ? 'red' : 'grey'}>
-            {t('空额度')} {observer?.empty_quota_count ?? 0}
-          </Tag>
+          <SummaryFilterTag
+            filterKey='all'
+            active={activeSummaryFilter === 'all'}
+            count={observer?.total_accounts ?? 0}
+            label={t('全部账号')}
+            onClick={() => applySummaryFilter('all')}
+          />
+          <SummaryFilterTag
+            filterKey='schedulable'
+            active={activeSummaryFilter === 'schedulable'}
+            count={observer?.schedulable_count ?? 0}
+            label={t('可调度')}
+            onClick={() => applySummaryFilter('schedulable')}
+          />
+          <SummaryFilterTag
+            filterKey='rate_limited'
+            active={activeSummaryFilter === 'rate_limited'}
+            count={observer?.rate_limited_count ?? 0}
+            label={t('限速中')}
+            onClick={() => applySummaryFilter('rate_limited')}
+          />
+          <SummaryFilterTag
+            filterKey='low'
+            active={activeSummaryFilter === 'low'}
+            count={observer?.low_quota_count ?? 0}
+            label={t('低额度')}
+            onClick={() => applySummaryFilter('low')}
+          />
+          <SummaryFilterTag
+            filterKey='empty'
+            active={activeSummaryFilter === 'empty'}
+            count={observer?.empty_quota_count ?? 0}
+            label={t('空额度')}
+            onClick={() => applySummaryFilter('empty')}
+          />
           <Text
             type='tertiary'
             size='small'
@@ -558,14 +741,15 @@ export default function CRSAccountUsageOverview({
             style={{ width: isMobile ? 'calc(50% - 4px)' : 125 }}
             onChange={(value) => changeFilter(setQuotaState, value || '')}
           />
-          <Checkbox
-            checked={attentionFirst}
-            onChange={(event) =>
-              changeFilter(setAttentionFirst, event.target.checked)
+          <Select
+            value={sortMode}
+            optionList={sortOptions}
+            prefix={t('排序方式')}
+            style={{ width: isMobile ? '100%' : 210 }}
+            onChange={(value) =>
+              changeFilter(setSortMode, value || 'attention')
             }
-          >
-            {t('异常优先')}
-          </Checkbox>
+          />
         </div>
       </div>
 
@@ -583,6 +767,8 @@ export default function CRSAccountUsageOverview({
                 key={`${account.site_id}:${account.remote_account_id}`}
                 account={account}
                 onOpenSite={onOpenSite}
+                onRefreshSite={onRefreshSite}
+                refreshingSiteId={refreshingSiteId}
                 t={t}
               />
             ))}
@@ -606,6 +792,7 @@ export default function CRSAccountUsageOverview({
             rowKey='id'
             size='small'
             bordered
+            scroll={{ x: 1520 }}
             pagination={{
               currentPage: page,
               pageSize,

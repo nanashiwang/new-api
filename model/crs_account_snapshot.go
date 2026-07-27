@@ -78,6 +78,7 @@ type CRSAccountSnapshotQuery struct {
 	HealthState    string
 	Keyword        string
 	QuotaState     string
+	Sort           string
 	StaleBefore    int64
 	AttentionFirst bool
 	Page           int
@@ -172,6 +173,8 @@ func QueryCRSAccountSnapshots(query CRSAccountSnapshotQuery) ([]*CRSAccountSnaps
 		db = db.Where("status = ?", status)
 	}
 	switch strings.TrimSpace(query.HealthState) {
+	case "schedulable":
+		db = db.Where("schedulable = ?", true)
 	case "available":
 		db = db.Where(
 			"is_active = ? AND schedulable = ? AND rate_limited = ? AND sync_error = ? AND error_message = ? AND (quota_unlimited = ? OR quota_total <= ? OR quota_remaining > ?)",
@@ -245,7 +248,12 @@ func QueryCRSAccountSnapshots(query CRSAccountSnapshotQuery) ([]*CRSAccountSnaps
 		pageSize = 200
 	}
 
-	if query.AttentionFirst {
+	sortMode := strings.TrimSpace(query.Sort)
+	if sortMode == "" && query.AttentionFirst {
+		sortMode = "attention"
+	}
+	switch sortMode {
+	case "attention":
 		attentionOrder := "CASE " +
 			"WHEN sync_error <> '' OR error_message <> '' THEN 0 " +
 			staleAttentionOrder(query.StaleBefore) +
@@ -257,7 +265,17 @@ func QueryCRSAccountSnapshots(query CRSAccountSnapshotQuery) ([]*CRSAccountSnaps
 		db = db.Order(attentionOrder).
 			Order("quota_remaining ASC").
 			Order("updated_time DESC")
-	} else {
+	case "quota_remaining":
+		db = db.Order("CASE WHEN quota_unlimited THEN 2 WHEN quota_total <= 0 THEN 1 ELSE 0 END ASC").
+			Order("quota_remaining ASC").
+			Order("updated_time DESC")
+	case "daily_requests":
+		db = db.Order("usage_daily_requests DESC").
+			Order("updated_time DESC")
+	case "last_synced":
+		db = db.Order("last_synced_at ASC").
+			Order("name ASC")
+	default:
 		db = db.Order("updated_time DESC").Order("name ASC")
 	}
 

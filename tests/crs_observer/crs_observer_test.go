@@ -248,6 +248,114 @@ func TestQueryCRSAccountSnapshotsFiltersHealthAndOrdersAttention(t *testing.T) {
 	require.Equal(t, "acct-boundary", defaultOrder[0].RemoteAccountID)
 }
 
+func TestQueryCRSAccountSnapshotsFiltersSchedulableAndSortsServerSide(t *testing.T) {
+	db := setupCRSObserverTestDB(t)
+	site := &model.CRSSite{
+		Name:              "sort-demo",
+		Host:              "sort.example.com",
+		Scheme:            "https",
+		Username:          "admin",
+		PasswordEncrypted: "enc-password",
+	}
+	require.NoError(t, db.Create(site).Error)
+
+	require.NoError(t, model.ReplaceCRSAccountSnapshots(site.Id, []*model.CRSAccountSnapshot{
+		{
+			RemoteAccountID:    "acct-steady",
+			Platform:           "openai",
+			Name:               "Steady",
+			Schedulable:        true,
+			QuotaTotal:         100,
+			QuotaRemaining:     20,
+			UsageDailyRequests: 5,
+			LastSyncedAt:       300,
+		},
+		{
+			RemoteAccountID:    "acct-busy",
+			Platform:           "openai",
+			Name:               "Busy",
+			Schedulable:        true,
+			QuotaTotal:         100,
+			QuotaRemaining:     5,
+			UsageDailyRequests: 50,
+			LastSyncedAt:       100,
+		},
+		{
+			RemoteAccountID:    "acct-unlimited",
+			Platform:           "claude",
+			Name:               "Unlimited",
+			Schedulable:        false,
+			QuotaUnlimited:     true,
+			UsageDailyRequests: 10,
+			LastSyncedAt:       200,
+		},
+		{
+			RemoteAccountID:    "acct-unknown-quota",
+			Platform:           "openai",
+			Name:               "Unknown quota",
+			Schedulable:        false,
+			UsageDailyRequests: 1,
+			LastSyncedAt:       250,
+		},
+	}))
+
+	schedulable, total, err := model.QueryCRSAccountSnapshots(model.CRSAccountSnapshotQuery{
+		SiteID:      site.Id,
+		HealthState: "schedulable",
+		Sort:        "quota_remaining",
+		Page:        1,
+		PageSize:    20,
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, total)
+	require.Equal(t, []string{"acct-busy", "acct-steady"}, []string{
+		schedulable[0].RemoteAccountID,
+		schedulable[1].RemoteAccountID,
+	})
+
+	quota, _, err := model.QueryCRSAccountSnapshots(model.CRSAccountSnapshotQuery{
+		SiteID:   site.Id,
+		Sort:     "quota_remaining",
+		Page:     1,
+		PageSize: 20,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"acct-busy", "acct-steady", "acct-unknown-quota", "acct-unlimited"}, []string{
+		quota[0].RemoteAccountID,
+		quota[1].RemoteAccountID,
+		quota[2].RemoteAccountID,
+		quota[3].RemoteAccountID,
+	})
+
+	daily, _, err := model.QueryCRSAccountSnapshots(model.CRSAccountSnapshotQuery{
+		SiteID:   site.Id,
+		Sort:     "daily_requests",
+		Page:     1,
+		PageSize: 20,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"acct-busy", "acct-unlimited", "acct-steady", "acct-unknown-quota"}, []string{
+		daily[0].RemoteAccountID,
+		daily[1].RemoteAccountID,
+		daily[2].RemoteAccountID,
+		daily[3].RemoteAccountID,
+	})
+
+	oldest, _, err := model.QueryCRSAccountSnapshots(model.CRSAccountSnapshotQuery{
+		SiteID:   site.Id,
+		Sort:     "last_synced",
+		Page:     1,
+		PageSize: 20,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"acct-busy", "acct-unlimited", "acct-unknown-quota", "acct-steady"}, []string{
+		oldest[0].RemoteAccountID,
+		oldest[1].RemoteAccountID,
+		oldest[2].RemoteAccountID,
+		oldest[3].RemoteAccountID,
+	})
+}
+
 func TestCRSAccountSnapshotTextFieldsDoNotDeclareDefaultValues(t *testing.T) {
 	t.Parallel()
 
