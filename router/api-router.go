@@ -365,6 +365,16 @@ func SetApiRouter(router *gin.Engine) {
 			crsRoute.POST("/sites/:id/refresh", controller.RefreshCRSSiteByID)
 			crsRoute.POST("/refresh_all", controller.RefreshAllCRSSites)
 		}
+		cpaRoute := apiRouter.Group("/cpa")
+		cpaRoute.Use(middleware.AdminAuth())
+		{
+			cpaRoute.GET("/overview", controller.GetCPAOverview)
+			cpaRoute.POST("/test_connection", controller.TestCPAConnection)
+			cpaRoute.POST("/sites", controller.CreateCPASite)
+			cpaRoute.PUT("/sites/:id", controller.UpdateCPASite)
+			cpaRoute.DELETE("/sites/:id", controller.DeleteCPASite)
+			cpaRoute.POST("/sites/:id/refresh", controller.RefreshCPASite)
+		}
 		tokenRoute := apiRouter.Group("/token")
 		tokenRoute.Use(middleware.UserAuth())
 		{
