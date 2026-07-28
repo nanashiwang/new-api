@@ -611,6 +611,8 @@ export default function CRSDashboardCard({ t: tProp }) {
         observer={observer}
         loadAccounts={loadAccounts}
         onOpenSite={openSiteDetailById}
+        onRefreshSite={refreshSite}
+        refreshingSiteId={refreshingSiteId}
         t={tFn}
       />
 

@@ -45,6 +45,7 @@ export function useCRSData() {
     status: '',
     quota_state: '',
     keyword: '',
+    sort: 'attention',
   });
 
   useEffect(() => {
