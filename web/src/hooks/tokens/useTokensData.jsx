@@ -70,6 +70,7 @@ export const useTokensData = (openFluentNotification) => {
   const [compactMode, setCompactMode] = useTableCompactMode('tokens');
   const [showKeys, setShowKeys] = useState({});
   const [tokenFullKeys, setTokenFullKeys] = useState({});
+  const [ccSwitchToken, setCCSwitchToken] = useState(null);
 
   // 表单状态
   const [formApi, setFormApi] = useState(null);
@@ -278,20 +279,20 @@ export const useTokensData = (openFluentNotification) => {
     setShowKeys((prev) => ({ ...prev, [record.id]: true }));
   };
 
-  const getChatServerAddress = (serverAddress) => {
-    const normalizedServerAddress = serverAddress.replace(/\/$/, '');
-    return normalizedServerAddress === 'https://nan.meta-api.vip'
-      ? 'https://cn.meta-api.vip'
-      : normalizedServerAddress;
-  };
+  const getChatServerAddress = (serverAddress) =>
+    serverAddress.replace(/\/+$/, '');
 
   // 打开聊天集成链接函数
   const onOpenLink = async (type, url, record) => {
     if (!url) return;
 
+    if (url.startsWith('ccswitch')) {
+      setCCSwitchToken(record);
+      return;
+    }
+
     const needsKey =
       url.startsWith('fluent') ||
-      url.startsWith('ccswitch') ||
       url.includes('{key}') ||
       url.includes('{cherryConfig}') ||
       url.includes('{aionuiConfig}') ||
@@ -352,17 +353,6 @@ export const useTokensData = (openFluentNotification) => {
         encodeToBase64(JSON.stringify(deepchatConfig)),
       );
       url = url.replaceAll('{deepchatConfig}', encodedConfig);
-    } else if (url.startsWith('ccswitch')) {
-      const endpoint = `${serverAddress}/v1`;
-      const params = new URLSearchParams();
-      params.set('resource', 'provider');
-      params.set('app', 'codex');
-      params.set('name', record?.name || 'new-api');
-      params.set('endpoint', endpoint);
-      params.set('apiKey', apiKey);
-      params.set('homepage', serverAddress);
-      params.set('enabled', 'true');
-      url = `ccswitch://v1/import?${params.toString()}`;
     } else {
       let encodedServerAddress = encodeURIComponent(serverAddress);
       url = url.replaceAll('{address}', encodedServerAddress);
@@ -694,6 +684,8 @@ export const useTokensData = (openFluentNotification) => {
     showKeys,
     setShowKeys,
     tokenFullKeys,
+    ccSwitchToken,
+    setCCSwitchToken,
     getTokenFullKey,
     copyTokenKey,
     toggleTokenKeyVisibility,

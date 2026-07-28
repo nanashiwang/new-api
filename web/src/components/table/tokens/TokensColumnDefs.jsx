@@ -671,6 +671,14 @@ const renderOperations = (
       <Button
         size='small'
         type='tertiary'
+        onClick={() => onOpenLink('CC Switch', 'ccswitch', record)}
+      >
+        CC Switch
+      </Button>
+
+      <Button
+        size='small'
+        type='tertiary'
         data-onboarding='token-test-action'
         onClick={() => openTestModal(record)}
       >

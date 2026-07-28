@@ -17,7 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
+import React, {
+  useEffect,
+  useRef,
+  useState,
+  useMemo,
+  useCallback,
+} from 'react';
 import { API } from '../../../helpers';
 import CardPro from '../../common/ui/CardPro';
 import TokensTable from './TokensTable';
@@ -26,6 +32,7 @@ import TokensFilters from './TokensFilters';
 import TokensDescription from './TokensDescription';
 import EditTokenModal from './modals/EditTokenModal';
 import TokenTestModal from './modals/TokenTestModal';
+import CCSwitchModal from './modals/CCSwitchModal';
 import { useTokensData } from '../../../hooks/tokens/useTokensData';
 import { useFluentIntegration } from '../../../hooks/tokens/useFluentIntegration';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
@@ -93,8 +100,9 @@ function TokensPage() {
     const ids = tokensList
       .filter(
         (tk) =>
-          (Number(tk.max_concurrency) > 0) ||
-          (Number(tk.window_request_limit) > 0 && Number(tk.window_seconds) > 0),
+          Number(tk.max_concurrency) > 0 ||
+          (Number(tk.window_request_limit) > 0 &&
+            Number(tk.window_seconds) > 0),
       )
       .map((tk) => tk.id);
     if (ids.length === 0) {
@@ -158,6 +166,13 @@ function TokensPage() {
           setShowTestModal(false);
           setTestingToken(null);
         }}
+      />
+      <CCSwitchModal
+        visible={!!tokensData.ccSwitchToken}
+        token={tokensData.ccSwitchToken}
+        getTokenFullKey={tokensData.getTokenFullKey}
+        onCancel={() => tokensData.setCCSwitchToken(null)}
+        t={tokensData.t}
       />
       <CardPro
         type='type1'
