@@ -65,6 +65,7 @@ type CRSUsageWindow struct {
 	Key           string  `json:"key"`
 	Label         string  `json:"label"`
 	Progress      float64 `json:"progress"`
+	ProgressKnown bool    `json:"progress_known"`
 	RemainingText string  `json:"remaining_text"`
 	ResetAt       string  `json:"reset_at"`
 	Tone          string  `json:"tone"`

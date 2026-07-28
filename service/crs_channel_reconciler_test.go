@@ -40,7 +40,7 @@ func crsSnapshot(t *testing.T, active, schedulable, rateLimited bool) *model.CRS
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &model.CRSAccountSnapshot{Platform: "openai-responses", RawAccount: string(raw)}
+	return &model.CRSAccountSnapshot{Platform: "openai-responses", RateLimited: rateLimited, RawAccount: string(raw)}
 }
 
 func TestCRSReconcilerRequiresTwoObservationsAndOnlyRecoversOwnedChannel(t *testing.T) {
@@ -163,6 +163,17 @@ func TestSummarizeCRSOpenAIHealthSeparatesPlatforms(t *testing.T) {
 	total, healthy, complete := summarizeCRSOpenAIHealth("openai-responses", []*model.CRSAccountSnapshot{healthyOpenAI, unhealthyResponses})
 	if !complete || total != 1 || healthy != 0 {
 		t.Fatalf("unexpected responses pool health: total=%d healthy=%d complete=%v", total, healthy, complete)
+	}
+}
+
+func TestSummarizeCRSOpenAIHealthUsesNormalizedWeeklyAvailability(t *testing.T) {
+	available := crsSnapshot(t, true, true, true)
+	available.Platform = "openai"
+	available.RateLimited = false
+
+	total, healthy, complete := summarizeCRSOpenAIHealth("openai", []*model.CRSAccountSnapshot{available})
+	if !complete || total != 1 || healthy != 1 {
+		t.Fatalf("weekly quota should override raw rate limit: total=%d healthy=%d complete=%v", total, healthy, complete)
 	}
 }
 

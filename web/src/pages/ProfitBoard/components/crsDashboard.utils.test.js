@@ -27,6 +27,7 @@ import {
   getCRSPlatformBadgeLabel,
   getCRSQuotaState,
   getCRSUsagePercentages,
+  isCRSEffectivelyRateLimited,
   isValidCRSPort,
   joinCRSHostPort,
   sortCRSAccountsByAttention,
@@ -104,6 +105,89 @@ assert.equal(
     healthNow,
   ).key,
   'rate_limited',
+);
+
+const availableGPTAccountWithRawRateLimit = {
+  platform: 'openai',
+  is_active: true,
+  schedulable: true,
+  rate_limited: true,
+  quota_total: 20,
+  quota_remaining: 0,
+  usage_windows: [
+    {
+      key: 'secondary',
+      label: '周限',
+      progress: 5,
+      progress_known: true,
+      source: 'codex_usage',
+    },
+  ],
+  last_synced_at: healthNow - 30,
+};
+
+assert.equal(
+  isCRSEffectivelyRateLimited(availableGPTAccountWithRawRateLimit),
+  false,
+);
+assert.equal(getCRSQuotaState(availableGPTAccountWithRawRateLimit), 'normal');
+assert.equal(
+  getCRSAccountHealth(availableGPTAccountWithRawRateLimit, healthNow).key,
+  'available',
+);
+
+const unusedGPTAccountWithRawRateLimit = {
+  ...availableGPTAccountWithRawRateLimit,
+  usage_windows: [
+    {
+      key: 'secondary',
+      label: '周限',
+      progress: 0,
+      progress_known: true,
+      source: 'codex_usage',
+    },
+  ],
+};
+assert.equal(
+  isCRSEffectivelyRateLimited(unusedGPTAccountWithRawRateLimit),
+  false,
+);
+assert.equal(getCRSQuotaState(unusedGPTAccountWithRawRateLimit), 'normal');
+assert.equal(
+  getCRSAccountHealth(unusedGPTAccountWithRawRateLimit, healthNow).key,
+  'available',
+);
+
+assert.equal(
+  isCRSEffectivelyRateLimited({
+    ...availableGPTAccountWithRawRateLimit,
+    usage_windows: [
+      {
+        key: 'secondary',
+        label: '周限',
+        progress: 100,
+        progress_known: true,
+        source: 'codex_usage',
+      },
+    ],
+  }),
+  true,
+);
+
+assert.equal(
+  isCRSEffectivelyRateLimited({
+    ...availableGPTAccountWithRawRateLimit,
+    usage_windows: [
+      {
+        key: 'primary',
+        label: '5h',
+        progress: 5,
+        progress_known: true,
+        source: 'codex_usage',
+      },
+    ],
+  }),
+  true,
 );
 
 assert.equal(
@@ -373,6 +457,7 @@ assert.deepEqual(
       key: 'seven_day',
       label: '7d',
       progress: 82,
+      progressKnown: true,
       remainingText: '余 2 天',
       resetAt: '2026-04-27T00:00:00Z',
       tone: 'warning',
@@ -393,6 +478,7 @@ assert.deepEqual(
       key: 'session_window',
       label: '5h',
       progress: 64.5,
+      progressKnown: true,
       remainingText: '5h 12m',
       resetAt: '2026-04-20T15:00:00Z',
       tone: 'info',
@@ -412,6 +498,7 @@ assert.deepEqual(
       key: 'quota',
       label: '额度',
       progress: 42.5,
+      progressKnown: true,
       remainingText: '11.5',
       resetAt: '2026-04-21T00:00:00Z',
       tone: 'success',

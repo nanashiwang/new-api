@@ -50,12 +50,12 @@ func summarizeCRSOpenAIHealth(platform string, snapshots []*model.CRSAccountSnap
 			continue
 		}
 		total++
-		active, schedulable, rateLimited, valid := explicitCRSAccountHealth(snapshot.RawAccount)
+		active, schedulable, _, valid := explicitCRSAccountHealth(snapshot.RawAccount)
 		if !valid {
 			complete = false
 			continue
 		}
-		if active && schedulable && !rateLimited {
+		if active && schedulable && !snapshot.RateLimited {
 			healthy++
 		}
 	}

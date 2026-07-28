@@ -126,16 +126,21 @@ const getCRSAccountTypeDisplayName = (account) => {
 
 const normalizeUsageWindow = (window, source = 'usage_windows') => {
   const progress = clampProgress(window?.progress);
+  const progressKnown =
+    window?.progress_known === undefined
+      ? progress !== null
+      : Boolean(window.progress_known);
   return {
     key: pickFirstText(window?.key, window?.label, source),
     label: pickFirstText(window?.label, 'Window'),
     progress,
+    progressKnown,
     remainingText: formatWindowRemainingText(
       window?.remainingText ?? window?.remaining_text ?? '',
     ),
     resetAt: pickFirstText(window?.resetAt, window?.reset_at),
     tone: normalizeTone(window?.tone, progress),
-    source,
+    source: pickFirstText(window?.source, source),
   };
 };
 
@@ -157,6 +162,13 @@ export const buildCRSGroupOptions = (sites = [], currentGroup = '') => {
 
 export const getCRSQuotaState = (account) => {
   if (account?.quota_unlimited) return 'unlimited';
+  const progresses = getCRSQuotaUsageProgresses(account);
+  if (progresses.length > 0) {
+    const remaining = 100 - Math.max(...progresses);
+    if (remaining <= 0) return 'empty';
+    if (remaining <= QUOTA_LOW_THRESHOLD) return 'low';
+    return 'normal';
+  }
   const total = Number(account?.quota_total || 0);
   const remaining = Number(account?.quota_remaining || 0);
   if (total > 0 && remaining <= 0) return 'empty';
@@ -329,14 +341,63 @@ export const buildCRSUsageWindows = (account = {}) => {
   return [];
 };
 
+const isCRSOpenAIPlatform = (platform) => {
+  const normalized = normalizeText(platform).toLowerCase();
+  return normalized === 'openai' || normalized === 'openai-responses';
+};
+
+const getKnownProgresses = (windows) =>
+  windows
+    .filter((window) => window.progressKnown)
+    .map((window) => clampProgress(window.progress))
+    .filter((progress) => progress !== null);
+
+const getCRSOpenAIWeeklyProgresses = (account = {}) => {
+  const windows = buildCRSUsageWindows(account);
+  return getKnownProgresses(
+    windows.filter(
+      (window) => window.source === 'codex_usage' && window.label === '周限',
+    ),
+  );
+};
+
+const getCRSQuotaUsageProgresses = (account = {}) => {
+  const explicitWindows = Array.isArray(account?.usage_windows)
+    ? account.usage_windows
+    : Array.isArray(account?.usageWindows)
+      ? account.usageWindows
+      : [];
+  if (explicitWindows.length === 0) return [];
+  const windows = buildCRSUsageWindows(account);
+  return getKnownProgresses(
+    isCRSOpenAIPlatform(account?.platform)
+      ? windows.filter(
+          (window) =>
+            window.source === 'codex_usage' && window.label === '周限',
+        )
+      : windows,
+  );
+};
+
+const getCRSHealthUsageProgresses = (account = {}) => {
+  if (isCRSOpenAIPlatform(account?.platform)) {
+    return getCRSOpenAIWeeklyProgresses(account);
+  }
+  return getKnownProgresses(buildCRSUsageWindows(account));
+};
+
+export const isCRSEffectivelyRateLimited = (account = {}) => {
+  if (!account?.rate_limited) return false;
+  if (!isCRSOpenAIPlatform(account?.platform)) return true;
+  const progresses = getCRSOpenAIWeeklyProgresses(account);
+  return progresses.length === 0 || Math.max(...progresses) >= 100;
+};
+
 export const getCRSAccountHealth = (
   account = {},
   nowSeconds = Math.floor(Date.now() / 1000),
 ) => {
-  const windows = buildCRSUsageWindows(account);
-  const progresses = windows
-    .map((window) => clampProgress(window?.progress))
-    .filter((progress) => progress !== null);
+  const progresses = getCRSHealthUsageProgresses(account);
   const maxProgress = progresses.length > 0 ? Math.max(...progresses) : null;
   const remainingPercent =
     maxProgress === null ? null : Math.max(0, 100 - maxProgress);
@@ -355,7 +416,7 @@ export const getCRSAccountHealth = (
   } else if (isStale) {
     key = 'stale';
     score = 95;
-  } else if (account?.rate_limited) {
+  } else if (isCRSEffectivelyRateLimited(account)) {
     key = 'rate_limited';
     score = 90;
   } else if (account?.is_active === false) {

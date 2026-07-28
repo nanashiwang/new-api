@@ -32,6 +32,7 @@ import {
   BarChart3,
   CircleDollarSign,
   Server,
+  ServerCog,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { CHART_CONFIG } from '../../constants/dashboard.constants';
@@ -40,6 +41,7 @@ import { showError, timestamp2string } from '../../helpers';
 import { useIsMobile } from '@/hooks/common/useIsMobile';
 import ChartAnalysisCard from './components/ChartAnalysisCard';
 import ComboManagerCard from './components/ComboManagerCard';
+import CPAAccountDashboard from './components/CPAAccountDashboard';
 import CRSDashboardCard from './components/CRSDashboardCard';
 import ExcludedAdminUsersCard from './components/ExcludedAdminUsersCard';
 import PricingConfigModal from './components/PricingConfigModal';
@@ -837,7 +839,13 @@ const ProfitBoardPage = () => {
     if (activityChecking)
       items.push({ key: 'watch', color: 'cyan', text: t('低频检查中') });
     return items;
-  }, [activityChecking, autoRefreshing, report, reportMatchesCurrentFilters, t]);
+  }, [
+    activityChecking,
+    autoRefreshing,
+    report,
+    reportMatchesCurrentFilters,
+    t,
+  ]);
 
   const sitePriceFactorNote = report?.meta?.site_price_factor_note || '';
 
@@ -1006,7 +1014,7 @@ const ProfitBoardPage = () => {
               },
               {
                 label: t('CRS'),
-                tabs: ['crs'],
+                tabs: ['crs', 'cpa'],
               },
             ];
             return (
@@ -1030,7 +1038,11 @@ const ProfitBoardPage = () => {
                               type='button'
                               onClick={() => setActiveTab(item.itemKey)}
                               onMouseEnter={() => setHoveredTab(item.itemKey)}
-                              onMouseLeave={() => setHoveredTab((current) => current === item.itemKey ? '' : current)}
+                              onMouseLeave={() =>
+                                setHoveredTab((current) =>
+                                  current === item.itemKey ? '' : current,
+                                )
+                              }
                               className={[
                                 'flex items-center gap-1.5 px-3 py-2 rounded-t bg-transparent text-sm font-medium transition-colors select-none appearance-none border-0 border-b-2',
                                 active
@@ -1213,6 +1225,19 @@ const ProfitBoardPage = () => {
           >
             <div className='mt-3'>
               <CRSDashboardCard t={t} />
+            </div>
+          </Tabs.TabPane>
+          <Tabs.TabPane
+            tab={
+              <span className='flex items-center gap-1.5'>
+                <ServerCog size={16} />
+                {t('CPA 账号')}
+              </span>
+            }
+            itemKey='cpa'
+          >
+            <div className='mt-3'>
+              <CPAAccountDashboard t={t} />
             </div>
           </Tabs.TabPane>
         </Tabs>

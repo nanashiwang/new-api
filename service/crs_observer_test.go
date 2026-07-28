@@ -87,6 +87,7 @@ func TestNormalizeCRSRemoteAccountSnapshotCapturesClaudeSignals(t *testing.T) {
 		Key:           "five_hour",
 		Label:         "5h",
 		Progress:      64.5,
+		ProgressKnown: true,
 		RemainingText: "5h 12m",
 		ResetAt:       "2026-04-20T15:00:00Z",
 		Tone:          "info",
@@ -96,6 +97,7 @@ func TestNormalizeCRSRemoteAccountSnapshotCapturesClaudeSignals(t *testing.T) {
 		Key:           "seven_day",
 		Label:         "7d",
 		Progress:      20,
+		ProgressKnown: true,
 		RemainingText: "余 4 天",
 		ResetAt:       "2026-04-27T00:00:00Z",
 		Tone:          "success",
@@ -105,6 +107,7 @@ func TestNormalizeCRSRemoteAccountSnapshotCapturesClaudeSignals(t *testing.T) {
 		Key:           "seven_day_opus",
 		Label:         "Opus 周限",
 		Progress:      90,
+		ProgressKnown: true,
 		RemainingText: "余 1 天",
 		ResetAt:       "2026-04-21T00:00:00Z",
 		Tone:          "danger",
@@ -151,6 +154,7 @@ func TestNormalizeCRSRemoteAccountSnapshotUsesCodexUsageWindowsBeforeSessionWind
 		Key:           "primary",
 		Label:         "5h",
 		Progress:      48,
+		ProgressKnown: true,
 		RemainingText: "2h 36m",
 		ResetAt:       "2026-04-20T18:00:00Z",
 		Tone:          "info",
@@ -160,6 +164,7 @@ func TestNormalizeCRSRemoteAccountSnapshotUsesCodexUsageWindowsBeforeSessionWind
 		Key:           "secondary",
 		Label:         "周限",
 		Progress:      82,
+		ProgressKnown: true,
 		RemainingText: "余 2 天",
 		ResetAt:       "2026-04-27T00:00:00Z",
 		Tone:          "warning",
@@ -200,12 +205,89 @@ func TestNormalizeCRSRemoteAccountSnapshotClassifiesPrimaryWeeklyAndSkipsEmptySe
 			Key:           "primary",
 			Label:         "周限",
 			Progress:      54,
+			ProgressKnown: true,
 			RemainingText: "5 天 14 小时",
 			ResetAt:       "2026-07-29T16:00:00Z",
 			Tone:          "info",
 			Source:        "codex_usage",
 		},
 	}, windows)
+}
+
+func TestNormalizeCRSRemoteOpenAIAccountUsesAvailableWeeklyQuotaOverRateLimitFlag(t *testing.T) {
+	t.Parallel()
+
+	account := map[string]any{
+		"id":          "acct-gpt-weekly-available",
+		"isActive":    true,
+		"schedulable": true,
+		"dailyQuota":  20,
+		"rateLimitStatus": map[string]any{
+			"isRateLimited":    true,
+			"minutesRemaining": 7409,
+			"rateLimitEndAt":   "2026-08-02T08:00:07Z",
+		},
+		"codexUsage": map[string]any{
+			"secondary": map[string]any{
+				"usedPercent":   5,
+				"windowMinutes": 10080,
+				"resetAt":       "2026-08-04T03:13:30Z",
+			},
+		},
+	}
+
+	snapshot, err := normalizeCRSRemoteAccountSnapshot(8, "openai", account, nil, 1785210000)
+	require.NoError(t, err)
+	require.False(t, snapshot.RateLimited)
+	require.Zero(t, snapshot.RateLimitMinutesRemaining)
+	require.Empty(t, snapshot.RateLimitResetAt)
+	require.EqualValues(t, 100, snapshot.QuotaTotal)
+	require.EqualValues(t, 5, snapshot.QuotaUsed)
+	require.EqualValues(t, 95, snapshot.QuotaRemaining)
+	require.EqualValues(t, 5, snapshot.QuotaPercentage)
+	require.Equal(t, "2026-08-04T03:13:30Z", snapshot.QuotaResetAt)
+}
+
+func TestNormalizeCRSRemoteOpenAIAccountTreatsUnusedWeeklyQuotaAsAvailable(t *testing.T) {
+	t.Parallel()
+
+	account := map[string]any{
+		"id": "acct-gpt-weekly-unused",
+		"rateLimitStatus": map[string]any{
+			"isRateLimited":    true,
+			"minutesRemaining": 7409,
+		},
+		"codexUsage": map[string]any{
+			"secondary": map[string]any{
+				"usedPercent":   0,
+				"windowMinutes": 10080,
+				"resetAt":       "2026-08-04T03:13:30Z",
+			},
+		},
+	}
+
+	snapshot, err := normalizeCRSRemoteAccountSnapshot(8, "openai", account, nil, 1785210000)
+	require.NoError(t, err)
+	require.False(t, snapshot.RateLimited)
+	require.Zero(t, snapshot.QuotaUsed)
+	require.EqualValues(t, 100, snapshot.QuotaRemaining)
+}
+
+func TestNormalizeCRSRemoteOpenAIAccountKeepsRateLimitWithoutKnownWeeklyQuota(t *testing.T) {
+	t.Parallel()
+
+	account := map[string]any{
+		"id": "acct-gpt-weekly-unknown",
+		"rateLimitStatus": map[string]any{
+			"isRateLimited":    true,
+			"minutesRemaining": 60,
+		},
+	}
+
+	snapshot, err := normalizeCRSRemoteAccountSnapshot(8, "openai", account, nil, 1785210000)
+	require.NoError(t, err)
+	require.True(t, snapshot.RateLimited)
+	require.Equal(t, 60, snapshot.RateLimitMinutesRemaining)
 }
 
 func TestParseAndMergeCRSRemoteOpenAIUsage(t *testing.T) {
@@ -305,6 +387,7 @@ func TestNormalizeCRSRemoteAccountSnapshotUsesBalanceQuota(t *testing.T) {
 		Key:           "quota",
 		Label:         "额度",
 		Progress:      42.5,
+		ProgressKnown: true,
 		RemainingText: "11.5",
 		ResetAt:       "2026-04-21T00:00:00Z",
 		Tone:          "success",
@@ -337,6 +420,7 @@ func TestNormalizeCRSRemoteAccountSnapshotFallsBackToSessionWindow(t *testing.T)
 		Key:           "session_window",
 		Label:         "5h",
 		Progress:      73,
+		ProgressKnown: true,
 		RemainingText: "1h 21m",
 		ResetAt:       "2026-04-20T20:00:00Z",
 		Tone:          "info",

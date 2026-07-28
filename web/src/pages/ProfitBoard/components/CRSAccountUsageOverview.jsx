@@ -43,6 +43,7 @@ import {
   getCRSAccountHealth,
   getCRSPlatformBadgeLabel,
   getCRSUsagePercentages,
+  isCRSEffectivelyRateLimited,
 } from './crsDashboard.utils';
 
 const { Text, Title } = Typography;
@@ -147,7 +148,8 @@ const SummaryFilterTag = ({ filterKey, active, count, label, onClick }) => {
 const AccountStatus = ({ account, t, showHealth = true }) => (
   <div className='flex flex-wrap items-center gap-1'>
     {showHealth ? <HealthTag account={account} t={t} /> : null}
-    {account?.rate_limited && account?.rate_limit_minutes_remaining > 0 ? (
+    {isCRSEffectivelyRateLimited(account) &&
+    account?.rate_limit_minutes_remaining > 0 ? (
       <Tag color='orange' size='small'>
         {t('{{minutes}} 分钟后恢复', {
           minutes: account.rate_limit_minutes_remaining,
@@ -286,7 +288,7 @@ const DailyUsage = ({ account, t }) => {
 };
 
 const RecoveryState = ({ account, t }) => {
-  if (!account?.rate_limited) {
+  if (!isCRSEffectivelyRateLimited(account)) {
     return (
       <Text type='tertiary' size='small'>
         {t('无需等待')}

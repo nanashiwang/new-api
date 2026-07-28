@@ -590,7 +590,9 @@ func normalizeCRSRemoteAccountSnapshot(siteID int, platform string, account map[
 		snapshot.SyncError = syncErr
 	}
 
-	snapshot.UsageWindowsJSON = marshalCRSUsageWindows(buildCRSUsageWindows(account, snapshot))
+	usageWindows := buildCRSUsageWindows(account, snapshot)
+	applyCRSOpenAIWeeklyAvailability(snapshot, usageWindows)
+	snapshot.UsageWindowsJSON = marshalCRSUsageWindows(usageWindows)
 	snapshot.RawAccount = marshalCRSObserverValue(account)
 	snapshot.RawBalance = marshalCRSObserverValue(balance)
 	return snapshot, nil
@@ -685,6 +687,41 @@ func buildCRSCodexUsageWindows(raw map[string]any) []model.CRSUsageWindow {
 	return windows
 }
 
+func applyCRSOpenAIWeeklyAvailability(snapshot *model.CRSAccountSnapshot, windows []model.CRSUsageWindow) {
+	if snapshot == nil || !isCRSOpenAIPlatform(snapshot.Platform) {
+		return
+	}
+
+	weeklyProgress := -1.0
+	weeklyResetAt := ""
+	for _, window := range windows {
+		if window.Source != "codex_usage" || window.Label != "周限" || !window.ProgressKnown {
+			continue
+		}
+		if window.Progress > weeklyProgress {
+			weeklyProgress = window.Progress
+			weeklyResetAt = window.ResetAt
+		}
+	}
+	if weeklyProgress < 0 {
+		return
+	}
+
+	// GPT account availability follows the official weekly usage window. The
+	// legacy dailyQuota fields are not an OpenAI five-hour usage limit.
+	snapshot.QuotaUnlimited = false
+	snapshot.QuotaTotal = 100
+	snapshot.QuotaUsed = weeklyProgress
+	snapshot.QuotaRemaining = 100 - weeklyProgress
+	snapshot.QuotaPercentage = weeklyProgress
+	snapshot.QuotaResetAt = weeklyResetAt
+	if weeklyProgress < 100 {
+		snapshot.RateLimited = false
+		snapshot.RateLimitMinutesRemaining = 0
+		snapshot.RateLimitResetAt = ""
+	}
+}
+
 func classifyCRSCodexUsageWindow(raw map[string]any, fallbackLabel string) (string, string) {
 	windowMinutes, ok := firstCRSUsageWindowRawNumber(raw, "windowMinutes", "window_minutes")
 	if !ok || windowMinutes <= 0 {
@@ -753,6 +790,7 @@ func buildCRSQuotaUsageWindow(snapshot *model.CRSAccountSnapshot) (model.CRSUsag
 		Key:           "quota",
 		Label:         "额度",
 		Progress:      clampCRSUsageWindowProgress(progress),
+		ProgressKnown: hasProgress,
 		RemainingText: remainingText,
 		ResetAt:       strings.TrimSpace(snapshot.QuotaResetAt),
 		Tone:          resolveCRSUsageWindowTone(progress, hasProgress, remainingText, snapshot.QuotaResetAt),
@@ -790,6 +828,7 @@ func normalizeCRSUsageWindow(key, label, source string, raw map[string]any) (mod
 		Key:           key,
 		Label:         label,
 		Progress:      progress,
+		ProgressKnown: hasProgress,
 		RemainingText: remainingText,
 		ResetAt:       resetAt,
 		Tone:          resolveCRSUsageWindowTone(progress, hasProgress, remainingText, resetAt),
