@@ -636,6 +636,15 @@ const renderOperations = (
   } catch (_) {
     showError(t('聊天链接配置错误，请联系管理员'));
   }
+  if (!chatsArray.some((item) => item.value?.startsWith('ccswitch'))) {
+    chatsArray.push({
+      node: 'item',
+      key: 'ccswitch',
+      name: 'CC Switch',
+      value: 'ccswitch',
+      onClick: () => onOpenLink('CC Switch', 'ccswitch', record),
+    });
+  }
 
   return (
     <Space wrap>
@@ -667,14 +676,6 @@ const renderOperations = (
           />
         </Dropdown>
       </SplitButtonGroup>
-
-      <Button
-        size='small'
-        type='tertiary'
-        onClick={() => onOpenLink('CC Switch', 'ccswitch', record)}
-      >
-        CC Switch
-      </Button>
 
       <Button
         size='small'
