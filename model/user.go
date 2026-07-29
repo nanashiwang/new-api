@@ -98,8 +98,11 @@ type User struct {
 	RegisterIP           string         `json:"register_ip" gorm:"type:varchar(64);column:register_ip;index"`
 	RegisterUserAgent    string         `json:"register_user_agent" gorm:"type:varchar(255);column:register_user_agent"`
 
-	InviterUsername string `json:"inviter_username,omitempty" gorm:"-"`
-	InviteeCount    int    `json:"invitee_count,omitempty" gorm:"-"`
+	InviterUsername       string                 `json:"inviter_username,omitempty" gorm:"-"`
+	InviteeCount          int                    `json:"invitee_count,omitempty" gorm:"-"`
+	inviteBindingDecision *inviteBindingDecision `gorm:"-"`
+	registrationBaseQuota int                    `gorm:"-"`
+	creationFinalized     bool                   `gorm:"-"`
 	// 生效套餐元数据（仅用于用户管理列表响应，不落库）：
 	// - HasActiveSubscription：当前是否存在生效套餐
 	// - ActiveSubscriptionCount：当前生效套餐条数
@@ -1446,29 +1449,6 @@ func HardDeleteUserById(id int) error {
 	return user.HardDelete()
 }
 
-func inviteUser(inviterId int) (err error) {
-	if inviterId <= 0 {
-		return errors.New("inviterId 为空！")
-	}
-	// 这里必须使用数据库原子自增而不是"先查后改再保存"：
-	// 在高并发注册场景下，后者会出现并发覆盖（lost update），导致 aff_count 实际被少加。
-	// 这正是"邀请关系查到 2 人，但直接邀请人数只有 1"这类数据漂移的常见根因。
-	result := DB.Model(&User{}).
-		Where("id = ?", inviterId).
-		Updates(map[string]interface{}{
-			"aff_count":   gorm.Expr("aff_count + 1"),
-			"aff_quota":   gorm.Expr("aff_quota + ?", common.QuotaForInviter),
-			"aff_history": gorm.Expr("aff_history + ?", common.QuotaForInviter),
-		})
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return gorm.ErrRecordNotFound
-	}
-	return nil
-}
-
 func (user *User) TransferAffQuotaToQuota(quota int) error {
 	// 检查quota是否小于最小额度
 	if float64(quota) < common.QuotaPerUnit {
@@ -1512,77 +1492,17 @@ func (user *User) TransferAffQuotaToQuota(quota int) error {
 }
 
 func (user *User) Insert(inviterId int) error {
-	var err error
-	if user.Password != "" {
-		user.Password, err = common.Password2Hash(user.Password)
-		if err != nil {
-			return err
-		}
+	if err := DB.Transaction(func(tx *gorm.DB) error {
+		return user.InsertWithTx(tx, inviterId)
+	}); err != nil {
+		return err
 	}
-	user.Quota = common.QuotaForNewUser
-	//user.SetAccessToken(common.GetUUID())
-	if strings.TrimSpace(user.AffCode) == "" {
-		user.AffCode, err = GenerateUniqueAffCode()
-		if err != nil {
-			return err
-		}
-	}
-	user.InviterId = inviterId
-	user.RegisterSource = NormalizeUserRegisterSource(user.RegisterSource)
-
-	// 初始化用户设置，包括默认的边栏配置
-	if user.Setting == "" {
-		defaultSetting := dto.UserSetting{}
-		// 这里暂时不设置SidebarModules，因为需要在用户创建后根据角色设置
-		user.SetSetting(defaultSetting)
-	}
-
-	result := DB.Create(user)
-	if result.Error != nil {
-		return result.Error
-	}
-
-	// 用户创建成功后，根据角色初始化边栏配置
-	// 需要重新获取用户以确保有正确的ID和Role
-	var createdUser User
-	if err := DB.Where("username = ?", user.Username).First(&createdUser).Error; err == nil {
-		// 生成基于角色的默认边栏配置
-		defaultSidebarConfig := generateDefaultSidebarConfigForRole(createdUser.Role)
-		if defaultSidebarConfig != "" {
-			currentSetting := createdUser.GetSetting()
-			currentSetting.SidebarModules = defaultSidebarConfig
-			createdUser.SetSetting(currentSetting)
-			createdUser.Update(false)
-			common.SysLog(fmt.Sprintf("为新用户 %s (角色: %d) 初始化边栏配置", createdUser.Username, createdUser.Role))
-		}
-	}
-
-	if common.QuotaForNewUser > 0 {
-		RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("新用户注册赠送 %s", logger.LogQuota(common.QuotaForNewUser)))
-	}
-	if inviterId != 0 {
-		if common.QuotaForInvitee > 0 {
-			_ = IncreaseUserQuota(user.Id, common.QuotaForInvitee, true)
-			RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
-		}
-		// 邀请人数统计必须独立于邀请奖励额度开关：
-		// 即使 QuotaForInviter=0（不发固定邀请奖励），也要累计 aff_count，
-		// 否则会出现"邀请关系已建立但邀请人数始终为 0"的错误展示。
-		if err := inviteUser(inviterId); err != nil {
-			// 邀请关系统计属于关键业务指标，这里显式记录错误便于排查数据不一致问题。
-			common.SysError(fmt.Sprintf("更新邀请统计失败(inviter_id=%d,user_id=%d): %s", inviterId, user.Id, err.Error()))
-		}
-		if common.QuotaForInviter > 0 {
-			//_ = IncreaseUserQuota(inviterId, common.QuotaForInviter)
-			RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(common.QuotaForInviter)))
-		}
-	}
+	user.finalizeUserCreation()
 	return nil
 }
 
 // InsertWithTx inserts a new user within an existing transaction.
-// This is used for OAuth registration where user creation and binding need to be atomic.
-// Post-creation tasks (sidebar config, logs, inviter rewards) are handled after the transaction commits.
+// Invitation binding, counters and fixed rewards are committed atomically with the user.
 func (user *User) InsertWithTx(tx *gorm.DB, inviterId int) error {
 	var err error
 	if user.Password != "" {
@@ -1591,14 +1511,23 @@ func (user *User) InsertWithTx(tx *gorm.DB, inviterId int) error {
 			return err
 		}
 	}
-	user.Quota = common.QuotaForNewUser
+	user.registrationBaseQuota = common.QuotaForNewUser
+	user.Quota = user.registrationBaseQuota
 	if strings.TrimSpace(user.AffCode) == "" {
 		user.AffCode, err = generateUniqueAffCode(tx)
 		if err != nil {
 			return err
 		}
 	}
-	user.InviterId = inviterId
+	decision, err := decideInviteBindingWithTx(tx, inviterId)
+	if err != nil {
+		return err
+	}
+	user.inviteBindingDecision = &decision
+	user.InviterId = decision.EffectiveInviterID
+	if user.InviterId != 0 {
+		user.Quota += decision.InviteeRewardQuota
+	}
 	user.RegisterSource = NormalizeUserRegisterSource(user.RegisterSource)
 
 	// 初始化用户设置
@@ -1617,7 +1546,16 @@ func (user *User) InsertWithTx(tx *gorm.DB, inviterId int) error {
 
 // FinalizeOAuthUserCreation performs post-transaction tasks for OAuth user creation.
 // This should be called after the transaction commits successfully.
-func (user *User) FinalizeOAuthUserCreation(inviterId int) {
+func (user *User) FinalizeOAuthUserCreation(_ int) {
+	user.finalizeUserCreation()
+}
+
+func (user *User) finalizeUserCreation() {
+	if user.creationFinalized {
+		return
+	}
+	user.creationFinalized = true
+
 	// 用户创建成功后，根据角色初始化边栏配置
 	var createdUser User
 	if err := DB.Where("id = ?", user.Id).First(&createdUser).Error; err == nil {
@@ -1631,22 +1569,32 @@ func (user *User) FinalizeOAuthUserCreation(inviterId int) {
 		}
 	}
 
-	if common.QuotaForNewUser > 0 {
-		RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("新用户注册赠送 %s", logger.LogQuota(common.QuotaForNewUser)))
+	if user.registrationBaseQuota > 0 {
+		RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("新用户注册赠送 %s", logger.LogQuota(user.registrationBaseQuota)))
 	}
-	if inviterId != 0 {
-		if common.QuotaForInvitee > 0 {
-			_ = IncreaseUserQuota(user.Id, common.QuotaForInvitee, true)
-			RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
+	decision := user.inviteBindingDecision
+	if user.InviterId != 0 && decision != nil {
+		if decision.InviteeRewardQuota > 0 {
+			RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(decision.InviteeRewardQuota)))
 		}
-		// 与普通注册保持一致：邀请人数统计不依赖 QuotaForInviter。
-		// 这样 OAuth 注册链路也能在"奖励为 0"时正确累计邀请人数。
-		if err := inviteUser(inviterId); err != nil {
-			common.SysError(fmt.Sprintf("更新邀请统计失败(inviter_id=%d,user_id=%d): %s", inviterId, user.Id, err.Error()))
+		if decision.InviterRewardQuota > 0 {
+			RecordLog(user.InviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(decision.InviterRewardQuota)))
 		}
-		if common.QuotaForInviter > 0 {
-			RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(common.QuotaForInviter)))
-		}
+	}
+	if decision == nil {
+		return
+	}
+	switch decision.Outcome {
+	case inviteBindingOutcomeProbabilitySkipped:
+		common.SysLog(fmt.Sprintf(
+			"invite binding skipped: inviter_id=%d user_id=%d threshold=%d rate=%d aff_count=%d",
+			decision.RequestedInviterID, user.Id, decision.Threshold, decision.RateAfterThreshold, decision.AffCountBefore,
+		))
+	case inviteBindingOutcomeRandomErrorSkipped:
+		common.SysError(fmt.Sprintf(
+			"invite binding skipped after random failure: inviter_id=%d user_id=%d error=%v",
+			decision.RequestedInviterID, user.Id, decision.RandomError,
+		))
 	}
 }
 

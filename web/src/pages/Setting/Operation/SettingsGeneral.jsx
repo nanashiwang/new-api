@@ -39,6 +39,35 @@ import {
 } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
 
+const DEFAULT_INVITE_BINDING_SETTINGS = {
+  threshold: 0,
+  rate_after_threshold: 100,
+};
+
+function parseInviteBindingSettings(raw) {
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    const threshold = Number(parsed?.threshold);
+    const rate = Number(parsed?.rate_after_threshold);
+    if (
+      !Number.isSafeInteger(threshold) ||
+      threshold < 0 ||
+      !Number.isInteger(rate) ||
+      rate < 0 ||
+      rate > 100
+    ) {
+      return DEFAULT_INVITE_BINDING_SETTINGS;
+    }
+    return { threshold, rate_after_threshold: rate };
+  } catch {
+    return DEFAULT_INVITE_BINDING_SETTINGS;
+  }
+}
+
+function hasNumericInput(value) {
+  return value !== '' && value !== null && value !== undefined;
+}
+
 export default function GeneralSettings(props) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
@@ -59,6 +88,8 @@ export default function GeneralSettings(props) {
     DemoSiteEnabled: false,
     SelfUseModeEnabled: false,
     'token_setting.max_user_tokens': 1000,
+    InviteBindingThreshold: 0,
+    InviteBindingRateAfterThreshold: 100,
   });
   const refForm = useRef();
   const [inputsRow, setInputsRow] = useState(inputs);
@@ -72,18 +103,56 @@ export default function GeneralSettings(props) {
   function onSubmit() {
     const updateArray = compareObjects(inputs, inputsRow);
     if (!updateArray.length) return showWarning(t('你似乎并没有修改什么'));
-    const requestQueue = updateArray.map((item) => {
-      let value = '';
-      if (typeof inputs[item.key] === 'boolean') {
-        value = String(inputs[item.key]);
-      } else {
-        value = inputs[item.key];
-      }
-      return API.put('/api/option/', {
-        key: item.key,
-        value,
+    const inviteBindingFields = new Set([
+      'InviteBindingThreshold',
+      'InviteBindingRateAfterThreshold',
+    ]);
+    const inviteBindingChanged = updateArray.some((item) =>
+      inviteBindingFields.has(item.key),
+    );
+    const threshold = Number(inputs.InviteBindingThreshold);
+    const rate = Number(inputs.InviteBindingRateAfterThreshold);
+    if (
+      inviteBindingChanged &&
+      (!hasNumericInput(inputs.InviteBindingThreshold) ||
+        !hasNumericInput(inputs.InviteBindingRateAfterThreshold) ||
+        !Number.isSafeInteger(threshold) ||
+        threshold < 0 ||
+        !Number.isInteger(rate) ||
+        rate < 0 ||
+        rate > 100)
+    ) {
+      return showError(
+        t(
+          '请输入有效的邀请绑定设置：人数阈值为非负整数，绑定成功率为 0 到 100 的整数',
+        ),
+      );
+    }
+    const requestQueue = updateArray
+      .filter((item) => !inviteBindingFields.has(item.key))
+      .map((item) => {
+        let value = '';
+        if (typeof inputs[item.key] === 'boolean') {
+          value = String(inputs[item.key]);
+        } else {
+          value = inputs[item.key];
+        }
+        return API.put('/api/option/', {
+          key: item.key,
+          value,
+        });
       });
-    });
+    if (inviteBindingChanged) {
+      requestQueue.push(
+        API.put('/api/option/', {
+          key: 'InviteBindingSettings',
+          value: JSON.stringify({
+            threshold,
+            rate_after_threshold: rate,
+          }),
+        }),
+      );
+    }
     setLoading(true);
     Promise.all(requestQueue)
       .then((res) => {
@@ -128,6 +197,33 @@ export default function GeneralSettings(props) {
     }
   };
 
+  const inviteBindingPreview = useMemo(() => {
+    const threshold = Number(inputs.InviteBindingThreshold);
+    const rate = Number(inputs.InviteBindingRateAfterThreshold);
+    if (
+      !hasNumericInput(inputs.InviteBindingThreshold) ||
+      !hasNumericInput(inputs.InviteBindingRateAfterThreshold) ||
+      !Number.isSafeInteger(threshold) ||
+      threshold < 0 ||
+      !Number.isInteger(rate) ||
+      rate < 0 ||
+      rate > 100
+    ) {
+      return t('当前设置无效，请输入非负整数人数和 0 到 100 的整数成功率。');
+    }
+    if (threshold === 0) {
+      return t('当前规则：邀请关系概率限制已关闭，所有有效邀请都会正常绑定。');
+    }
+    return t(
+      '当前规则：每位用户前 {{threshold}} 名受邀注册用户必定绑定；从第 {{next}} 名开始，每次注册有 {{rate}}% 概率绑定。未绑定用户仍可正常注册，但双方不会获得邀请奖励，也不会产生后续充值返佣。',
+      { threshold, next: threshold + 1, rate },
+    );
+  }, [
+    inputs.InviteBindingThreshold,
+    inputs.InviteBindingRateAfterThreshold,
+    t,
+  ]);
+
   useEffect(() => {
     const currentInputs = {};
     for (let key in props.options) {
@@ -163,6 +259,12 @@ export default function GeneralSettings(props) {
       currentInputs['general_setting.payment_currency_symbol'] =
         props.options['general_setting.payment_currency_symbol'];
     }
+    const inviteBindingSettings = parseInviteBindingSettings(
+      props.options?.InviteBindingSettings,
+    );
+    currentInputs.InviteBindingThreshold = inviteBindingSettings.threshold;
+    currentInputs.InviteBindingRateAfterThreshold =
+      inviteBindingSettings.rate_after_threshold;
     setInputs(currentInputs);
     setInputsRow(structuredClone(currentInputs));
     refForm.current.setValues(currentInputs);
@@ -333,6 +435,46 @@ export default function GeneralSettings(props) {
                   )}
                   placeholder={'1000'}
                   onChange={handleFieldChange('token_setting.max_user_tokens')}
+                />
+              </Col>
+            </Row>
+          </Form.Section>
+          <Form.Section text={t('邀请关系控制')}>
+            <Banner
+              type='info'
+              description={inviteBindingPreview}
+              bordered
+              fullMode={false}
+              closeIcon={null}
+              style={{ marginBottom: 16 }}
+            />
+            <Row gutter={16}>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  field={'InviteBindingThreshold'}
+                  label={t('全量绑定人数阈值')}
+                  min={0}
+                  step={1}
+                  precision={0}
+                  placeholder='1000'
+                  extraText={t('0 表示关闭限制，所有有效邀请都会正常绑定')}
+                  onChange={handleFieldChange('InviteBindingThreshold')}
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  field={'InviteBindingRateAfterThreshold'}
+                  label={t('达到阈值后的绑定成功率')}
+                  min={0}
+                  max={100}
+                  step={1}
+                  precision={0}
+                  suffix={t('百分比符号')}
+                  placeholder='20'
+                  extraText={t('仅影响超过阈值后的新注册，不改变已有邀请关系')}
+                  onChange={handleFieldChange(
+                    'InviteBindingRateAfterThreshold',
+                  )}
                 />
               </Col>
             </Row>

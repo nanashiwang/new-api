@@ -341,6 +341,14 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "InviteBindingSettings":
+		if _, parseErr := common.ParseInviteBindingSettings(option.Value.(string)); parseErr != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "邀请绑定设置无效：人数阈值必须是非负整数，阈值后绑定概率必须在 0% 到 100% 之间",
+			})
+			return
+		}
 	case "console_setting.api_info":
 		err = console_setting.ValidateConsoleSettings(option.Value.(string), "ApiInfo")
 		if err != nil {

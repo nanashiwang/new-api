@@ -136,6 +136,7 @@ func InitOptionMap() {
 	common.OptionMap["QuotaForNewUser"] = strconv.Itoa(common.QuotaForNewUser)
 	common.OptionMap["QuotaForInviter"] = strconv.Itoa(common.QuotaForInviter)
 	common.OptionMap["QuotaForInvitee"] = strconv.Itoa(common.QuotaForInvitee)
+	common.OptionMap["InviteBindingSettings"] = common.InviteBindingSettings2JSONString()
 	// 邀请充值返佣配置：
 	// - InviterCommissionEnabled: 开关
 	// - InviterRechargeCommissionRate: 比例（如 0.1 = 10%）
@@ -248,6 +249,13 @@ func UpdateOption(key string, value string) error {
 }
 
 func updateOptionMap(key string, value string) (err error) {
+	// Validate the combined settings before publishing either snapshot. This
+	// prevents a malformed persisted value from replacing the last good value.
+	if key == "InviteBindingSettings" {
+		if _, err = common.ParseInviteBindingSettings(value); err != nil {
+			return err
+		}
+	}
 	common.OptionMapRWMutex.Lock()
 	defer common.OptionMapRWMutex.Unlock()
 	common.OptionMap[key] = value
@@ -525,6 +533,8 @@ func updateOptionMap(key string, value string) (err error) {
 		common.QuotaForInviter, _ = strconv.Atoi(value)
 	case "QuotaForInvitee":
 		common.QuotaForInvitee, _ = strconv.Atoi(value)
+	case "InviteBindingSettings":
+		err = common.UpdateInviteBindingSettingsByJSONString(value)
 	case "InviterRechargeCommissionRate":
 		// 比例配置使用小数表达（例如 0.1 表示 10%）。
 		common.InviterRechargeCommissionRate, _ = strconv.ParseFloat(value, 64)

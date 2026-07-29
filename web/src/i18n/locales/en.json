@@ -1,5 +1,15 @@
 {
   "translation": {
+    "0 表示关闭限制，所有有效邀请都会正常绑定": "Set to 0 to disable the limit and bind every valid invitation",
+    "仅影响超过阈值后的新注册，不改变已有邀请关系": "Only affects new registrations after the threshold; existing invitation relationships remain unchanged",
+    "全量绑定人数阈值": "Guaranteed binding threshold",
+    "百分比符号": "%",
+    "达到阈值后的绑定成功率": "Binding rate after threshold",
+    "邀请关系控制": "Invitation relationship control",
+    "请输入有效的邀请绑定设置：人数阈值为非负整数，绑定成功率为 0 到 100 的整数": "Enter valid invitation settings: the threshold must be a non-negative integer and the binding rate must be an integer from 0 to 100",
+    "当前设置无效，请输入非负整数人数和 0 到 100 的整数成功率。": "The current settings are invalid. Enter a non-negative integer threshold and an integer success rate from 0 to 100.",
+    "当前规则：邀请关系概率限制已关闭，所有有效邀请都会正常绑定。": "Current rule: probabilistic invitation limiting is disabled, so every valid invitation is bound.",
+    "当前规则：每位用户前 {{threshold}} 名受邀注册用户必定绑定；从第 {{next}} 名开始，每次注册有 {{rate}}% 概率绑定。未绑定用户仍可正常注册，但双方不会获得邀请奖励，也不会产生后续充值返佣。": "Current rule: each user's first {{threshold}} invited registrations are always bound. Starting with registration {{next}}, each registration has a {{rate}}% chance of binding. Unbound users can still register normally, but neither side receives invitation rewards and no future recharge commission relationship is created.",
     " + 图片生成调用 {{symbol}}{{price}} / 1次 * {{ratioType}} {{ratio}}": " + Image generation call {{symbol}}{{price}} / 1 time * {{ratioType}} {{ratio}}",
     " + 文件搜索 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_one": " + File search {{count}} time / 1K times * {{symbol}}{{price}} * {{ratioType}} {{ratio}}",
     " + 文件搜索 {{count}}次 / 1K 次 * {{symbol}}{{price}} * {{ratioType}} {{ratio}}_other": " + File search {{count}} times / 1K times * {{symbol}}{{price}} * {{ratioType}} {{ratio}}",
