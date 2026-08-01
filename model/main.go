@@ -254,13 +254,6 @@ func InitLogDB() (err error) {
 func migrateDB() error {
 	// Migrate price_amount column from float/double to decimal for existing tables
 	migrateSubscriptionPlanPriceAmount()
-	if err := prepareProfitBoardOverviewSnapshotWatermarkMigration(); err != nil {
-		return err
-	}
-	if err := ensureProfitBoardOverviewSnapshotReportLargeText(); err != nil {
-		return err
-	}
-
 	err := DB.AutoMigrate(
 		&Channel{},
 		&Token{},
@@ -286,12 +279,8 @@ func migrateDB() error {
 		&Model{},
 		&ModelPermission{},
 		&Vendor{},
-		&ProfitBoardConfig{},
-		&ProfitBoardUpstreamAccount{},
-		&ProfitBoardRemoteSnapshot{},
-		&ProfitBoardHourlyStat{},
-		&ProfitBoardAggregateState{},
-		&ProfitBoardOverviewSnapshot{},
+		&UpstreamAccount{},
+		&UpstreamAccountSnapshot{},
 		&PerfMetric{},
 		&PrefillGroup{},
 		&Setup{},
@@ -337,17 +326,11 @@ func migrateDB() error {
 		if err := ensureSellableTokenOrderColumnsSQLite(); err != nil {
 			return err
 		}
-		if err := ensureProfitBoardUpstreamAccountColumnsSQLite(); err != nil {
+		if err := ensureUpstreamAccountColumnsSQLite(); err != nil {
 			return err
 		}
 	} else {
 		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
-			return err
-		}
-		if err := ensureProfitBoardOverviewSnapshotWatermarkText(); err != nil {
-			return err
-		}
-		if err := ensureProfitBoardOverviewSnapshotReportLargeText(); err != nil {
 			return err
 		}
 	}
@@ -355,13 +338,6 @@ func migrateDB() error {
 }
 
 func migrateDBFast() error {
-	if err := prepareProfitBoardOverviewSnapshotWatermarkMigration(); err != nil {
-		return err
-	}
-	if err := ensureProfitBoardOverviewSnapshotReportLargeText(); err != nil {
-		return err
-	}
-
 	var wg sync.WaitGroup
 
 	migrations := []struct {
@@ -392,12 +368,8 @@ func migrateDBFast() error {
 		{&Model{}, "Model"},
 		{&ModelPermission{}, "ModelPermission"},
 		{&Vendor{}, "Vendor"},
-		{&ProfitBoardConfig{}, "ProfitBoardConfig"},
-		{&ProfitBoardUpstreamAccount{}, "ProfitBoardUpstreamAccount"},
-		{&ProfitBoardRemoteSnapshot{}, "ProfitBoardRemoteSnapshot"},
-		{&ProfitBoardHourlyStat{}, "ProfitBoardHourlyStat"},
-		{&ProfitBoardAggregateState{}, "ProfitBoardAggregateState"},
-		{&ProfitBoardOverviewSnapshot{}, "ProfitBoardOverviewSnapshot"},
+		{&UpstreamAccount{}, "UpstreamAccount"},
+		{&UpstreamAccountSnapshot{}, "UpstreamAccountSnapshot"},
 		{&PerfMetric{}, "PerfMetric"},
 		{&PrefillGroup{}, "PrefillGroup"},
 		{&Setup{}, "Setup"},
@@ -461,17 +433,11 @@ func migrateDBFast() error {
 		if err := ensureSellableTokenOrderColumnsSQLite(); err != nil {
 			return err
 		}
-		if err := ensureProfitBoardUpstreamAccountColumnsSQLite(); err != nil {
+		if err := ensureUpstreamAccountColumnsSQLite(); err != nil {
 			return err
 		}
 	} else {
 		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
-			return err
-		}
-		if err := ensureProfitBoardOverviewSnapshotWatermarkText(); err != nil {
-			return err
-		}
-		if err := ensureProfitBoardOverviewSnapshotReportLargeText(); err != nil {
 			return err
 		}
 	}
@@ -718,7 +684,7 @@ func ensureRedemptionColumnsSQLite() error {
 	return nil
 }
 
-func ensureProfitBoardUpstreamAccountColumnsSQLite() error {
+func ensureUpstreamAccountColumnsSQLite() error {
 	if !common.UsingSQLite {
 		return nil
 	}
@@ -740,11 +706,6 @@ func ensureProfitBoardUpstreamAccountColumnsSQLite() error {
 		{Name: "resource_display_mode", DDL: "`resource_display_mode` varchar(24) DEFAULT 'both'"},
 		{Name: "email", DDL: "`email` varchar(255)"},
 		{Name: "password_encrypted", DDL: "`password_encrypted` text"},
-		{Name: "low_balance_auto_disable_enabled", DDL: "`low_balance_auto_disable_enabled` numeric DEFAULT 0"},
-		{Name: "low_balance_check_interval_seconds", DDL: "`low_balance_check_interval_seconds` integer DEFAULT 300"},
-		{Name: "low_balance_last_checked_at", DDL: "`low_balance_last_checked_at` bigint DEFAULT 0"},
-		{Name: "low_balance_last_auto_disabled_at", DDL: "`low_balance_last_auto_disabled_at` bigint DEFAULT 0"},
-		{Name: "low_balance_last_auto_disabled_count", DDL: "`low_balance_last_auto_disabled_count` integer DEFAULT 0"},
 	}
 	for _, col := range required {
 		if _, ok := existing[col.Name]; ok {
@@ -755,166 +716,6 @@ func ensureProfitBoardUpstreamAccountColumnsSQLite() error {
 		}
 	}
 	return nil
-}
-
-func ensureProfitBoardOverviewSnapshotWatermarkText() error {
-	if common.UsingSQLite {
-		return nil
-	}
-
-	tableName := "profit_board_overview_snapshots"
-	columnName := "dependency_watermark"
-	if !DB.Migrator().HasTable(tableName) {
-		return nil
-	}
-	if !DB.Migrator().HasColumn(&ProfitBoardOverviewSnapshot{}, columnName) {
-		return nil
-	}
-
-	var alterSQL string
-	if common.UsingPostgreSQL {
-		columnType, err := getProfitBoardOverviewSnapshotColumnType(tableName, columnName)
-		if err != nil {
-			return err
-		}
-		if strings.EqualFold(columnType, "text") {
-			return nil
-		}
-		alterSQL = fmt.Sprintf(`ALTER TABLE %s ALTER COLUMN %s TYPE text`, tableName, columnName)
-	} else if common.UsingMySQL {
-		columnType, err := getProfitBoardOverviewSnapshotColumnType(tableName, columnName)
-		if err != nil {
-			return err
-		}
-		if isProfitBoardOverviewSnapshotWatermarkTextType(columnType) {
-			return nil
-		}
-		alterSQL = fmt.Sprintf("ALTER TABLE %s MODIFY COLUMN %s TEXT", tableName, columnName)
-	}
-
-	if alterSQL == "" {
-		return nil
-	}
-	if err := DB.Exec(alterSQL).Error; err != nil {
-		return err
-	}
-	common.SysLog(fmt.Sprintf("Successfully migrated %s.%s to text", tableName, columnName))
-	return nil
-}
-
-func ensureProfitBoardOverviewSnapshotReportLargeText() error {
-	if common.UsingSQLite {
-		return nil
-	}
-
-	tableName := "profit_board_overview_snapshots"
-	columnName := "report"
-	if !DB.Migrator().HasTable(tableName) {
-		return nil
-	}
-	if !DB.Migrator().HasColumn(&ProfitBoardOverviewSnapshot{}, columnName) {
-		return nil
-	}
-
-	columnType, err := getProfitBoardOverviewSnapshotColumnType(tableName, columnName)
-	if err != nil {
-		return err
-	}
-
-	var alterSQL string
-	if common.UsingPostgreSQL {
-		if strings.EqualFold(columnType, "text") {
-			return nil
-		}
-		alterSQL = fmt.Sprintf(`ALTER TABLE %s ALTER COLUMN %s TYPE text`, tableName, columnName)
-	} else if common.UsingMySQL {
-		if isProfitBoardOverviewSnapshotLargeTextType(columnType) {
-			return nil
-		}
-		alterSQL = fmt.Sprintf("ALTER TABLE %s MODIFY COLUMN %s MEDIUMTEXT", tableName, columnName)
-	}
-
-	if alterSQL == "" {
-		return nil
-	}
-	if err := DB.Exec(alterSQL).Error; err != nil {
-		return err
-	}
-	common.SysLog(fmt.Sprintf("Successfully migrated %s.%s to large text", tableName, columnName))
-	return nil
-}
-
-func prepareProfitBoardOverviewSnapshotWatermarkMigration() error {
-	if !common.UsingMySQL {
-		return nil
-	}
-
-	tableName := "profit_board_overview_snapshots"
-	columnName := "dependency_watermark"
-	if !DB.Migrator().HasTable(tableName) {
-		return nil
-	}
-	if !DB.Migrator().HasColumn(&ProfitBoardOverviewSnapshot{}, columnName) {
-		return nil
-	}
-
-	columnType, err := getProfitBoardOverviewSnapshotColumnType(tableName, columnName)
-	if err != nil {
-		return err
-	}
-	if isProfitBoardOverviewSnapshotWatermarkTextType(columnType) {
-		return nil
-	}
-
-	var indexNames []string
-	if err := DB.Raw(`
-		SELECT DISTINCT INDEX_NAME
-		FROM information_schema.STATISTICS
-		WHERE TABLE_SCHEMA = DATABASE()
-			AND TABLE_NAME = ?
-			AND COLUMN_NAME = ?
-			AND INDEX_NAME <> 'PRIMARY'`,
-		tableName, columnName).Scan(&indexNames).Error; err != nil {
-		return err
-	}
-	for _, indexName := range indexNames {
-		if err := DB.Exec(fmt.Sprintf("DROP INDEX `%s` ON `%s`", escapeMySQLIdentifier(indexName), escapeMySQLIdentifier(tableName))).Error; err != nil {
-			return err
-		}
-		common.SysLog(fmt.Sprintf("Dropped legacy index %s on %s.%s before text migration", indexName, tableName, columnName))
-	}
-	return nil
-}
-
-func getProfitBoardOverviewSnapshotColumnType(tableName string, columnName string) (string, error) {
-	var columnType string
-	if common.UsingPostgreSQL {
-		err := DB.Raw(`SELECT data_type FROM information_schema.columns
-			WHERE table_name = ? AND column_name = ?`, tableName, columnName).Scan(&columnType).Error
-		return columnType, err
-	}
-	if common.UsingMySQL {
-		err := DB.Raw(`SELECT COLUMN_TYPE FROM information_schema.columns
-			WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`,
-			tableName, columnName).Scan(&columnType).Error
-		return columnType, err
-	}
-	return "", nil
-}
-
-func isProfitBoardOverviewSnapshotWatermarkTextType(columnType string) bool {
-	return strings.EqualFold(columnType, "text") ||
-		strings.EqualFold(columnType, "mediumtext") ||
-		strings.EqualFold(columnType, "longtext")
-}
-
-func isProfitBoardOverviewSnapshotLargeTextType(columnType string) bool {
-	return strings.EqualFold(columnType, "mediumtext") ||
-		strings.EqualFold(columnType, "longtext")
-}
-
-func escapeMySQLIdentifier(identifier string) string {
-	return strings.ReplaceAll(identifier, "`", "``")
 }
 
 // migrateSubscriptionPlanPriceAmount migrates price_amount column from float/double to decimal(10,6)

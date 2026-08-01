@@ -211,7 +211,7 @@ const AccountCard = ({
             <div>
               <span>
                 {item.status === 'needs_baseline'
-                  ? t('需要至少 2 次成功同步才能计算成本')
+                  ? t('需要至少 2 次成功同步才能计算用量')
                   : t('远端同步失败，请检查配置或网络')}
               </span>
               {item.snapshot_count != null && (

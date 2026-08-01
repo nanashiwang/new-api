@@ -47,7 +47,7 @@ export const DEFAULT_ADMIN_CONFIG = {
   },
   admin: {
     enabled: true,
-    profitBoard: true,
+    upstreamAccounts: true,
     channel: true,
     models: true,
     deployment: true,
@@ -60,11 +60,29 @@ export const DEFAULT_ADMIN_CONFIG = {
 
 const deepClone = (value) => JSON.parse(JSON.stringify(value));
 
+export const migrateSidebarConfig = (savedConfig) => {
+  if (!savedConfig || typeof savedConfig !== 'object') return savedConfig;
+
+  const migrated = deepClone(savedConfig);
+  const admin = migrated.admin;
+  if (admin && typeof admin === 'object') {
+    if (
+      !Object.prototype.hasOwnProperty.call(admin, 'upstreamAccounts') &&
+      Object.prototype.hasOwnProperty.call(admin, 'profitBoard')
+    ) {
+      admin.upstreamAccounts = admin.profitBoard;
+    }
+    delete admin.profitBoard;
+  }
+  return migrated;
+};
+
 export const mergeAdminConfig = (savedConfig) => {
   const merged = deepClone(DEFAULT_ADMIN_CONFIG);
-  if (!savedConfig || typeof savedConfig !== 'object') return merged;
+  const migratedConfig = migrateSidebarConfig(savedConfig);
+  if (!migratedConfig || typeof migratedConfig !== 'object') return merged;
 
-  for (const [sectionKey, sectionConfig] of Object.entries(savedConfig)) {
+  for (const [sectionKey, sectionConfig] of Object.entries(migratedConfig)) {
     if (!sectionConfig || typeof sectionConfig !== 'object') continue;
 
     if (!merged[sectionKey]) {
@@ -125,7 +143,7 @@ export const useSidebar = () => {
         } else {
           config = res.data.data.sidebar_modules;
         }
-        setUserConfig(config);
+        setUserConfig(migrateSidebarConfig(config));
       } else {
         // 当用户没有配置时，生成一个基于管理员配置的默认用户配置
         // 这样可以确保权限控制正确生效

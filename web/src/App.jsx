@@ -18,7 +18,13 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { lazy, Suspense, useContext, useEffect, useMemo } from 'react';
-import { Route, Routes, useLocation, useParams } from 'react-router-dom';
+import {
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useParams,
+} from 'react-router-dom';
 import Loading from './components/common/ui/Loading';
 import { AuthRedirect, PrivateRoute, AdminRoute } from './helpers/auth';
 import NotFound from './pages/NotFound';
@@ -42,7 +48,7 @@ const About = lazy(() => import('./pages/About'));
 const User = lazy(() => import('./pages/User'));
 const Setting = lazy(() => import('./pages/Setting'));
 const Channel = lazy(() => import('./pages/Channel'));
-const ProfitBoard = lazy(() => import('./pages/ProfitBoard'));
+const UpstreamAccounts = lazy(() => import('./pages/UpstreamAccounts'));
 const Token = lazy(() => import('./pages/Token'));
 const Redemption = lazy(() => import('./pages/Redemption'));
 const TopUp = lazy(() => import('./pages/TopUp'));
@@ -184,12 +190,20 @@ function App() {
           }
         />
         <Route
-          path='/console/profit-board'
+          path='/console/upstream-accounts'
           element={
             <AdminRoute>
               <Suspense fallback={<Loading></Loading>} key={location.pathname}>
-                <ProfitBoard />
+                <UpstreamAccounts />
               </Suspense>
+            </AdminRoute>
+          }
+        />
+        <Route
+          path='/console/profit-board'
+          element={
+            <AdminRoute>
+              <Navigate to='/console/upstream-accounts' replace />
             </AdminRoute>
           }
         />

@@ -22,21 +22,16 @@ import {
   createDefaultUpstreamAccountDraft,
   getUpstreamAccountDraftValidation,
   getUpstreamAccountSuggestedName,
-  normalizeUpstreamAccountType,
   normalizeUpstreamAccountBaseUrl,
+  normalizeUpstreamAccountType,
   prepareUpstreamAccountDraftForSave,
 } from '../utils';
 
-export const useUpstreamAccounts = ({
-  options,
-  loadUpstreamAccounts,
-  comboConfigs,
-  setComboConfigs,
-  upstreamConfig,
-  setUpstreamConfig,
-  setHasUnsavedConfigChanges,
-  runFullRefresh,
-}) => {
+const UPSTREAM_ACCOUNTS_API = '/api/upstream_accounts';
+
+export const useUpstreamAccounts = () => {
+  const [accounts, setAccounts] = useState([]);
+  const [accountsLoading, setAccountsLoading] = useState(true);
   const [accountDraft, setAccountDraft] = useState(
     createDefaultUpstreamAccountDraft(),
   );
@@ -54,37 +49,36 @@ export const useUpstreamAccounts = ({
   const [accountNameManuallyEdited, setAccountNameManuallyEdited] =
     useState(false);
 
-  const accounts = useMemo(
-    () => options.upstream_accounts || [],
-    [options.upstream_accounts],
-  );
-
   const editingAccount = useMemo(
     () =>
       accounts.find((item) => item.id === Number(editingAccountId || 0)) ||
       null,
-    [editingAccountId, accounts],
+    [accounts, editingAccountId],
   );
 
-  const activeWalletAccountIds = useMemo(() => {
-    const ids = new Set();
-    (comboConfigs || []).forEach((item) => {
-      if (item?.upstream_mode !== 'wallet_observer') return;
-      const accountId = Number(item?.upstream_account_id || 0);
-      if (accountId > 0) ids.add(accountId);
-    });
-    if (upstreamConfig?.upstream_mode === 'wallet_observer') {
-      const legacyAccountId = Number(upstreamConfig?.upstream_account_id || 0);
-      if (legacyAccountId > 0) ids.add(legacyAccountId);
+  const loadAccounts = useCallback(async () => {
+    setAccountsLoading(true);
+    try {
+      const res = await API.get(UPSTREAM_ACCOUNTS_API);
+      if (!res.data.success) {
+        showError(res.data.message);
+        return [];
+      }
+      const nextAccounts = Array.isArray(res.data.data) ? res.data.data : [];
+      setAccounts(nextAccounts);
+      return nextAccounts;
+    } catch (error) {
+      showError(error);
+      return [];
+    } finally {
+      setAccountsLoading(false);
     }
-    return ids;
-  }, [
-    comboConfigs,
-    upstreamConfig?.upstream_account_id,
-    upstreamConfig?.upstream_mode,
-  ]);
+  }, []);
 
-  // Auto-select first account when list changes
+  useEffect(() => {
+    loadAccounts();
+  }, [loadAccounts]);
+
   useEffect(() => {
     if (!accounts.length) {
       if (editingAccountId) setEditingAccountId(0);
@@ -98,7 +92,7 @@ export const useUpstreamAccounts = ({
     const nextAccount =
       accounts.find((item) => item.enabled !== false) || accounts[0];
     setEditingAccountId(nextAccount?.id || 0);
-  }, [editingAccountId, accounts]);
+  }, [accounts, editingAccountId]);
 
   const loadAccountTrend = useCallback(async (accountId) => {
     if (!accountId) {
@@ -110,16 +104,13 @@ export const useUpstreamAccounts = ({
     try {
       const end = Math.floor(Date.now() / 1000);
       const start = end - 7 * 24 * 60 * 60;
-      const res = await API.get(
-        `/api/profit_board/upstream_accounts/${accountId}/trend`,
-        {
-          params: {
-            start_timestamp: start,
-            end_timestamp: end,
-            granularity: 'day',
-          },
+      const res = await API.get(`${UPSTREAM_ACCOUNTS_API}/${accountId}/trend`, {
+        params: {
+          start_timestamp: start,
+          end_timestamp: end,
+          granularity: 'day',
         },
-      );
+      });
       if (!res.data.success) return showError(res.data.message);
       setAccountTrend(res.data.data || null);
     } catch (error) {
@@ -129,7 +120,6 @@ export const useUpstreamAccounts = ({
     }
   }, []);
 
-  // Load trend when detail side sheet opens or account changes
   useEffect(() => {
     if (!detailSideSheetVisible || !editingAccountId) {
       setAccountTrend(null);
@@ -162,9 +152,7 @@ export const useUpstreamAccounts = ({
     (field, value) => {
       if (!field) return;
       touchAccountDraftField(field);
-      if (field === 'name') {
-        setAccountNameManuallyEdited(true);
-      }
+      if (field === 'name') setAccountNameManuallyEdited(true);
       setAccountDraft((prev) => {
         const normalizedValue =
           field === 'account_type'
@@ -184,9 +172,7 @@ export const useUpstreamAccounts = ({
         }
         if (field === 'base_url' && !accountNameManuallyEdited && !prev.id) {
           const suggestedName = getUpstreamAccountSuggestedName(value);
-          if (suggestedName) {
-            next.name = suggestedName;
-          }
+          if (suggestedName) next.name = suggestedName;
         }
         return next;
       });
@@ -198,16 +184,11 @@ export const useUpstreamAccounts = ({
     touchAccountDraftField('base_url');
     setAccountDraft((prev) => {
       const normalizedBaseUrl = normalizeUpstreamAccountBaseUrl(prev.base_url);
-      const next = {
-        ...prev,
-        base_url: normalizedBaseUrl,
-      };
+      const next = { ...prev, base_url: normalizedBaseUrl };
       if (!accountNameManuallyEdited && !prev.id) {
         const suggestedName =
           getUpstreamAccountSuggestedName(normalizedBaseUrl);
-        if (suggestedName) {
-          next.name = suggestedName;
-        }
+        if (suggestedName) next.name = suggestedName;
       }
       return next;
     });
@@ -237,8 +218,6 @@ export const useUpstreamAccounts = ({
     accountDraftValidation.errors,
   ]);
 
-  const accountDraftCanSave = accountDraftValidation.isValid;
-
   const resetAccountDraft = useCallback(() => {
     setAccountDraft(createDefaultUpstreamAccountDraft());
     resetAccountDraftUiState();
@@ -267,11 +246,6 @@ export const useUpstreamAccounts = ({
         password: '',
         password_masked: account.password_masked || '',
         resource_display_mode: account.resource_display_mode || 'both',
-        low_balance_threshold_usd: account.low_balance_threshold_usd || 0,
-        low_balance_auto_disable_enabled:
-          !!account.low_balance_auto_disable_enabled,
-        low_balance_check_interval_seconds:
-          account.low_balance_check_interval_seconds || 300,
         enabled: account.enabled !== false,
       });
       setAccountDraftTouched({});
@@ -282,9 +256,7 @@ export const useUpstreamAccounts = ({
     [accounts],
   );
 
-  const closeSideSheet = useCallback(() => {
-    setSideSheetVisible(false);
-  }, []);
+  const closeSideSheet = useCallback(() => setSideSheetVisible(false), []);
 
   const openDetailSideSheet = useCallback((accountId) => {
     if (!accountId) return;
@@ -292,22 +264,20 @@ export const useUpstreamAccounts = ({
     setDetailSideSheetVisible(true);
   }, []);
 
-  const closeDetailSideSheet = useCallback(() => {
-    setDetailSideSheetVisible(false);
-  }, []);
+  const closeDetailSideSheet = useCallback(
+    () => setDetailSideSheetVisible(false),
+    [],
+  );
 
   const syncAccountInternal = useCallback(
     async (accountId, options = {}) => {
-      const {
-        forceRefresh = false,
-        suppressReadyToast = false,
-        suppressNeedsBaselineToast = false,
-      } = options;
+      const { suppressReadyToast = false, suppressNeedsBaselineToast = false } =
+        options;
       if (!accountId) return false;
       setSyncingAccountId(accountId);
       try {
         const res = await API.post(
-          `/api/profit_board/upstream_accounts/${accountId}/sync`,
+          `${UPSTREAM_ACCOUNTS_API}/${accountId}/sync`,
         );
         if (!res.data.success) {
           showError(res.data.message);
@@ -321,20 +291,16 @@ export const useUpstreamAccounts = ({
                 ? `：${res.data.data.error_message}`
                 : ''),
           );
-        } else if (syncedStatus === 'needs_baseline') {
-          if (!suppressNeedsBaselineToast) {
-            showSuccess('首次同步完成，下次开始统计近 7 天已用');
-          }
-        } else {
-          if (!suppressReadyToast) {
-            showSuccess('账户数据已刷新');
-          }
+        } else if (
+          syncedStatus === 'needs_baseline' &&
+          !suppressNeedsBaselineToast
+        ) {
+          showSuccess('首次同步完成，下次开始统计近 7 天已用');
+        } else if (!suppressReadyToast) {
+          showSuccess('账户数据已刷新');
         }
-        await loadUpstreamAccounts();
+        await loadAccounts();
         await loadAccountTrend(accountId);
-        if (forceRefresh || activeWalletAccountIds.has(Number(accountId))) {
-          await runFullRefresh();
-        }
         return syncedStatus !== 'failed';
       } catch (error) {
         showError(error);
@@ -343,12 +309,7 @@ export const useUpstreamAccounts = ({
         setSyncingAccountId(0);
       }
     },
-    [
-      activeWalletAccountIds,
-      loadAccountTrend,
-      loadUpstreamAccounts,
-      runFullRefresh,
-    ],
+    [loadAccountTrend, loadAccounts],
   );
 
   const saveAccount = useCallback(async () => {
@@ -368,27 +329,23 @@ export const useUpstreamAccounts = ({
       const isEditing = !!preparedDraft.id;
       const method = isEditing ? 'put' : 'post';
       const url = isEditing
-        ? `/api/profit_board/upstream_accounts/${preparedDraft.id}`
-        : '/api/profit_board/upstream_accounts';
+        ? `${UPSTREAM_ACCOUNTS_API}/${preparedDraft.id}`
+        : UPSTREAM_ACCOUNTS_API;
       const res = await API[method](url, preparedDraft);
       if (!res.data.success) return showError(res.data.message);
       if (isEditing) {
         showSuccess('上游账户已更新');
-        await loadUpstreamAccounts();
+        await loadAccounts();
         setEditingAccountId(preparedDraft.id);
         await loadAccountTrend(preparedDraft.id);
       } else {
         const createdAccountId = res.data.data?.id || 0;
         showSuccess('上游账户已创建，正在自动同步');
-        setUpstreamConfig((prev) => ({
-          ...prev,
-          upstream_account_id: createdAccountId || prev.upstream_account_id,
-        }));
         setEditingAccountId(createdAccountId);
         if (createdAccountId > 0) {
           await syncAccountInternal(createdAccountId);
         } else {
-          await loadUpstreamAccounts();
+          await loadAccounts();
         }
       }
       setSideSheetVisible(false);
@@ -399,12 +356,11 @@ export const useUpstreamAccounts = ({
       setSavingAccount(false);
     }
   }, [
-    accountNameManuallyEdited,
     accountDraft,
+    accountNameManuallyEdited,
     loadAccountTrend,
-    loadUpstreamAccounts,
+    loadAccounts,
     resetAccountDraft,
-    setUpstreamConfig,
     syncAccountInternal,
   ]);
 
@@ -418,68 +374,27 @@ export const useUpstreamAccounts = ({
   const syncAllAccounts = useCallback(async () => {
     setSyncingAllAccounts(true);
     try {
-      const res = await API.post(
-        '/api/profit_board/upstream_accounts/sync_all',
-      );
+      const res = await API.post(`${UPSTREAM_ACCOUNTS_API}/sync_all`);
       if (!res.data.success) return showError(res.data.message);
       showSuccess('全部账户已刷新');
-      await loadUpstreamAccounts();
-      if (editingAccountId) {
-        await loadAccountTrend(editingAccountId);
-      }
-      if (activeWalletAccountIds.size > 0) {
-        await runFullRefresh();
-      }
+      await loadAccounts();
+      if (editingAccountId) await loadAccountTrend(editingAccountId);
     } catch (error) {
       showError(error);
     } finally {
       setSyncingAllAccounts(false);
     }
-  }, [
-    activeWalletAccountIds,
-    editingAccountId,
-    loadAccountTrend,
-    loadUpstreamAccounts,
-    runFullRefresh,
-  ]);
+  }, [editingAccountId, loadAccountTrend, loadAccounts]);
 
   const deleteAccount = useCallback(
     async (accountId) => {
       if (!accountId) return;
       setDeletingAccountId(accountId);
       try {
-        const res = await API.delete(
-          `/api/profit_board/upstream_accounts/${accountId}`,
-        );
+        const res = await API.delete(`${UPSTREAM_ACCOUNTS_API}/${accountId}`);
         if (!res.data.success) return showError(res.data.message);
         showSuccess('上游账户已删除');
-        await loadUpstreamAccounts();
-        if (
-          Number(upstreamConfig.upstream_account_id || 0) === Number(accountId)
-        ) {
-          setUpstreamConfig((prev) => ({
-            ...prev,
-            upstream_account_id: 0,
-          }));
-        }
-        let removedBindings = false;
-        setComboConfigs((prev) =>
-          (prev || []).map((item) => {
-            if (Number(item?.upstream_account_id || 0) !== Number(accountId)) {
-              return item;
-            }
-            removedBindings = true;
-            return {
-              ...item,
-              upstream_mode: 'manual_rules',
-              upstream_account_id: 0,
-            };
-          }),
-        );
-        if (removedBindings) {
-          setHasUnsavedConfigChanges(true);
-          showSuccess('已移除当前页面内引用该账户的组合绑定，请记得保存配置');
-        }
+        await loadAccounts();
         if (Number(editingAccountId || 0) === Number(accountId)) {
           setDetailSideSheetVisible(false);
           setAccountTrend(null);
@@ -492,26 +407,19 @@ export const useUpstreamAccounts = ({
         setDeletingAccountId(0);
       }
     },
-    [
-      loadUpstreamAccounts,
-      editingAccountId,
-      resetAccountDraft,
-      setComboConfigs,
-      setHasUnsavedConfigChanges,
-      setUpstreamConfig,
-      upstreamConfig.upstream_account_id,
-    ],
+    [editingAccountId, loadAccounts, resetAccountDraft],
   );
 
   return {
     accounts,
+    accountsLoading,
     accountDraft,
     setAccountDraft,
     updateAccountDraftField,
     normalizeAccountDraftBaseUrl,
     touchAccountDraftField,
     accountDraftErrors,
-    accountDraftCanSave,
+    accountDraftCanSave: accountDraftValidation.isValid,
     accountDraftValidation,
     editingAccountId,
     setEditingAccountId,
@@ -529,6 +437,7 @@ export const useUpstreamAccounts = ({
     syncAllAccounts,
     deleteAccount,
     resetAccountDraft,
+    loadAccounts,
     loadAccountTrend,
     openCreateSideSheet,
     openEditSideSheet,

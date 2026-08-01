@@ -33,7 +33,7 @@ import { Nav, Divider, Button } from '@douyinfe/semi-ui';
 
 const routerMap = {
   home: '/',
-  profitBoard: '/console/profit-board',
+  upstreamAccounts: '/console/upstream-accounts',
   channel: '/console/channel',
   token: '/console/token',
   redemption: '/console/redemption',
@@ -179,9 +179,9 @@ const SiderBar = ({ onNavigate = () => {} }) => {
   const adminItems = useMemo(() => {
     const items = [
       {
-        text: t('收益看板'),
-        itemKey: 'profitBoard',
-        to: '/profit-board',
+        text: t('账户管理'),
+        itemKey: 'upstreamAccounts',
+        to: '/upstream-accounts',
         className: isAdmin() ? '' : 'tableHiddle',
       },
       {

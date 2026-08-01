@@ -275,7 +275,9 @@ const CRSSiteDetailSideSheet = ({
 
   const displayAccounts = useMemo(() => {
     if (!sortProblematic) {
-      return [...filteredAccounts].sort((a, b) => problemScore(a) - problemScore(b));
+      return [...filteredAccounts].sort(
+        (a, b) => problemScore(a) - problemScore(b),
+      );
     }
     return [...filteredAccounts].sort(
       (a, b) => problemScore(b) - problemScore(a),
@@ -375,11 +377,7 @@ const CRSSiteDetailSideSheet = ({
                     ) : null}
                   </Space>
                   <div className='mt-1'>
-                    <Text
-                      type='tertiary'
-                      size='small'
-                      className='break-all'
-                    >
+                    <Text type='tertiary' size='small' className='break-all'>
                       {site.scheme}://{site.host}
                     </Text>
                   </div>

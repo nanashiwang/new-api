@@ -130,7 +130,9 @@ export default function CRSSiteModal({
                             if (!value || isValidCRSPort(value)) {
                               return Promise.resolve();
                             }
-                            return Promise.reject(t('端口必须是 1-65535 的整数'));
+                            return Promise.reject(
+                              t('端口必须是 1-65535 的整数'),
+                            );
                           },
                         },
                       ]}

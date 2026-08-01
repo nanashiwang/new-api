@@ -1662,7 +1662,3 @@ html.dark .with-pastel-balls::before {
 .semi-datepicker-range-input {
   border-radius: 10px !important;
 }
-
-.profit-board-tabs > .semi-tabs-bar {
-  border-bottom: none !important;
-}
