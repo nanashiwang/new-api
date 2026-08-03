@@ -23,6 +23,7 @@ import {
   Activity,
   ArrowRight,
   Copy,
+  Download,
   FileText,
   Gauge,
   Globe2,
@@ -173,8 +174,9 @@ const EnterpriseHome = ({
               {t('开启 AI 新体验')}
               <ArrowRight size={18} />
             </Link>
-            <Link className='yh-btn yh-btn-secondary' to='/pricing'>
-              {t('查看模型广场')}
+            <Link className='yh-btn yh-btn-secondary' to='/download'>
+              <Download size={18} />
+              {t('下载客户端')}
             </Link>
           </div>
 

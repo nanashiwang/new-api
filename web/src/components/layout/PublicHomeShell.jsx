@@ -17,8 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useContext, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import React, { lazy, Suspense, useContext, useEffect, useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { StatusContext } from '../../context/Status';
 import { UserContext } from '../../context/User';
 import { API } from '../../helpers/apiCore';
@@ -32,6 +32,8 @@ import {
 } from '../../helpers/prefetchAppShell';
 import Home from '../../pages/Home';
 import GlobalTopProgress from '../common/ui/GlobalTopProgress';
+
+const DesktopDownload = lazy(() => import('../../pages/DesktopDownload'));
 
 const defaultModules = {
   home: true,
@@ -59,6 +61,8 @@ const parseHeaderModules = (rawConfig) => {
 };
 
 const PublicHomeShell = () => {
+  const location = useLocation();
+  const isDownloadPage = /^\/download\/?$/.test(location.pathname);
   const [userState, userDispatch] = useContext(UserContext);
   const [statusState, statusDispatch] = useContext(StatusContext);
   const { t, language, setLanguage } = usePublicTranslation();
@@ -83,6 +87,7 @@ const PublicHomeShell = () => {
 
   const navLinks = [
     modules.home && { text: t('首页'), to: '/' },
+    { text: t('下载客户端'), to: '/download', prefetchApp: false },
     modules.console && {
       text: t('控制台'),
       to: userState.user ? '/console' : '/login',
@@ -161,13 +166,22 @@ const PublicHomeShell = () => {
     setLanguage(language.startsWith('zh') ? 'en' : 'zh-CN');
   };
 
+  const isCurrentNavLink = (to) => {
+    if (!to) return false;
+    if (to === '/') return location.pathname === '/';
+    return location.pathname.replace(/\/$/, '') === to;
+  };
+
   return (
     <div className='public-shell min-h-screen bg-[var(--semi-color-bg-0,#fff)] text-[var(--semi-color-text-0,#111827)]'>
       <GlobalTopProgress />
-      {!customLanding && (
+      {(!customLanding || isDownloadPage) && (
         <header className='public-header public-header--hero fixed top-0 left-0 right-0 z-50 backdrop-blur-lg'>
           <div className='flex items-center justify-between h-16 px-2'>
-            <Link to='/' className='group flex items-center gap-2 min-w-0'>
+            <Link
+              to='/'
+              className='public-brand group flex items-center gap-2 min-w-0'
+            >
               <img
                 src={logo}
                 alt='logo'
@@ -178,7 +192,7 @@ const PublicHomeShell = () => {
               </span>
             </Link>
 
-            <nav className='flex flex-1 items-center gap-1 lg:gap-2 mx-2 md:mx-4 overflow-x-auto whitespace-nowrap scrollbar-hide'>
+            <nav className='public-primary-nav flex flex-1 items-center gap-1 lg:gap-2 mx-2 md:mx-4 overflow-x-auto whitespace-nowrap scrollbar-hide'>
               {navLinks.map((link) =>
                 link.external ? (
                   <a
@@ -195,8 +209,15 @@ const PublicHomeShell = () => {
                     key={link.text}
                     to={link.to}
                     className='public-nav-link'
-                    onMouseEnter={prefetchAppShell}
-                    onTouchStart={prefetchAppShell}
+                    aria-current={
+                      isCurrentNavLink(link.to) ? 'page' : undefined
+                    }
+                    onMouseEnter={
+                      link.prefetchApp === false ? undefined : prefetchAppShell
+                    }
+                    onTouchStart={
+                      link.prefetchApp === false ? undefined : prefetchAppShell
+                    }
                   >
                     {link.text}
                   </Link>
@@ -204,10 +225,10 @@ const PublicHomeShell = () => {
               )}
             </nav>
 
-            <div className='flex items-center gap-2 md:gap-3'>
+            <div className='public-header-actions flex items-center gap-2 md:gap-3'>
               <button
                 type='button'
-                className='public-icon-button'
+                className='public-icon-button public-theme-button'
                 aria-label={t('切换主题')}
                 onClick={toggleTheme}
               >
@@ -216,7 +237,7 @@ const PublicHomeShell = () => {
               <button
                 type='button'
                 className='public-icon-button'
-                aria-label={t('common.changeLanguage')}
+                aria-label={t('切换语言')}
                 onClick={toggleLanguage}
               >
                 文
@@ -261,7 +282,19 @@ const PublicHomeShell = () => {
           </div>
         </header>
       )}
-      <Home onLandingChange={setCustomLanding} />
+      {isDownloadPage ? (
+        <Suspense
+          fallback={
+            <main className='min-h-screen bg-[var(--semi-color-bg-0,#fff)]'>
+              <span className='sr-only'>{t('正在加载')}</span>
+            </main>
+          }
+        >
+          <DesktopDownload />
+        </Suspense>
+      ) : (
+        <Home onLandingChange={setCustomLanding} />
+      )}
       <footer className='public-footer'>
         <div className='flex flex-col md:flex-row items-center justify-between w-full max-w-[1110px] gap-6 mx-auto'>
           <span className='text-sm text-[var(--semi-color-text-1,#4b5563)]'>

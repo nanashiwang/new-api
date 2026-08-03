@@ -12,6 +12,8 @@ func SetDesktopUpdateRouter(router *gin.Engine) {
 	{
 		public.GET("/latest.json", controller.ServeDesktopUpdateManifest)
 		public.HEAD("/latest.json", controller.ServeDesktopUpdateManifest)
+		public.GET("/downloads.json", controller.ServeDesktopDownloadCatalog)
+		public.HEAD("/downloads.json", controller.ServeDesktopDownloadCatalog)
 		public.GET("/releases/:version/:filename", controller.ServeDesktopUpdateArtifact)
 		public.HEAD("/releases/:version/:filename", controller.ServeDesktopUpdateArtifact)
 		public.PUT("/publish/:version/:filename", controller.PublishDesktopUpdateArtifact)

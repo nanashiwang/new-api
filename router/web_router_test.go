@@ -44,6 +44,8 @@ func TestPrerenderedIndexRoutesDoNotRedirect(t *testing.T) {
 		"/register/?aff=R3bk",
 		"/login?next=/console",
 		"/pricing",
+		"/download",
+		"/download/",
 		"/about",
 	} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)

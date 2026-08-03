@@ -43,6 +43,9 @@ func TestDesktopUpdatePublicRoutesSupportHeadAndRange(t *testing.T) {
 	if _, err := service.SaveDesktopUpdateArtifact("1.2.3", "bundle.exe", strings.NewReader(content), 1024); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := service.SaveDesktopUpdateArtifact("1.2.3", "YuanHeng Desktop_1.2.3_x64-setup.exe", strings.NewReader("installer"), 1024); err != nil {
+		t.Fatal(err)
+	}
 	manifest := `{"version":"1.2.3","platforms":{"windows-x86_64":{"signature":"signed","url":"https://example.com/bundle.exe"}}}`
 	if _, err := service.PublishDesktopUpdateManifest(strings.NewReader(manifest), service.GetDesktopUpdateSettings().PublicBaseURL, 10); err != nil {
 		t.Fatal(err)
@@ -58,6 +61,38 @@ func TestDesktopUpdatePublicRoutesSupportHeadAndRange(t *testing.T) {
 	}
 	if head.Header().Get("Cache-Control") != "no-cache, no-store, must-revalidate" {
 		t.Fatalf("unexpected manifest cache policy: %q", head.Header().Get("Cache-Control"))
+	}
+
+	catalogResponse := httptest.NewRecorder()
+	r.ServeHTTP(catalogResponse, httptest.NewRequest(http.MethodGet, "/desktop/update/downloads.json", nil))
+	if catalogResponse.Code != http.StatusOK {
+		t.Fatalf("unexpected downloads response: code=%d body=%q", catalogResponse.Code, catalogResponse.Body.String())
+	}
+	if catalogResponse.Header().Get("Cache-Control") != "public, max-age=300, must-revalidate" {
+		t.Fatalf("unexpected downloads cache policy: %q", catalogResponse.Header().Get("Cache-Control"))
+	}
+	var catalog service.DesktopDownloadCatalog
+	if err := common.Unmarshal(catalogResponse.Body.Bytes(), &catalog); err != nil {
+		t.Fatal(err)
+	}
+	if catalog.Version != "1.2.3" || len(catalog.Packages) != 1 || catalog.Packages[0].ID != "windows-x64" {
+		t.Fatalf("unexpected downloads catalog: %+v", catalog)
+	}
+	if etag := catalogResponse.Header().Get("ETag"); etag == "" {
+		t.Fatal("downloads catalog must include an ETag")
+	} else {
+		notModified := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "/desktop/update/downloads.json", nil)
+		request.Header.Set("If-None-Match", etag)
+		r.ServeHTTP(notModified, request)
+		if notModified.Code != http.StatusNotModified || notModified.Body.Len() != 0 {
+			t.Fatalf("unexpected conditional response: code=%d body=%q", notModified.Code, notModified.Body.String())
+		}
+	}
+	catalogHead := httptest.NewRecorder()
+	r.ServeHTTP(catalogHead, httptest.NewRequest(http.MethodHead, "/desktop/update/downloads.json", nil))
+	if catalogHead.Code != http.StatusOK || catalogHead.Body.Len() != 0 || catalogHead.Header().Get("Content-Length") == "" {
+		t.Fatalf("unexpected downloads HEAD response: code=%d body=%q length=%q", catalogHead.Code, catalogHead.Body.String(), catalogHead.Header().Get("Content-Length"))
 	}
 
 	rangeResponse := httptest.NewRecorder()
@@ -95,6 +130,12 @@ func TestDesktopUpdatePublicRoutesAreHiddenWhenDisabled(t *testing.T) {
 	}
 	if response.Header().Get("Cache-Control") != "no-cache, no-store, must-revalidate" {
 		t.Fatalf("disabled manifest response must not be cached: %q", response.Header().Get("Cache-Control"))
+	}
+
+	downloads := httptest.NewRecorder()
+	r.ServeHTTP(downloads, httptest.NewRequest(http.MethodGet, "/desktop/update/downloads.json", nil))
+	if downloads.Code != http.StatusNotFound || downloads.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("disabled downloads response must be hidden and uncached: code=%d cache=%q", downloads.Code, downloads.Header().Get("Cache-Control"))
 	}
 
 	artifact := httptest.NewRecorder()

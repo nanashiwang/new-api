@@ -48,7 +48,7 @@ func registerPrerenderedIndexRoutes(router *gin.Engine, indexPage []byte) {
 		c.Set(middleware.RouteTagKey, "web")
 		serveWebIndex(c, indexPage)
 	}
-	for _, path := range []string{"/login", "/login/", "/register", "/register/", "/pricing", "/pricing/", "/about", "/about/"} {
+	for _, path := range []string{"/login", "/login/", "/register", "/register/", "/pricing", "/pricing/", "/download", "/download/", "/about", "/about/"} {
 		router.GET(path, serve)
 		router.HEAD(path, serve)
 	}

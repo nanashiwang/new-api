@@ -992,6 +992,36 @@
     border-radius: 20px;
   }
 
+  .public-header.public-header--hero > div {
+    gap: 4px;
+  }
+
+  .public-brand,
+  .public-header-actions {
+    flex-shrink: 0;
+  }
+
+  .public-primary-nav {
+    flex: 0 1 auto;
+    min-width: 0;
+    margin-right: 4px;
+    margin-left: auto;
+  }
+
+  .public-primary-nav .public-nav-link {
+    padding: 8px 9px;
+    font-size: 13px;
+  }
+
+  .public-primary-nav .public-nav-link[aria-current='page'],
+  .public-primary-nav .public-nav-link:nth-child(n + 3) {
+    display: none;
+  }
+
+  .public-header-actions {
+    gap: 4px;
+  }
+
   .yh-hero {
     padding-top: 124px;
   }

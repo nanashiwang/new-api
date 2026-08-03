@@ -1,12 +1,14 @@
 package controller
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
 	"mime"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -198,6 +200,40 @@ func ServeDesktopUpdateManifest(c *gin.Context) {
 	c.Header("Content-Type", "application/json; charset=utf-8")
 	c.Header("ETag", desktopUpdateETag(info))
 	http.ServeContent(c.Writer, c.Request, "latest.json", info.ModTime(), file)
+}
+
+func ServeDesktopDownloadCatalog(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	c.Header("X-Content-Type-Options", "nosniff")
+	settings := service.GetDesktopUpdateSettings()
+	if !settings.Enabled {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	catalog, err := service.GetDesktopDownloadCatalog(settings.PublicBaseURL)
+	if err != nil {
+		respondDesktopUpdatePublicError(c, err)
+		return
+	}
+	payload, err := common.Marshal(catalog)
+	if err != nil {
+		respondDesktopUpdatePublicError(c, err)
+		return
+	}
+	etag := fmt.Sprintf(`"%x"`, sha256.Sum256(payload))
+	c.Header("Cache-Control", "public, max-age=300, must-revalidate")
+	c.Header("Content-Type", "application/json; charset=utf-8")
+	c.Header("Content-Length", strconv.Itoa(len(payload)))
+	c.Header("ETag", etag)
+	if c.GetHeader("If-None-Match") == etag {
+		c.Status(http.StatusNotModified)
+		return
+	}
+	if c.Request.Method == http.MethodHead {
+		c.Status(http.StatusOK)
+		return
+	}
+	c.Data(http.StatusOK, "application/json; charset=utf-8", payload)
 }
 
 func ServeDesktopUpdateArtifact(c *gin.Context) {

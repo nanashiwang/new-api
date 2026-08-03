@@ -190,6 +190,106 @@ func TestDesktopUpdateManifestRejectsEmptyStoredArtifact(t *testing.T) {
 	}
 }
 
+func TestDesktopDownloadCatalogListsOnlyHumanInstallers(t *testing.T) {
+	withDesktopUpdateTestState(t)
+	baseURL := "https://updates.example.com/desktop/update"
+	files := map[string]string{
+		"YuanHeng Desktop_1.2.3_aarch64.dmg":            "mac-arm-installer",
+		"YuanHeng Desktop_1.2.3_x64.dmg":                "mac-intel-installer",
+		"YuanHeng Desktop_1.2.3_x64-setup.exe":          "windows-installer",
+		"YuanHeng Desktop_1.2.3_aarch64.app.tar.gz":     "mac-updater",
+		"YuanHeng Desktop_1.2.3_aarch64.app.tar.gz.sig": "mac-signature",
+		"YuanHeng Desktop_1.2.3_portable.zip":           "portable-archive",
+	}
+	for filename, content := range files {
+		if _, err := SaveDesktopUpdateArtifact("1.2.3", filename, strings.NewReader(content), 1024); err != nil {
+			t.Fatalf("save %s: %v", filename, err)
+		}
+	}
+	manifest := `{"version":"1.2.3","notes":"release notes","pub_date":"2026-08-01T00:00:00Z","platforms":{"darwin-aarch64":{"signature":"signed","url":"https://example.com/YuanHeng%20Desktop_1.2.3_aarch64.app.tar.gz"},"windows-x86_64":{"signature":"signed","url":"https://example.com/YuanHeng%20Desktop_1.2.3_x64-setup.exe"}}}`
+	if _, err := PublishDesktopUpdateManifest(strings.NewReader(manifest), baseURL, 10); err != nil {
+		t.Fatal(err)
+	}
+
+	catalog, err := GetDesktopDownloadCatalog(baseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if catalog.Version != "1.2.3" || catalog.Notes != "release notes" || catalog.PubDate != "2026-08-01T00:00:00Z" {
+		t.Fatalf("unexpected catalog metadata: %+v", catalog)
+	}
+	expectedIDs := []string{"macos-arm64", "macos-x64", "windows-x64"}
+	if len(catalog.Packages) != len(expectedIDs) {
+		t.Fatalf("unexpected packages: %+v", catalog.Packages)
+	}
+	for index, expectedID := range expectedIDs {
+		item := catalog.Packages[index]
+		if item.ID != expectedID {
+			t.Fatalf("package %d: expected %s, got %+v", index, expectedID, item)
+		}
+		if item.Size <= 0 || !strings.HasPrefix(item.URL, baseURL+"/releases/1.2.3/") || strings.Contains(item.URL, " ") {
+			t.Fatalf("unsafe package metadata: %+v", item)
+		}
+		if strings.HasSuffix(item.Filename, ".sig") || strings.HasSuffix(item.Filename, ".tar.gz") || strings.HasSuffix(item.Filename, ".zip") {
+			t.Fatalf("internal artifact leaked into catalog: %+v", item)
+		}
+	}
+}
+
+func TestDesktopDownloadCatalogFailsClosedForMissingOrAmbiguousInstallers(t *testing.T) {
+	t.Run("missing", func(t *testing.T) {
+		withDesktopUpdateTestState(t)
+		if _, err := SaveDesktopUpdateArtifact("1.2.3", "YuanHeng.app.tar.gz", strings.NewReader("updater"), 1024); err != nil {
+			t.Fatal(err)
+		}
+		manifest := `{"version":"1.2.3","platforms":{"darwin-aarch64":{"signature":"signed","url":"https://example.com/YuanHeng.app.tar.gz"}}}`
+		if _, err := PublishDesktopUpdateManifest(strings.NewReader(manifest), "https://updates.example.com/desktop/update", 10); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := GetDesktopDownloadCatalog("https://updates.example.com/desktop/update"); !errors.Is(err, ErrDesktopUpdateNotFound) {
+			t.Fatalf("expected no public installers, got %v", err)
+		}
+	})
+
+	t.Run("duplicate", func(t *testing.T) {
+		withDesktopUpdateTestState(t)
+		for _, filename := range []string{"YuanHeng.app.tar.gz", "YuanHeng_aarch64.dmg", "YuanHeng_arm64.dmg"} {
+			if _, err := SaveDesktopUpdateArtifact("1.2.3", filename, strings.NewReader(filename), 1024); err != nil {
+				t.Fatal(err)
+			}
+		}
+		manifest := `{"version":"1.2.3","platforms":{"darwin-aarch64":{"signature":"signed","url":"https://example.com/YuanHeng.app.tar.gz"}}}`
+		if _, err := PublishDesktopUpdateManifest(strings.NewReader(manifest), "https://updates.example.com/desktop/update", 10); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := GetDesktopDownloadCatalog("https://updates.example.com/desktop/update"); err == nil || !strings.Contains(err.Error(), "重复") {
+			t.Fatalf("expected ambiguous installer failure, got %v", err)
+		}
+	})
+}
+
+func TestDesktopDownloadCatalogIgnoresSymlinkInstaller(t *testing.T) {
+	root := withDesktopUpdateTestState(t)
+	if _, err := SaveDesktopUpdateArtifact("1.2.3", "YuanHeng.app.tar.gz", strings.NewReader("updater"), 1024); err != nil {
+		t.Fatal(err)
+	}
+	releaseDir := filepath.Join(root, "releases", "1.2.3")
+	target := filepath.Join(root, "outside.dmg")
+	if err := os.WriteFile(target, []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(releaseDir, "YuanHeng_aarch64.dmg")); err != nil {
+		t.Skipf("symlink is not supported: %v", err)
+	}
+	manifest := `{"version":"1.2.3","platforms":{"darwin-aarch64":{"signature":"signed","url":"https://example.com/YuanHeng.app.tar.gz"}}}`
+	if _, err := PublishDesktopUpdateManifest(strings.NewReader(manifest), "https://updates.example.com/desktop/update", 10); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GetDesktopDownloadCatalog("https://updates.example.com/desktop/update"); !errors.Is(err, ErrDesktopUpdateNotFound) {
+		t.Fatalf("symlink installer must not be exposed, got %v", err)
+	}
+}
+
 func TestDesktopUpdatePublishTokenFailsClosed(t *testing.T) {
 	withDesktopUpdateTestState(t)
 	t.Setenv("DESKTOP_UPDATE_PUBLISH_TOKEN", "  environment-token\n")

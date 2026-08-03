@@ -62,7 +62,7 @@ if (typeof window !== 'undefined') {
 
 const ShellRouter = () => {
   const location = useLocation();
-  if (location.pathname === '/') {
+  if (location.pathname === '/' || /^\/download\/?$/.test(location.pathname)) {
     return <PublicHomeShell />;
   }
   return (

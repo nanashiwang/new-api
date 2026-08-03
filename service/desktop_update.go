@@ -71,6 +71,37 @@ type DesktopUpdateManifestSummary struct {
 	Platforms []string `json:"platforms"`
 }
 
+type DesktopDownloadPackage struct {
+	ID       string `json:"id"`
+	OS       string `json:"os"`
+	Arch     string `json:"arch"`
+	Format   string `json:"format"`
+	Filename string `json:"filename"`
+	Size     int64  `json:"size"`
+	URL      string `json:"url"`
+}
+
+type DesktopDownloadCatalog struct {
+	Version  string                   `json:"version"`
+	Notes    string                   `json:"notes,omitempty"`
+	PubDate  string                   `json:"pub_date,omitempty"`
+	Packages []DesktopDownloadPackage `json:"packages"`
+}
+
+type desktopDownloadDefinition struct {
+	ID       string
+	OS       string
+	Arch     string
+	Format   string
+	Suffixes []string
+}
+
+var desktopDownloadDefinitions = []desktopDownloadDefinition{
+	{ID: "macos-arm64", OS: "macos", Arch: "arm64", Format: "dmg", Suffixes: []string{"_aarch64.dmg", "_arm64.dmg"}},
+	{ID: "macos-x64", OS: "macos", Arch: "x86_64", Format: "dmg", Suffixes: []string{"_x64.dmg", "_x86_64.dmg"}},
+	{ID: "windows-x64", OS: "windows", Arch: "x86_64", Format: "exe", Suffixes: []string{"_x64-setup.exe", "_x86_64-setup.exe"}},
+}
+
 type DesktopUpdateStorageStatus struct {
 	Directory string `json:"directory"`
 	Exists    bool   `json:"exists"`
@@ -574,6 +605,103 @@ func RepublishCurrentDesktopUpdateManifest(baseURL string, retentionCount int) e
 	}
 	_, err = PublishDesktopUpdateManifest(strings.NewReader(string(data)), baseURL, retentionCount)
 	return err
+}
+
+func GetDesktopDownloadCatalog(baseURL string) (*DesktopDownloadCatalog, error) {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		return nil, errors.New("请先配置对外基础地址")
+	}
+	if err := validateDesktopUpdatePublicBaseURL(baseURL); err != nil {
+		return nil, err
+	}
+	manifestData, err := readCurrentDesktopUpdateManifest()
+	if err != nil {
+		return nil, err
+	}
+	_, manifest, err := parseAndRewriteDesktopUpdateManifest(manifestData, baseURL)
+	if err != nil {
+		return nil, err
+	}
+	directory, version, err := desktopUpdateReleaseDir(manifest.Version)
+	if err != nil {
+		return nil, err
+	}
+	directoryInfo, err := os.Lstat(directory)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, ErrDesktopUpdateNotFound
+		}
+		return nil, err
+	}
+	if directoryInfo.Mode()&os.ModeSymlink != 0 || !directoryInfo.IsDir() {
+		return nil, ErrDesktopUpdateNotFound
+	}
+
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return nil, err
+	}
+	packagesByID := make(map[string]DesktopDownloadPackage, len(desktopDownloadDefinitions))
+	for _, entry := range entries {
+		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		definition, ok := classifyDesktopDownload(entry.Name())
+		if !ok {
+			continue
+		}
+		if err = ValidateDesktopUpdateFilename(entry.Name()); err != nil {
+			continue
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			return nil, infoErr
+		}
+		if !info.Mode().IsRegular() || info.Size() <= 0 {
+			continue
+		}
+		if _, exists := packagesByID[definition.ID]; exists {
+			return nil, fmt.Errorf("当前版本包含重复的 %s 安装包", definition.ID)
+		}
+		packagesByID[definition.ID] = DesktopDownloadPackage{
+			ID:       definition.ID,
+			OS:       definition.OS,
+			Arch:     definition.Arch,
+			Format:   definition.Format,
+			Filename: entry.Name(),
+			Size:     info.Size(),
+			URL:      desktopUpdateArtifactURL(baseURL, version, entry.Name()),
+		}
+	}
+
+	packages := make([]DesktopDownloadPackage, 0, len(packagesByID))
+	for _, definition := range desktopDownloadDefinitions {
+		if item, ok := packagesByID[definition.ID]; ok {
+			packages = append(packages, item)
+		}
+	}
+	if len(packages) == 0 {
+		return nil, ErrDesktopUpdateNotFound
+	}
+	return &DesktopDownloadCatalog{
+		Version:  version,
+		Notes:    manifest.Notes,
+		PubDate:  manifest.PubDate,
+		Packages: packages,
+	}, nil
+}
+
+func classifyDesktopDownload(filename string) (desktopDownloadDefinition, bool) {
+	lower := strings.ToLower(filename)
+	for _, definition := range desktopDownloadDefinitions {
+		for _, suffix := range definition.Suffixes {
+			if strings.HasSuffix(lower, suffix) {
+				return definition, true
+			}
+		}
+	}
+	return desktopDownloadDefinition{}, false
 }
 
 func OpenDesktopUpdateManifest() (*os.File, os.FileInfo, error) {

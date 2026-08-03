@@ -64,6 +64,12 @@ var routeMetaMap = map[string]routeMeta{
 		Canonical:   seoSiteOrigin + "/pricing",
 		OGURL:       seoSiteOrigin + "/pricing",
 	},
+	"/download": {
+		Title:       "下载 YuanHeng Desktop · 统一管理 AI 终端、客户端与模型",
+		Description: "下载 YuanHeng Desktop，统一管理 Codex、Claude Code、ChatGPT 等 AI 工具的终端、客户端、模型和分组，支持应用内自动更新。",
+		Canonical:   seoSiteOrigin + "/download",
+		OGURL:       seoSiteOrigin + "/download",
+	},
 	"/about": {
 		Title:       "关于 · 元衡 API",
 		Description: "了解元衡 API 平台背景、技术架构（基于开源 new-api）、运维状态与服务条款。",
@@ -204,6 +210,7 @@ func LoadPrerendered(buildFS embed.FS) {
 		{[]string{"/login", "/login/"}, "web/dist/login/index.html"},
 		{[]string{"/register", "/register/"}, "web/dist/register/index.html"},
 		{[]string{"/pricing", "/pricing/"}, "web/dist/pricing/index.html"},
+		{[]string{"/download", "/download/"}, "web/dist/download/index.html"},
 		{[]string{"/about", "/about/"}, "web/dist/about/index.html"},
 	}
 	loaded := map[string][]byte{}

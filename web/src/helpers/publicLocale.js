@@ -32,6 +32,7 @@ const en = {
   登录: 'Sign in',
   注册: 'Sign up',
   切换主题: 'Switch Theme',
+  切换语言: 'Change Language',
   'common.changeLanguage': 'Change Language',
   版权所有: 'All rights reserved',
   设计与开发由: 'Designed & Developed by',
@@ -143,6 +144,41 @@ const en = {
   '现在就接入，开启统一的大模型调用体验':
     'Integrate now and unlock a unified LLM experience.',
   立即开始: 'Get Started',
+  下载客户端: 'Download App',
+  返回首页: 'Back to Home',
+  '把你的 AI 工具，放进一个控制中心':
+    'Bring Your AI Tools Into One Control Center',
+  '下载安装 YuanHeng Desktop，统一管理终端、客户端、模型和分组，后续版本可在应用内直接更新。':
+    'Download YuanHeng Desktop to manage terminals, clients, models and groups in one place, with in-app updates for future releases.',
+  当前发布版本: 'Current release',
+  最新稳定版: 'Latest stable',
+  选择安装包: 'Choose Installer',
+  选择与你的电脑匹配的版本: 'Choose the Version for Your Computer',
+  '检测到 macOS，请根据芯片类型选择。':
+    'macOS detected. Choose the installer that matches your chip.',
+  '检测到 Windows，已优先显示对应版本。':
+    'Windows detected. The matching installer is shown first.',
+  正在获取最新版本: 'Loading latest release',
+  'macOS · Apple 芯片': 'macOS · Apple Silicon',
+  '适用于 Apple 芯片的 Mac': 'For Macs with Apple silicon',
+  'macOS · Intel 芯片': 'macOS · Intel',
+  '适用于 Intel 芯片的 Mac': 'For Macs with an Intel processor',
+  'Windows · 64 位': 'Windows · 64-bit',
+  '适用于 64 位 Windows 电脑': 'For 64-bit Windows PCs',
+  '下载 DMG': 'Download DMG',
+  下载安装程序: 'Download Installer',
+  当前系统: 'Your System',
+  推荐版本: 'Recommended',
+  客户端暂未开放下载: 'Desktop App Is Not Available Yet',
+  '当前还没有可公开下载的稳定版本，请稍后再来。':
+    'There is no public stable release yet. Please check back later.',
+  暂时无法获取下载信息: 'Download Information Is Temporarily Unavailable',
+  '网络或更新服务暂时不可用，请稍后重试。':
+    'The network or update service is temporarily unavailable. Please try again later.',
+  重新加载: 'Reload',
+  安装包由元衡平台直接托管: 'Installers are hosted directly by YuanHeng',
+  安装后支持应用内自动更新: 'In-app updates are available after installation',
+  正在加载: 'Loading',
 };
 
 // 公开首页仅内置 zh / en 两套词条：先走与控制台一致的归一化（localeNormalize），

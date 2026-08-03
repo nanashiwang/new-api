@@ -36,7 +36,7 @@ const DIST_DIR = resolve(WEB_ROOT, 'dist');
 // 反而让所有未识别路由的 fallback 也带上首页内容）。
 // 后端按 path 精确查 map：只有命中预渲染产物的路径返回静态 HTML，
 // 其余路径继续走 RenderIndexWithMeta 模板替换链路。
-const ROUTES = ['/login', '/register', '/pricing', '/about'];
+const ROUTES = ['/login', '/register', '/pricing', '/download', '/about'];
 
 const PREVIEW_PORT = Number(process.env.PRERENDER_PREVIEW_PORT || 4173);
 const PREVIEW_HOST = process.env.PRERENDER_PREVIEW_HOST || '127.0.0.1';
@@ -116,6 +116,42 @@ const apiMocks = new Map([
     },
   ],
   ['/api/subscription/plans', { success: true, message: '', data: [] }],
+  [
+    '/desktop/update/downloads.json',
+    {
+      version: '0.1.18',
+      pub_date: '2026-08-01T00:00:00Z',
+      packages: [
+        {
+          id: 'macos-arm64',
+          os: 'macos',
+          arch: 'arm64',
+          format: 'dmg',
+          filename: 'YuanHeng.Desktop_0.1.18_aarch64.dmg',
+          size: 22361608,
+          url: '/desktop/update/releases/0.1.18/YuanHeng.Desktop_0.1.18_aarch64.dmg',
+        },
+        {
+          id: 'macos-x64',
+          os: 'macos',
+          arch: 'x86_64',
+          format: 'dmg',
+          filename: 'YuanHeng.Desktop_0.1.18_x64.dmg',
+          size: 22877300,
+          url: '/desktop/update/releases/0.1.18/YuanHeng.Desktop_0.1.18_x64.dmg',
+        },
+        {
+          id: 'windows-x64',
+          os: 'windows',
+          arch: 'x86_64',
+          format: 'exe',
+          filename: 'YuanHeng.Desktop_0.1.18_x64-setup.exe',
+          size: 17244922,
+          url: '/desktop/update/releases/0.1.18/YuanHeng.Desktop_0.1.18_x64-setup.exe',
+        },
+      ],
+    },
+  ],
 ]);
 
 if (SKIP) {
