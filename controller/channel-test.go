@@ -66,6 +66,11 @@ func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointTyp
 	if normalized != "" {
 		return normalized
 	}
+	lowerModelName := strings.ToLower(strings.TrimSpace(modelName))
+	if common.IsImageGenerationModel(lowerModelName) ||
+		(channel != nil && channel.Type == constant.ChannelTypeVolcEngine && strings.Contains(lowerModelName, "seedream")) {
+		return string(constant.EndpointTypeImageGeneration)
+	}
 	if strings.HasSuffix(modelName, ratio_setting.CompactModelSuffix) {
 		return string(constant.EndpointTypeOpenAIResponseCompact)
 	}
@@ -125,10 +130,6 @@ func resolveTestRequestPath(channel *model.Channel, modelName, endpointType stri
 		strings.Contains(modelName, "embed") ||
 		(channel != nil && channel.Type == constant.ChannelTypeMokaAI) {
 		requestPath = "/v1/embeddings"
-	}
-
-	if channel != nil && channel.Type == constant.ChannelTypeVolcEngine && strings.Contains(modelName, "seedream") {
-		requestPath = "/v1/images/generations"
 	}
 
 	if shouldUseAnthropicMessagesPath(channel, modelName) {
@@ -919,12 +920,17 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 				Input: []any{"hello world"},
 			}
 		case constant.EndpointTypeImageGeneration:
-			// 返回 ImageRequest
+			// 生图测试使用单张、低质量的最小有效请求，降低测试耗时与费用。
+			quality := ""
+			if strings.HasPrefix(strings.ToLower(model), "gpt-image-") {
+				quality = "low"
+			}
 			return &dto.ImageRequest{
-				Model:  model,
-				Prompt: "a cute cat",
-				N:      common.GetPointer(uint(1)),
-				Size:   "1024x1024",
+				Model:   model,
+				Prompt:  "a simple white square on a plain background",
+				N:       common.GetPointer(uint(1)),
+				Size:    "1024x1024",
+				Quality: quality,
 			}
 		case constant.EndpointTypeJinaRerank:
 			// 返回 RerankRequest
