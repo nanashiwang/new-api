@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -147,6 +149,14 @@ func TestBuildImagePlaygroundLaunchURLForcesGalleryImagesMode(t *testing.T) {
 func setupImagePlaygroundGroupTestDB(t *testing.T) {
 	t.Helper()
 
+	originalDB := model.DB
+	originalLogDB := model.LOG_DB
+	originalRedisEnabled := common.RedisEnabled
+	originalMemoryCacheEnabled := common.MemoryCacheEnabled
+	originalUserUsableGroups := setting.UserUsableGroups2JSONString()
+	originalAutoGroups := setting.AutoGroups2JsonString()
+	originalGroupRatio := ratio_setting.GroupRatio2JSONString()
+
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -155,6 +165,18 @@ func setupImagePlaygroundGroupTestDB(t *testing.T) {
 	model.LOG_DB = db
 	common.RedisEnabled = false
 	common.MemoryCacheEnabled = false
+	t.Cleanup(func() {
+		model.DB = originalDB
+		model.LOG_DB = originalLogDB
+		common.RedisEnabled = originalRedisEnabled
+		common.MemoryCacheEnabled = originalMemoryCacheEnabled
+		_ = setting.UpdateUserUsableGroupsByJSONString(originalUserUsableGroups)
+		_ = setting.UpdateAutoGroupsByJsonString(originalAutoGroups)
+		_ = ratio_setting.UpdateGroupRatioByJSONString(originalGroupRatio)
+		if sqlDB, sqlErr := db.DB(); sqlErr == nil {
+			_ = sqlDB.Close()
+		}
+	})
 
 	if err := db.AutoMigrate(&model.User{}, &model.Token{}, &model.Ability{}, &model.Channel{}); err != nil {
 		t.Fatalf("migrate db: %v", err)
@@ -167,6 +189,26 @@ func setupImagePlaygroundGroupTestDB(t *testing.T) {
 	}
 	if err := ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"vip":1,"team":1}`); err != nil {
 		t.Fatalf("update group ratio: %v", err)
+	}
+}
+
+func TestBuildImagePlaygroundGroupCandidatesExcludesRemovedDefaultGroup(t *testing.T) {
+	setupImagePlaygroundGroupTestDB(t)
+
+	if err := setting.UpdateUserUsableGroupsByJSONString(`{"vip":"VIP","team":"团队"}`); err != nil {
+		t.Fatalf("update user usable groups: %v", err)
+	}
+	if err := setting.UpdateAutoGroupsByJsonString(`["default","team","vip"]`); err != nil {
+		t.Fatalf("update auto groups: %v", err)
+	}
+	if err := ratio_setting.UpdateGroupRatioByJSONString(`{"vip":1,"team":1}`); err != nil {
+		t.Fatalf("update group ratio: %v", err)
+	}
+
+	got := buildImagePlaygroundGroupCandidates("default")
+	want := []string{"team", "vip"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("buildImagePlaygroundGroupCandidates() = %v, want %v", got, want)
 	}
 }
 
@@ -254,7 +296,7 @@ func TestResolveImagePlaygroundTokenGroupPrefersImageAndAgentGroup(t *testing.T)
 	}
 }
 
-func TestResolveImagePlaygroundTokenGroupFallsBackToUserGroup(t *testing.T) {
+func TestResolveImagePlaygroundTokenGroupReturnsErrorWithoutCapableGroup(t *testing.T) {
 	setupImagePlaygroundGroupTestDB(t)
 
 	if err := model.DB.Create(&model.User{
@@ -268,18 +310,21 @@ func TestResolveImagePlaygroundTokenGroupFallsBackToUserGroup(t *testing.T) {
 	}
 
 	group, supportsEcommerce, err := resolveImagePlaygroundTokenGroup(1)
-	if err != nil {
-		t.Fatalf("resolve image playground group: %v", err)
+	if err == nil {
+		t.Fatal("resolveImagePlaygroundTokenGroup() error = nil, want no capable group error")
 	}
-	if group != "default" {
-		t.Fatalf("resolveImagePlaygroundTokenGroup() = %q, want default", group)
+	if group != "" {
+		t.Fatalf("resolveImagePlaygroundTokenGroup() group = %q, want empty", group)
 	}
 	if supportsEcommerce {
-		t.Fatal("supportsEcommerce = true, want false (no channel enabled)")
+		t.Fatal("supportsEcommerce = true, want false")
+	}
+	if !strings.Contains(err.Error(), imagePlaygroundDefaultModel) {
+		t.Fatalf("error = %q, want model name %q", err, imagePlaygroundDefaultModel)
 	}
 }
 
-func TestCreateImagePlaygroundTokenDoesNotLimitModels(t *testing.T) {
+func TestCreateImagePlaygroundTokenUsesCapableGroupWithoutModelLimits(t *testing.T) {
 	setupImagePlaygroundGroupTestDB(t)
 
 	if err := model.DB.Create(&model.User{
@@ -291,10 +336,31 @@ func TestCreateImagePlaygroundTokenDoesNotLimitModels(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
+	if err := model.DB.Create(&model.Channel{
+		Id:     10,
+		Name:   "vip-image",
+		Key:    "sk-image",
+		Group:  "vip",
+		Models: imagePlaygroundDefaultModel,
+		Status: common.ChannelStatusEnabled,
+	}).Error; err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+	if err := model.DB.Create(&model.Ability{
+		Group:     "vip",
+		Model:     imagePlaygroundDefaultModel,
+		ChannelId: 10,
+		Enabled:   true,
+	}).Error; err != nil {
+		t.Fatalf("seed ability: %v", err)
+	}
 
 	token, supportsEcommerce, err := createImagePlaygroundToken(1, 100)
 	if err != nil {
 		t.Fatalf("create image playground token: %v", err)
+	}
+	if token.Group != "vip" {
+		t.Fatalf("image playground token group = %q, want vip", token.Group)
 	}
 	if token.ModelLimitsEnabled {
 		t.Fatal("image playground token should not enable model limits")
@@ -303,7 +369,7 @@ func TestCreateImagePlaygroundTokenDoesNotLimitModels(t *testing.T) {
 		t.Fatalf("image playground token model limits = %q, want empty", token.ModelLimits)
 	}
 	if supportsEcommerce {
-		t.Fatal("supportsEcommerce = true, want false (no channel enabled in test fixture)")
+		t.Fatal("supportsEcommerce = true, want false (only image model enabled)")
 	}
 }
 
@@ -329,6 +395,17 @@ func TestClearImagePlaygroundTokenModelLimits(t *testing.T) {
 
 func TestRefreshImagePlaygroundTokenClearsLimitsAndUpdatesGroup(t *testing.T) {
 	setupImagePlaygroundGroupTestDB(t)
+
+	// 模拟 default 已从当前分组配置中移除，但历史用户和旧令牌仍保留 default。
+	if err := setting.UpdateUserUsableGroupsByJSONString(`{"vip":"VIP","team":"团队"}`); err != nil {
+		t.Fatalf("update user usable groups: %v", err)
+	}
+	if err := setting.UpdateAutoGroupsByJsonString(`["vip"]`); err != nil {
+		t.Fatalf("update auto groups: %v", err)
+	}
+	if err := ratio_setting.UpdateGroupRatioByJSONString(`{"vip":1,"team":1}`); err != nil {
+		t.Fatalf("update group ratio: %v", err)
+	}
 
 	if err := model.DB.Create(&model.User{
 		Id:       1,

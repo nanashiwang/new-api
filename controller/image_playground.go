@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/net/publicsuffix"
@@ -181,23 +183,26 @@ func clearImagePlaygroundTokenModelLimits(token *model.Token) bool {
 
 // resolveImagePlaygroundTokenGroup 选出最适合当前用户的 image-playground 分组并报告其能力。
 // 选择顺序：
-//  1. 同时支持 image + agent 模型（电商套图所需）；
-//  2. 仅支持 image 模型；
-//  3. 兜底返回用户当前分组（可能不支持任何 image 模型，由 caller 处理失败场景）。
+//  1. 当前用户分组（仅当它仍是有效、可用分组时）；
+//  2. AutoGroups 中按配置顺序排列的有效分组；
+//  3. 其余有效、可用分组（按名称排序，保证结果稳定）；
+//  4. 在上述候选中优先选择同时支持 image + agent 模型的分组，其次选择仅支持 image 的分组。
 //
-// 第二个返回值表示返回的 group 是否同时支持两个模型；caller 可直接用作 supportsEcommerce 标志，
-// 无需再次进行 ability 查询，避免每次会话生成都重复 N 次 DB/缓存调用。
+// 不再回退到 default 或已取消的用户分组：无可执行分组时直接返回配置错误，避免创建一个
+// 看似可用、实际无法路由的临时令牌。
 func resolveImagePlaygroundTokenGroup(userId int) (string, bool, error) {
 	userGroup, err := model.GetUserGroup(userId, false)
 	if err != nil {
 		return "", false, err
 	}
 	userGroup = strings.TrimSpace(userGroup)
-	if userGroup == "" {
-		userGroup = "default"
-	}
 
 	candidates := buildImagePlaygroundGroupCandidates(userGroup)
+	if len(candidates) == 0 {
+		return "", false, errors.New(
+			"当前用户没有可用于 AI 生图的有效分组，请检查用户可用分组和分组倍率配置",
+		)
+	}
 
 	// 每个 candidate 对两个模型仅查询一次，避免分支间重复触发 model.GetChannel。
 	type supportInfo struct {
@@ -206,11 +211,15 @@ func resolveImagePlaygroundTokenGroup(userId int) (string, bool, error) {
 		agent bool
 	}
 	infos := make([]supportInfo, 0, len(candidates))
+	var firstImageCheckErr error
 	for _, group := range candidates {
 		imageSupported, imageErr := imagePlaygroundGroupSupportsModel(group, imagePlaygroundDefaultModel)
 		if imageErr != nil {
 			common.SysError(fmt.Sprintf("image-playground supports check failed: group=%s model=%s err=%v",
 				group, imagePlaygroundDefaultModel, imageErr))
+			if firstImageCheckErr == nil {
+				firstImageCheckErr = imageErr
+			}
 		}
 		agentSupported, agentErr := imagePlaygroundGroupSupportsModel(group, imagePlaygroundAgentModel)
 		if agentErr != nil {
@@ -230,26 +239,46 @@ func resolveImagePlaygroundTokenGroup(userId int) (string, bool, error) {
 			return info.group, false, nil
 		}
 	}
-	return userGroup, false, nil
+	if firstImageCheckErr != nil {
+		return "", false, fmt.Errorf("检查 AI 生图分组能力失败: %w", firstImageCheckErr)
+	}
+	return "", false, fmt.Errorf(
+		"当前用户没有支持 %s 的可用分组，请检查渠道模型与分组配置",
+		imagePlaygroundDefaultModel,
+	)
 }
+
 func buildImagePlaygroundGroupCandidates(userGroup string) []string {
-	candidates := make([]string, 0)
+	usableGroups := service.GetUserUsableGroups(userGroup)
+	activeGroups := ratio_setting.GetGroupRatioCopy()
+	candidates := make([]string, 0, len(usableGroups))
 	add := func(group string) {
 		group = strings.TrimSpace(group)
 		if group == "" || common.StringsContains(candidates, group) {
+			return
+		}
+		if _, ok := usableGroups[group]; !ok {
+			return
+		}
+		if _, ok := activeGroups[group]; !ok {
 			return
 		}
 		candidates = append(candidates, group)
 	}
 
 	add(userGroup)
-	usableGroups := service.GetUserUsableGroups(userGroup)
 	for _, group := range setting.GetAutoGroups() {
-		if _, ok := usableGroups[group]; ok {
-			add(group)
+		add(group)
+	}
+
+	remainingGroups := make([]string, 0, len(usableGroups))
+	for group := range usableGroups {
+		if _, ok := activeGroups[group]; ok {
+			remainingGroups = append(remainingGroups, group)
 		}
 	}
-	for group := range usableGroups {
+	sort.Strings(remainingGroups)
+	for _, group := range remainingGroups {
 		add(group)
 	}
 	return candidates
