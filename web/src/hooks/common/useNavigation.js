@@ -41,6 +41,11 @@ export const useNavigation = (t, docsLink, headerNavModules) => {
         to: '/',
       },
       {
+        text: t('下载客户端'),
+        itemKey: 'download',
+        to: '/download',
+      },
+      {
         text: t('控制台'),
         itemKey: 'console',
         to: '/console',
@@ -76,6 +81,10 @@ export const useNavigation = (t, docsLink, headerNavModules) => {
 
     // 根据配置过滤导航链接
     return allLinks.filter((link) => {
+      // 下载入口是全局基础能力，不受历史导航模块配置影响。
+      if (link.itemKey === 'download') {
+        return true;
+      }
       if (link.itemKey === 'docs') {
         return docsLink && modules.docs;
       }

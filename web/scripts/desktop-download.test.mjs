@@ -167,13 +167,23 @@ Promise.all([
     'utf8',
   ),
   readFile(new URL('../src/index.jsx', import.meta.url), 'utf8'),
+  readFile(
+    new URL('../src/hooks/common/useNavigation.js', import.meta.url),
+    'utf8',
+  ),
 ])
-  .then(([homeSource, shellSource, entrySource]) => {
+  .then(([homeSource, shellSource, entrySource, navigationSource]) => {
     assert.match(homeSource, /to='\/download'/);
     assert.match(homeSource, /t\('下载客户端'\)/);
     assert.match(shellSource, /DesktopDownload/);
     assert.match(shellSource, /prefetchApp: false/);
     assert.match(entrySource, /download/);
+    assert.match(navigationSource, /itemKey: 'download'/);
+    assert.match(navigationSource, /to: '\/download'/);
+    assert.match(
+      navigationSource,
+      /if \(link\.itemKey === 'download'\) \{\s*return true;/,
+    );
 
     console.log('desktop download helpers: ok');
   })
