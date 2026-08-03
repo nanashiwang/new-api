@@ -233,6 +233,26 @@ func TestResolveTestRequestPath_AnthropicClaudeModelUsesMessages(t *testing.T) {
 	}
 }
 
+func TestResolveTestRequestPath_ImageGenerationModelUsesImagesEndpoint(t *testing.T) {
+	requestPath, endpointType := resolveTestRequestPath(&model.Channel{Id: 1}, "gpt-image-2", "")
+	if requestPath != "/v1/images/generations" {
+		t.Fatalf("unexpected request path: %s", requestPath)
+	}
+	if endpointType != string(constant.EndpointTypeImageGeneration) {
+		t.Fatalf("unexpected endpoint type: %s", endpointType)
+	}
+}
+
+func TestNormalizeTokenModelSupportedEndpointTypes_ImageGenerationUsesCanonicalEndpoint(t *testing.T) {
+	endpointTypes := normalizeTokenModelSupportedEndpointTypes("gpt-image-2", []constant.EndpointType{
+		constant.EndpointTypeOpenAI,
+		constant.EndpointTypeOpenAIResponse,
+	})
+	if len(endpointTypes) != 1 || endpointTypes[0] != constant.EndpointTypeImageGeneration {
+		t.Fatalf("unexpected image endpoint types: %#v", endpointTypes)
+	}
+}
+
 func TestDetectErrorFromTestResponseBody_IgnoresNullError(t *testing.T) {
 	body := []byte(`{"id":"resp_123","status":"completed","error":null,"output":[]}`)
 	if err := detectErrorFromTestResponseBody(body); err != nil {
@@ -369,6 +389,32 @@ func TestBuildChannelStyleTestExecution_ChatToResponsesUsesResponsesStream(t *te
 	}
 	if !req.Stream {
 		t.Fatal("expected responses request stream=true")
+	}
+}
+
+func TestBuildChannelStyleTestExecution_ImageGenerationUsesImageRequest(t *testing.T) {
+	execution := buildChannelStyleTestExecution(&model.Channel{Id: 1}, "gpt-image-2", "", nil)
+	if execution.requestPath != "/v1/images/generations" {
+		t.Fatalf("unexpected request path: %s", execution.requestPath)
+	}
+	if execution.endpointType != string(constant.EndpointTypeImageGeneration) {
+		t.Fatalf("unexpected endpoint type: %s", execution.endpointType)
+	}
+	if execution.relayFormat != types.RelayFormatOpenAIImage {
+		t.Fatalf("unexpected relay format: %s", execution.relayFormat)
+	}
+	if execution.isStream {
+		t.Fatal("image generation test should not use stream mode")
+	}
+	req, ok := execution.request.(*dto.ImageRequest)
+	if !ok {
+		t.Fatalf("unexpected request type: %T", execution.request)
+	}
+	if req.Model != "gpt-image-2" || req.Prompt == "" {
+		t.Fatalf("unexpected image request: %#v", req)
+	}
+	if req.N == nil || *req.N != 1 || req.Size != "1024x1024" || req.Quality != "low" {
+		t.Fatalf("unexpected image test parameters: %#v", req)
 	}
 }
 

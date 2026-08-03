@@ -251,9 +251,8 @@ func normalizeTokenModelSupportedEndpointTypes(modelName string, supportedEndpoi
 			return []constant.EndpointType{constant.EndpointTypeEmbeddings}
 		}
 	case "/v1/images/generations":
-		if len(supportedEndpointTypes) == 0 {
-			return []constant.EndpointType{constant.EndpointTypeImageGeneration}
-		}
+		// 生图模型的令牌测试必须走图片端点，避免错误落到 chat/completions。
+		return []constant.EndpointType{constant.EndpointTypeImageGeneration}
 	case "/v1/rerank":
 		if len(supportedEndpointTypes) == 0 {
 			return []constant.EndpointType{constant.EndpointTypeJinaRerank}
