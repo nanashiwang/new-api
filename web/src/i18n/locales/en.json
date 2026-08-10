@@ -5334,5 +5334,10 @@
   "发送中": "Sending",
   "已发送": "Sent",
   "发送失败": "Failed",
-  "已跳过": "Skipped"
+  "已跳过": "Skipped",
+  "最近风控时间": "Latest safety event",
+  "风控时间排序": "Safety event time sorting",
+  "风控时间排序：默认（筛选时最新优先）": "Safety event time: default (newest first when filtered)",
+  "风控时间排序：最新优先": "Safety event time: newest first",
+  "风控时间排序：最早优先": "Safety event time: oldest first"
 }

@@ -5726,5 +5726,10 @@
   "发送中": "Đang gửi",
   "已发送": "Đã gửi",
   "发送失败": "Gửi thất bại",
-  "已跳过": "Đã bỏ qua"
+  "已跳过": "Đã bỏ qua",
+  "最近风控时间": "Sự kiện an toàn gần nhất",
+  "风控时间排序": "Sắp xếp theo thời gian sự kiện an toàn",
+  "风控时间排序：默认（筛选时最新优先）": "Sự kiện an toàn: mặc định (mới nhất trước khi lọc)",
+  "风控时间排序：最新优先": "Sự kiện an toàn: mới nhất trước",
+  "风控时间排序：最早优先": "Sự kiện an toàn: cũ nhất trước"
 }

@@ -137,8 +137,8 @@ const UsersFilters = ({
       ].map((code) => ({ label: code, value: code })),
     [],
   );
-  // 两种排序可同时生效（例如 ID 降序 + 钱包额度升序）。
-  // ID 与钱包额度排序使用独立文案，避免 "asc/desc" 歧义。
+  // 多种排序可同时生效；风控时间优先，其他字段用于稳定同一时间下的次级顺序。
+  // 各字段使用独立文案，避免 "asc/desc" 歧义。
   const idSortDirectionOptions = useMemo(
     () => [
       { label: t('ID排序：默认'), value: '' },
@@ -160,6 +160,14 @@ const UsersFilters = ({
       { label: t('已使用额度排序：默认'), value: '' },
       { label: t('已使用额度排序：升序'), value: 'asc' },
       { label: t('已使用额度排序：降序'), value: 'desc' },
+    ],
+    [t],
+  );
+  const contentSafetySortDirectionOptions = useMemo(
+    () => [
+      { label: t('风控时间排序：默认（筛选时最新优先）'), value: '' },
+      { label: t('风控时间排序：最新优先'), value: 'desc' },
+      { label: t('风控时间排序：最早优先'), value: 'asc' },
     ],
     [t],
   );
@@ -613,6 +621,19 @@ const UsersFilters = ({
                 }
                 optionList={usedQuotaSortDirectionOptions}
                 placeholder={t('已使用额度排序')}
+                showClear
+              />
+              <Select
+                value={draftAdvancedFilters.searchContentSafetySortOrder}
+                onChange={(value) =>
+                  setDraftAdvancedFilters((prev) => ({
+                    ...prev,
+                    searchContentSafetySortOrder:
+                      value === null || value === undefined ? '' : value,
+                  }))
+                }
+                optionList={contentSafetySortDirectionOptions}
+                placeholder={t('风控时间排序')}
                 showClear
               />
             </div>

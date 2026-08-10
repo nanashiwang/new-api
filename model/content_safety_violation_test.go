@@ -320,6 +320,49 @@ func TestUserContentSafetyFiltersApplyBeforePagination(t *testing.T) {
 	require.EqualValues(t, 5, warnings)
 }
 
+func TestSearchUsersWithParamsSortsByLatestContentSafetyBeforePagination(t *testing.T) {
+	setupContentSafetyViolationTestDB(t)
+	now := time.Now().Unix()
+	older := createContentSafetyTestUser(t, "safety-sort-older", common.RoleCommonUser)
+	newer := createContentSafetyTestUser(t, "safety-sort-newer", common.RoleCommonUser)
+	withoutRecent := createContentSafetyTestUser(t, "safety-sort-none", common.RoleCommonUser)
+
+	require.NoError(t, DB.Create(&ContentSafetyViolation{
+		UserId: older.Id, EventKey: "safety-sort-older-event", ErrorCode: "content_filter",
+		CreatedAt: now - 120, Action: ContentSafetyActionWarning,
+	}).Error)
+	require.NoError(t, DB.Create(&ContentSafetyViolation{
+		UserId: newer.Id, EventKey: "safety-sort-newer-event", ErrorCode: "cyber_policy",
+		CreatedAt: now - 30, Action: ContentSafetyActionWarning,
+	}).Error)
+	// 超出 30 天窗口的历史记录不应参与排序，也不应显示为最近触发时间。
+	require.NoError(t, DB.Create(&ContentSafetyViolation{
+		UserId: withoutRecent.Id, EventKey: "safety-sort-expired-event", ErrorCode: "safety",
+		CreatedAt: now - int64(contentSafetyWindow.Seconds()) - 1, Action: ContentSafetyActionWarning,
+	}).Error)
+
+	users, total, err := SearchUsersWithParams(UserSearchParams{
+		ContentSafetySortOrder: "desc", SortBy: "id", SortOrder: "desc", PageSize: 2,
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 3, total)
+	require.Len(t, users, 2)
+	require.Equal(t, newer.Id, users[0].Id)
+	require.Equal(t, older.Id, users[1].Id)
+	require.Equal(t, now-30, users[0].ContentSafetyLastAt)
+	require.Equal(t, now-120, users[1].ContentSafetyLastAt)
+
+	ascending, _, err := SearchUsersWithParams(UserSearchParams{
+		ContentSafetySortOrder: "asc", SortBy: "id", SortOrder: "desc", PageSize: 3,
+	})
+	require.NoError(t, err)
+	require.Len(t, ascending, 3)
+	require.Equal(t, older.Id, ascending[0].Id)
+	require.Equal(t, newer.Id, ascending[1].Id)
+	require.Equal(t, withoutRecent.Id, ascending[2].Id)
+	require.Zero(t, ascending[2].ContentSafetyLastAt)
+}
+
 func TestAttachUserContentSafetyMetadataWithoutAuditTableIsNormal(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)

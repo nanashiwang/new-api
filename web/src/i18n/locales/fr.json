@@ -5425,5 +5425,10 @@
   "发送中": "Envoi en cours",
   "已发送": "Envoyé",
   "发送失败": "Échec de l'envoi",
-  "已跳过": "Ignoré"
+  "已跳过": "Ignoré",
+  "最近风控时间": "Dernier événement de sécurité",
+  "风控时间排序": "Tri par heure d'événement de sécurité",
+  "风控时间排序：默认（筛选时最新优先）": "Événement de sécurité : par défaut (plus récents d'abord avec filtre)",
+  "风控时间排序：最新优先": "Événement de sécurité : plus récents d'abord",
+  "风控时间排序：最早优先": "Événement de sécurité : plus anciens d'abord"
 }

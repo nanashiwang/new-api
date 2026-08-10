@@ -403,6 +403,11 @@ func SearchUsers(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	contentSafetySortOrder, err := parseOptionalSortOrderQuery(c.Query("content_safety_sort_order"), "content_safety_sort_order")
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 
 	sortBy, sortOrder, idSortOrder, balanceSortOrder, usedQuotaSortOrder, err := parseUserSortQuery(c)
 	if err != nil {
@@ -412,31 +417,32 @@ func SearchUsers(c *gin.Context) {
 
 	pageInfo := common.GetPageQuery(c)
 	users, total, err := model.SearchUsersWithParams(model.UserSearchParams{
-		Keyword:               keyword,
-		Group:                 group,
-		Role:                  role,
-		Status:                status,
-		InviterID:             inviterID,
-		InviteeUserID:         inviteeUserID,
-		HasInviter:            hasInviter,
-		HasInvitees:           hasInvitees,
-		HasActiveSubscription: hasActiveSubscription,
-		HasSellableToken:      hasSellableToken,
-		WalletMin:             walletMin,
-		WalletMax:             walletMax,
-		UsedBalanceMin:        usedBalanceMin,
-		UsedBalanceMax:        usedBalanceMax,
-		RegisterSource:        registerSource,
-		RegisterIP:            registerIP,
-		ContentSafetyStatus:   contentSafetyStatus,
-		ContentSafetyCodes:    contentSafetyCodes,
-		SortBy:                sortBy,
-		SortOrder:             sortOrder,
-		IdSortOrder:           idSortOrder,
-		WalletSortOrder:       balanceSortOrder,
-		UsedQuotaSortOrder:    usedQuotaSortOrder,
-		StartIdx:              pageInfo.GetStartIdx(),
-		PageSize:              pageInfo.GetPageSize(),
+		Keyword:                keyword,
+		Group:                  group,
+		Role:                   role,
+		Status:                 status,
+		InviterID:              inviterID,
+		InviteeUserID:          inviteeUserID,
+		HasInviter:             hasInviter,
+		HasInvitees:            hasInvitees,
+		HasActiveSubscription:  hasActiveSubscription,
+		HasSellableToken:       hasSellableToken,
+		WalletMin:              walletMin,
+		WalletMax:              walletMax,
+		UsedBalanceMin:         usedBalanceMin,
+		UsedBalanceMax:         usedBalanceMax,
+		RegisterSource:         registerSource,
+		RegisterIP:             registerIP,
+		ContentSafetyStatus:    contentSafetyStatus,
+		ContentSafetyCodes:     contentSafetyCodes,
+		ContentSafetySortOrder: contentSafetySortOrder,
+		SortBy:                 sortBy,
+		SortOrder:              sortOrder,
+		IdSortOrder:            idSortOrder,
+		WalletSortOrder:        balanceSortOrder,
+		UsedQuotaSortOrder:     usedQuotaSortOrder,
+		StartIdx:               pageInfo.GetStartIdx(),
+		PageSize:               pageInfo.GetPageSize(),
 	})
 	if err != nil {
 		common.ApiError(c, err)
@@ -609,6 +615,16 @@ func parseOptionalBoolQuery(raw string, name string) (*bool, error) {
 		return nil, fmt.Errorf("参数 %s 不是有效布尔值", name)
 	}
 	return &value, nil
+}
+
+func parseOptionalSortOrderQuery(raw string, name string) (string, error) {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	switch value {
+	case "", "asc", "desc":
+		return value, nil
+	default:
+		return "", fmt.Errorf("参数 %s 仅支持 asc 或 desc", name)
+	}
 }
 
 func parseUserSortQuery(c *gin.Context) (string, string, string, string, string, error) {

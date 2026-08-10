@@ -222,6 +222,33 @@ func applyUserContentSafetyFilters(tx *gorm.DB, query *gorm.DB, params UserSearc
 	return query
 }
 
+func applyUserContentSafetySort(tx *gorm.DB, query *gorm.DB, sortOrder string, fallbackOrder string) (*gorm.DB, string) {
+	normalizedOrder := normalizeUserSortOrder(sortOrder)
+	if normalizedOrder == "" || !tx.Migrator().HasTable(&ContentSafetyViolation{}) {
+		return query, fallbackOrder
+	}
+
+	// 排序口径必须与用户列表展示的 ContentSafetyLastAt 一致：只统计最近 30 天。
+	// 先聚合再 JOIN，避免在 users 主查询中直接关联多条违规记录导致重复用户、总数失真或分页漂移。
+	cutoff := time.Now().Unix() - int64(contentSafetyWindow.Seconds())
+	latestViolation := tx.Model(&ContentSafetyViolation{}).
+		Select("user_id, MAX(created_at) AS last_at").
+		Where("created_at >= ?", cutoff).
+		Group("user_id")
+	query = query.Joins(
+		"LEFT JOIN (?) AS content_safety_sort ON content_safety_sort.user_id = users.id",
+		latestViolation,
+	)
+
+	// 无近期记录的用户始终排在有记录用户之后；否则升序时 NULL/0 会占据列表顶部，
+	// 与管理员“查看风控事件时间线”的目标相反。
+	orderClause := "CASE WHEN content_safety_sort.last_at IS NULL THEN 1 ELSE 0 END ASC, content_safety_sort.last_at " + normalizedOrder
+	if strings.TrimSpace(fallbackOrder) != "" {
+		orderClause += ", " + fallbackOrder
+	}
+	return query, orderClause
+}
+
 func AttachUserContentSafetyMetadata(tx *gorm.DB, users []*User) error {
 	if len(users) == 0 {
 		return nil

@@ -785,6 +785,12 @@ export const getUsersColumns = ({
         renderContentSafety(record, t, showContentSafetyReviewModal),
     },
     {
+      title: t('最近风控时间'),
+      dataIndex: 'content_safety_last_at',
+      key: 'content_safety_last_at',
+      render: renderTimestamp,
+    },
+    {
       title: t('套餐情况'),
       dataIndex: 'subscription_status',
       key: 'subscription_status',

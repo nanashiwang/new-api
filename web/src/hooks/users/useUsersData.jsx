@@ -43,12 +43,32 @@ const DEFAULT_ADVANCED_FILTERS = {
   searchRegisterIp: '',
   searchContentSafetyStatus: '',
   searchContentSafetyCodes: [],
-  // 复合排序支持 ID、钱包额度、已使用额度同时生效。
+  searchContentSafetySortOrder: '',
+  // 复合排序支持风控时间、ID、钱包额度、已使用额度同时生效。
   searchIdSortOrder: '',
   searchWalletSortOrder: '',
   searchUsedQuotaSortOrder: '',
 };
 const USERS_ADVANCED_FILTERS_STORAGE_KEY = 'users-advanced-filters';
+
+const withDefaultContentSafetySort = (filters) => {
+  const normalized = { ...(filters || {}) };
+  const contentSafetyStatus = normalized.searchContentSafetyStatus || '';
+  const isViolationView =
+    (contentSafetyStatus !== '' && contentSafetyStatus !== 'normal') ||
+    (Array.isArray(normalized.searchContentSafetyCodes) &&
+      normalized.searchContentSafetyCodes.length > 0);
+  const hasExplicitSort = [
+    normalized.searchContentSafetySortOrder,
+    normalized.searchIdSortOrder,
+    normalized.searchWalletSortOrder,
+    normalized.searchUsedQuotaSortOrder,
+  ].some((value) => value === 'asc' || value === 'desc');
+  if (isViolationView && !hasExplicitSort) {
+    normalized.searchContentSafetySortOrder = 'desc';
+  }
+  return normalized;
+};
 
 const getInitialAdvancedFilters = () => {
   try {
@@ -129,7 +149,7 @@ export const useUsersData = () => {
 
   const normalizeAdvancedFilters = (filters) => {
     const next = { ...DEFAULT_ADVANCED_FILTERS, ...(filters || {}) };
-    return {
+    const normalized = {
       searchRole: next.searchRole ?? '',
       searchStatus: next.searchStatus ?? '',
       searchInviterId: next.searchInviterId ?? '',
@@ -149,10 +169,12 @@ export const useUsersData = () => {
             (code) => typeof code === 'string' && code.trim() !== '',
           )
         : [],
+      searchContentSafetySortOrder: next.searchContentSafetySortOrder ?? '',
       searchIdSortOrder: next.searchIdSortOrder ?? '',
       searchWalletSortOrder: next.searchWalletSortOrder ?? '',
       searchUsedQuotaSortOrder: next.searchUsedQuotaSortOrder ?? '',
     };
+    return normalized;
   };
 
   const hasAdvancedFilters = (filters) => {
@@ -283,6 +305,9 @@ export const useUsersData = () => {
     if (searchWalletMax === null) {
       searchWalletMax = resolvedAdvanced.searchWalletMax;
     }
+    // 仅在本次请求中应用风控视图的默认排序，避免把隐式默认值写入本地筛选状态；
+    // 用户清除风控筛选后会自然恢复原有 ID 排序。
+    resolvedAdvanced = withDefaultContentSafetySort(resolvedAdvanced);
 
     const keyword = (searchKeyword || '').trim();
     const group = (searchGroup || '').trim();
@@ -392,6 +417,13 @@ export const useUsersData = () => {
       if (resolvedAdvanced.searchContentSafetyCodes.length > 0) {
         params.content_safety_codes =
           resolvedAdvanced.searchContentSafetyCodes.join(',');
+      }
+      if (
+        resolvedAdvanced.searchContentSafetySortOrder === 'asc' ||
+        resolvedAdvanced.searchContentSafetySortOrder === 'desc'
+      ) {
+        params.content_safety_sort_order =
+          resolvedAdvanced.searchContentSafetySortOrder;
       }
       const res = await API.get('/api/user/search', { params });
       if (!isLatestRequest(reqId)) {

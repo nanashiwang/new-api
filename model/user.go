@@ -146,31 +146,32 @@ type User struct {
 }
 
 type UserSearchParams struct {
-	Keyword               string
-	Group                 string
-	Role                  *int
-	Status                *int
-	InviterID             *int
-	InviteeUserID         *int
-	HasInviter            *bool
-	HasInvitees           *bool
-	HasActiveSubscription *bool
-	HasSellableToken      *bool
-	WalletMin             *int
-	WalletMax             *int
-	UsedBalanceMin        *int
-	UsedBalanceMax        *int
-	RegisterSource        string
-	RegisterIP            string
-	ContentSafetyStatus   string
-	ContentSafetyCodes    []string
-	SortBy                string
-	SortOrder             string
-	IdSortOrder           string
-	WalletSortOrder       string
-	UsedQuotaSortOrder    string
-	StartIdx              int
-	PageSize              int
+	Keyword                string
+	Group                  string
+	Role                   *int
+	Status                 *int
+	InviterID              *int
+	InviteeUserID          *int
+	HasInviter             *bool
+	HasInvitees            *bool
+	HasActiveSubscription  *bool
+	HasSellableToken       *bool
+	WalletMin              *int
+	WalletMax              *int
+	UsedBalanceMin         *int
+	UsedBalanceMax         *int
+	RegisterSource         string
+	RegisterIP             string
+	ContentSafetyStatus    string
+	ContentSafetyCodes     []string
+	ContentSafetySortOrder string
+	SortBy                 string
+	SortOrder              string
+	IdSortOrder            string
+	WalletSortOrder        string
+	UsedQuotaSortOrder     string
+	StartIdx               int
+	PageSize               int
 }
 
 type InviteIncomeSummary struct {
@@ -653,6 +654,7 @@ func SearchUsersWithParams(params UserSearchParams) ([]*User, int64, error) {
 	}
 
 	orderClause := buildUserOrderClause(params.SortBy, params.SortOrder, params.IdSortOrder, params.WalletSortOrder, params.UsedQuotaSortOrder)
+	query, orderClause = applyUserContentSafetySort(tx, query, params.ContentSafetySortOrder, orderClause)
 
 	// 获取分页数据
 	err = query.Omit("password", "access_token").Order(orderClause).Limit(pageSize).Offset(startIdx).Find(&users).Error
