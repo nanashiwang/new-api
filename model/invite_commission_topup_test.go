@@ -2,6 +2,7 @@ package model
 
 import (
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -15,19 +16,170 @@ func setupInviteCommissionTopUpTest(t *testing.T) {
 
 	originEnabled := common.InviterCommissionEnabled
 	originRate := common.InviterRechargeCommissionRate
+	originSecondLevelRate := common.InviterRechargeSecondLevelCommissionRate
 	originQuotaPerUnit := common.QuotaPerUnit
 	originPrice := operation_setting.Price
 	t.Cleanup(func() {
 		common.InviterCommissionEnabled = originEnabled
 		common.InviterRechargeCommissionRate = originRate
+		common.InviterRechargeSecondLevelCommissionRate = originSecondLevelRate
 		common.QuotaPerUnit = originQuotaPerUnit
 		operation_setting.Price = originPrice
 	})
 
 	common.InviterCommissionEnabled = true
 	common.InviterRechargeCommissionRate = 0.1
+	common.InviterRechargeSecondLevelCommissionRate = 0
 	common.QuotaPerUnit = 1000
 	operation_setting.Price = 1
+}
+
+func TestEnqueueInviteCommissionFromTopUp_CreatesAndSettlesTwoLevels(t *testing.T) {
+	setupInviteCommissionTopUpTest(t)
+
+	originDailyCap := common.InviterCommissionDailyCap
+	common.InviterCommissionDailyCap = 0
+	common.InviterRechargeSecondLevelCommissionRate = 0.05
+	t.Cleanup(func() {
+		common.InviterCommissionDailyCap = originDailyCap
+	})
+
+	grandparent := createInviteCommissionTestUser(t, "grandparent_topup_two_level", 0)
+	parent := createInviteCommissionTestUser(t, "parent_topup_two_level", grandparent.Id)
+	invitee := createInviteCommissionTestUser(t, "invitee_topup_two_level", parent.Id)
+	topUp := createInviteCommissionTopUp(t, invitee.Id, "topup_two_level_001", 100, 100, 100, common.TopUpStatusSuccess)
+
+	require.NoError(t, EnqueueInviteCommissionFromTopUp(topUp))
+	require.NoError(t, EnqueueInviteCommissionFromTopUp(topUp))
+
+	var ledgers []*InviteCommissionLedger
+	require.NoError(t, DB.Where("topup_trade_no = ?", topUp.TradeNo).Order("commission_level asc").Find(&ledgers).Error)
+	require.Len(t, ledgers, 2)
+
+	direct := ledgers[0]
+	assert.Equal(t, InviteCommissionLevelDirect, direct.CommissionLevel)
+	assert.Equal(t, parent.Id, direct.InviterUserId)
+	assert.Equal(t, invitee.Id, direct.DirectInviteeUserId)
+	assert.Equal(t, 0.1, direct.CommissionRate)
+	assert.Equal(t, 10000, direct.CommissionQuota)
+
+	indirect := ledgers[1]
+	assert.Equal(t, InviteCommissionLevelIndirect, indirect.CommissionLevel)
+	assert.Equal(t, grandparent.Id, indirect.InviterUserId)
+	assert.Equal(t, parent.Id, indirect.DirectInviteeUserId)
+	assert.Equal(t, 0.05, indirect.CommissionRate)
+	assert.Equal(t, 5000, indirect.CommissionQuota)
+
+	settled, skipped, processed, err := SettleInviteCommissionByBizDate("2099-01-01", 10)
+	require.NoError(t, err)
+	assert.Equal(t, 2, settled)
+	assert.Equal(t, 0, skipped)
+	assert.Equal(t, 2, processed)
+
+	var refreshedParent User
+	require.NoError(t, DB.First(&refreshedParent, parent.Id).Error)
+	assert.Equal(t, 10000, refreshedParent.AffQuota)
+	assert.Equal(t, 10000, refreshedParent.AffHistoryQuota)
+
+	var refreshedGrandparent User
+	require.NoError(t, DB.First(&refreshedGrandparent, grandparent.Id).Error)
+	assert.Equal(t, 5000, refreshedGrandparent.AffQuota)
+	assert.Equal(t, 5000, refreshedGrandparent.AffHistoryQuota)
+}
+
+func TestEnqueueInviteCommissionFromTopUp_AllowsSecondLevelOnly(t *testing.T) {
+	setupInviteCommissionTopUpTest(t)
+	common.InviterRechargeCommissionRate = 0
+	common.InviterRechargeSecondLevelCommissionRate = 0.05
+
+	grandparent := createInviteCommissionTestUser(t, "grandparent_topup_second_only", 0)
+	parent := createInviteCommissionTestUser(t, "parent_topup_second_only", grandparent.Id)
+	invitee := createInviteCommissionTestUser(t, "invitee_topup_second_only", parent.Id)
+	topUp := createInviteCommissionTopUp(t, invitee.Id, "topup_second_only_001", 100, 100, 100, common.TopUpStatusSuccess)
+
+	require.NoError(t, EnqueueInviteCommissionFromTopUp(topUp))
+
+	var ledgers []*InviteCommissionLedger
+	require.NoError(t, DB.Where("topup_trade_no = ?", topUp.TradeNo).Find(&ledgers).Error)
+	require.Len(t, ledgers, 1)
+	assert.Equal(t, InviteCommissionLevelIndirect, ledgers[0].CommissionLevel)
+	assert.Equal(t, grandparent.Id, ledgers[0].InviterUserId)
+}
+
+func TestEnqueueInviteCommissionFromTopUp_SkipsSecondLevelWithoutGrandparent(t *testing.T) {
+	setupInviteCommissionTopUpTest(t)
+	common.InviterRechargeSecondLevelCommissionRate = 0.05
+
+	parent := createInviteCommissionTestUser(t, "parent_topup_no_grandparent", 0)
+	invitee := createInviteCommissionTestUser(t, "invitee_topup_no_grandparent", parent.Id)
+	topUp := createInviteCommissionTopUp(t, invitee.Id, "topup_no_grandparent_001", 100, 100, 100, common.TopUpStatusSuccess)
+
+	require.NoError(t, EnqueueInviteCommissionFromTopUp(topUp))
+
+	var ledgers []*InviteCommissionLedger
+	require.NoError(t, DB.Where("topup_trade_no = ?", topUp.TradeNo).Find(&ledgers).Error)
+	require.Len(t, ledgers, 1)
+	assert.Equal(t, InviteCommissionLevelDirect, ledgers[0].CommissionLevel)
+	assert.Equal(t, parent.Id, ledgers[0].InviterUserId)
+}
+
+func TestSettleInviteCommission_AppliesDailyCapPerBeneficiary(t *testing.T) {
+	setupInviteCommissionTopUpTest(t)
+	common.InviterRechargeSecondLevelCommissionRate = 0.05
+
+	originDailyCap := common.InviterCommissionDailyCap
+	common.InviterCommissionDailyCap = 7000
+	t.Cleanup(func() {
+		common.InviterCommissionDailyCap = originDailyCap
+	})
+
+	grandparent := createInviteCommissionTestUser(t, "grandparent_topup_cap", 0)
+	parent := createInviteCommissionTestUser(t, "parent_topup_cap", grandparent.Id)
+	invitee := createInviteCommissionTestUser(t, "invitee_topup_cap", parent.Id)
+	topUp := createInviteCommissionTopUp(t, invitee.Id, "topup_cap_two_level_001", 100, 100, 100, common.TopUpStatusSuccess)
+
+	require.NoError(t, EnqueueInviteCommissionFromTopUp(topUp))
+	settled, skipped, processed, err := SettleInviteCommissionByBizDate(time.Unix(topUp.CompleteTime, 0).Format("2006-01-02"), 10)
+	require.NoError(t, err)
+	assert.Equal(t, 2, settled)
+	assert.Equal(t, 0, skipped)
+	assert.Equal(t, 2, processed)
+
+	var refreshedParent User
+	require.NoError(t, DB.First(&refreshedParent, parent.Id).Error)
+	assert.Equal(t, 7000, refreshedParent.AffQuota)
+
+	var refreshedGrandparent User
+	require.NoError(t, DB.First(&refreshedGrandparent, grandparent.Id).Error)
+	assert.Equal(t, 5000, refreshedGrandparent.AffQuota)
+
+	var capStates []*InviteCommissionDailyCapState
+	require.NoError(t, DB.Order("inviter_user_id asc").Find(&capStates).Error)
+	require.Len(t, capStates, 2)
+	settledByInviter := map[int]int{}
+	for _, state := range capStates {
+		settledByInviter[state.InviterUserId] = state.SettledQuota
+	}
+	assert.Equal(t, 7000, settledByInviter[parent.Id])
+	assert.Equal(t, 5000, settledByInviter[grandparent.Id])
+}
+
+func TestEnqueueInviteCommissionFromTopUp_SkipsCyclicGrandparent(t *testing.T) {
+	setupInviteCommissionTopUpTest(t)
+	common.InviterRechargeSecondLevelCommissionRate = 0.05
+
+	parent := createInviteCommissionTestUser(t, "parent_topup_cycle", 0)
+	invitee := createInviteCommissionTestUser(t, "invitee_topup_cycle", parent.Id)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", parent.Id).Update("inviter_id", invitee.Id).Error)
+	topUp := createInviteCommissionTopUp(t, invitee.Id, "topup_cycle_001", 100, 100, 100, common.TopUpStatusSuccess)
+
+	require.NoError(t, EnqueueInviteCommissionFromTopUp(topUp))
+
+	var ledgers []*InviteCommissionLedger
+	require.NoError(t, DB.Where("topup_trade_no = ?", topUp.TradeNo).Find(&ledgers).Error)
+	require.Len(t, ledgers, 1)
+	assert.Equal(t, InviteCommissionLevelDirect, ledgers[0].CommissionLevel)
+	assert.Equal(t, parent.Id, ledgers[0].InviterUserId)
 }
 
 func createInviteCommissionTopUp(t *testing.T, userID int, tradeNo string, amount int64, money, paidMoney float64, status string) *TopUp {

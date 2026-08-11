@@ -1,3 +1,21 @@
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Card, Modal, Space, Tag, Typography } from '@douyinfe/semi-ui';
 import {
@@ -93,6 +111,15 @@ const InviteCommissionModal = ({ visible, onCancel, t }) => {
         render: (registeredDate) => registeredDate || '-',
       },
       {
+        title: t('返佣层级'),
+        dataIndex: 'commission_level',
+        render: (level) => (
+          <Tag color={Number(level) === 2 ? 'violet' : 'blue'} shape='circle'>
+            {Number(level) === 2 ? t('二级') : t('一级')}
+          </Tag>
+        ),
+      },
+      {
         title: t('充值金额'),
         dataIndex: 'recharge_total_money',
         render: (money) => renderRechargeMoney(money),
@@ -129,7 +156,7 @@ const InviteCommissionModal = ({ visible, onCancel, t }) => {
         <Card className='!rounded-2xl shadow-sm border-0'>
           <Space wrap>
             <Tag color='white' shape='circle'>
-              {t('邀请人数')}：{inviteesTotal}
+              {t('返佣来源项数')}：{inviteesTotal}
             </Tag>
             <Tag color='white' shape='circle'>
               {t('充值返佣汇总')}：
@@ -139,7 +166,7 @@ const InviteCommissionModal = ({ visible, onCancel, t }) => {
           <div className='mt-2'>
             <Text type='tertiary' size='small'>
               {t(
-                '仅按匿名用户汇总已结算充值记录的实付金额和返佣，不展示被邀请人的真实账号信息；数据每天 24 点刷新。',
+                '一级按匿名用户、二级按直接下级分支汇总已结算返佣；不展示下级的下级账号和逐人注册信息，数据每天 24 点刷新。',
               )}
             </Text>
           </div>

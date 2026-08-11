@@ -38,6 +38,7 @@ export default function SettingsCreditLimit(props) {
     QuotaForInvitee: '',
     InviterCommissionEnabled: false,
     InviterRechargeCommissionRate: '',
+    InviterRechargeSecondLevelCommissionRate: '',
     InviterCommissionDailyCap: '',
     InvoiceServiceFeeRate: '',
     'quota_setting.enable_free_model_pre_consume': true,
@@ -52,6 +53,16 @@ export default function SettingsCreditLimit(props) {
         maximumFractionDigits: 2,
       })
     : '0';
+  const inviterSecondLevelCommissionRate = Number.parseFloat(
+    inputs.InviterRechargeSecondLevelCommissionRate,
+  );
+  const inviterSecondLevelCommissionPercent = Number.isFinite(
+    inviterSecondLevelCommissionRate,
+  )
+    ? (inviterSecondLevelCommissionRate * 100).toLocaleString(undefined, {
+        maximumFractionDigits: 2,
+      })
+    : '0';
   const invoiceFeeRate = Number.parseFloat(inputs.InvoiceServiceFeeRate);
   const invoiceFeePercent = Number.isFinite(invoiceFeeRate)
     ? (invoiceFeeRate * 100).toLocaleString(undefined, {
@@ -59,39 +70,72 @@ export default function SettingsCreditLimit(props) {
       })
     : '0';
 
-  function onSubmit() {
+  async function onSubmit() {
     const updateArray = compareObjects(inputs, inputsRow);
     if (!updateArray.length) return showWarning(t('你似乎并没有修改什么'));
-    const requestQueue = updateArray.map((item) => {
+
+    const firstLevelRate = Number(inputs.InviterRechargeCommissionRate);
+    const secondLevelRate = Number(
+      inputs.InviterRechargeSecondLevelCommissionRate,
+    );
+    if (
+      !Number.isFinite(firstLevelRate) ||
+      !Number.isFinite(secondLevelRate) ||
+      firstLevelRate < 0 ||
+      firstLevelRate > 1 ||
+      secondLevelRate < 0 ||
+      secondLevelRate > 1 ||
+      firstLevelRate + secondLevelRate > 1
+    ) {
+      return showError(
+        t('一级和二级返佣比例必须分别在 0 到 1 之间，且合计不能超过 1'),
+      );
+    }
+
+    const rateKeys = new Set([
+      'InviterRechargeCommissionRate',
+      'InviterRechargeSecondLevelCommissionRate',
+    ]);
+    const makeRequest = async (item) => {
       let value = '';
       if (typeof inputs[item.key] === 'boolean') {
         value = String(inputs[item.key]);
       } else {
         value = inputs[item.key];
       }
-      return API.put('/api/option/', {
+      const response = await API.put('/api/option/', {
         key: item.key,
         value,
       });
-    });
-    setLoading(true);
-    Promise.all(requestQueue)
-      .then((res) => {
-        if (requestQueue.length === 1) {
-          if (res.includes(undefined)) return;
-        } else if (requestQueue.length > 1) {
-          if (res.includes(undefined))
-            return showError(t('部分保存失败，请重试'));
-        }
-        showSuccess(t('保存成功'));
-        props.refresh();
-      })
-      .catch(() => {
-        showError(t('保存失败，请重试'));
-      })
-      .finally(() => {
-        setLoading(false);
+      if (!response?.data?.success) {
+        throw new Error(response?.data?.message || t('保存失败，请重试'));
+      }
+      return response;
+    };
+    // 当一级下降、二级上升（或反向）时先保存下降项，避免中间态短暂超过 100%。
+    const rateUpdates = updateArray
+      .filter((item) => rateKeys.has(item.key))
+      .sort((left, right) => {
+        const leftDelta =
+          Number(inputs[left.key]) - Number(inputsRow[left.key] || 0);
+        const rightDelta =
+          Number(inputs[right.key]) - Number(inputsRow[right.key] || 0);
+        return leftDelta - rightDelta;
       });
+    const otherUpdates = updateArray.filter((item) => !rateKeys.has(item.key));
+    setLoading(true);
+    try {
+      for (const item of rateUpdates) {
+        await makeRequest(item);
+      }
+      await Promise.all(otherUpdates.map(makeRequest));
+      showSuccess(t('保存成功'));
+      props.refresh();
+    } catch (error) {
+      showError(error?.message || t('保存失败，请重试'));
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -100,6 +144,9 @@ export default function SettingsCreditLimit(props) {
       if (Object.keys(inputs).includes(key)) {
         currentInputs[key] = props.options[key];
       }
+    }
+    if (currentInputs.InviterRechargeSecondLevelCommissionRate === undefined) {
+      currentInputs.InviterRechargeSecondLevelCommissionRate = '0';
     }
     setInputs(currentInputs);
     setInputsRow(structuredClone(currentInputs));
@@ -186,19 +233,44 @@ export default function SettingsCreditLimit(props) {
               </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={6}>
                 <Form.InputNumber
-                  label={t('邀请充值返佣比例')}
+                  label={t('一级邀请充值返佣比例')}
                   field={'InviterRechargeCommissionRate'}
                   step={0.01}
                   min={0}
                   max={1}
-                  extraText={t('按充值额度计算，当前比例 {{ratePercent}}%，T+1 结算', {
-                    ratePercent: inviterCommissionPercent,
-                  })}
+                  extraText={t(
+                    '按充值额度计算，当前比例 {{ratePercent}}%，T+1 结算',
+                    {
+                      ratePercent: inviterCommissionPercent,
+                    },
+                  )}
                   placeholder={t('例如：0.1')}
                   onChange={(value) =>
                     setInputs({
                       ...inputs,
                       InviterRechargeCommissionRate: String(value),
+                    })
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={6}>
+                <Form.InputNumber
+                  label={t('二级邀请充值返佣比例')}
+                  field={'InviterRechargeSecondLevelCommissionRate'}
+                  step={0.01}
+                  min={0}
+                  max={1}
+                  extraText={t(
+                    '下级成功绑定后，其下级自动继承为二级关系；当前比例 {{ratePercent}}%，不重复抽取绑定概率',
+                    {
+                      ratePercent: inviterSecondLevelCommissionPercent,
+                    },
+                  )}
+                  placeholder={t('例如：0.05')}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      InviterRechargeSecondLevelCommissionRate: String(value),
                     })
                   }
                 />
@@ -227,9 +299,12 @@ export default function SettingsCreditLimit(props) {
                   step={0.01}
                   min={0}
                   max={1}
-                  extraText={t('按发票开票金额计算，申请时从钱包额度扣除，当前比例 {{ratePercent}}%', {
-                    ratePercent: invoiceFeePercent,
-                  })}
+                  extraText={t(
+                    '按发票开票金额计算，申请时从钱包额度扣除，当前比例 {{ratePercent}}%',
+                    {
+                      ratePercent: invoiceFeePercent,
+                    },
+                  )}
                   placeholder={t('例如：0.01')}
                   onChange={(value) =>
                     setInputs({

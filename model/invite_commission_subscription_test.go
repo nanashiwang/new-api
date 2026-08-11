@@ -345,6 +345,46 @@ func TestCompleteSubscriptionOrder_EnqueueInviteCommissionByPaidAmount_StackAndI
 	assert.EqualValues(t, 1, subCount)
 }
 
+func TestCompleteSubscriptionOrder_EnqueueInviteCommissionTwoLevels(t *testing.T) {
+	setupInviteCommissionSubscriptionTest(t)
+
+	originEnabled := common.InviterCommissionEnabled
+	originFirstRate := common.InviterRechargeCommissionRate
+	originSecondRate := common.InviterRechargeSecondLevelCommissionRate
+	originQuotaPerUnit := common.QuotaPerUnit
+	originPrice := operation_setting.Price
+	t.Cleanup(func() {
+		common.InviterCommissionEnabled = originEnabled
+		common.InviterRechargeCommissionRate = originFirstRate
+		common.InviterRechargeSecondLevelCommissionRate = originSecondRate
+		common.QuotaPerUnit = originQuotaPerUnit
+		operation_setting.Price = originPrice
+	})
+	common.InviterCommissionEnabled = true
+	common.InviterRechargeCommissionRate = 0.1
+	common.InviterRechargeSecondLevelCommissionRate = 0.05
+	common.QuotaPerUnit = 1000
+	operation_setting.Price = 8
+
+	grandparent := createInviteCommissionTestUser(t, "grandparent_sub_two_level", 0)
+	parent := createInviteCommissionTestUser(t, "parent_sub_two_level", grandparent.Id)
+	invitee := createInviteCommissionTestUser(t, "invitee_sub_two_level", parent.Id)
+	plan := createSubscriptionPlanForInviteCommissionTest(t, "两级返佣月卡", 88, 3000000000)
+
+	tradeNo := "sub_invite_two_level_001"
+	createSubscriptionOrderForInviteCommissionTest(t, invitee.Id, plan.Id, tradeNo, 88, SubscriptionPurchaseModeStack, 0)
+	require.NoError(t, CompleteSubscriptionOrder(tradeNo, `{"status":"success"}`))
+	require.NoError(t, CompleteSubscriptionOrder(tradeNo, `{"status":"success"}`))
+
+	var ledgers []*InviteCommissionLedger
+	require.NoError(t, DB.Where("topup_trade_no = ?", tradeNo).Order("commission_level asc").Find(&ledgers).Error)
+	require.Len(t, ledgers, 2)
+	assert.Equal(t, parent.Id, ledgers[0].InviterUserId)
+	assert.Equal(t, 1100, ledgers[0].CommissionQuota)
+	assert.Equal(t, grandparent.Id, ledgers[1].InviterUserId)
+	assert.Equal(t, 550, ledgers[1].CommissionQuota)
+}
+
 func TestCompleteSubscriptionOrder_EnqueueInviteCommission_Renew(t *testing.T) {
 	setupInviteCommissionSubscriptionTest(t)
 
