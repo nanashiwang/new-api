@@ -103,6 +103,7 @@ func AddRedemption(c *gin.Context) {
 			SubscriptionPurchaseMode:     model.NormalizeSubscriptionPurchaseMode(redemption.SubscriptionPurchaseMode),
 			SubscriptionPurchaseQuantity: redemption.SubscriptionPurchaseQuantity,
 			ExpiredTime:                  redemption.ExpiredTime,
+			FundingSource:                model.RedemptionFundingSourceAdmin,
 		}
 		err = cleanRedemption.Insert()
 		if err != nil {
@@ -151,6 +152,10 @@ func UpdateRedemption(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	if cleanRedemption.FundingSource == model.RedemptionFundingSourceWallet {
+		common.ApiErrorMsg(c, "用户钱包创建的兑换码不允许由管理员编辑或禁用")
+		return
+	}
 	if statusOnly == "" {
 		if cleanRedemption.Status == common.RedemptionCodeStatusUsed {
 			// 已使用兑换码禁止改权益，避免出现“账已经发出，后台又改成别的权益”的审计问题。
@@ -189,6 +194,57 @@ func UpdateRedemption(c *gin.Context) {
 		"data":    cleanRedemption,
 	})
 	return
+}
+
+type createWalletRedemptionRequest struct {
+	Quota     int    `json:"quota"`
+	RequestID string `json:"request_id"`
+}
+
+func CreateSelfRedemption(c *gin.Context) {
+	userID := c.GetInt("id")
+	lock := getTopUpLock(userID)
+	if !lock.TryLock() {
+		common.ApiErrorI18n(c, i18n.MsgUserTopUpProcessing)
+		return
+	}
+	defer lock.Unlock()
+
+	var req createWalletRedemptionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	result, err := model.CreateWalletFundedRedemption(userID, req.Quota, req.RequestID)
+	if err != nil {
+		switch {
+		case errors.Is(err, model.ErrRedemptionInvalidQuota):
+			common.ApiErrorMsg(c, "兑换码额度必须大于 0")
+		case errors.Is(err, model.ErrRedemptionInsufficientQuota):
+			common.ApiErrorMsg(c, "钱包余额不足")
+		case errors.Is(err, model.ErrRedemptionActiveLimit):
+			common.ApiErrorMsg(c, "最多只能保留 100 个未使用兑换码")
+		case errors.Is(err, model.ErrRedemptionInvalidRequestID):
+			common.ApiErrorMsg(c, "请求标识无效，请刷新页面后重试")
+		default:
+			common.SysError("failed to create wallet-funded redemption: " + err.Error())
+			common.ApiErrorMsg(c, "创建兑换码失败，请稍后重试")
+		}
+		return
+	}
+	common.ApiSuccess(c, result)
+}
+
+func GetSelfRedemptions(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	items, total, err := model.GetUserWalletRedemptions(c.GetInt("id"), pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(items)
+	common.ApiSuccess(c, pageInfo)
 }
 
 func DeleteInvalidRedemption(c *gin.Context) {

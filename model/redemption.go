@@ -10,21 +10,34 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ErrRedeemFailed is returned when redemption fails due to database error
 var ErrRedeemFailed = errors.New("redeem.failed")
 
 var (
-	ErrRedemptionAlreadyUsed = errors.New("redemption.already_used")
-	ErrRedemptionDisabled    = errors.New("redemption.disabled")
-	ErrRedemptionExpired     = errors.New("redemption.expired")
+	ErrRedemptionAlreadyUsed           = errors.New("redemption.already_used")
+	ErrRedemptionDisabled              = errors.New("redemption.disabled")
+	ErrRedemptionExpired               = errors.New("redemption.expired")
+	ErrRedemptionInvalidQuota          = errors.New("redemption.invalid_quota")
+	ErrRedemptionInsufficientQuota     = errors.New("redemption.insufficient_quota")
+	ErrRedemptionActiveLimit           = errors.New("redemption.active_limit")
+	ErrRedemptionInvalidRequestID      = errors.New("redemption.invalid_request_id")
+	ErrWalletFundedRedemptionImmutable = errors.New("wallet-funded redemption is immutable")
 )
 
 const (
 	RedemptionBenefitTypeQuota         = "quota"
 	RedemptionBenefitTypeSubscription  = "subscription"
 	RedemptionBenefitTypeSellableToken = "sellable_token"
+)
+
+const (
+	RedemptionFundingSourceAdmin  = "admin"
+	RedemptionFundingSourceWallet = "wallet"
+
+	maxActiveWalletRedemptionsPerUser = 100
 )
 
 type RedemptionResult struct {
@@ -46,6 +59,24 @@ type RedemptionResult struct {
 	IssuanceId  int    `json:"issuance_id"`
 	ProductId   int    `json:"product_id"`
 	ProductName string `json:"product_name"`
+}
+
+// WalletRedemptionCreationResult is safe to return to the creator. It omits
+// UsedUserId so the redeemer's identity is never disclosed to another user.
+type WalletRedemptionCreationResult struct {
+	Redemption     *UserWalletRedemption `json:"redemption"`
+	RemainingQuota int                   `json:"remaining_quota"`
+	Replayed       bool                  `json:"replayed"`
+}
+
+type UserWalletRedemption struct {
+	Id           int    `json:"id"`
+	Key          string `json:"key"`
+	Status       int    `json:"status"`
+	Quota        int    `json:"quota"`
+	CreatedTime  int64  `json:"created_time"`
+	RedeemedTime int64  `json:"redeemed_time"`
+	ExpiredTime  int64  `json:"expired_time"`
 }
 
 // RedeemNeedRenewTargetError 表示套餐兑换码在“续费”模式下命中了多条可续费订阅。
@@ -76,26 +107,183 @@ func (e *RedeemNeedSelectPurchaseModeError) Error() string {
 }
 
 type Redemption struct {
-	Id                           int    `json:"id"`
-	UserId                       int    `json:"user_id"`
-	Key                          string `json:"key" gorm:"type:char(32);uniqueIndex"`
-	Status                       int    `json:"status" gorm:"default:1"`
-	Name                         string `json:"name" gorm:"index"`
-	BenefitType                  string `json:"benefit_type" gorm:"type:varchar(32);not null;default:'quota';index"`
-	Quota                        int    `json:"quota" gorm:"default:100"`
-	PlanId                       int    `json:"plan_id" gorm:"type:int;default:0;index"`
-	SellableTokenProductId       int    `json:"sellable_token_product_id" gorm:"type:int;default:0;index"`
-	SubscriptionPurchaseMode     string `json:"subscription_purchase_mode" gorm:"type:varchar(16);not null;default:'stack'"`
-	SubscriptionPurchaseQuantity int    `json:"subscription_purchase_quantity" gorm:"type:int;not null;default:1"`
-	CreatedTime                  int64  `json:"created_time" gorm:"bigint"`
-	RedeemedTime                 int64  `json:"redeemed_time" gorm:"bigint"`
-	Count                        int    `json:"count" gorm:"-:all"`
-	UsedUserId                   int    `json:"used_user_id"`
+	Id                           int     `json:"id"`
+	UserId                       int     `json:"user_id" gorm:"uniqueIndex:idx_redemptions_user_request"`
+	Key                          string  `json:"key" gorm:"type:char(32);uniqueIndex"`
+	Status                       int     `json:"status" gorm:"default:1"`
+	Name                         string  `json:"name" gorm:"index"`
+	BenefitType                  string  `json:"benefit_type" gorm:"type:varchar(32);not null;default:'quota';index"`
+	Quota                        int     `json:"quota" gorm:"default:100"`
+	PlanId                       int     `json:"plan_id" gorm:"type:int;default:0;index"`
+	SellableTokenProductId       int     `json:"sellable_token_product_id" gorm:"type:int;default:0;index"`
+	SubscriptionPurchaseMode     string  `json:"subscription_purchase_mode" gorm:"type:varchar(16);not null;default:'stack'"`
+	SubscriptionPurchaseQuantity int     `json:"subscription_purchase_quantity" gorm:"type:int;not null;default:1"`
+	CreatedTime                  int64   `json:"created_time" gorm:"bigint"`
+	RedeemedTime                 int64   `json:"redeemed_time" gorm:"bigint"`
+	Count                        int     `json:"count" gorm:"-:all"`
+	UsedUserId                   int     `json:"used_user_id"`
+	FundingSource                string  `json:"funding_source" gorm:"type:varchar(16);not null;default:'admin';index"`
+	CreateRequestId              *string `json:"-" gorm:"type:varchar(64);uniqueIndex:idx_redemptions_user_request"`
 	// PlanTitle 仅用于列表展示当前套餐标题，不落库，不保留历史快照。
 	PlanTitle   string         `json:"plan_title" gorm:"-"`
 	ProductName string         `json:"product_name" gorm:"-"`
 	DeletedAt   gorm.DeletedAt `gorm:"index"`
 	ExpiredTime int64          `json:"expired_time" gorm:"bigint"`
+}
+
+func walletRedemptionView(redemption *Redemption) *UserWalletRedemption {
+	if redemption == nil {
+		return nil
+	}
+	return &UserWalletRedemption{
+		Id:           redemption.Id,
+		Key:          redemption.Key,
+		Status:       redemption.Status,
+		Quota:        redemption.Quota,
+		CreatedTime:  redemption.CreatedTime,
+		RedeemedTime: redemption.RedeemedTime,
+		ExpiredTime:  redemption.ExpiredTime,
+	}
+}
+
+func validWalletRedemptionRequestID(requestID string) bool {
+	if len(requestID) < 8 || len(requestID) > 64 {
+		return false
+	}
+	for _, char := range []byte(requestID) {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '-' || char == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// CreateWalletFundedRedemption atomically converts wallet quota into a single
+// bearer redemption code. The request ID makes client retries idempotent.
+func CreateWalletFundedRedemption(userID int, quota int, requestID string) (*WalletRedemptionCreationResult, error) {
+	requestID = strings.TrimSpace(requestID)
+	if userID <= 0 {
+		return nil, errors.New("无效的 user id")
+	}
+	if quota <= 0 {
+		return nil, ErrRedemptionInvalidQuota
+	}
+	if !validWalletRedemptionRequestID(requestID) {
+		return nil, ErrRedemptionInvalidRequestID
+	}
+
+	redemption := &Redemption{}
+	remainingQuota := 0
+	replayed := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		creator := &User{}
+		creatorQuery := tx.Select("id", "quota", "status").Where("id = ?", userID)
+		if !common.UsingSQLite {
+			creatorQuery = creatorQuery.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := creatorQuery.First(creator).Error; err != nil {
+			return err
+		}
+		if creator.Status != common.UserStatusEnabled {
+			return errors.New("用户状态不可用")
+		}
+
+		// The creator row lock serializes different requests from the same wallet.
+		// Recheck idempotency after acquiring it so concurrent retries cannot deduct twice.
+		if err := tx.Where("user_id = ? AND create_request_id = ?", userID, requestID).First(redemption).Error; err == nil {
+			remainingQuota = creator.Quota
+			replayed = true
+			return nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+
+		var activeCount int64
+		if err := tx.Model(&Redemption{}).
+			Where("user_id = ? AND funding_source = ? AND status = ?", userID, RedemptionFundingSourceWallet, common.RedemptionCodeStatusEnabled).
+			Where("expired_time = 0 OR expired_time >= ?", common.GetTimestamp()).
+			Count(&activeCount).Error; err != nil {
+			return err
+		}
+		if activeCount >= maxActiveWalletRedemptionsPerUser {
+			return ErrRedemptionActiveLimit
+		}
+		if creator.Quota < quota {
+			return ErrRedemptionInsufficientQuota
+		}
+
+		updateResult := tx.Model(&User{}).
+			Where("id = ? AND status = ? AND quota >= ?", userID, common.UserStatusEnabled, quota).
+			Update("quota", gorm.Expr("quota - ?", quota))
+		if updateResult.Error != nil {
+			return updateResult.Error
+		}
+		if updateResult.RowsAffected != 1 {
+			return ErrRedemptionInsufficientQuota
+		}
+
+		requestIDCopy := requestID
+		redemption = &Redemption{
+			UserId:          userID,
+			Key:             common.GetUUID(),
+			Status:          common.RedemptionCodeStatusEnabled,
+			Name:            "用户钱包兑换码",
+			BenefitType:     RedemptionBenefitTypeQuota,
+			Quota:           quota,
+			CreatedTime:     common.GetTimestamp(),
+			FundingSource:   RedemptionFundingSourceWallet,
+			CreateRequestId: &requestIDCopy,
+		}
+		if err := tx.Create(redemption).Error; err != nil {
+			return err
+		}
+		remainingQuota = creator.Quota - quota
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if err := updateUserQuotaCache(userID, remainingQuota); err != nil {
+		common.SysLog("failed to update wallet redemption creator quota cache: " + err.Error())
+	}
+	if !replayed {
+		RecordLog(userID, LogTypeSystem, fmt.Sprintf("创建钱包兑换码扣除 %s（兑换码ID:%d）", logger.LogQuota(quota), redemption.Id))
+	}
+	return &WalletRedemptionCreationResult{
+		Redemption:     walletRedemptionView(redemption),
+		RemainingQuota: remainingQuota,
+		Replayed:       replayed,
+	}, nil
+}
+
+func GetUserWalletRedemptions(userID int, startIdx int, pageSize int) ([]*UserWalletRedemption, int64, error) {
+	if userID <= 0 {
+		return nil, 0, errors.New("无效的 user id")
+	}
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	if pageSize <= 0 || pageSize > 100 {
+		pageSize = common.ItemsPerPage
+	}
+	query := DB.Model(&Redemption{}).
+		Where("user_id = ? AND funding_source = ?", userID, RedemptionFundingSourceWallet)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var redemptions []*Redemption
+	if err := query.Select("id", "key", "status", "quota", "created_time", "redeemed_time", "expired_time").
+		Order("id DESC").Limit(pageSize).Offset(startIdx).Find(&redemptions).Error; err != nil {
+		return nil, 0, err
+	}
+	items := make([]*UserWalletRedemption, 0, len(redemptions))
+	for _, redemption := range redemptions {
+		items = append(items, walletRedemptionView(redemption))
+	}
+	return items, total, nil
 }
 
 func NormalizeRedemptionBenefitType(benefitType string) string {
@@ -225,6 +413,8 @@ func RedeemWithOptions(key string, userId int, renewTargetSubscriptionId int, pu
 	redemption := &Redemption{}
 	result := &RedemptionResult{}
 	selectedPurchaseMode := ""
+	inviterBound := false
+	selfRedeemed := false
 	if len(purchaseMode) > 0 {
 		selectedPurchaseMode = purchaseMode[0]
 	}
@@ -237,7 +427,11 @@ func RedeemWithOptions(key string, userId int, renewTargetSubscriptionId int, pu
 	common.RandomSleep()
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		// 兑换码先锁定，保证并发下只有一个请求能消费成功。
-		err := tx.Set("gorm:query_option", "FOR UPDATE").Where(keyCol+" = ?", key).First(redemption).Error
+		redemptionQuery := tx.Where(keyCol+" = ?", key)
+		if !common.UsingSQLite {
+			redemptionQuery = redemptionQuery.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		err := redemptionQuery.First(redemption).Error
 		if err != nil {
 			return errors.New("无效的兑换码")
 		}
@@ -254,6 +448,14 @@ func RedeemWithOptions(key string, userId int, renewTargetSubscriptionId int, pu
 		}
 		if redemption.ExpiredTime != 0 && redemption.ExpiredTime < common.GetTimestamp() {
 			return ErrRedemptionExpired
+		}
+
+		// 钱包码先锁定创建者和兑换者，再发放权益。这样 A/B 互兑时不会因为
+		// 双方先各自锁住兑换者余额行而形成反向锁顺序。
+		var bindErr error
+		inviterBound, selfRedeemed, bindErr = bindWalletRedemptionCreatorTx(tx, redemption, userId)
+		if bindErr != nil {
+			return bindErr
 		}
 
 		// 返回对象在事务内一次性填满，避免事务提交后再查引入展示与真实发放不一致。
@@ -319,6 +521,21 @@ func RedeemWithOptions(key string, userId int, renewTargetSubscriptionId int, pu
 		return nil, ErrRedeemFailed
 	}
 
+	if result.QuotaAdded > 0 {
+		quota, quotaErr := GetUserQuota(userId, true)
+		if quotaErr != nil {
+			common.SysLog("failed to refresh redemption user quota: " + quotaErr.Error())
+		} else if cacheErr := updateUserQuotaCache(userId, quota); cacheErr != nil {
+			common.SysLog("failed to update redemption user quota cache: " + cacheErr.Error())
+		}
+	}
+	if inviterBound {
+		RecordLog(userId, LogTypeSystem, fmt.Sprintf("通过钱包兑换码建立邀请关系（兑换码ID:%d）", redemption.Id))
+		RecordLog(redemption.UserId, LogTypeSystem, fmt.Sprintf("钱包兑换码带来一名新下级（兑换码ID:%d）", redemption.Id))
+	} else if selfRedeemed {
+		RecordLog(userId, LogTypeSystem, fmt.Sprintf("自兑钱包兑换码，仅返还额度且未建立邀请关系（兑换码ID:%d）", redemption.Id))
+	}
+
 	switch result.BenefitType {
 	case RedemptionBenefitTypeSubscription:
 		RecordTopupLog(userId,
@@ -340,6 +557,98 @@ func RedeemWithOptions(key string, userId int, renewTargetSubscriptionId int, pu
 	return result, nil
 }
 
+func bindWalletRedemptionCreatorTx(tx *gorm.DB, redemption *Redemption, redeemerUserID int) (bound bool, selfRedeemed bool, err error) {
+	if tx == nil || redemption == nil || redemption.FundingSource != RedemptionFundingSourceWallet || redemption.UserId <= 0 {
+		return false, false, nil
+	}
+	creatorUserID := redemption.UserId
+	if creatorUserID == redeemerUserID {
+		return false, true, nil
+	}
+
+	// Lock both users in deterministic ID order to avoid A/B cross-redemption
+	// deadlocks. SQLite serializes writes and does not support FOR UPDATE.
+	var users []*User
+	query := tx.Select("id", "status", "inviter_id").
+		Where("id IN ?", []int{creatorUserID, redeemerUserID}).
+		Order("id ASC")
+	if !common.UsingSQLite {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	if err := query.Find(&users).Error; err != nil {
+		return false, false, err
+	}
+	userByID := make(map[int]*User, len(users))
+	for _, user := range users {
+		userByID[user.Id] = user
+	}
+	creator := userByID[creatorUserID]
+	redeemer := userByID[redeemerUserID]
+	if creator == nil || redeemer == nil || creator.Status != common.UserStatusEnabled || redeemer.Status != common.UserStatusEnabled {
+		return false, false, nil
+	}
+	if redeemer.InviterId != 0 {
+		return false, false, nil
+	}
+	wouldCreateCycle, err := walletRedemptionWouldCreateCycleTx(tx, creatorUserID, redeemerUserID)
+	if err != nil {
+		return false, false, err
+	}
+	if wouldCreateCycle {
+		return false, false, nil
+	}
+
+	bindResult := tx.Model(&User{}).
+		Where("id = ? AND inviter_id = 0", redeemerUserID).
+		Update("inviter_id", creatorUserID)
+	if bindResult.Error != nil {
+		return false, false, bindResult.Error
+	}
+	if bindResult.RowsAffected != 1 {
+		return false, false, nil
+	}
+
+	creatorResult := tx.Model(&User{}).
+		Where("id = ? AND status = ?", creatorUserID, common.UserStatusEnabled).
+		Update("aff_count", gorm.Expr("aff_count + 1"))
+	if creatorResult.Error != nil {
+		return false, false, creatorResult.Error
+	}
+	if creatorResult.RowsAffected != 1 {
+		return false, false, errors.New("兑换码创建者状态已变化")
+	}
+	return true, false, nil
+}
+
+// walletRedemptionWouldCreateCycleTx follows the creator's existing upstream
+// chain. Binding is skipped if the redeemer is already anywhere in that chain,
+// or if the existing data already contains a cycle.
+func walletRedemptionWouldCreateCycleTx(tx *gorm.DB, creatorUserID int, redeemerUserID int) (bool, error) {
+	const maxInviteChainDepth = 1024
+	currentID := creatorUserID
+	seen := make(map[int]struct{})
+	for depth := 0; currentID > 0 && depth < maxInviteChainDepth; depth++ {
+		if currentID == redeemerUserID {
+			return true, nil
+		}
+		if _, exists := seen[currentID]; exists {
+			return true, nil
+		}
+		seen[currentID] = struct{}{}
+
+		var user User
+		err := tx.Unscoped().Select("id", "inviter_id").First(&user, "id = ?", currentID).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		currentID = user.InviterId
+	}
+	return currentID > 0, nil
+}
+
 func (redemption *Redemption) Insert() error {
 	// 创建前统一归一化，避免不同入口写出不同风格的数据。
 	redemption.BenefitType = NormalizeRedemptionBenefitType(redemption.BenefitType)
@@ -349,10 +658,16 @@ func (redemption *Redemption) Insert() error {
 }
 
 func (redemption *Redemption) SelectUpdate() error {
+	if err := redemption.ensureAdminMutable(); err != nil {
+		return err
+	}
 	return DB.Model(redemption).Select("redeemed_time", "status").Updates(redemption).Error
 }
 
 func (redemption *Redemption) Update() error {
+	if err := redemption.ensureAdminMutable(); err != nil {
+		return err
+	}
 	// 编辑时同样走归一化，保证管理端改完后字段组合仍然合法。
 	redemption.BenefitType = NormalizeRedemptionBenefitType(redemption.BenefitType)
 	redemption.SubscriptionPurchaseMode = NormalizeSubscriptionPurchaseMode(redemption.SubscriptionPurchaseMode)
@@ -372,7 +687,24 @@ func (redemption *Redemption) Update() error {
 }
 
 func (redemption *Redemption) Delete() error {
+	if err := redemption.ensureAdminMutable(); err != nil {
+		return err
+	}
 	return DB.Delete(redemption).Error
+}
+
+func (redemption *Redemption) ensureAdminMutable() error {
+	if redemption == nil || redemption.Id <= 0 {
+		return errors.New("无效的兑换码 id")
+	}
+	var persisted Redemption
+	if err := DB.Select("id", "funding_source").First(&persisted, "id = ?", redemption.Id).Error; err != nil {
+		return err
+	}
+	if persisted.FundingSource == RedemptionFundingSourceWallet {
+		return ErrWalletFundedRedemptionImmutable
+	}
+	return nil
 }
 
 func DeleteRedemptionById(id int) error {
@@ -388,7 +720,9 @@ func DeleteRedemptionById(id int) error {
 
 func DeleteInvalidRedemptions() (int64, error) {
 	now := common.GetTimestamp()
-	result := DB.Where("status IN ? OR (status = ? AND expired_time != 0 AND expired_time < ?)", []int{common.RedemptionCodeStatusUsed, common.RedemptionCodeStatusDisabled}, common.RedemptionCodeStatusEnabled, now).Delete(&Redemption{})
+	result := DB.Where("funding_source IS NULL OR funding_source <> ?", RedemptionFundingSourceWallet).
+		Where("status IN ? OR (status = ? AND expired_time != 0 AND expired_time < ?)", []int{common.RedemptionCodeStatusUsed, common.RedemptionCodeStatusDisabled}, common.RedemptionCodeStatusEnabled, now).
+		Delete(&Redemption{})
 	return result.RowsAffected, result.Error
 }
 

@@ -63,6 +63,7 @@ import WithdrawalModal from './modals/WithdrawalModal';
 import PaymentConfirmModal from './modals/PaymentConfirmModal';
 import TopupHistoryModal from './modals/TopupHistoryModal';
 import InviteCommissionModal from './modals/InviteCommissionModal';
+import WalletRedemptionModal from './modals/WalletRedemptionModal';
 import SubscriptionIssuanceModal from '../subscriptions/SubscriptionIssuanceModal';
 
 const { Text, Title } = Typography;
@@ -148,6 +149,7 @@ const TopUp = () => {
   const [openTransfer, setOpenTransfer] = useState(false);
   const [openWithdrawal, setOpenWithdrawal] = useState(false);
   const [openInviteCommissions, setOpenInviteCommissions] = useState(false);
+  const [openWalletRedemption, setOpenWalletRedemption] = useState(false);
   const [withdrawalSubmitting, setWithdrawalSubmitting] = useState(false);
   const [alipayAccount, setAlipayAccount] = useState('');
   const [alipayName, setAlipayName] = useState('');
@@ -797,6 +799,17 @@ const TopUp = () => {
 
   const renderAmount = () =>
     `${getPaymentCurrencySymbol()}${Number(amount || 0).toFixed(2)}`;
+
+  const updateWalletQuota = (remainingQuota) => {
+    if (!userState.user) return;
+    const updatedUser = {
+      ...userState.user,
+      quota: Number(remainingQuota || 0),
+    };
+    userDispatch({ type: 'login', payload: updatedUser });
+    setUserData(updatedUser);
+  };
+
   return (
     <div
       className='w-full max-w-7xl mx-auto relative min-h-screen lg:min-h-0 mt-[60px] px-2'
@@ -832,6 +845,13 @@ const TopUp = () => {
       <InviteCommissionModal
         visible={openInviteCommissions}
         onCancel={() => setOpenInviteCommissions(false)}
+        t={t}
+      />
+      <WalletRedemptionModal
+        visible={openWalletRedemption}
+        onCancel={() => setOpenWalletRedemption(false)}
+        walletQuota={userState?.user?.quota || 0}
+        onQuotaChanged={updateWalletQuota}
         t={t}
       />
       <PaymentConfirmModal
@@ -1018,6 +1038,20 @@ const TopUp = () => {
                 }
               />
             </Form>
+            <div className='mt-3 flex items-center justify-between gap-3 border-t border-slate-100 pt-3'>
+              <Text type='tertiary' size='small'>
+                {t('可以把钱包额度转换为兑换码赠送给其他用户')}
+              </Text>
+              <Button
+                type='primary'
+                theme='light'
+                size='small'
+                icon={<IconGift />}
+                onClick={() => setOpenWalletRedemption(true)}
+              >
+                {t('创建兑换码')}
+              </Button>
+            </div>
           </Card>
         </div>
       </div>

@@ -672,6 +672,8 @@ func ensureRedemptionColumnsSQLite() error {
 	required := []sqliteColumnDef{
 		{Name: "benefit_type", DDL: "`benefit_type` varchar(32) NOT NULL DEFAULT 'quota'"},
 		{Name: "sellable_token_product_id", DDL: "`sellable_token_product_id` integer DEFAULT 0"},
+		{Name: "funding_source", DDL: "`funding_source` varchar(16) NOT NULL DEFAULT 'admin'"},
+		{Name: "create_request_id", DDL: "`create_request_id` varchar(64)"},
 	}
 	for _, col := range required {
 		if _, ok := existing[col.Name]; ok {
