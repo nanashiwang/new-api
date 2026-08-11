@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -100,4 +101,69 @@ func TestUpdateRedemption_RejectsSellableTokenBenefit(t *testing.T) {
 	require.NoError(t, model.DB.First(&refreshed, "id = ?", redemption.Id).Error)
 	require.Equal(t, model.RedemptionBenefitTypeQuota, refreshed.BenefitType)
 	require.Zero(t, refreshed.SellableTokenProductId)
+}
+
+func TestAddRedemption_MarksAdminFundingSource(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupRedemptionControllerTestDB(t)
+
+	body := `{
+		"name":"管理员余额码",
+		"count":1,
+		"benefit_type":"quota",
+		"quota":100
+	}`
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/redemption", strings.NewReader(body))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Set("id", 1)
+
+	AddRedemption(ctx)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Success bool `json:"success"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.Success, recorder.Body.String())
+
+	var redemption model.Redemption
+	require.NoError(t, model.DB.First(&redemption).Error)
+	require.Equal(t, model.RedemptionFundingSourceAdmin, redemption.FundingSource)
+}
+
+func TestAdminCannotUpdateOrDeleteWalletFundedRedemption(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupRedemptionControllerTestDB(t)
+
+	redemption := &model.Redemption{
+		UserId:        10,
+		Key:           common.GetUUID(),
+		Status:        common.RedemptionCodeStatusEnabled,
+		Name:          "用户钱包兑换码",
+		BenefitType:   model.RedemptionBenefitTypeQuota,
+		Quota:         100,
+		CreatedTime:   common.GetTimestamp(),
+		FundingSource: model.RedemptionFundingSourceWallet,
+	}
+	require.NoError(t, redemption.Insert())
+
+	updateBody := fmt.Sprintf(`{"id":%d,"status":%d}`, redemption.Id, common.RedemptionCodeStatusDisabled)
+	updateRecorder := httptest.NewRecorder()
+	updateCtx, _ := gin.CreateTestContext(updateRecorder)
+	updateCtx.Request = httptest.NewRequest(http.MethodPut, "/api/redemption?status_only=1", strings.NewReader(updateBody))
+	updateCtx.Request.Header.Set("Content-Type", "application/json")
+	UpdateRedemption(updateCtx)
+	require.Contains(t, updateRecorder.Body.String(), "不允许由管理员编辑或禁用")
+
+	deleteRecorder := httptest.NewRecorder()
+	deleteCtx, _ := gin.CreateTestContext(deleteRecorder)
+	deleteCtx.Request = httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/redemption/%d", redemption.Id), nil)
+	deleteCtx.Params = gin.Params{{Key: "id", Value: strconv.Itoa(redemption.Id)}}
+	DeleteRedemption(deleteCtx)
+	require.Contains(t, deleteRecorder.Body.String(), model.ErrWalletFundedRedemptionImmutable.Error())
+
+	var persisted model.Redemption
+	require.NoError(t, model.DB.First(&persisted, redemption.Id).Error)
+	require.Equal(t, common.RedemptionCodeStatusEnabled, persisted.Status)
 }

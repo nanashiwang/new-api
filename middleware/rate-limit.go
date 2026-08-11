@@ -132,6 +132,16 @@ func CriticalRateLimit() func(c *gin.Context) {
 	return defNext
 }
 
+// WalletRedemptionRateLimit is keyed by the authenticated user rather than IP,
+// so rotating proxy addresses cannot turn self-redemption into unbounded table
+// and log growth. It must be installed after UserAuth.
+func WalletRedemptionRateLimit() func(c *gin.Context) {
+	if common.CriticalRateLimitEnable {
+		return userRateLimitFactory(common.CriticalRateLimitNum, common.CriticalRateLimitDuration, "WR")
+	}
+	return defNext
+}
+
 func RegisterRateLimit() func(c *gin.Context) {
 	return rateLimitFactory(common.RegisterRateLimitNum, common.RegisterRateLimitDuration, "RG")
 }
