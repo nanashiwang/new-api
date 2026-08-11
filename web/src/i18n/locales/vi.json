@@ -1,5 +1,15 @@
 {
   "translation": {
+    "一级": "Cấp 1",
+    "二级": "Cấp 2",
+    "一级邀请充值返佣比例": "Tỷ lệ hoa hồng nạp tiền giới thiệu cấp 1",
+    "二级邀请充值返佣比例": "Tỷ lệ hoa hồng nạp tiền giới thiệu cấp 2",
+    "一级和二级返佣比例必须分别在 0 到 1 之间，且合计不能超过 1": "Tỷ lệ hoa hồng cấp 1 và cấp 2 phải nằm trong khoảng 0 đến 1 và tổng không được vượt quá 1",
+    "下级成功绑定后，其下级自动继承为二级关系；当前比例 {{ratePercent}}%，不重复抽取绑定概率": "Sau khi người được mời trực tiếp liên kết thành công, người họ mời tự động trở thành quan hệ cấp 2. Tỷ lệ hiện tại: {{ratePercent}}%; không quay xác suất liên kết lần hai",
+    "返佣层级": "Cấp hoa hồng",
+    "返佣来源项数": "Số mục nguồn hoa hồng",
+    "一级按匿名用户、二级按直接下级分支汇总已结算返佣；不展示下级的下级账号和逐人注册信息，数据每天 24 点刷新。": "Hoa hồng cấp 1 đã quyết toán được tổng hợp theo người dùng ẩn danh, còn cấp 2 theo nhánh người được mời trực tiếp. Không hiển thị tài khoản hoặc thông tin đăng ký từng người của tuyến dưới gián tiếp; dữ liệu làm mới lúc 0 giờ mỗi ngày.",
+    "例如：0.05": "Ví dụ: 0,05",
     "0 表示关闭限制，所有有效邀请都会正常绑定": "Đặt 0 để tắt giới hạn và liên kết mọi lời mời hợp lệ",
     "仅影响超过阈值后的新注册，不改变已有邀请关系": "Chỉ ảnh hưởng đăng ký mới sau ngưỡng, không thay đổi quan hệ mời hiện có",
     "全量绑定人数阈值": "Ngưỡng liên kết bảo đảm",

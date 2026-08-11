@@ -1,8 +1,10 @@
 package model
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -19,6 +21,11 @@ type Option struct {
 	Key   string `json:"key" gorm:"primaryKey"`
 	Value string `json:"value"`
 }
+
+// inviteCommissionRateOptionMutex serializes the two economic rate settings.
+// They are persisted as separate legacy options, but must be validated and
+// published as one logical configuration inside a process.
+var inviteCommissionRateOptionMutex sync.Mutex
 
 func AllOption() ([]*Option, error) {
 	var options []*Option
@@ -139,10 +146,12 @@ func InitOptionMap() {
 	common.OptionMap["InviteBindingSettings"] = common.InviteBindingSettings2JSONString()
 	// 邀请充值返佣配置：
 	// - InviterCommissionEnabled: 开关
-	// - InviterRechargeCommissionRate: 比例（如 0.1 = 10%）
+	// - InviterRechargeCommissionRate: 一级比例（如 0.1 = 10%）
+	// - InviterRechargeSecondLevelCommissionRate: 二级比例（如 0.05 = 5%）
 	// - InviterCommissionDailyCap: 单日上限（0 表示不限）
 	common.OptionMap["InviterCommissionEnabled"] = strconv.FormatBool(common.InviterCommissionEnabled)
 	common.OptionMap["InviterRechargeCommissionRate"] = strconv.FormatFloat(common.InviterRechargeCommissionRate, 'f', -1, 64)
+	common.OptionMap["InviterRechargeSecondLevelCommissionRate"] = strconv.FormatFloat(common.InviterRechargeSecondLevelCommissionRate, 'f', -1, 64)
 	common.OptionMap["InviterCommissionDailyCap"] = strconv.Itoa(common.InviterCommissionDailyCap)
 	common.OptionMap["InvoiceServiceFeeRate"] = strconv.FormatFloat(common.InvoiceServiceFeeRate, 'f', -1, 64)
 	common.OptionMap["QuotaRemindThreshold"] = strconv.Itoa(common.QuotaRemindThreshold)
@@ -233,28 +242,54 @@ func SyncOptions(frequency int) {
 }
 
 func UpdateOption(key string, value string) error {
+	isInviteCommissionRate := isInviteCommissionRateOption(key)
+	if isInviteCommissionRate {
+		inviteCommissionRateOptionMutex.Lock()
+		defer inviteCommissionRateOptionMutex.Unlock()
+	}
+	if err := validateInviteCommissionRateOption(key, value); err != nil {
+		return err
+	}
 	// Save to database first
 	option := Option{
 		Key: key,
 	}
 	// https://gorm.io/docs/update.html#Save-All-Fields
-	DB.FirstOrCreate(&option, Option{Key: key})
+	if err := DB.FirstOrCreate(&option, Option{Key: key}).Error; err != nil {
+		return err
+	}
 	option.Value = value
 	// Save is a combination function.
 	// If save value does not contain primary key, it will execute Create,
 	// otherwise it will execute Update (with all fields).
-	DB.Save(&option)
+	if err := DB.Save(&option).Error; err != nil {
+		return err
+	}
 	// Update OptionMap
+	if isInviteCommissionRate {
+		return updateOptionMapUnlocked(key, value)
+	}
 	return updateOptionMap(key, value)
 }
 
 func updateOptionMap(key string, value string) (err error) {
+	if isInviteCommissionRateOption(key) {
+		inviteCommissionRateOptionMutex.Lock()
+		defer inviteCommissionRateOptionMutex.Unlock()
+	}
+	return updateOptionMapUnlocked(key, value)
+}
+
+func updateOptionMapUnlocked(key string, value string) (err error) {
 	// Validate the combined settings before publishing either snapshot. This
 	// prevents a malformed persisted value from replacing the last good value.
 	if key == "InviteBindingSettings" {
 		if _, err = common.ParseInviteBindingSettings(value); err != nil {
 			return err
 		}
+	}
+	if err = validateInviteCommissionRateOption(key, value); err != nil {
+		return err
 	}
 	common.OptionMapRWMutex.Lock()
 	defer common.OptionMapRWMutex.Unlock()
@@ -538,6 +573,9 @@ func updateOptionMap(key string, value string) (err error) {
 	case "InviterRechargeCommissionRate":
 		// 比例配置使用小数表达（例如 0.1 表示 10%）。
 		common.InviterRechargeCommissionRate, _ = strconv.ParseFloat(value, 64)
+	case "InviterRechargeSecondLevelCommissionRate":
+		// 二级比例仅用于下级的下级，邀请关系沿已绑定链路自动继承。
+		common.InviterRechargeSecondLevelCommissionRate, _ = strconv.ParseFloat(value, 64)
 	case "InviterCommissionDailyCap":
 		// 单日上限单位为额度，0 表示不限制。
 		common.InviterCommissionDailyCap, _ = strconv.Atoi(value)
@@ -638,6 +676,27 @@ func updateOptionMap(key string, value string) (err error) {
 		err = operation_setting.UpdatePayMethodsByJsonString(value)
 	}
 	return err
+}
+
+func validateInviteCommissionRateOption(key string, value string) error {
+	if !isInviteCommissionRateOption(key) {
+		return nil
+	}
+	rate, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	if err != nil {
+		return fmt.Errorf("invalid invite commission rate: %w", err)
+	}
+	_, firstLevelRate, secondLevelRate := common.InviteCommissionConfigSnapshot()
+	if key == "InviterRechargeCommissionRate" {
+		firstLevelRate = rate
+	} else {
+		secondLevelRate = rate
+	}
+	return common.ValidateInviteCommissionRates(firstLevelRate, secondLevelRate)
+}
+
+func isInviteCommissionRateOption(key string) bool {
+	return key == "InviterRechargeCommissionRate" || key == "InviterRechargeSecondLevelCommissionRate"
 }
 
 // handleConfigUpdate 处理分层配置更新，返回是否已处理

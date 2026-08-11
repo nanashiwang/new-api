@@ -116,6 +116,11 @@ var InviterCommissionEnabled = false
 // 取值建议 [0,1]：0.1 表示返佣 10%，0 表示不返佣。
 var InviterRechargeCommissionRate = 0.05
 
+// InviterRechargeSecondLevelCommissionRate 二级邀请返佣比例。
+// A 邀请 B、B 邀请 C 时，C 的有效付费会按该比例向 A 返佣。
+// 默认 0，保证升级后不会改变已有站点的返佣成本。
+var InviterRechargeSecondLevelCommissionRate = 0.0
+
 // InviterCommissionDailyCap 邀请人单日返佣上限。
 // 0 表示不限制；大于 0 时超出上限部分会被跳过或截断（见返佣风控逻辑）。
 var InviterCommissionDailyCap = 0

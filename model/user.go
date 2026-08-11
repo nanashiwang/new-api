@@ -187,6 +187,7 @@ type InviteRechargeCommissionSummary struct {
 type InviteRechargeCommissionInvitee struct {
 	Alias                   string  `json:"alias"`
 	RegisteredDate          string  `json:"registered_date"`
+	CommissionLevel         int     `json:"commission_level"`
 	RechargeTotalMoney      float64 `json:"recharge_total_money"`
 	RechargeCommissionQuota int     `json:"recharge_commission_quota"`
 }
@@ -1117,20 +1118,24 @@ func GetUserInviteRelations(userID int, startIdx int, pageSize int) (*User, *Use
 	}
 	if len(inviteeIDs) > 0 {
 		type inviteeRechargeRow struct {
-			InviteeUserID      int `gorm:"column:invitee_user_id"`
-			RechargeTotalQuota int `gorm:"column:recharge_total_quota"`
+			DirectInviteeUserID int `gorm:"column:direct_invitee_user_id"`
+			RechargeTotalQuota  int `gorm:"column:recharge_total_quota"`
 		}
 		var rows []inviteeRechargeRow
-		// 为"当前页被邀请人"批量聚合返佣，避免前端逐行请求导致 N+1。
+		// 为当前页直接下级按邀请分支聚合返佣：
+		// - 一级返佣归到付款用户本人；
+		// - 二级返佣归到 A 的直接下级 B，避免 A 的汇总与分支明细不一致。
+		branchExpression := "CASE WHEN direct_invitee_user_id > 0 THEN direct_invitee_user_id ELSE invitee_user_id END"
 		if err := DB.Model(&InviteCommissionLedger{}).
-			Select("invitee_user_id, COALESCE(SUM(settled_quota), 0) AS recharge_total_quota").
-			Where("inviter_user_id = ? AND status = ? AND invitee_user_id IN ?", userID, InviteCommissionStatusSettled, inviteeIDs).
-			Group("invitee_user_id").
+			Select(branchExpression+" AS direct_invitee_user_id, COALESCE(SUM(settled_quota), 0) AS recharge_total_quota").
+			Where("inviter_user_id = ? AND status = ?", userID, InviteCommissionStatusSettled).
+			Where("(direct_invitee_user_id IN ? OR (direct_invitee_user_id = 0 AND invitee_user_id IN ?))", inviteeIDs, inviteeIDs).
+			Group(branchExpression).
 			Find(&rows).Error; err != nil {
 			return nil, nil, nil, 0, nil, err
 		}
 		for _, row := range rows {
-			rechargeByInvitee[row.InviteeUserID] = row.RechargeTotalQuota
+			rechargeByInvitee[row.DirectInviteeUserID] = row.RechargeTotalQuota
 		}
 	}
 	for _, invitee := range invitees {
@@ -1163,9 +1168,17 @@ func GetUserInviteRechargeCommissions(userID int, startIdx int, pageSize int) ([
 		pageSize = common.ItemsPerPage
 	}
 
-	query := DB.Unscoped().Model(&User{}).Where("inviter_id = ?", userID)
+	// 一级按实际付款用户汇总；二级按当前受益人的直接下级分支汇总。
+	// 这样 A 只能看到自己已知的直接下级 B 及该分支产生的返佣，
+	// 不会新增暴露 B 的下级 C 的逐人注册日期和充值行为。
+	sourceUserExpression := "CASE WHEN ledgers.commission_level = 2 AND ledgers.direct_invitee_user_id > 0 THEN ledgers.direct_invitee_user_id ELSE ledgers.invitee_user_id END"
+	commissionLevelExpression := "CASE WHEN ledgers.commission_level = 2 THEN 2 ELSE 1 END"
+	groupedSources := DB.Table("invite_commission_ledgers AS ledgers").
+		Select(sourceUserExpression+" AS source_user_id, "+commissionLevelExpression+" AS commission_level").
+		Where("ledgers.inviter_user_id = ? AND ledgers.status = ?", userID, InviteCommissionStatusSettled).
+		Group(sourceUserExpression + ", " + commissionLevelExpression)
 	var total int64
-	if err := query.Count(&total).Error; err != nil {
+	if err := DB.Table("(?) AS commission_sources", groupedSources).Count(&total).Error; err != nil {
 		return nil, 0, nil, err
 	}
 
@@ -1177,62 +1190,43 @@ func GetUserInviteRechargeCommissions(userID int, startIdx int, pageSize int) ([
 		return nil, 0, nil, err
 	}
 
-	var invitees []*User
-	if err := query.
-		Select("id", "created_at").
-		Order("id asc").
+	type inviteeRechargeRow struct {
+		SourceUserID       int     `gorm:"column:source_user_id"`
+		RegisteredAt       int64   `gorm:"column:registered_at"`
+		CommissionLevel    int     `gorm:"column:commission_level"`
+		RechargeTotalQuota int     `gorm:"column:recharge_total_quota"`
+		RechargeTotalMoney float64 `gorm:"column:recharge_total_money"`
+	}
+	var rows []inviteeRechargeRow
+	if err := DB.Table("invite_commission_ledgers AS ledgers").
+		Select(sourceUserExpression+` AS source_user_id,
+			users.created_at AS registered_at,
+			`+commissionLevelExpression+` AS commission_level,
+			COALESCE(SUM(ledgers.settled_quota), 0) AS recharge_total_quota,
+			COALESCE(SUM(CASE WHEN top_ups.paid_money > 0 THEN top_ups.paid_money ELSE top_ups.money END), 0) AS recharge_total_money`).
+		Joins("LEFT JOIN users ON users.id = "+sourceUserExpression).
+		Joins("LEFT JOIN top_ups ON top_ups.trade_no = ledgers.topup_trade_no").
+		Where("ledgers.inviter_user_id = ? AND ledgers.status = ?", userID, InviteCommissionStatusSettled).
+		Group(sourceUserExpression + ", users.created_at, " + commissionLevelExpression).
+		Order("source_user_id asc, commission_level asc").
 		Limit(pageSize).
 		Offset(startIdx).
-		Find(&invitees).Error; err != nil {
+		Find(&rows).Error; err != nil {
 		return nil, 0, nil, err
 	}
 
-	inviteeIDs := make([]int, 0, len(invitees))
-	for _, invitee := range invitees {
-		if invitee != nil && invitee.Id > 0 {
-			inviteeIDs = append(inviteeIDs, invitee.Id)
-		}
-	}
-
-	rechargeByInvitee := map[int]int{}
-	rechargeMoneyByInvitee := map[int]float64{}
-	if len(inviteeIDs) > 0 {
-		type inviteeRechargeRow struct {
-			InviteeUserID      int     `gorm:"column:invitee_user_id"`
-			RechargeTotalQuota int     `gorm:"column:recharge_total_quota"`
-			RechargeTotalMoney float64 `gorm:"column:recharge_total_money"`
-		}
-		var rows []inviteeRechargeRow
-		if err := DB.Model(&InviteCommissionLedger{}).
-			Select(`invite_commission_ledgers.invitee_user_id,
-				COALESCE(SUM(invite_commission_ledgers.settled_quota), 0) AS recharge_total_quota,
-				COALESCE(SUM(CASE WHEN top_ups.paid_money > 0 THEN top_ups.paid_money ELSE top_ups.money END), 0) AS recharge_total_money`).
-			Joins("LEFT JOIN top_ups ON top_ups.trade_no = invite_commission_ledgers.topup_trade_no").
-			Where("invite_commission_ledgers.inviter_user_id = ? AND invite_commission_ledgers.status = ? AND invite_commission_ledgers.invitee_user_id IN ?", userID, InviteCommissionStatusSettled, inviteeIDs).
-			Group("invite_commission_ledgers.invitee_user_id").
-			Find(&rows).Error; err != nil {
-			return nil, 0, nil, err
-		}
-		for _, row := range rows {
-			rechargeByInvitee[row.InviteeUserID] = row.RechargeTotalQuota
-			rechargeMoneyByInvitee[row.InviteeUserID] = row.RechargeTotalMoney
-		}
-	}
-
-	items := make([]*InviteRechargeCommissionInvitee, 0, len(invitees))
-	for index, invitee := range invitees {
-		if invitee == nil {
-			continue
-		}
+	items := make([]*InviteRechargeCommissionInvitee, 0, len(rows))
+	for index, row := range rows {
 		registeredDate := ""
-		if invitee.CreatedAt > 0 {
-			registeredDate = time.Unix(invitee.CreatedAt, 0).Format("2006-01-02")
+		if row.RegisteredAt > 0 {
+			registeredDate = time.Unix(row.RegisteredAt, 0).Format("2006-01-02")
 		}
 		items = append(items, &InviteRechargeCommissionInvitee{
 			Alias:                   fmt.Sprintf("用户%d", startIdx+index+1),
 			RegisteredDate:          registeredDate,
-			RechargeTotalMoney:      rechargeMoneyByInvitee[invitee.Id],
-			RechargeCommissionQuota: rechargeByInvitee[invitee.Id],
+			CommissionLevel:         row.CommissionLevel,
+			RechargeTotalMoney:      row.RechargeTotalMoney,
+			RechargeCommissionQuota: row.RechargeTotalQuota,
 		})
 	}
 

@@ -373,6 +373,7 @@ func TestGetUserInviteRechargeCommissionsAnonymizesAndAggregates(t *testing.T) {
 	}).Error)
 	require.NoError(t, DB.Create(&[]InviteCommissionLedger{
 		{
+			// 模拟迁移前历史台账：新增字段保持数据库默认值。
 			InviteeUserId:   invitee1.Id,
 			InviterUserId:   inviter.Id,
 			TopupTradeNo:    "invitee-1-topup-1",
@@ -384,15 +385,17 @@ func TestGetUserInviteRechargeCommissionsAnonymizesAndAggregates(t *testing.T) {
 			Status:          InviteCommissionStatusSettled,
 		},
 		{
-			InviteeUserId:   invitee1.Id,
-			InviterUserId:   inviter.Id,
-			TopupTradeNo:    "invitee-1-topup-2",
-			BizDate:         "2026-07-05",
-			BaseQuota:       200,
-			CommissionRate:  0.1,
-			CommissionQuota: 20,
-			SettledQuota:    20,
-			Status:          InviteCommissionStatusSettled,
+			InviteeUserId:       invitee1.Id,
+			InviterUserId:       inviter.Id,
+			DirectInviteeUserId: invitee1.Id,
+			CommissionLevel:     InviteCommissionLevelDirect,
+			TopupTradeNo:        "invitee-1-topup-2",
+			BizDate:             "2026-07-05",
+			BaseQuota:           200,
+			CommissionRate:      0.1,
+			CommissionQuota:     20,
+			SettledQuota:        20,
+			Status:              InviteCommissionStatusSettled,
 		},
 		{
 			InviteeUserId:   invitee2.Id,
@@ -409,15 +412,77 @@ func TestGetUserInviteRechargeCommissionsAnonymizesAndAggregates(t *testing.T) {
 	items, total, summary, err := GetUserInviteRechargeCommissions(inviter.Id, 0, 10)
 
 	require.NoError(t, err)
-	require.Equal(t, int64(2), total)
+	require.Equal(t, int64(1), total)
 	require.Equal(t, 30, summary.RechargeTotalQuota)
-	require.Len(t, items, 2)
+	require.Len(t, items, 1)
 	require.Equal(t, "用户1", items[0].Alias)
 	require.Equal(t, "2026-07-01", items[0].RegisteredDate)
+	require.Equal(t, InviteCommissionLevelDirect, items[0].CommissionLevel)
 	assert.InDelta(t, 200, items[0].RechargeTotalMoney, 0.000001)
 	require.Equal(t, 30, items[0].RechargeCommissionQuota)
-	require.Equal(t, "用户2", items[1].Alias)
-	require.Equal(t, "2026-07-02", items[1].RegisteredDate)
-	assert.Zero(t, items[1].RechargeTotalMoney)
-	require.Equal(t, 0, items[1].RechargeCommissionQuota)
+}
+
+func TestTwoLevelInviteCommissionDetailsAndBranchAggregation(t *testing.T) {
+	setupUserAffInviteTestDB(t)
+
+	grandparent := createUserAffInviteTestInviter(t, "commission_grandparent", "commission_grandparent_aff", common.UserStatusEnabled)
+	parent := &User{Username: "commission_parent", Password: "password123", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "commission_parent_aff", InviterId: grandparent.Id, CreatedAt: time.Date(2026, 7, 1, 12, 0, 0, 0, time.Local).Unix()}
+	require.NoError(t, DB.Create(parent).Error)
+	invitee := &User{Username: "commission_grandchild", Password: "password123", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "commission_grandchild_aff", InviterId: parent.Id, CreatedAt: time.Date(2026, 7, 2, 12, 0, 0, 0, time.Local).Unix()}
+	require.NoError(t, DB.Create(invitee).Error)
+	secondInvitee := &User{Username: "commission_grandchild_2", Password: "password123", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "commission_grandchild_2_aff", InviterId: parent.Id, CreatedAt: time.Date(2026, 7, 3, 12, 0, 0, 0, time.Local).Unix()}
+	require.NoError(t, DB.Create(secondInvitee).Error)
+
+	require.NoError(t, DB.Create(&[]TopUp{
+		{UserId: invitee.Id, Amount: 50, Money: 50, PaidMoney: 50, TradeNo: "grandchild-topup", Status: common.TopUpStatusSuccess},
+		{UserId: secondInvitee.Id, Amount: 30, Money: 30, PaidMoney: 30, TradeNo: "grandchild-topup-2", Status: common.TopUpStatusSuccess},
+	}).Error)
+	require.NoError(t, DB.Create(&[]InviteCommissionLedger{
+		{
+			InviteeUserId:       invitee.Id,
+			InviterUserId:       grandparent.Id,
+			DirectInviteeUserId: parent.Id,
+			CommissionLevel:     InviteCommissionLevelIndirect,
+			TopupTradeNo:        "grandchild-topup",
+			BizDate:             "2026-07-05",
+			BaseQuota:           50,
+			CommissionRate:      0.05,
+			CommissionQuota:     5,
+			SettledQuota:        5,
+			Status:              InviteCommissionStatusSettled,
+		},
+		{
+			InviteeUserId:       secondInvitee.Id,
+			InviterUserId:       grandparent.Id,
+			DirectInviteeUserId: parent.Id,
+			CommissionLevel:     InviteCommissionLevelIndirect,
+			TopupTradeNo:        "grandchild-topup-2",
+			BizDate:             "2026-07-05",
+			BaseQuota:           30,
+			CommissionRate:      0.05,
+			CommissionQuota:     3,
+			SettledQuota:        3,
+			Status:              InviteCommissionStatusSettled,
+		},
+	}).Error)
+
+	items, total, summary, err := GetUserInviteRechargeCommissions(grandparent.Id, 0, 10)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Equal(t, 8, summary.RechargeTotalQuota)
+	require.Len(t, items, 1)
+	require.Equal(t, "用户1", items[0].Alias)
+	// 二级返佣按直接下级分支聚合，不向 A 暴露 C 的逐人注册日期。
+	require.Equal(t, "2026-07-01", items[0].RegisteredDate)
+	require.Equal(t, InviteCommissionLevelIndirect, items[0].CommissionLevel)
+	assert.InDelta(t, 80, items[0].RechargeTotalMoney, 0.000001)
+	require.Equal(t, 8, items[0].RechargeCommissionQuota)
+
+	_, _, invitees, relationTotal, relationSummary, err := GetUserInviteRelations(grandparent.Id, 0, 10)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), relationTotal)
+	require.Equal(t, 8, relationSummary.RechargeTotalQuota)
+	require.Len(t, invitees, 1)
+	require.Equal(t, parent.Id, invitees[0].Id)
+	require.Equal(t, 8, invitees[0].InviteRechargeCommissionQuota)
 }

@@ -58,7 +58,7 @@ func runInviteCommissionSettlementOnce() {
 	}
 	defer inviteCommissionSettlementRunning.Store(false)
 
-	if !common.InviterCommissionEnabled || common.InviterRechargeCommissionRate <= 0 {
+	if !common.InviteCommissionConfigured() {
 		return
 	}
 

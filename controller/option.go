@@ -349,6 +349,21 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "InviterRechargeCommissionRate", "InviterRechargeSecondLevelCommissionRate":
+		rate, parseErr := strconv.ParseFloat(strings.TrimSpace(option.Value.(string)), 64)
+		_, firstLevelRate, secondLevelRate := common.InviteCommissionConfigSnapshot()
+		if option.Key == "InviterRechargeCommissionRate" {
+			firstLevelRate = rate
+		} else {
+			secondLevelRate = rate
+		}
+		if parseErr != nil || common.ValidateInviteCommissionRates(firstLevelRate, secondLevelRate) != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "邀请返佣比例无效：一级、二级比例必须分别在 0 到 1 之间，且合计不能超过 1",
+			})
+			return
+		}
 	case "console_setting.api_info":
 		err = console_setting.ValidateConsoleSettings(option.Value.(string), "ApiInfo")
 		if err != nil {
