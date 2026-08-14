@@ -20,6 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import i18next from 'i18next';
 import { Modal, Tag, Typography, Avatar } from '@douyinfe/semi-ui';
 import { copy, showSuccess } from './utils';
+import { isMiMoModel } from './modelVendor';
 import { MOBILE_BREAKPOINT } from '../hooks/common/useIsMobile';
 import {
   BILLING_PRICING_VARS,
@@ -232,6 +233,11 @@ export const getModelCategories = (() => {
         label: t('通义千问'),
         icon: <Qwen.Color />,
         filter: (model) => model.model_name.toLowerCase().includes('qwen'),
+      },
+      mimo: {
+        label: 'MiMo',
+        icon: null,
+        filter: (model) => isMiMoModel(model.model_name),
       },
       deepseek: {
         label: 'DeepSeek',
