@@ -9,8 +9,8 @@ import (
 
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
-	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/channel"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/sjson"
@@ -23,6 +23,8 @@ import (
 
 const claudeParamHealDoneKey = "claude_param_heal_done"
 
+const emptyClaudeThinkingError = "each thinking block must contain thinking"
+
 // 只允许剥除采样类参数：剥掉它们不改变请求语义，最多损失一点采样偏好。
 // max_tokens/messages/tools 等语义参数绝不自动剥。
 var healableParams = map[string]struct{}{
@@ -32,9 +34,10 @@ var healableParams = map[string]struct{}{
 }
 
 // 匹配 Anthropic/OpenAI 风格的参数错误指认，如：
-//   `temperature` is deprecated for this model.
-//   `top_k` is not supported ...
-//   Unsupported parameter: `top_p` ...
+//
+//	`temperature` is deprecated for this model.
+//	`top_k` is not supported ...
+//	Unsupported parameter: `top_p` ...
 var healableParamErrorRegexp = regexp.MustCompile(
 	"`([a-zA-Z_][a-zA-Z0-9_]*)`(?:[a-zA-Z ]*)? is (?:deprecated|not supported|unsupported)|[Uu]nsupported parameter[: ]+`?([a-zA-Z_][a-zA-Z0-9_]*)`?",
 )
@@ -81,6 +84,37 @@ func tryHealClaudeParamError(
 	if !ok || !strings.Contains(bodyText, "invalid_request_error") {
 		return httpResp, false
 	}
+	if strings.Contains(strings.ToLower(bodyText), emptyClaudeThinkingError) {
+		cleanedJSON, result, err := sanitizeEmptyClaudeThinkingJSON(requestJSON)
+		if err != nil || !result.Changed() {
+			return httpResp, false
+		}
+
+		c.Set(claudeParamHealDoneKey, true)
+		logger.LogWarn(c, fmt.Sprintf(
+			"request self-heal: upstream rejected empty thinking; removed %d block(s), removed %d message(s), merged %d message(s), retrying once (channel #%d, model %s)",
+			result.RemovedBlocks,
+			result.RemovedMessages,
+			result.MergedMessages,
+			info.ChannelId,
+			info.UpstreamModelName,
+		))
+
+		retryResp, retryErr := adaptor.DoRequest(c, info, bytes.NewBuffer(cleanedJSON))
+		if retryErr != nil {
+			logger.LogWarn(c, fmt.Sprintf("empty thinking self-heal retry failed, falling back to original 400: %v", retryErr))
+			return httpResp, false
+		}
+		healedResp, ok := retryResp.(*http.Response)
+		if !ok {
+			return httpResp, false
+		}
+		if healedResp != httpResp && httpResp.Body != nil {
+			_ = httpResp.Body.Close()
+		}
+		c.Header("X-Request-Adjusted", "empty_thinking")
+		return healedResp, true
+	}
 	param := extractHealableParam(bodyText)
 	if param == "" {
 		return httpResp, false
@@ -105,6 +139,9 @@ func tryHealClaudeParamError(
 	healedResp, ok := retryResp.(*http.Response)
 	if !ok {
 		return httpResp, false
+	}
+	if healedResp != httpResp && httpResp.Body != nil {
+		_ = httpResp.Body.Close()
 	}
 	// 可观测性：让调用方知道参数被服务端调整过
 	c.Header("X-Param-Adjusted", param)
