@@ -1,13 +1,17 @@
 package model
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
+	"unicode"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/shopspring/decimal"
+	"golang.org/x/text/unicode/norm"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -26,12 +30,22 @@ const (
 
 	InvoiceTitleTypePersonal = "personal"
 	InvoiceTitleTypeCompany  = "company"
+
+	InvoiceSourceTypeSystemOrder    = "system_order"
+	InvoiceSourceTypeManualTransfer = "manual_transfer"
+
+	InvoiceOrderTypeManualTransfer   = "manual_transfer"
+	InvoicePaymentMethodBankTransfer = "bank_transfer"
+	InvoiceManualTransferPayeeName   = "上海曜算智能科技有限公司"
+
+	maxInvoiceMoney = int64(1_000_000_000_000)
 )
 
 var (
 	ErrInvoiceRequestNotFound         = errors.New("发票申请不存在")
 	ErrInvoiceRequestAlreadyReviewed  = errors.New("发票申请已审核")
 	ErrInvoiceOrderUnavailable        = errors.New("订单不可申请发票")
+	ErrInvoiceManualTransferOccupied  = errors.New("该银行转账已存在待审核或已开票申请")
 	ErrInsufficientQuotaForInvoiceFee = errors.New("余额不足，无法支付发票手续费")
 )
 
@@ -51,6 +65,7 @@ type InvoiceRequest struct {
 	Remark                  string  `json:"remark" gorm:"type:text"`
 	NeedDetailBill          bool    `json:"need_detail_bill" gorm:"not null;default:true"`
 	NeedServiceConfirmation bool    `json:"need_service_confirmation" gorm:"not null;default:false"`
+	SourceType              string  `json:"source_type" gorm:"type:varchar(32);index;not null;default:'system_order'"`
 	Status                  string  `json:"status" gorm:"type:varchar(16);index;not null;default:'pending'"`
 	TotalMoney              float64 `json:"total_money" gorm:"type:decimal(20,6);not null;default:0"`
 	TotalQuota              int64   `json:"total_quota" gorm:"type:bigint;not null;default:0"`
@@ -69,31 +84,76 @@ type InvoiceRequest struct {
 	CreatedAt               int64   `json:"created_at" gorm:"index"`
 	ReviewedAt              int64   `json:"reviewed_at" gorm:"index;not null;default:0"`
 
-	Username            string               `json:"username,omitempty" gorm:"column:username;->"`
-	DisplayName         string               `json:"display_name,omitempty" gorm:"column:display_name;->"`
-	ReviewerUsername    string               `json:"reviewer_username,omitempty" gorm:"column:reviewer_username;->"`
-	ReviewerDisplayName string               `json:"reviewer_display_name,omitempty" gorm:"column:reviewer_display_name;->"`
-	Items               []InvoiceRequestItem `json:"items" gorm:"foreignKey:InvoiceRequestId"`
+	Username            string                      `json:"username,omitempty" gorm:"column:username;->"`
+	DisplayName         string                      `json:"display_name,omitempty" gorm:"column:display_name;->"`
+	ReviewerUsername    string                      `json:"reviewer_username,omitempty" gorm:"column:reviewer_username;->"`
+	ReviewerDisplayName string                      `json:"reviewer_display_name,omitempty" gorm:"column:reviewer_display_name;->"`
+	Items               []InvoiceRequestItem        `json:"items" gorm:"foreignKey:InvoiceRequestId"`
+	ProductItems        []InvoiceRequestProductItem `json:"product_items" gorm:"foreignKey:InvoiceRequestId"`
 }
 
 type InvoiceRequestItem struct {
+	Id                int     `json:"id"`
+	InvoiceRequestId  int     `json:"invoice_request_id" gorm:"index;not null"`
+	UserId            int     `json:"user_id" gorm:"index;not null"`
+	SourceType        string  `json:"source_type" gorm:"type:varchar(32);index;not null;default:'system_order'"`
+	OrderType         string  `json:"order_type" gorm:"type:varchar(32);index;not null"`
+	OrderId           int     `json:"order_id" gorm:"index;not null"`
+	TradeNo           string  `json:"trade_no" gorm:"type:varchar(255);index;not null;default:''"`
+	PaymentMethod     string  `json:"payment_method" gorm:"type:varchar(50);not null;default:''"`
+	Amount            int64   `json:"amount" gorm:"type:bigint;not null;default:0"`
+	Money             float64 `json:"money" gorm:"type:decimal(20,6);not null;default:0"`
+	ProductName       string  `json:"product_name" gorm:"type:varchar(255);not null;default:''"`
+	PayerName         string  `json:"payer_name" gorm:"type:varchar(128);not null;default:''"`
+	PayeeName         string  `json:"payee_name" gorm:"type:varchar(128);not null;default:''"`
+	TransferBankName  string  `json:"transfer_bank_name" gorm:"type:varchar(128);not null;default:''"`
+	TransferRemark    string  `json:"transfer_remark" gorm:"type:varchar(500);not null;default:''"`
+	ManualFingerprint *string `json:"-" gorm:"type:varchar(64);uniqueIndex"`
+	CreateTime        int64   `json:"create_time" gorm:"index"`
+	CompleteTime      int64   `json:"complete_time" gorm:"index"`
+}
+
+type InvoiceRequestProductItem struct {
 	Id               int     `json:"id"`
 	InvoiceRequestId int     `json:"invoice_request_id" gorm:"index;not null"`
-	UserId           int     `json:"user_id" gorm:"index;not null"`
-	OrderType        string  `json:"order_type" gorm:"type:varchar(32);index;not null"`
-	OrderId          int     `json:"order_id" gorm:"index;not null"`
-	TradeNo          string  `json:"trade_no" gorm:"type:varchar(255);index;not null;default:''"`
-	PaymentMethod    string  `json:"payment_method" gorm:"type:varchar(50);not null;default:''"`
-	Amount           int64   `json:"amount" gorm:"type:bigint;not null;default:0"`
+	ProductName      string  `json:"product_name" gorm:"type:varchar(255);not null"`
+	Specification    string  `json:"specification" gorm:"type:varchar(255);not null;default:''"`
+	Unit             string  `json:"unit" gorm:"type:varchar(32);not null;default:''"`
+	Quantity         float64 `json:"quantity" gorm:"type:decimal(20,6);not null;default:1"`
+	UnitPrice        float64 `json:"unit_price" gorm:"type:decimal(20,6);not null;default:0"`
 	Money            float64 `json:"money" gorm:"type:decimal(20,6);not null;default:0"`
-	ProductName      string  `json:"product_name" gorm:"type:varchar(255);not null;default:''"`
-	CreateTime       int64   `json:"create_time" gorm:"index"`
-	CompleteTime     int64   `json:"complete_time" gorm:"index"`
+	Quota            int64   `json:"quota" gorm:"type:bigint;not null;default:0"`
+	ServiceStartAt   int64   `json:"service_start_at" gorm:"index;not null;default:0"`
+	ServiceEndAt     int64   `json:"service_end_at" gorm:"index;not null;default:0"`
+	Remark           string  `json:"remark" gorm:"type:varchar(500);not null;default:''"`
 }
 
 type InvoiceOrderRef struct {
 	OrderType string `json:"order_type"`
 	Id        int    `json:"id"`
+}
+
+type InvoiceManualTransactionInput struct {
+	TradeNo          string  `json:"trade_no"`
+	PayerName        string  `json:"payer_name"`
+	PayeeName        string  `json:"payee_name"`
+	TransferBankName string  `json:"transfer_bank_name"`
+	Money            float64 `json:"money"`
+	PaidAt           int64   `json:"paid_at"`
+	Remark           string  `json:"remark"`
+}
+
+type InvoiceProductItemInput struct {
+	ProductName    string  `json:"product_name"`
+	Specification  string  `json:"specification"`
+	Unit           string  `json:"unit"`
+	Quantity       float64 `json:"quantity"`
+	UnitPrice      float64 `json:"unit_price"`
+	Money          float64 `json:"money"`
+	Quota          int64   `json:"quota"`
+	ServiceStartAt int64   `json:"service_start_at"`
+	ServiceEndAt   int64   `json:"service_end_at"`
+	Remark         string  `json:"remark"`
 }
 
 type CreateInvoiceRequestInput struct {
@@ -111,6 +171,8 @@ type CreateInvoiceRequestInput struct {
 	NeedDetailBill          bool
 	NeedServiceConfirmation bool
 	Orders                  []InvoiceOrderRef
+	ManualTransactions      []InvoiceManualTransactionInput
+	ProductItems            []InvoiceProductItemInput
 }
 
 type InvoiceRequestSearchParams struct {
@@ -166,11 +228,13 @@ func CreateInvoiceRequest(userID int, input CreateInvoiceRequestInput) (*Invoice
 		return nil, err
 	}
 
+	sourceType := invoiceSourceTypeFromInput(input)
 	var request InvoiceRequest
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		items := make([]InvoiceRequestItem, 0, len(input.Orders))
-		seen := make(map[string]struct{}, len(input.Orders))
-		var totalMoney float64
+		items := make([]InvoiceRequestItem, 0, len(input.Orders)+len(input.ManualTransactions))
+		seenOrders := make(map[string]struct{}, len(input.Orders))
+		seenManualTransfers := make(map[string]struct{}, len(input.ManualTransactions))
+		totalMoneyDecimal := decimal.Zero
 		var totalQuota int64
 
 		for _, ref := range input.Orders {
@@ -179,18 +243,70 @@ func CreateInvoiceRequest(userID int, input CreateInvoiceRequestInput) (*Invoice
 				return errors.New("订单参数错误")
 			}
 			key := fmt.Sprintf("%s:%d", orderType, ref.Id)
-			if _, ok := seen[key]; ok {
+			if _, ok := seenOrders[key]; ok {
 				return errors.New("订单重复选择")
 			}
-			seen[key] = struct{}{}
+			seenOrders[key] = struct{}{}
 
 			item, err := buildInvoiceRequestItemTx(tx, userID, orderType, ref.Id)
 			if err != nil {
 				return err
 			}
+			item.SourceType = InvoiceSourceTypeSystemOrder
 			items = append(items, *item)
-			totalMoney += item.Money
+			totalMoneyDecimal = totalMoneyDecimal.Add(decimal.NewFromFloat(item.Money))
+			if item.Amount < 0 || (item.Amount > 0 && totalQuota > (1<<63-1)-item.Amount) {
+				return errors.New("订单额度合计超出范围")
+			}
 			totalQuota += item.Amount
+		}
+
+		manualProductSummary := summarizeInvoiceProductNames(input.ProductItems)
+		for _, transfer := range input.ManualTransactions {
+			fingerprint := invoiceManualTransferFingerprint(transfer)
+			if _, ok := seenManualTransfers[fingerprint]; ok {
+				return errors.New("银行转账重复录入")
+			}
+			seenManualTransfers[fingerprint] = struct{}{}
+			occupied, err := isInvoiceManualTransferOccupiedTx(tx, fingerprint)
+			if err != nil {
+				return err
+			}
+			if occupied {
+				return ErrInvoiceManualTransferOccupied
+			}
+			fingerprintCopy := fingerprint
+			item := InvoiceRequestItem{
+				UserId:            userID,
+				SourceType:        InvoiceSourceTypeManualTransfer,
+				OrderType:         InvoiceOrderTypeManualTransfer,
+				OrderId:           0,
+				TradeNo:           transfer.TradeNo,
+				PaymentMethod:     InvoicePaymentMethodBankTransfer,
+				Money:             transfer.Money,
+				ProductName:       manualProductSummary,
+				PayerName:         transfer.PayerName,
+				PayeeName:         transfer.PayeeName,
+				TransferBankName:  transfer.TransferBankName,
+				TransferRemark:    transfer.Remark,
+				ManualFingerprint: &fingerprintCopy,
+				CreateTime:        transfer.PaidAt,
+				CompleteTime:      transfer.PaidAt,
+			}
+			items = append(items, item)
+			totalMoneyDecimal = totalMoneyDecimal.Add(decimal.NewFromFloat(transfer.Money))
+		}
+
+		if totalMoneyDecimal.GreaterThan(decimal.NewFromInt(maxInvoiceMoney)) {
+			return errors.New("开票金额合计不能超过 1000000000000 元")
+		}
+		totalMoney, _ := totalMoneyDecimal.Float64()
+		productItems, productQuota, err := buildInvoiceProductItems(input.ProductItems, sourceType, totalMoney, totalQuota, items)
+		if err != nil {
+			return err
+		}
+		if sourceType == InvoiceSourceTypeManualTransfer {
+			totalQuota = productQuota
 		}
 
 		// 计算发票手续费额度：开票金额(totalMoney)为人民币(payMoney 同源)，
@@ -203,6 +319,9 @@ func CreateInvoiceRequest(userID int, input CreateInvoiceRequestInput) (*Invoice
 					Mul(decimal.NewFromFloat(rate)).
 					Mul(decimal.NewFromFloat(common.QuotaPerUnit)).
 					Div(decimal.NewFromFloat(price))
+				if dFee.GreaterThan(decimal.NewFromInt(1<<63 - 1)) {
+					return errors.New("发票手续费额度超出范围")
+				}
 				if q := dFee.IntPart(); q > 0 {
 					feeRate = rate
 					feeQuota = q
@@ -225,6 +344,7 @@ func CreateInvoiceRequest(userID int, input CreateInvoiceRequestInput) (*Invoice
 			Remark:                  input.Remark,
 			NeedDetailBill:          input.NeedDetailBill,
 			NeedServiceConfirmation: input.NeedServiceConfirmation,
+			SourceType:              sourceType,
 			Status:                  InvoiceStatusPending,
 			TotalMoney:              totalMoney,
 			TotalQuota:              totalQuota,
@@ -246,11 +366,22 @@ func CreateInvoiceRequest(userID int, input CreateInvoiceRequestInput) (*Invoice
 			items[i].InvoiceRequestId = request.Id
 		}
 		if err := tx.Create(&items).Error; err != nil {
+			if sourceType == InvoiceSourceTypeManualTransfer && isInvoiceDuplicateKeyErr(err) {
+				return ErrInvoiceManualTransferOccupied
+			}
+			return err
+		}
+		for i := range productItems {
+			productItems[i].InvoiceRequestId = request.Id
+		}
+		if err := tx.Create(&productItems).Error; err != nil {
 			return err
 		}
 		request.Items = items
+		request.ProductItems = productItems
 
-		// 申请发票时扣除手续费：事务内行锁校验余额并扣减，保证与申请创建原子
+		// 申请发票时扣除手续费：事务内行锁校验余额并扣减，保证与申请创建原子。
+		// 人工转账仅作为开票凭证，不会创建充值订单，也不会增加钱包额度。
 		if feeQuota > 0 {
 			var feeUser User
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -297,7 +428,7 @@ func GetUserInvoiceRequestsByParams(userID int, params InvoiceRequestSearchParam
 
 	var requests []*InvoiceRequest
 	query := applyInvoiceRequestSearch(DB.Model(&InvoiceRequest{}).Where("user_id = ?", userID), params, false)
-	if err := query.Preload("Items").Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&requests).Error; err != nil {
+	if err := query.Preload("Items").Preload("ProductItems").Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&requests).Error; err != nil {
 		return nil, 0, err
 	}
 	return requests, total, nil
@@ -316,7 +447,7 @@ func GetAllInvoiceRequestsByParams(params InvoiceRequestSearchParams, pageInfo *
 
 	var requests []*InvoiceRequest
 	dataQuery := applyInvoiceRequestSearch(invoiceRequestListWithUser(DB), params, true)
-	if err := dataQuery.Preload("Items").Order("invoice_requests.id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&requests).Error; err != nil {
+	if err := dataQuery.Preload("Items").Preload("ProductItems").Order("invoice_requests.id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&requests).Error; err != nil {
 		return nil, 0, err
 	}
 	return requests, total, nil
@@ -330,6 +461,7 @@ func GetUserInvoiceRequestDetail(userID int, id int) (*InvoiceRequest, error) {
 	var request InvoiceRequest
 	err := invoiceRequestDetailWithUser(DB).
 		Preload("Items").
+		Preload("ProductItems").
 		Where("invoice_requests.id = ? AND invoice_requests.user_id = ?", id, userID).
 		First(&request).Error
 	if err != nil {
@@ -349,6 +481,7 @@ func GetInvoiceRequestDetail(id int) (*InvoiceRequest, error) {
 	var request InvoiceRequest
 	err := invoiceRequestDetailWithUser(DB).
 		Preload("Items").
+		Preload("ProductItems").
 		Where("invoice_requests.id = ?", id).
 		First(&request).Error
 	if err != nil {
@@ -397,15 +530,53 @@ func normalizeCreateInvoiceInput(input CreateInvoiceRequestInput) CreateInvoiceR
 	input.Email = strings.TrimSpace(input.Email)
 	input.Phone = strings.TrimSpace(input.Phone)
 	input.Remark = strings.TrimSpace(input.Remark)
+	for i := range input.ManualTransactions {
+		input.ManualTransactions[i].TradeNo = strings.TrimSpace(input.ManualTransactions[i].TradeNo)
+		input.ManualTransactions[i].PayerName = strings.TrimSpace(input.ManualTransactions[i].PayerName)
+		input.ManualTransactions[i].PayeeName = strings.TrimSpace(input.ManualTransactions[i].PayeeName)
+		if normalizeInvoiceFingerprintPart(input.ManualTransactions[i].PayeeName) == normalizeInvoiceFingerprintPart(InvoiceManualTransferPayeeName) {
+			input.ManualTransactions[i].PayeeName = InvoiceManualTransferPayeeName
+		}
+		input.ManualTransactions[i].TransferBankName = strings.TrimSpace(input.ManualTransactions[i].TransferBankName)
+		input.ManualTransactions[i].Remark = strings.TrimSpace(input.ManualTransactions[i].Remark)
+	}
+	if len(input.ManualTransactions) > 0 {
+		// 人工凭证的核心产物就是交易明细与产品清单，服务端强制保留，不能由篡改请求关闭。
+		input.NeedDetailBill = true
+		input.NeedServiceConfirmation = true
+	}
+	for i := range input.ProductItems {
+		input.ProductItems[i].ProductName = strings.TrimSpace(input.ProductItems[i].ProductName)
+		input.ProductItems[i].Specification = strings.TrimSpace(input.ProductItems[i].Specification)
+		input.ProductItems[i].Unit = strings.TrimSpace(input.ProductItems[i].Unit)
+		input.ProductItems[i].Remark = strings.TrimSpace(input.ProductItems[i].Remark)
+	}
 	return input
 }
 
 func validateCreateInvoiceInput(input CreateInvoiceRequestInput) error {
-	if len(input.Orders) == 0 {
-		return errors.New("请选择需要开票的订单")
+	hasOrders := len(input.Orders) > 0
+	hasManualTransfers := len(input.ManualTransactions) > 0
+	if !hasOrders && !hasManualTransfers {
+		return errors.New("请选择平台订单或填写银行转账")
+	}
+	if hasOrders && hasManualTransfers {
+		return errors.New("平台订单和银行转账不能在同一申请中混用")
+	}
+	if hasOrders && len(input.ProductItems) > 0 {
+		return errors.New("平台订单的产品明细由系统快照生成，不能自定义")
 	}
 	if len(input.Orders) > 100 {
 		return errors.New("单次最多选择 100 笔订单")
+	}
+	if len(input.ManualTransactions) > 50 {
+		return errors.New("单次最多填写 50 笔银行转账")
+	}
+	if hasManualTransfers && len(input.ProductItems) == 0 {
+		return errors.New("银行转账申请必须填写产品明细")
+	}
+	if len(input.ProductItems) > 50 {
+		return errors.New("单次最多填写 50 条产品明细")
 	}
 	if input.Title == "" {
 		if input.InvoiceType == InvoiceTypeSpecial {
@@ -449,7 +620,249 @@ func validateCreateInvoiceInput(input CreateInvoiceRequestInput) error {
 	if len([]rune(input.Remark)) > 1000 {
 		return errors.New("备注不能超过 1000 个字符")
 	}
+	for index, transfer := range input.ManualTransactions {
+		if err := validateInvoiceManualTransaction(transfer); err != nil {
+			return fmt.Errorf("第 %d 笔银行转账：%w", index+1, err)
+		}
+	}
+	for index, item := range input.ProductItems {
+		if err := validateInvoiceProductItem(item); err != nil {
+			return fmt.Errorf("第 %d 条产品明细：%w", index+1, err)
+		}
+	}
 	return nil
+}
+
+func validateInvoiceManualTransaction(input InvoiceManualTransactionInput) error {
+	if input.TradeNo == "" {
+		return errors.New("银行流水号不能为空")
+	}
+	if len([]rune(input.TradeNo)) > 255 {
+		return errors.New("银行流水号不能超过 255 个字符")
+	}
+	if normalizeInvoiceFingerprintPart(input.TradeNo) == "" {
+		return errors.New("银行流水号必须包含字母或数字")
+	}
+	if input.PayerName == "" {
+		return errors.New("付款方名称不能为空")
+	}
+	if len([]rune(input.PayerName)) > 128 {
+		return errors.New("付款方名称不能超过 128 个字符")
+	}
+	if normalizeInvoiceFingerprintPart(input.PayerName) == "" {
+		return errors.New("付款方名称必须包含文字或数字")
+	}
+	if input.PayeeName == "" {
+		return errors.New("收款方名称不能为空")
+	}
+	if len([]rune(input.PayeeName)) > 128 {
+		return errors.New("收款方名称不能超过 128 个字符")
+	}
+	if input.PayeeName != InvoiceManualTransferPayeeName {
+		return fmt.Errorf("收款方必须为%s", InvoiceManualTransferPayeeName)
+	}
+	if input.TransferBankName == "" {
+		return errors.New("付款银行不能为空")
+	}
+	if len([]rune(input.TransferBankName)) > 128 {
+		return errors.New("付款银行不能超过 128 个字符")
+	}
+	if normalizeInvoiceFingerprintPart(input.TransferBankName) == "" {
+		return errors.New("付款银行必须包含文字或数字")
+	}
+	if err := validateInvoiceMoney(input.Money, true); err != nil {
+		return err
+	}
+	if input.PaidAt <= 0 {
+		return errors.New("转账时间不能为空")
+	}
+	if input.PaidAt > common.GetTimestamp() {
+		return errors.New("转账时间不能晚于当前时间")
+	}
+	if len([]rune(input.Remark)) > 500 {
+		return errors.New("转账备注不能超过 500 个字符")
+	}
+	return nil
+}
+
+func validateInvoiceProductItem(input InvoiceProductItemInput) error {
+	if input.ProductName == "" {
+		return errors.New("产品名称不能为空")
+	}
+	if len([]rune(input.ProductName)) > 255 {
+		return errors.New("产品名称不能超过 255 个字符")
+	}
+	if len([]rune(input.Specification)) > 255 {
+		return errors.New("规格说明不能超过 255 个字符")
+	}
+	if input.Unit == "" {
+		return errors.New("单位不能为空")
+	}
+	if len([]rune(input.Unit)) > 32 {
+		return errors.New("单位不能超过 32 个字符")
+	}
+	if math.IsNaN(input.Quantity) || math.IsInf(input.Quantity, 0) || input.Quantity <= 0 || input.Quantity > 1_000_000_000 {
+		return errors.New("数量必须大于 0")
+	}
+	quantity := decimal.NewFromFloat(input.Quantity)
+	if !quantity.Equal(quantity.Round(6)) {
+		return errors.New("数量最多保留 6 位小数")
+	}
+	if math.IsNaN(input.UnitPrice) || math.IsInf(input.UnitPrice, 0) || input.UnitPrice <= 0 || input.UnitPrice > float64(maxInvoiceMoney) {
+		return errors.New("单价必须大于 0")
+	}
+	unitPrice := decimal.NewFromFloat(input.UnitPrice)
+	if !unitPrice.Equal(unitPrice.Round(2)) {
+		return errors.New("单价最多保留 2 位小数")
+	}
+	if err := validateInvoiceMoney(input.Money, true); err != nil {
+		return err
+	}
+	if input.Quota < 0 {
+		return errors.New("额度不能为负数")
+	}
+	if input.ServiceStartAt < 0 || input.ServiceEndAt < 0 {
+		return errors.New("服务周期不合法")
+	}
+	if (input.ServiceStartAt == 0) != (input.ServiceEndAt == 0) {
+		return errors.New("服务周期开始和结束时间必须同时填写")
+	}
+	if input.ServiceStartAt > 0 && input.ServiceEndAt < input.ServiceStartAt {
+		return errors.New("服务结束时间不能早于开始时间")
+	}
+	if len([]rune(input.Remark)) > 500 {
+		return errors.New("产品备注不能超过 500 个字符")
+	}
+	return nil
+}
+
+func validateInvoiceMoney(value float64, requirePositive bool) error {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > float64(maxInvoiceMoney) {
+		return errors.New("金额不合法")
+	}
+	if requirePositive && value <= 0 {
+		return errors.New("金额必须大于 0")
+	}
+	amount := decimal.NewFromFloat(value)
+	if !amount.Equal(amount.Round(2)) {
+		return errors.New("金额最多保留 2 位小数")
+	}
+	return nil
+}
+
+func invoiceSourceTypeFromInput(input CreateInvoiceRequestInput) string {
+	if len(input.ManualTransactions) > 0 {
+		return InvoiceSourceTypeManualTransfer
+	}
+	return InvoiceSourceTypeSystemOrder
+}
+
+func invoiceManualTransferFingerprint(input InvoiceManualTransactionInput) string {
+	canonical := strings.Join([]string{
+		normalizeInvoiceFingerprintPart(input.TransferBankName),
+		normalizeInvoiceFingerprintPart(input.TradeNo),
+		normalizeInvoiceFingerprintPart(input.PayerName),
+	}, "|")
+	sum := sha256.Sum256([]byte(canonical))
+	return fmt.Sprintf("%x", sum[:])
+}
+
+func normalizeInvoiceFingerprintPart(value string) string {
+	value = strings.ToLower(norm.NFKC.String(strings.TrimSpace(value)))
+	var builder strings.Builder
+	for _, r := range value {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) {
+			builder.WriteRune(r)
+		}
+	}
+	return builder.String()
+}
+
+func summarizeInvoiceProductNames(items []InvoiceProductItemInput) string {
+	names := make([]string, 0, 2)
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		name := strings.TrimSpace(item.ProductName)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+		if len(names) == 2 {
+			break
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	summary := strings.Join(names, "、")
+	if len(seen) > len(names) || len(items) > len(names) {
+		summary += "等"
+	}
+	runes := []rune(summary)
+	if len(runes) > 255 {
+		return string(runes[:255])
+	}
+	return summary
+}
+
+func buildInvoiceProductItems(inputs []InvoiceProductItemInput, sourceType string, totalMoney float64, totalQuota int64, transactionItems []InvoiceRequestItem) ([]InvoiceRequestProductItem, int64, error) {
+	if len(inputs) == 0 {
+		if sourceType == InvoiceSourceTypeManualTransfer {
+			return nil, 0, errors.New("银行转账申请必须填写产品明细")
+		}
+		name := "AI API 调用额度"
+		for _, item := range transactionItems {
+			if strings.TrimSpace(item.ProductName) != "" {
+				name = strings.TrimSpace(item.ProductName)
+				break
+			}
+		}
+		return []InvoiceRequestProductItem{{
+			ProductName: name,
+			Unit:        "项",
+			Quantity:    1,
+			UnitPrice:   totalMoney,
+			Money:       totalMoney,
+			Quota:       totalQuota,
+		}}, totalQuota, nil
+	}
+
+	items := make([]InvoiceRequestProductItem, 0, len(inputs))
+	totalProductMoney := decimal.Zero
+	var productQuota int64
+	for index, input := range inputs {
+		expectedMoney := decimal.NewFromFloat(input.Quantity).Mul(decimal.NewFromFloat(input.UnitPrice)).Round(2)
+		actualMoney := decimal.NewFromFloat(input.Money).Round(2)
+		if !expectedMoney.Equal(actualMoney) {
+			return nil, 0, fmt.Errorf("第 %d 条产品明细的数量、单价与金额不一致", index+1)
+		}
+		if input.Quota > 0 && productQuota > (1<<63-1)-input.Quota {
+			return nil, 0, errors.New("产品额度合计超出范围")
+		}
+		productQuota += input.Quota
+		totalProductMoney = totalProductMoney.Add(actualMoney)
+		items = append(items, InvoiceRequestProductItem{
+			ProductName:    input.ProductName,
+			Specification:  input.Specification,
+			Unit:           input.Unit,
+			Quantity:       input.Quantity,
+			UnitPrice:      input.UnitPrice,
+			Money:          input.Money,
+			Quota:          input.Quota,
+			ServiceStartAt: input.ServiceStartAt,
+			ServiceEndAt:   input.ServiceEndAt,
+			Remark:         input.Remark,
+		})
+	}
+	requestMoney := decimal.NewFromFloat(totalMoney).Round(2)
+	if !totalProductMoney.Equal(requestMoney) {
+		return nil, 0, fmt.Errorf("产品明细金额合计 %.2f 元与交易金额 %.2f 元不一致", totalProductMoney.InexactFloat64(), requestMoney.InexactFloat64())
+	}
+	return items, productQuota, nil
 }
 
 func normalizeInvoiceType(invoiceType string) string {
@@ -567,6 +980,35 @@ func isInvoiceOrderOccupiedTx(tx *gorm.DB, orderType string, orderID int) (bool,
 		Where("invoice_requests.status IN ?", invoiceOccupiedStatuses()).
 		Count(&count).Error
 	return count > 0, err
+}
+
+func isInvoiceManualTransferOccupiedTx(tx *gorm.DB, fingerprint string) (bool, error) {
+	if tx == nil {
+		tx = DB
+	}
+	if strings.TrimSpace(fingerprint) == "" {
+		return false, errors.New("银行转账指纹不能为空")
+	}
+	var count int64
+	err := tx.Table("invoice_request_items").
+		Joins("JOIN invoice_requests ON invoice_requests.id = invoice_request_items.invoice_request_id").
+		Where("invoice_request_items.manual_fingerprint = ?", fingerprint).
+		Where("invoice_requests.status IN ?", invoiceOccupiedStatuses()).
+		Count(&count).Error
+	return count > 0, err
+}
+
+func isInvoiceDuplicateKeyErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "unique constraint") ||
+		strings.Contains(message, "duplicate entry") ||
+		strings.Contains(message, "duplicate key")
 }
 
 func listEligibleInvoiceTopUpRecords(tx *gorm.DB, userID int) ([]*PaymentRecord, error) {
@@ -726,7 +1168,7 @@ func reviewInvoiceRequest(id int, reviewerUserID int, targetStatus string, input
 	var request InvoiceRequest
 	now := common.GetTimestamp()
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").Preload("Items").First(&request, "id = ?", id).Error; err != nil {
+		if err := tx.Set("gorm:query_option", "FOR UPDATE").Preload("Items").Preload("ProductItems").First(&request, "id = ?", id).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrInvoiceRequestNotFound
 			}
@@ -775,6 +1217,17 @@ func reviewInvoiceRequest(id int, reviewerUserID int, targetStatus string, input
 			if err := tx.Model(&User{}).Where("id = ?", request.UserId).
 				Update("quota", gorm.Expr("quota + ?", request.ServiceFeeQuota)).Error; err != nil {
 				return err
+			}
+		}
+		if targetStatus == InvoiceStatusRejected {
+			// 驳回后释放人工转账唯一指纹，允许用户修正资料后重新申请。
+			if err := tx.Model(&InvoiceRequestItem{}).
+				Where("invoice_request_id = ? AND source_type = ?", request.Id, InvoiceSourceTypeManualTransfer).
+				Update("manual_fingerprint", nil).Error; err != nil {
+				return err
+			}
+			for i := range request.Items {
+				request.Items[i].ManualFingerprint = nil
 			}
 		}
 		return nil

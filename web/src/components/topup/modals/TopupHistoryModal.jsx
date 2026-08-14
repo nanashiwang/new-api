@@ -71,6 +71,7 @@ const PAYMENT_METHOD_MAP = {
   alipay: '支付宝',
   wxpay: '微信',
   wallet: '钱包',
+  bank_transfer: '银行转账',
 };
 
 const RISK_STATUS_CONFIG = {
@@ -93,6 +94,7 @@ const RECORD_TYPE_MAP = {
   topup: '在线充值',
   subscription: '订阅套餐',
   sellable_token_purchase: '钱包购买',
+  manual_transfer: '公对公转账',
 };
 
 const EMPTY_FILTERS = {
@@ -184,26 +186,68 @@ const INVOICE_STATUS_OPTIONS = [
   { label: '已驳回', value: 'rejected' },
 ];
 
+const INVOICE_MANUAL_PAYEE_NAME = '上海曜算智能科技有限公司';
+const MAX_MANUAL_INVOICE_ROWS = 50;
+
 const EMPTY_INVOICE_FILTERS = {
   username: '',
   status: '',
 };
 
-const EMPTY_INVOICE_FORM = {
-  invoiceType: 'normal',
-  titleType: 'company',
-  title: '',
-  taxNumber: '',
-  registeredAddress: '',
-  registeredPhone: '',
-  bankName: '',
-  bankAccount: '',
-  email: '',
-  phone: '',
-  remark: '',
-  needDetailBill: true,
-  needServiceConfirmation: false,
-};
+let invoiceRowSequence = 0;
+
+function createInvoiceRowKey(prefix) {
+  invoiceRowSequence += 1;
+  return `${prefix}-${Date.now()}-${invoiceRowSequence}`;
+}
+
+function createManualInvoiceTransaction() {
+  return {
+    key: createInvoiceRowKey('transfer'),
+    tradeNo: '',
+    payerName: '',
+    payeeName: INVOICE_MANUAL_PAYEE_NAME,
+    transferBankName: '',
+    money: '',
+    paidAt: new Date(),
+    remark: '',
+  };
+}
+
+function createInvoiceProductItem() {
+  return {
+    key: createInvoiceRowKey('product'),
+    productName: 'AI API 调用服务',
+    specification: '',
+    unit: '项',
+    quantity: '1',
+    unitPrice: '',
+    money: '',
+    quota: '',
+    remark: '',
+  };
+}
+
+function createEmptyInvoiceForm() {
+  return {
+    sourceType: 'system_order',
+    invoiceType: 'normal',
+    titleType: 'company',
+    title: '',
+    taxNumber: '',
+    registeredAddress: '',
+    registeredPhone: '',
+    bankName: '',
+    bankAccount: '',
+    email: '',
+    phone: '',
+    remark: '',
+    needDetailBill: true,
+    needServiceConfirmation: false,
+    manualTransactions: [createManualInvoiceTransaction()],
+    productItems: [createInvoiceProductItem()],
+  };
+}
 
 const RISK_RECORD_TYPE_OPTIONS = [
   { label: '全部订单类型', value: '' },
@@ -263,6 +307,15 @@ function getInvoiceOrderKey(record) {
 }
 
 function getInvoiceItemKey(item) {
+  if (item?.id) {
+    return String(item.id);
+  }
+  if (
+    item?.source_type === 'manual_transfer' ||
+    item?.order_type === 'manual_transfer'
+  ) {
+    return `manual_transfer-${item?.trade_no || item?.complete_time || '-'}`;
+  }
   if (!item?.order_id) {
     return '';
   }
@@ -290,6 +343,14 @@ function getInvoicePaymentLabel(paymentMethod) {
   return PAYMENT_METHOD_MAP[paymentMethod] || paymentMethod || '-';
 }
 
+function getInvoicePaymentLabelForItem(item) {
+  const label = getInvoicePaymentLabel(item?.payment_method);
+  if (item?.payment_method === 'bank_transfer' && item?.transfer_bank_name) {
+    return `${label}（${item.transfer_bank_name}）`;
+  }
+  return label;
+}
+
 function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -308,9 +369,52 @@ function formatInvoiceTime(value) {
 }
 
 function formatInvoiceCode(item) {
-  return (
-    item?.trade_no || `${item?.order_type || '-'}-${item?.order_id || '-'}`
+  if (item?.trade_no) {
+    return item.trade_no;
+  }
+  if (
+    item?.source_type === 'manual_transfer' ||
+    item?.order_type === 'manual_transfer' ||
+    !item?.order_id
+  ) {
+    return '-';
+  }
+  return `${item?.order_type || '-'}-${item.order_id}`;
+}
+
+function formatInvoiceBusinessId(item) {
+  if (
+    item?.source_type === 'manual_transfer' ||
+    item?.order_type === 'manual_transfer' ||
+    !item?.order_id
+  ) {
+    return '-';
+  }
+  return item.order_id;
+}
+
+function isManualInvoice(invoice) {
+  if (invoice?.source_type === 'manual_transfer') {
+    return true;
+  }
+  return (invoice?.items || []).some(
+    (item) =>
+      item?.source_type === 'manual_transfer' ||
+      item?.order_type === 'manual_transfer',
   );
+}
+
+function toUnixTimestamp(value) {
+  if (!value) return 0;
+  const timestamp = value instanceof Date ? value.getTime() : Date.parse(value);
+  if (!Number.isFinite(timestamp)) return 0;
+  return Math.floor(timestamp / 1000);
+}
+
+function hasAtMostTwoMoneyDecimals(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return false;
+  return Math.abs(amount * 100 - Math.round(amount * 100)) < 1e-7;
 }
 
 function formatInvoiceUser(invoice) {
@@ -381,6 +485,26 @@ function formatInvoiceServiceQuota(invoice) {
   return '以账户实际可用额度及调用扣减记录为准';
 }
 
+function formatInvoiceProductQuantity(item) {
+  const quantity = Number(item?.quantity || 0);
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    return '-';
+  }
+  const text = Number.isInteger(quantity)
+    ? String(quantity)
+    : quantity.toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
+  return `${text}${item?.unit ? ` ${item.unit}` : ''}`;
+}
+
+function formatInvoiceProductServicePeriod(item) {
+  const start = Number(item?.service_start_at || 0);
+  const end = Number(item?.service_end_at || 0);
+  if (!start || !end) {
+    return '-';
+  }
+  return `${formatInvoicePrintDate(start)} 至 ${formatInvoicePrintDate(end)}`;
+}
+
 function formatInvoicePaymentAmount(item) {
   if (Number(item?.money || 0) > 0) {
     return formatInvoicePrintMoney(item.money);
@@ -432,19 +556,30 @@ function formatInvoiceTypeSummary(summary) {
     .join('；');
 }
 
-function buildInvoicePrintHtml(invoice, stampUrl = '') {
+function buildInvoicePrintHtml(invoice, stampUrl = '', options = {}) {
   const items = invoice?.items || [];
   const summary = buildInvoicePrintSummary(invoice);
   const cell = (value) => escapeHtml(displayValue(value));
-  const totalParts = [];
-  if (summary.money > 0) {
-    totalParts.push(
-      `支付金额合计人民币 ${formatInvoicePrintMoney(summary.money)}`,
-    );
-  }
-  if (totalParts.length === 0) {
-    totalParts.push(`支付金额合计人民币 ${formatInvoicePrintMoney(0)}`);
-  }
+  const manual = isManualInvoice(invoice);
+  const official = Boolean(options.official ?? invoice?.status === 'invoiced');
+  const documentTitle = official
+    ? '曜算平台交易明细证明'
+    : '曜算平台交易明细账单（待审核）';
+  const intro = manual
+    ? official
+      ? `兹证明：用户 ${cell(formatInvoiceUser(invoice))} 提交的公对公银行转账资料已经平台审核，相关交易明细如下：`
+      : `用户 ${cell(formatInvoiceUser(invoice))} 提交了公对公银行转账资料，以下内容仅为待审核申请信息预览：`
+    : `用户 ${cell(formatInvoiceUser(invoice))} 于曜算平台存在相关交易记录，申请范围内的交易明细如下：`;
+  const sourceNotes = manual
+    ? official
+      ? `<p>本文件所列人工转账信息依据申请人提交的银行转账资料及平台审核记录生成。</p>
+      <p>人工转账记录不属于平台支付渠道自动回传订单，不会据此自动增加或扣减用户钱包余额。</p>`
+      : `<p>本文件中的银行转账信息由申请人自行填报，当前尚未完成平台核验，不构成到账、开票或服务交付证明。</p>
+      <p>人工转账记录不会据此自动增加或扣减用户钱包余额。</p>`
+    : `<p>本文件所列订单明细依据用户申请时选择的订单及平台系统快照生成。</p>`;
+  const totalParts = [
+    `支付金额合计人民币 ${formatInvoicePrintMoney(summary.money)}`,
+  ];
   const typeSummary = formatInvoiceTypeSummary(summary);
   const timeRange = summary.startTime
     ? `${formatInvoiceTime(summary.startTime)} 至 ${formatInvoiceTime(summary.endTime)}`
@@ -452,37 +587,59 @@ function buildInvoicePrintHtml(invoice, stampUrl = '') {
   const orderRows =
     items.length > 0
       ? items
-          .map(
-            (item, index) => `
+          .map((item, index) => {
+            const payer = displayValue(item?.payer_name);
+            const payee = displayValue(item?.payee_name);
+            const parties =
+              payer !== '-' && payee !== '-'
+                ? `${payer} → ${payee}`
+                : payer !== '-'
+                  ? payer
+                  : payee;
+            return `
               <tr>
                 <td class="center">${index + 1}</td>
                 <td class="center">${cell(getInvoiceOrderTypeLabel(item?.order_type))}</td>
-                <td class="center">${cell(item?.order_id)}</td>
+                <td class="center">${cell(formatInvoiceBusinessId(item))}</td>
                 <td>${cell(formatInvoiceCode(item))}</td>
+                <td class="center">${cell(parties)}</td>
                 <td class="center">${cell(item?.product_name)}</td>
-                <td class="center">${cell(getInvoicePaymentLabel(item?.payment_method))}</td>
+                <td class="center">${cell(getInvoicePaymentLabelForItem(item))}</td>
                 <td class="money">${cell(formatInvoicePaymentAmount(item))}</td>
                 <td class="center">${cell(formatInvoiceTime(item?.complete_time || item?.create_time))}</td>
               </tr>
-            `,
-          )
+            `;
+          })
           .join('')
-      : '<tr><td colspan="8" class="empty">暂无订单明细</td></tr>';
+      : '<tr><td colspan="9" class="empty">暂无交易明细</td></tr>';
+  const watermark = official
+    ? ''
+    : '<div class="draft-watermark">待审核 · 非正式文件</div>';
+  const signSection = official
+    ? `<section class="sign">
+      <div class="sign-box">
+        <p>上海曜算智能科技有限公司</p>
+        <p>盖章：<span class="stamp-hint">见右下角公章</span></p>
+        <p>出具日期：${cell(formatInvoicePrintDate(invoice?.reviewed_at || Math.floor(Date.now() / 1000)))}</p>
+        ${stampUrl ? `<img class="sign-seal-image" src="${cell(stampUrl)}" alt="公司公章" />` : ''}
+      </div>
+    </section>`
+    : '<section class="pending-note">当前状态：待审核。审核通过前不得作为正式交易证明使用。</section>';
   return `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>曜算平台交易明细证明 #${cell(invoice?.id)}</title>
+  <title>${cell(documentTitle)} #${cell(invoice?.id)}</title>
   <style>
     @page { size: A4 landscape; margin: 14mm; }
     * { box-sizing: border-box; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
     body { margin: 0; color: #243244; background: #fff; font: 14px/1.55 "Songti SC", "SimSun", "Noto Serif CJK SC", serif; }
-    .certificate { position: relative; min-height: 176mm; padding: 4mm 18mm 6mm 2mm; }
+    .certificate { position: relative; min-height: 176mm; padding: 4mm 18mm 6mm 2mm; overflow: hidden; }
     h1 { margin: 0; text-align: center; font: 700 25px/1.25 "PingFang SC", "Microsoft YaHei", sans-serif; letter-spacing: 1px; color: #23364a; }
     .title-line { height: 2px; margin: 14px 0 8px; background: #2d5f86; }
     .intro { margin: 0 26px 16px; text-indent: 2em; font-size: 14px; }
     h2 { margin: 0 0 8px; font: 700 16px/1.2 "PingFang SC", "Microsoft YaHei", sans-serif; color: #1f3447; }
-    table { width: 100%; border-collapse: collapse; table-layout: fixed; margin-left: 20px; width: calc(100% - 40px); }
+    table { width: calc(100% - 40px); border-collapse: collapse; table-layout: fixed; margin-left: 20px; }
     th { background: #22364b; color: #fff; font-weight: 700; }
     th, td { border: 1px solid #cfd8e3; padding: 6px 7px; vertical-align: middle; word-break: break-all; }
     tbody tr:nth-child(even) { background: #f7f9fb; }
@@ -497,26 +654,30 @@ function buildInvoicePrintHtml(invoice, stampUrl = '') {
     .sign-box p { margin: 8px 0; }
     .stamp-hint { color: #526579; font-size: 13px; }
     .sign-seal-image { position: absolute; width: 110px; height: 110px; right: 0; bottom: 0; object-fit: contain; opacity: 0.94; }
+    .pending-note { margin: 24px 20px 0; padding: 10px 12px; border: 1px solid #f59e0b; color: #9a5b00; background: #fff8e6; text-align: center; font-weight: 700; }
+    .draft-watermark { position: fixed; z-index: 10; left: 50%; top: 48%; transform: translate(-50%, -50%) rotate(-24deg); color: rgba(185, 28, 28, 0.16); font: 800 54px/1 "PingFang SC", sans-serif; letter-spacing: 5px; white-space: nowrap; pointer-events: none; }
     .empty { padding: 18px; text-align: center; color: #697586; }
     @media screen { body { padding: 18px; background: #eef2f7; } .certificate { max-width: 1120px; margin: 0 auto; padding: 28px 76px 72px 32px; background: #fff; box-shadow: 0 10px 34px rgba(15, 23, 42, 0.12); } }
   </style>
 </head>
 <body>
   <main class="certificate">
-    <h1>曜算平台交易明细证明</h1>
+    ${watermark}
+    <h1>${cell(documentTitle)}</h1>
     <div class="title-line"></div>
-    <p class="intro">兹证明：用户 ${cell(formatInvoiceUser(invoice))} 于曜算平台存在相关交易记录。根据该用户申请时所选择的交易类型及时间范围，平台系统记录的交易明细如下：</p>
+    <p class="intro">${intro}</p>
 
     <h2>交易明细表</h2>
     <table>
       <thead>
         <tr>
           <th style="width: 44px;">序号</th>
-          <th style="width: 90px;">订单类型</th>
-          <th style="width: 96px;">平台订单 ID</th>
+          <th style="width: 90px;">交易类型</th>
+          <th style="width: 96px;">业务编号</th>
           <th>订单编码/交易号</th>
+          <th style="width: 150px;">付款方/收款方</th>
           <th style="width: 110px;">商品/套餐</th>
-          <th style="width: 96px;">支付渠道</th>
+          <th style="width: 118px;">支付渠道</th>
           <th style="width: 120px;">支付金额</th>
           <th style="width: 160px;">支付时间</th>
         </tr>
@@ -532,63 +693,109 @@ function buildInvoicePrintHtml(invoice, stampUrl = '') {
 
     <section class="notes">
       <h2>说明</h2>
-      <p>本《曜算平台交易明细证明》仅用于证明用户在其申请范围内，于曜算平台产生的相关支付订单记录。</p>
-      <p>本证明所列订单明细依据用户申请时选择的订单及平台系统记录生成，具体筛选条件以用户申请页面选择内容为准。</p>
-      <p>本证明仅限用于证明用户在曜算平台的相关交易记录，不作为其他权利义务认定依据。</p>
-      <p>本证明不得擅自修改、涂改、拆分或用于与申请目的不一致的其他用途。</p>
-      <p>本证明中所列时间均为北京时间（UTC+08:00）。</p>
-      <p>本证明经上海曜算智能科技有限公司加盖公章后生效。</p>
+      ${sourceNotes}
+      <p>${official ? '本证明' : '本预览'}不得擅自修改、涂改、拆分或用于与申请目的不一致的其他用途。</p>
+      <p>本文件中所列时间均为北京时间（UTC+08:00）。</p>
+      ${official ? '<p>本证明经上海曜算智能科技有限公司加盖公章后生效。</p>' : ''}
     </section>
 
-    <section class="sign">
-      <div class="sign-box">
-        <p>上海曜算智能科技有限公司</p>
-        <p>盖章：<span class="stamp-hint">见右下角公章</span></p>
-        <p>出具日期：${cell(formatInvoicePrintDate(Math.floor(Date.now() / 1000)))}</p>
-        ${stampUrl ? `<img class="sign-seal-image" src="${cell(stampUrl)}" alt="公司公章" />` : ''}
-      </div>
-    </section>
+    ${signSection}
   </main>
 </body>
 </html>`;
 }
 
-function buildInvoiceServiceConfirmationHtml(invoice, stampUrl = '') {
+function buildInvoiceServiceConfirmationHtml(
+  invoice,
+  stampUrl = '',
+  options = {},
+) {
   const cell = (value) => escapeHtml(displayValue(value));
+  const official = Boolean(options.official ?? invoice?.status === 'invoiced');
   const documentNo = `YS-AIAPI-${formatInvoiceDateCompact(invoice?.created_at)}-${String(
     invoice?.id || 0,
   ).padStart(4, '0')}`;
   const issueDate = formatInvoicePrintDate(
-    invoice?.reviewed_at || Math.floor(Date.now() / 1000),
+    official
+      ? invoice?.reviewed_at || Math.floor(Date.now() / 1000)
+      : invoice?.created_at || Math.floor(Date.now() / 1000),
   );
   const clientName = invoice?.title || formatInvoiceUser(invoice);
-  const serviceAmount = formatInvoiceServiceAmount(invoice);
-  const quotaText = formatInvoiceServiceQuota(invoice);
+  const productItems =
+    Array.isArray(invoice?.product_items) && invoice.product_items.length > 0
+      ? invoice.product_items
+      : [
+          {
+            product_name: 'AI API 调用额度',
+            specification: '以对应交易及账户实际记录为准',
+            unit: '项',
+            quantity: 1,
+            unit_price: Number(invoice?.total_money || 0),
+            money: Number(invoice?.total_money || 0),
+            quota: Number(invoice?.total_quota || 0),
+            remark: '',
+          },
+        ];
+  const productRows = productItems
+    .map((item, index) => {
+      const details = [
+        Number(item?.quota || 0) > 0
+          ? `额度：${formatInvoiceServiceQuota({ total_quota: item.quota })}`
+          : '',
+        formatInvoiceProductServicePeriod(item) !== '-'
+          ? `服务周期：${formatInvoiceProductServicePeriod(item)}`
+          : '',
+        item?.remark ? `备注：${item.remark}` : '',
+      ].filter(Boolean);
+      return `<tr>
+        <td class="center">${index + 1}</td>
+        <td>${cell(item?.product_name)}</td>
+        <td>${cell(item?.specification)}</td>
+        <td class="center">${cell(formatInvoiceProductQuantity(item))}</td>
+        <td class="money">${cell(formatInvoicePrintMoney(item?.unit_price))}</td>
+        <td class="money">${cell(formatInvoicePrintMoney(item?.money))}</td>
+        <td>${cell(details.join('；'))}</td>
+      </tr>`;
+    })
+    .join('');
+  const documentTitle = official
+    ? 'AI API 技术服务产品明细清单'
+    : 'AI API 技术服务产品明细清单（待审核）';
+  const watermark = official
+    ? ''
+    : '<div class="draft-watermark">待审核 · 非正式文件</div>';
+  const signSection = official
+    ? `<section class="sign">
+      <div class="sign-box">
+        <p class="provider-name">上海曜算智能科技有限公司</p>
+        <p>盖章：<span class="stamp-hint">见右下角公章</span></p>
+        <p>出具日期：${cell(issueDate)}</p>
+        ${stampUrl ? `<img class="provider-seal" src="${cell(stampUrl)}" alt="公司公章" />` : ''}
+      </div>
+    </section>`
+    : '<section class="pending-note">当前状态：待审核。产品内容及金额须经管理员核验后方可作为正式文件使用。</section>';
   return `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>AI API 技术服务产品确认单 #${cell(invoice?.id)}</title>
+  <title>${cell(documentTitle)} #${cell(invoice?.id)}</title>
   <style>
-    @page { size: A4 portrait; margin: 0; }
+    @page { size: A4 portrait; margin: 11mm 12mm; }
     * { box-sizing: border-box; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-    html, body { margin: 0; background: #fff; }
-    body { color: #1f2d3d; font: 12px/1.42 "Songti SC", "SimSun", "Noto Serif CJK SC", serif; }
-    .certificate { width: 210mm; min-height: 297mm; margin: 0 auto; padding: 16mm 16mm 15mm; background: #fff; }
-    .topline { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 6px; border-bottom: 1px solid #d8dee8; color: #586575; font-size: 11px; }
-    h1 { margin: 10px 0 8px; text-align: center; font: 700 22px/1.25 "PingFang SC", "Microsoft YaHei", sans-serif; color: #14233a; letter-spacing: 1px; }
-    .lead { margin: 0 0 10px; text-indent: 2em; color: #37475a; }
-    .meta-table { margin-bottom: 10px; }
-    .meta-table th { width: 24mm; background: #edf3f8; color: #1f2d3d; text-align: left; font-weight: 700; }
-    .meta-table td { background: #fff; color: #1f2d3d; }
-    /* 表格单元格统一顶部对齐 + 所有列同一套 padding：序号/金额与多行说明的首行齐平，短内容不浮在行中央。 */
-    .meta-table th, .meta-table td { padding: 6px 8px; vertical-align: middle; line-height: 1.3; }
-    h2 { margin: 10px 0 5px; padding-left: 7px; border-left: 4px solid #1f4e79; font: 700 14px/1.25 "PingFang SC", "Microsoft YaHei", sans-serif; color: #1f3447; }
-    table { width: 100%; margin: 0 0 8px; border-collapse: collapse; table-layout: fixed; page-break-inside: avoid; }
+    body { margin: 0; color: #243244; background: #fff; font: 12px/1.38 "Songti SC", "SimSun", "Noto Serif CJK SC", serif; }
+    .certificate { position: relative; min-height: 273mm; max-width: 186mm; margin: 0 auto; padding: 0 0 4mm; overflow: hidden; }
+    .topline { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #2d5f86; padding-bottom: 4px; color: #2d5f86; font: 600 11px/1.2 "PingFang SC", sans-serif; }
+    h1 { margin: 8px 0 5px; text-align: center; color: #23364a; font: 700 22px/1.2 "PingFang SC", "Microsoft YaHei", sans-serif; letter-spacing: 0.8px; }
+    .lead { margin: 0 4px 7px; text-align: center; color: #526579; font-size: 11px; }
+    h2 { margin: 7px 0 4px; color: #1f3447; font: 700 14px/1.2 "PingFang SC", "Microsoft YaHei", sans-serif; page-break-after: avoid; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; page-break-inside: avoid; }
+    .meta-table th { width: 19mm; background: #eef3f8; color: #23364a; }
+    .meta-table td { background: #fff; }
     th { background: #22364b; color: #fff; font-weight: 700; text-align: center; }
     th, td { border: 1px solid #c8d4e2; padding: 6px 7px; vertical-align: middle; word-break: break-word; line-height: 1.34; }
     th { line-height: 1.2; }
     .center { text-align: center; }
+    .money { text-align: right; white-space: nowrap; }
     .notes { margin: 0; padding: 8px 10px; border: 1px solid #c8d4e2; background: #fafcff; page-break-inside: avoid; }
     .notes p { margin: 4px 0; text-indent: 2em; }
     .sign { display: flex; justify-content: flex-end; margin-top: 40px; page-break-inside: avoid; }
@@ -597,61 +804,42 @@ function buildInvoiceServiceConfirmationHtml(invoice, stampUrl = '') {
     .provider-name { font-weight: 700; }
     .stamp-hint { color: #526579; }
     .provider-seal { position: absolute; z-index: 2; right: 0; bottom: -4mm; width: 32mm; height: 32mm; object-fit: contain; opacity: 0.9; transform: rotate(-6deg); pointer-events: none; }
-    @media screen { body { padding: 18px; background: #eef2f7; } .certificate { box-shadow: 0 10px 34px rgba(15, 23, 42, 0.12); } }
+    .pending-note { margin-top: 20px; padding: 10px 12px; border: 1px solid #f59e0b; color: #9a5b00; background: #fff8e6; text-align: center; font-weight: 700; }
+    .draft-watermark { position: fixed; z-index: 10; left: 50%; top: 48%; transform: translate(-50%, -50%) rotate(-24deg); color: rgba(185, 28, 28, 0.15); font: 800 42px/1 "PingFang SC", sans-serif; letter-spacing: 4px; white-space: nowrap; pointer-events: none; }
+    @media screen { body { padding: 18px; background: #eef2f7; } .certificate { padding: 12mm; background: #fff; box-shadow: 0 10px 34px rgba(15, 23, 42, 0.12); } }
   </style>
 </head>
 <body>
   <main class="certificate" data-page-orientation="portrait">
+    ${watermark}
     <div class="topline">
       <span>上海曜算智能科技有限公司</span>
       <span>文件编号：${cell(documentNo)}</span>
     </div>
-    <h1>AI API 技术服务产品确认单</h1>
-    <p class="lead">本文件用于确认 API 调用额度、计费规则及配套技术服务内容，随对应发票申请生成，盖章后作为服务交付与费用确认依据。</p>
+    <h1>${cell(documentTitle)}</h1>
+    <p class="lead">${official ? '本文件依据对应交易及产品快照生成，盖章后作为服务交付与费用确认依据。' : '本文件依据用户提交内容自动生成，当前仅供核对，尚未完成平台审核。'}</p>
     <table class="meta-table">
       <tbody>
-        <tr><th>文件编号</th><td>${cell(documentNo)}</td><th>签发日期</th><td>${cell(issueDate)}</td></tr>
+        <tr><th>文件编号</th><td>${cell(documentNo)}</td><th>${official ? '签发日期' : '申请日期'}</th><td>${cell(issueDate)}</td></tr>
         <tr><th>服务提供方</th><td>上海曜算智能科技有限公司</td><th>客户名称</th><td>${cell(clientName)}</td></tr>
-        <tr><th>服务周期</th><td>自服务开通之日起至所购调用额度消耗完毕，或双方另行书面约定期限届满。</td><th>交付方式</th><td>线上 API 接入、接口文档、远程技术支持。</td></tr>
+        <tr><th>凭证来源</th><td>${cell(isManualInvoice(invoice) ? '申请人填报的公对公转账资料' : '平台订单快照')}</td><th>申请金额</th><td>${cell(formatInvoicePrintMoney(invoice?.total_money))}</td></tr>
       </tbody>
     </table>
 
-    <h2>一、服务资源</h2>
+    <h2>一、产品及费用明细</h2>
     <table>
-      <thead><tr><th style="width: 13mm;">序号</th><th style="width: 38mm;">服务名称</th><th>服务说明及主要配置</th></tr></thead>
-      <tbody><tr><td class="center">1</td><td>大语言模型 API 调用服务</td><td>支持文本生成、文本理解、代码辅助、多轮对话等能力；支持多种模型按需切换；通过 API Key 调用；按 Token 实际使用量计量并扣减额度。</td></tr></tbody>
+      <thead><tr><th style="width: 10mm;">序号</th><th style="width: 30mm;">产品名称</th><th style="width: 34mm;">规格说明</th><th style="width: 22mm;">数量</th><th style="width: 26mm;">单价</th><th style="width: 26mm;">金额</th><th>额度 / 服务周期 / 备注</th></tr></thead>
+      <tbody>${productRows}</tbody>
     </table>
 
-    <h2>二、产品资源费用</h2>
-    <table>
-      <thead><tr><th style="width: 13mm;">序号</th><th style="width: 34mm;">产品名称</th><th style="width: 42mm;">计费规则</th><th style="width: 30mm;">购买金额</th><th>额度说明</th></tr></thead>
-      <tbody><tr><td class="center">1</td><td>API 调用 Token 额度</td><td>输入、输出及缓存读取按系统实时价格折算扣减。</td><td>${cell(serviceAmount)}</td><td>本次申请涉及 ${cell(quotaText)}；以账户实际调用产生的输入、输出及缓存读取 Token 数量折算扣减；不同模型、参数和上下文长度对应消耗可能不同，具体以系统实时扣费价格及实际扣费记录为准。</td></tr></tbody>
-    </table>
-
-    <h2>三、技术服务内容</h2>
-    <table>
-      <thead><tr><th style="width: 28mm;">类别</th><th>服务内容</th></tr></thead>
-      <tbody>
-        <tr><td class="center">基础服务</td><td>平台接入支持、API Key 配置、接口文档说明、请求参数配置、返回值解析、Token 用量统计、账单查询、余额提醒及常见错误排查。</td></tr>
-        <tr><td class="center">增值服务</td><td>应用集成辅助、提示词优化建议、批量文本任务调用策略、并发控制建议、结果质量反馈及模型参数调整建议。</td></tr>
-      </tbody>
-    </table>
-
-    <h2>四、服务边界与合规说明</h2>
+    <h2>二、交付与核验说明</h2>
     <section class="notes">
-      <p>本服务提供 API 调用额度及相关技术支持，不包含客户业务系统定制开发、私有化部署、长期驻场运维或第三方平台账号代运营，除非双方另有书面约定。</p>
-      <p>大语言模型输出具有概率性，服务提供方不承诺输出内容完全满足特定业务结果；用户应自行审核、确认和合规使用。</p>
-      <p>用户不得将本服务用于违法违规、侵犯第三方权益、规避监管或违反上游模型服务政策的用途。</p>
+      <p>产品名称、规格、数量、单价、金额及额度均以本清单快照为准；如与发票或双方书面约定不一致，应在审核前修正。</p>
+      <p>公对公转账资料由申请人填报，不会自动生成充值订单或改变钱包余额，须由管理员核对到账信息后处理。</p>
+      <p>API 服务的实际可用范围、计量方式及使用限制仍以平台规则和双方书面约定为准。</p>
     </section>
 
-    <section class="sign">
-      <div class="sign-box">
-        <p class="provider-name">上海曜算智能科技有限公司</p>
-        <p>盖章：<span class="stamp-hint">见右下角公章</span></p>
-        <p>出具日期：${cell(issueDate)}</p>
-        ${stampUrl ? `<img class="provider-seal" src="${cell(stampUrl)}" alt="公司公章" />` : ''}
-      </div>
-    </section>
+    ${signSection}
   </main>
 </body>
 </html>`;
@@ -802,7 +990,7 @@ const TopupHistoryModal = ({
   const [eligibleInvoiceOrders, setEligibleInvoiceOrders] = useState([]);
   const [eligibleInvoiceLoading, setEligibleInvoiceLoading] = useState(false);
   const [selectedInvoiceOrderKeys, setSelectedInvoiceOrderKeys] = useState([]);
-  const [invoiceForm, setInvoiceForm] = useState(EMPTY_INVOICE_FORM);
+  const [invoiceForm, setInvoiceForm] = useState(createEmptyInvoiceForm);
   const [invoiceSubmitting, setInvoiceSubmitting] = useState(false);
   const [invoiceReviewState, setInvoiceReviewState] = useState({
     visible: false,
@@ -1541,7 +1729,7 @@ const TopupHistoryModal = ({
   };
 
   const openInvoiceApplyModal = async (record = null) => {
-    setInvoiceForm(EMPTY_INVOICE_FORM);
+    setInvoiceForm(createEmptyInvoiceForm());
     setSelectedInvoiceOrderKeys(record ? [getInvoiceOrderKey(record)] : []);
     setInvoiceApplyVisible(true);
     await loadEligibleInvoiceOrders(record);
@@ -1551,7 +1739,7 @@ const TopupHistoryModal = ({
     setInvoiceApplyVisible(false);
     setSelectedInvoiceOrderKeys([]);
     setEligibleInvoiceOrders([]);
-    setInvoiceForm(EMPTY_INVOICE_FORM);
+    setInvoiceForm(createEmptyInvoiceForm());
   };
 
   const handleInvoiceFormChange = (key, value) => {
@@ -1565,6 +1753,88 @@ const TopupHistoryModal = ({
       }
       return next;
     });
+  };
+
+  const handleInvoiceSourceChange = (value) => {
+    if (value === 'manual_transfer') {
+      setSelectedInvoiceOrderKeys([]);
+    }
+    setInvoiceForm((prev) => ({
+      ...prev,
+      sourceType: value,
+      needDetailBill: value === 'manual_transfer' ? true : prev.needDetailBill,
+      needServiceConfirmation:
+        value === 'manual_transfer' ? true : prev.needServiceConfirmation,
+    }));
+  };
+
+  const updateManualInvoiceTransaction = (key, field, value) => {
+    setInvoiceForm((prev) => ({
+      ...prev,
+      manualTransactions: prev.manualTransactions.map((item) =>
+        item.key === key ? { ...item, [field]: value } : item,
+      ),
+    }));
+  };
+
+  const addManualInvoiceTransaction = () => {
+    setInvoiceForm((prev) => ({
+      ...prev,
+      manualTransactions: [
+        ...prev.manualTransactions,
+        createManualInvoiceTransaction(),
+      ],
+    }));
+  };
+
+  const removeManualInvoiceTransaction = (key) => {
+    setInvoiceForm((prev) => ({
+      ...prev,
+      manualTransactions:
+        prev.manualTransactions.length > 1
+          ? prev.manualTransactions.filter((item) => item.key !== key)
+          : prev.manualTransactions,
+    }));
+  };
+
+  const updateInvoiceProductItem = (key, field, value) => {
+    setInvoiceForm((prev) => ({
+      ...prev,
+      productItems: prev.productItems.map((item) => {
+        if (item.key !== key) return item;
+        const next = { ...item, [field]: value };
+        if (field === 'quantity' || field === 'unitPrice') {
+          const quantity = Number(next.quantity);
+          const unitPrice = Number(next.unitPrice);
+          if (
+            Number.isFinite(quantity) &&
+            quantity > 0 &&
+            Number.isFinite(unitPrice) &&
+            unitPrice >= 0
+          ) {
+            next.money = (quantity * unitPrice).toFixed(2);
+          }
+        }
+        return next;
+      }),
+    }));
+  };
+
+  const addInvoiceProductItem = () => {
+    setInvoiceForm((prev) => ({
+      ...prev,
+      productItems: [...prev.productItems, createInvoiceProductItem()],
+    }));
+  };
+
+  const removeInvoiceProductItem = (key) => {
+    setInvoiceForm((prev) => ({
+      ...prev,
+      productItems:
+        prev.productItems.length > 1
+          ? prev.productItems.filter((item) => item.key !== key)
+          : prev.productItems,
+    }));
   };
 
   const selectedInvoiceOrders = useMemo(() => {
@@ -1583,6 +1853,43 @@ const TopupHistoryModal = ({
       { money: 0, quota: 0 },
     );
   }, [selectedInvoiceOrders]);
+
+  const manualInvoiceSummary = useMemo(
+    () =>
+      invoiceForm.manualTransactions.reduce(
+        (summary, item) => ({
+          money: summary.money + Number(item?.money || 0),
+          quota: summary.quota,
+        }),
+        { money: 0, quota: 0 },
+      ),
+    [invoiceForm.manualTransactions],
+  );
+
+  const invoiceProductSummary = useMemo(
+    () =>
+      invoiceForm.productItems.reduce(
+        (summary, item) => ({
+          money: summary.money + Number(item?.money || 0),
+          quota: summary.quota + Number(item?.quota || 0),
+        }),
+        { money: 0, quota: 0 },
+      ),
+    [invoiceForm.productItems],
+  );
+
+  const invoiceApplySummary =
+    invoiceForm.sourceType === 'manual_transfer'
+      ? {
+          money: manualInvoiceSummary.money,
+          quota: invoiceProductSummary.quota,
+        }
+      : selectedInvoiceSummary;
+
+  const manualProductAmountMismatch =
+    invoiceForm.sourceType === 'manual_transfer' &&
+    Math.round(manualInvoiceSummary.money * 100) !==
+      Math.round(invoiceProductSummary.money * 100);
 
   // 发票申请手续费：开票金额(money)为人民币，按充值汇率 price 换回美元再 × 每元额度，
   // 与后端口径一致：feeQuota = money × rate × QuotaPerUnit / price，截断取整。
@@ -1608,16 +1915,14 @@ const TopupHistoryModal = ({
     if (
       invoiceServiceFeeRate <= 0 ||
       invoicePrice <= 0 ||
-      selectedInvoiceSummary.money <= 0
+      invoiceApplySummary.money <= 0
     )
       return 0;
     return Math.trunc(
-      (selectedInvoiceSummary.money *
-        invoiceServiceFeeRate *
-        getQuotaPerUnit()) /
+      (invoiceApplySummary.money * invoiceServiceFeeRate * getQuotaPerUnit()) /
         invoicePrice,
     );
-  }, [invoiceServiceFeeRate, invoicePrice, selectedInvoiceSummary]);
+  }, [invoiceServiceFeeRate, invoicePrice, invoiceApplySummary.money]);
   const userWalletQuota = Number(userState?.user?.quota || 0);
   const invoiceFeeInsufficient =
     estimatedInvoiceFeeQuota > 0 && userWalletQuota < estimatedInvoiceFeeQuota;
@@ -1636,9 +1941,77 @@ const TopupHistoryModal = ({
       phone: invoiceForm.phone.trim(),
       remark: invoiceForm.remark.trim(),
     };
-    if (selectedInvoiceOrders.length === 0) {
+    const isManual = invoiceForm.sourceType === 'manual_transfer';
+    if (!isManual && selectedInvoiceOrders.length === 0) {
       Toast.error({ content: t('请选择需要开票的订单') });
       return;
+    }
+    const manualTransactions = invoiceForm.manualTransactions.map((item) => ({
+      trade_no: item.tradeNo.trim(),
+      payer_name: item.payerName.trim(),
+      payee_name: item.payeeName.trim(),
+      transfer_bank_name: item.transferBankName.trim(),
+      money: Number(item.money),
+      paid_at: toUnixTimestamp(item.paidAt),
+      remark: item.remark.trim(),
+    }));
+    const productItems = invoiceForm.productItems.map((item) => ({
+      product_name: item.productName.trim(),
+      specification: item.specification.trim(),
+      unit: item.unit.trim(),
+      quantity: Number(item.quantity),
+      unit_price: Number(item.unitPrice),
+      money: Number(item.money),
+      quota: Number(item.quota || 0),
+      service_start_at: 0,
+      service_end_at: 0,
+      remark: item.remark.trim(),
+    }));
+    if (isManual) {
+      const invalidTransfer = manualTransactions.find(
+        (item) =>
+          !item.trade_no ||
+          !item.payer_name ||
+          !item.payee_name ||
+          !item.transfer_bank_name ||
+          !Number.isFinite(item.money) ||
+          item.money <= 0 ||
+          !hasAtMostTwoMoneyDecimals(item.money) ||
+          !item.paid_at ||
+          item.paid_at > Math.floor(Date.now() / 1000),
+      );
+      if (invalidTransfer) {
+        Toast.error({ content: t('请完整填写银行转账信息') });
+        return;
+      }
+      const invalidProduct = productItems.find(
+        (item) =>
+          !item.product_name ||
+          !Number.isFinite(item.quantity) ||
+          item.quantity <= 0 ||
+          Math.abs(
+            item.quantity * 1_000_000 - Math.round(item.quantity * 1_000_000),
+          ) > 1e-7 ||
+          !item.unit ||
+          !Number.isFinite(item.unit_price) ||
+          item.unit_price <= 0 ||
+          !hasAtMostTwoMoneyDecimals(item.unit_price) ||
+          !Number.isFinite(item.money) ||
+          item.money <= 0 ||
+          !hasAtMostTwoMoneyDecimals(item.money) ||
+          Math.round(item.quantity * item.unit_price * 100) !==
+            Math.round(item.money * 100) ||
+          !Number.isSafeInteger(item.quota) ||
+          item.quota < 0,
+      );
+      if (invalidProduct) {
+        Toast.error({ content: t('请完整填写产品明细') });
+        return;
+      }
+      if (manualProductAmountMismatch) {
+        Toast.error({ content: t('产品明细金额合计必须与转账金额一致') });
+        return;
+      }
     }
     if (!form.title) {
       Toast.error({
@@ -1686,10 +2059,14 @@ const TopupHistoryModal = ({
           need_service_confirmation: Boolean(
             invoiceForm.needServiceConfirmation,
           ),
-          orders: selectedInvoiceOrders.map((item) => ({
-            order_type: resolveOrderType(item),
-            id: item.id,
-          })),
+          orders: isManual
+            ? []
+            : selectedInvoiceOrders.map((item) => ({
+                order_type: resolveOrderType(item),
+                id: item.id,
+              })),
+          manual_transactions: isManual ? manualTransactions : [],
+          product_items: isManual ? productItems : [],
         });
         const { success, message, data } = res.data || {};
         if (!success) {
@@ -1704,7 +2081,13 @@ const TopupHistoryModal = ({
         }
         await Promise.all([refreshInvoices(), refreshRecords()]);
       } catch (error) {
-        Toast.error({ content: t('提交发票申请失败') });
+        Toast.error({
+          content: t(
+            error?.response?.data?.message ||
+              error?.message ||
+              '提交发票申请失败',
+          ),
+        });
       } finally {
         setInvoiceSubmitting(false);
       }
@@ -1720,7 +2103,7 @@ const TopupHistoryModal = ({
             <Text strong type='warning'>
               {renderQuota(estimatedInvoiceFeeQuota)}
             </Text>
-            （{t('开票金额')} {formatMoney(selectedInvoiceSummary.money)} ×{' '}
+            （{t('开票金额')} {formatMoney(invoiceApplySummary.money)} ×{' '}
             {(invoiceServiceFeeRate * 100).toFixed(2)}%）。
             <br />
             {t('若申请被驳回，手续费将原额退还。')}
@@ -1821,7 +2204,7 @@ const TopupHistoryModal = ({
     ) {
       Toast.error({
         content: t(
-          '请上传服务确认单 PDF（可在当前弹窗点击【生成服务确认单】打印并另存为 PDF）',
+          '请上传产品明细清单 PDF（可在当前弹窗点击【生成产品明细清单】打印并另存为 PDF）',
         ),
       });
       return;
@@ -1954,7 +2337,7 @@ const TopupHistoryModal = ({
     ) {
       Toast.error({
         content: t(
-          '请上传服务确认单 PDF（可在当前弹窗点击【生成服务确认单】打印并另存为 PDF）',
+          '请上传产品明细清单 PDF（可在当前弹窗点击【生成产品明细清单】打印并另存为 PDF）',
         ),
       });
       return;
@@ -2020,8 +2403,9 @@ const TopupHistoryModal = ({
     }
     pdfWindow.opener = null;
 
-    const stampUrl = await loadInvoiceStampDataUrl();
-    const html = buildInvoicePrintHtml(detail, stampUrl);
+    const official = userIsAdmin || detail?.status === 'invoiced';
+    const stampUrl = official ? await loadInvoiceStampDataUrl() : '';
+    const html = buildInvoicePrintHtml(detail, stampUrl, { official });
     // 浏览器原生渲染（所见即所得，与页面预览完全一致）；需要 PDF 时走浏览器“打印→另存为 PDF”。
     const doc = autoPrint
       ? html.replace(
@@ -2047,8 +2431,11 @@ const TopupHistoryModal = ({
     }
     pdfWindow.opener = null;
 
-    const stampUrl = await loadInvoiceStampDataUrl();
-    const html = buildInvoiceServiceConfirmationHtml(detail, stampUrl);
+    const official = userIsAdmin || detail?.status === 'invoiced';
+    const stampUrl = official ? await loadInvoiceStampDataUrl() : '';
+    const html = buildInvoiceServiceConfirmationHtml(detail, stampUrl, {
+      official,
+    });
     // 浏览器原生渲染（所见即所得，与页面预览完全一致）；需要 PDF 时走浏览器“打印→另存为 PDF”。
     const doc = autoPrint
       ? html.replace(
@@ -2090,10 +2477,10 @@ const TopupHistoryModal = ({
           autoPrint: true,
         }))
       ) {
-        Toast.error({ content: t('浏览器阻止了服务产品清单窗口') });
+        Toast.error({ content: t('浏览器阻止了产品明细清单窗口') });
       }
     } catch (error) {
-      Toast.error({ content: t('生成服务产品清单失败') });
+      Toast.error({ content: t('生成产品明细清单失败') });
     }
   };
 
@@ -2155,13 +2542,13 @@ const TopupHistoryModal = ({
   const viewInvoiceServiceConfirmation = async (record) => {
     const targetWindow = window.open('', '_blank', 'width=960,height=720');
     if (!targetWindow) {
-      Toast.error({ content: t('浏览器阻止了服务产品清单窗口') });
+      Toast.error({ content: t('浏览器阻止了产品明细清单窗口') });
       return;
     }
     targetWindow.opener = null;
     targetWindow.document.open();
     targetWindow.document.write(
-      '<!doctype html><meta charset="utf-8"><title>服务产品清单</title><body style="font:14px sans-serif;padding:24px;">正在加载服务产品清单...</body>',
+      '<!doctype html><meta charset="utf-8"><title>产品明细清单</title><body style="font:14px sans-serif;padding:24px;">正在加载产品明细清单...</body>',
     );
     targetWindow.document.close();
     try {
@@ -2170,8 +2557,8 @@ const TopupHistoryModal = ({
     } catch (error) {
       targetWindow.document.open();
       targetWindow.document.write(
-        `<!doctype html><meta charset="utf-8"><title>服务产品清单</title><body style="font:14px sans-serif;padding:24px;color:#b91c1c;">${escapeHtml(
-          error?.message || '加载服务产品清单失败',
+        `<!doctype html><meta charset="utf-8"><title>产品明细清单</title><body style="font:14px sans-serif;padding:24px;color:#b91c1c;">${escapeHtml(
+          error?.message || '加载产品明细清单失败',
         )}</body>`,
       );
       targetWindow.document.close();
@@ -2181,13 +2568,13 @@ const TopupHistoryModal = ({
   const printInvoiceServiceConfirmationForRecord = async (record) => {
     const targetWindow = window.open('', '_blank', 'width=960,height=720');
     if (!targetWindow) {
-      Toast.error({ content: t('浏览器阻止了服务产品清单窗口') });
+      Toast.error({ content: t('浏览器阻止了产品明细清单窗口') });
       return;
     }
     targetWindow.opener = null;
     targetWindow.document.open();
     targetWindow.document.write(
-      '<!doctype html><meta charset="utf-8"><title>服务产品清单</title><body style="font:14px sans-serif;padding:24px;">正在加载服务产品清单...</body>',
+      '<!doctype html><meta charset="utf-8"><title>产品明细清单</title><body style="font:14px sans-serif;padding:24px;">正在加载产品明细清单...</body>',
     );
     targetWindow.document.close();
     try {
@@ -2199,8 +2586,8 @@ const TopupHistoryModal = ({
     } catch (error) {
       targetWindow.document.open();
       targetWindow.document.write(
-        `<!doctype html><meta charset="utf-8"><title>服务产品清单</title><body style="font:14px sans-serif;padding:24px;color:#b91c1c;">${escapeHtml(
-          error?.message || '加载服务产品清单失败',
+        `<!doctype html><meta charset="utf-8"><title>产品明细清单</title><body style="font:14px sans-serif;padding:24px;color:#b91c1c;">${escapeHtml(
+          error?.message || '加载产品明细清单失败',
         )}</body>`,
       );
       targetWindow.document.close();
@@ -3033,7 +3420,7 @@ const TopupHistoryModal = ({
   const invoiceDetailItemColumns = useMemo(
     () => [
       {
-        title: t('订单类型'),
+        title: t('交易类型'),
         dataIndex: 'order_type',
         key: 'order_type',
         width: 110,
@@ -3044,10 +3431,26 @@ const TopupHistoryModal = ({
         ),
       },
       {
-        title: t('平台订单ID'),
-        dataIndex: 'order_id',
+        title: t('业务编号'),
         key: 'order_id',
         width: 100,
+        render: (_, item) => formatInvoiceBusinessId(item),
+      },
+      {
+        title: t('付款方 / 收款方'),
+        key: 'transfer_parties',
+        width: 200,
+        render: (_, item) =>
+          item?.payer_name || item?.payee_name ? (
+            <div>
+              <div>{item?.payer_name || '-'}</div>
+              <Text type='tertiary' size='small'>
+                → {item?.payee_name || '-'}
+              </Text>
+            </div>
+          ) : (
+            <Text type='tertiary'>-</Text>
+          ),
       },
       {
         title: t('订单编码/交易号'),
@@ -3071,7 +3474,11 @@ const TopupHistoryModal = ({
         dataIndex: 'payment_method',
         key: 'payment_method',
         width: 120,
-        render: renderPaymentMethod,
+        render: (_, item) => (
+          <Tag shape='circle' color='grey'>
+            {t(getInvoicePaymentLabelForItem(item))}
+          </Tag>
+        ),
       },
       {
         title: t('支付金额'),
@@ -3098,6 +3505,59 @@ const TopupHistoryModal = ({
         width: 160,
         render: (_, item) =>
           formatInvoiceTime(item?.complete_time || item?.create_time),
+      },
+    ],
+    [t],
+  );
+
+  const invoiceProductItemColumns = useMemo(
+    () => [
+      {
+        title: t('产品名称'),
+        dataIndex: 'product_name',
+        key: 'product_name',
+        width: 180,
+      },
+      {
+        title: t('规格说明'),
+        dataIndex: 'specification',
+        key: 'specification',
+        width: 180,
+        render: (value) => value || <Text type='tertiary'>-</Text>,
+      },
+      {
+        title: t('数量'),
+        key: 'quantity',
+        width: 110,
+        render: (_, item) => formatInvoiceProductQuantity(item),
+      },
+      {
+        title: t('单价'),
+        dataIndex: 'unit_price',
+        key: 'unit_price',
+        width: 120,
+        render: (value) => formatMoney(value),
+      },
+      {
+        title: t('金额'),
+        dataIndex: 'money',
+        key: 'money',
+        width: 120,
+        render: (value) => <Text type='danger'>{formatMoney(value)}</Text>,
+      },
+      {
+        title: t('额度'),
+        dataIndex: 'quota',
+        key: 'quota',
+        width: 130,
+        render: (value) => (Number(value || 0) > 0 ? renderQuota(value) : '-'),
+      },
+      {
+        title: t('产品备注'),
+        dataIndex: 'remark',
+        key: 'remark',
+        width: 180,
+        render: (value) => value || <Text type='tertiary'>-</Text>,
       },
     ],
     [t],
@@ -3169,6 +3629,19 @@ const TopupHistoryModal = ({
               <Tag shape='circle' size='small' color='blue'>
                 {t(record?.title_type === 'company' ? '企业' : '个人')}
               </Tag>
+              <Tag
+                shape='circle'
+                size='small'
+                color={
+                  record?.source_type === 'manual_transfer' ? 'orange' : 'grey'
+                }
+              >
+                {t(
+                  record?.source_type === 'manual_transfer'
+                    ? '公对公银行转账'
+                    : '平台订单',
+                )}
+              </Tag>
               <Text
                 strong
                 copyable={{ content: buildInvoiceTitleCopyText(record) }}
@@ -3183,7 +3656,7 @@ const TopupHistoryModal = ({
             ) : null}
             {record?.need_service_confirmation ? (
               <Tag shape='circle' size='small' color='purple'>
-                {t('已申请服务确认单')}
+                {t('已申请产品明细清单')}
               </Tag>
             ) : null}
             {record?.tax_number ? (
@@ -3329,7 +3802,7 @@ const TopupHistoryModal = ({
               theme='outline'
               onClick={() => viewInvoiceServiceConfirmation(record)}
             >
-              {t('服务产品清单')}
+              {t('产品明细清单')}
             </Button>
             {record?.status === 'pending' ? (
               <>
@@ -4001,6 +4474,7 @@ const TopupHistoryModal = ({
     }
 
     const items = detail?.items || [];
+    const productItems = detail?.product_items || [];
     const infoGridStyle = {
       gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(0, 1fr))',
     };
@@ -4033,8 +4507,14 @@ const TopupHistoryModal = ({
               true,
             )}
             {renderInvoiceDetailValue(
-              '订单数量',
-              `${items.length} ${t('笔订单')}`,
+              '凭证来源',
+              detail?.source_type === 'manual_transfer'
+                ? t('公对公银行转账')
+                : t('平台订单'),
+            )}
+            {renderInvoiceDetailValue(
+              '交易数量',
+              `${items.length} ${t('笔交易')}`,
             )}
             {renderInvoiceDetailValue(
               '合计支付金额',
@@ -4062,10 +4542,25 @@ const TopupHistoryModal = ({
               detail?.need_detail_bill !== false ? '需要随发票发送' : '不需要',
             )}
             {renderInvoiceDetailValue(
-              '服务确认单',
+              '产品明细清单',
               detail?.need_service_confirmation ? '需要随发票发送' : '不需要',
             )}
           </div>
+          {isManualInvoice(detail) ? (
+            <div
+              className='mt-3 rounded-lg p-3'
+              style={{
+                background: 'var(--semi-color-warning-light-default)',
+                border: '1px solid var(--semi-color-warning)',
+              }}
+            >
+              <Text type='warning'>
+                {t(
+                  '该申请包含人工录入的银行转账资料，审核时必须核对流水号、付款方、金额和转账时间；该记录不会影响钱包余额。',
+                )}
+              </Text>
+            </div>
+          ) : null}
         </Card>
 
         <Card
@@ -4114,7 +4609,7 @@ const TopupHistoryModal = ({
         </Card>
 
         <Card
-          title={t('订单明细')}
+          title={t('交易明细')}
           bordered={false}
           bodyStyle={{ padding: 0 }}
           style={{ border: '1px solid var(--semi-color-border)' }}
@@ -4127,7 +4622,25 @@ const TopupHistoryModal = ({
             size='small'
             pagination={false}
             scroll={{ x: '100%' }}
-            empty={buildTableEmpty(t, '暂无订单明细')}
+            empty={buildTableEmpty(t, '暂无交易明细')}
+          />
+        </Card>
+
+        <Card
+          title={t('产品明细清单')}
+          bordered={false}
+          bodyStyle={{ padding: 0 }}
+          style={{ border: '1px solid var(--semi-color-border)' }}
+        >
+          <Table
+            columns={invoiceProductItemColumns}
+            dataSource={productItems}
+            loading={invoiceDetailLoading}
+            rowKey={(item, index) => String(item?.id || `product-${index}`)}
+            size='small'
+            pagination={false}
+            scroll={{ x: '100%' }}
+            empty={buildTableEmpty(t, '暂无产品明细')}
           />
         </Card>
 
@@ -4282,7 +4795,7 @@ const TopupHistoryModal = ({
               disabled={!invoiceDetail}
               onClick={printInvoiceServiceConfirmation}
             >
-              {t('服务产品清单')}
+              {t('产品明细清单')}
             </Button>
             <Button
               type='primary'
@@ -4311,6 +4824,35 @@ const TopupHistoryModal = ({
         style={isMobile ? undefined : { width: '1000px', maxWidth: '95vw' }}
       >
         <div className='space-y-4'>
+          <Card
+            bordered={false}
+            bodyStyle={{ padding: 12 }}
+            style={{
+              background: 'var(--semi-color-fill-0)',
+              border: '1px solid var(--semi-color-border)',
+            }}
+          >
+            <div className='text-xs mb-1'>{t('付款凭证来源')}</div>
+            <Select
+              value={invoiceForm.sourceType}
+              optionList={[
+                { label: t('平台订单'), value: 'system_order' },
+                { label: t('公对公银行转账'), value: 'manual_transfer' },
+              ]}
+              onChange={handleInvoiceSourceChange}
+              style={{ width: '100%' }}
+            />
+            <div className='mt-2'>
+              <Text type='tertiary' size='small'>
+                {t(
+                  invoiceForm.sourceType === 'manual_transfer'
+                    ? '人工转账仅作为开票凭证，不会自动增加或扣减钱包余额，提交后需管理员核验。'
+                    : '平台订单信息将自动复制为不可变的开票快照。',
+                )}
+              </Text>
+            </div>
+          </Card>
+
           <div
             className='grid gap-3'
             style={{
@@ -4479,6 +5021,7 @@ const TopupHistoryModal = ({
             <div className='flex flex-col gap-2'>
               <Checkbox
                 checked={invoiceForm.needDetailBill}
+                disabled={invoiceForm.sourceType === 'manual_transfer'}
                 onChange={(event) =>
                   handleInvoiceFormChange(
                     'needDetailBill',
@@ -4490,6 +5033,7 @@ const TopupHistoryModal = ({
               </Checkbox>
               <Checkbox
                 checked={invoiceForm.needServiceConfirmation}
+                disabled={invoiceForm.sourceType === 'manual_transfer'}
                 onChange={(event) =>
                   handleInvoiceFormChange(
                     'needServiceConfirmation',
@@ -4497,7 +5041,7 @@ const TopupHistoryModal = ({
                   )
                 }
               >
-                {t('同时申请服务确认单')}
+                {t('同时申请产品明细清单')}
               </Checkbox>
             </div>
             <div className='mt-1'>
@@ -4506,6 +5050,335 @@ const TopupHistoryModal = ({
               </Text>
             </div>
           </Card>
+
+          {invoiceForm.sourceType === 'manual_transfer' ? (
+            <>
+              <Card
+                title={t('银行转账明细')}
+                bordered={false}
+                bodyStyle={{ padding: 12 }}
+                style={{ border: '1px solid var(--semi-color-border)' }}
+              >
+                <div className='space-y-3'>
+                  {invoiceForm.manualTransactions.map((item, index) => (
+                    <div
+                      key={item.key}
+                      className='rounded-lg p-3'
+                      style={{
+                        background: 'var(--semi-color-fill-0)',
+                        border: '1px solid var(--semi-color-border)',
+                      }}
+                    >
+                      <div className='mb-3 flex items-center justify-between gap-2'>
+                        <Text strong>
+                          {t('转账记录')} #{index + 1}
+                        </Text>
+                        <Button
+                          size='small'
+                          type='danger'
+                          theme='borderless'
+                          disabled={invoiceForm.manualTransactions.length <= 1}
+                          onClick={() =>
+                            removeManualInvoiceTransaction(item.key)
+                          }
+                        >
+                          {t('删除')}
+                        </Button>
+                      </div>
+                      <div
+                        className='grid gap-3'
+                        style={{
+                          gridTemplateColumns: isMobile
+                            ? '1fr'
+                            : 'repeat(2, minmax(0, 1fr))',
+                        }}
+                      >
+                        <div>
+                          <div className='text-xs mb-1'>{t('银行流水号')}</div>
+                          <Input
+                            value={item.tradeNo}
+                            onChange={(value) =>
+                              updateManualInvoiceTransaction(
+                                item.key,
+                                'tradeNo',
+                                value,
+                              )
+                            }
+                            maxLength={255}
+                            showClear
+                          />
+                        </div>
+                        <div>
+                          <div className='text-xs mb-1'>{t('转账时间')}</div>
+                          <DatePicker
+                            type='dateTime'
+                            value={item.paidAt}
+                            onChange={(value) =>
+                              updateManualInvoiceTransaction(
+                                item.key,
+                                'paidAt',
+                                value,
+                              )
+                            }
+                            disabledDate={(date) =>
+                              date instanceof Date &&
+                              date.getTime() > Date.now()
+                            }
+                            style={{ width: '100%' }}
+                          />
+                        </div>
+                        <div>
+                          <div className='text-xs mb-1'>{t('付款方名称')}</div>
+                          <Input
+                            value={item.payerName}
+                            onChange={(value) =>
+                              updateManualInvoiceTransaction(
+                                item.key,
+                                'payerName',
+                                value,
+                              )
+                            }
+                            maxLength={128}
+                            showClear
+                          />
+                        </div>
+                        <div>
+                          <div className='text-xs mb-1'>{t('收款方名称')}</div>
+                          <Input
+                            value={item.payeeName}
+                            disabled
+                            maxLength={128}
+                          />
+                        </div>
+                        <div>
+                          <div className='text-xs mb-1'>{t('付款银行')}</div>
+                          <Input
+                            value={item.transferBankName}
+                            onChange={(value) =>
+                              updateManualInvoiceTransaction(
+                                item.key,
+                                'transferBankName',
+                                value,
+                              )
+                            }
+                            maxLength={128}
+                            showClear
+                          />
+                        </div>
+                        <div>
+                          <div className='text-xs mb-1'>{t('转账金额')}</div>
+                          <Input
+                            type='number'
+                            value={item.money}
+                            onChange={(value) =>
+                              updateManualInvoiceTransaction(
+                                item.key,
+                                'money',
+                                value,
+                              )
+                            }
+                            prefix='¥'
+                          />
+                        </div>
+                        <div
+                          style={{
+                            gridColumn: isMobile ? undefined : '1 / -1',
+                          }}
+                        >
+                          <div className='text-xs mb-1'>{t('转账备注')}</div>
+                          <Input
+                            value={item.remark}
+                            onChange={(value) =>
+                              updateManualInvoiceTransaction(
+                                item.key,
+                                'remark',
+                                value,
+                              )
+                            }
+                            maxLength={500}
+                            showClear
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  <Button
+                    theme='outline'
+                    disabled={
+                      invoiceForm.manualTransactions.length >=
+                      MAX_MANUAL_INVOICE_ROWS
+                    }
+                    onClick={addManualInvoiceTransaction}
+                  >
+                    {t('新增转账记录')}
+                  </Button>
+                </div>
+              </Card>
+
+              <Card
+                title={t('产品明细清单')}
+                bordered={false}
+                bodyStyle={{ padding: 12 }}
+                style={{ border: '1px solid var(--semi-color-border)' }}
+              >
+                <div className='space-y-3'>
+                  {invoiceForm.productItems.map((item, index) => (
+                    <div
+                      key={item.key}
+                      className='rounded-lg p-3'
+                      style={{
+                        background: 'var(--semi-color-fill-0)',
+                        border: '1px solid var(--semi-color-border)',
+                      }}
+                    >
+                      <div className='mb-3 flex items-center justify-between gap-2'>
+                        <Text strong>
+                          {t('产品明细')} #{index + 1}
+                        </Text>
+                        <Button
+                          size='small'
+                          type='danger'
+                          theme='borderless'
+                          disabled={invoiceForm.productItems.length <= 1}
+                          onClick={() => removeInvoiceProductItem(item.key)}
+                        >
+                          {t('删除')}
+                        </Button>
+                      </div>
+                      <div
+                        className='grid gap-3'
+                        style={{
+                          gridTemplateColumns: isMobile
+                            ? '1fr'
+                            : 'repeat(3, minmax(0, 1fr))',
+                        }}
+                      >
+                        <div>
+                          <div className='text-xs mb-1'>{t('产品名称')}</div>
+                          <Input
+                            value={item.productName}
+                            onChange={(value) =>
+                              updateInvoiceProductItem(
+                                item.key,
+                                'productName',
+                                value,
+                              )
+                            }
+                            maxLength={255}
+                            showClear
+                          />
+                        </div>
+                        <div>
+                          <div className='text-xs mb-1'>{t('规格说明')}</div>
+                          <Input
+                            value={item.specification}
+                            onChange={(value) =>
+                              updateInvoiceProductItem(
+                                item.key,
+                                'specification',
+                                value,
+                              )
+                            }
+                            maxLength={255}
+                            showClear
+                          />
+                        </div>
+                        <div>
+                          <div className='text-xs mb-1'>{t('单位')}</div>
+                          <Input
+                            value={item.unit}
+                            onChange={(value) =>
+                              updateInvoiceProductItem(item.key, 'unit', value)
+                            }
+                            maxLength={32}
+                          />
+                        </div>
+                        <div>
+                          <div className='text-xs mb-1'>{t('数量')}</div>
+                          <Input
+                            type='number'
+                            value={item.quantity}
+                            onChange={(value) =>
+                              updateInvoiceProductItem(
+                                item.key,
+                                'quantity',
+                                value,
+                              )
+                            }
+                          />
+                        </div>
+                        <div>
+                          <div className='text-xs mb-1'>{t('单价')}</div>
+                          <Input
+                            type='number'
+                            value={item.unitPrice}
+                            onChange={(value) =>
+                              updateInvoiceProductItem(
+                                item.key,
+                                'unitPrice',
+                                value,
+                              )
+                            }
+                            prefix='¥'
+                          />
+                        </div>
+                        <div>
+                          <div className='text-xs mb-1'>{t('金额')}</div>
+                          <Input
+                            type='number'
+                            value={item.money}
+                            onChange={(value) =>
+                              updateInvoiceProductItem(item.key, 'money', value)
+                            }
+                            prefix='¥'
+                          />
+                        </div>
+                        <div>
+                          <div className='text-xs mb-1'>{t('对应额度')}</div>
+                          <Input
+                            type='number'
+                            value={item.quota}
+                            onChange={(value) =>
+                              updateInvoiceProductItem(item.key, 'quota', value)
+                            }
+                            placeholder={t('可选')}
+                          />
+                        </div>
+                        <div
+                          style={{
+                            gridColumn: isMobile ? undefined : 'span 2',
+                          }}
+                        >
+                          <div className='text-xs mb-1'>{t('产品备注')}</div>
+                          <Input
+                            value={item.remark}
+                            onChange={(value) =>
+                              updateInvoiceProductItem(
+                                item.key,
+                                'remark',
+                                value,
+                              )
+                            }
+                            maxLength={500}
+                            showClear
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  <Button
+                    theme='outline'
+                    disabled={
+                      invoiceForm.productItems.length >= MAX_MANUAL_INVOICE_ROWS
+                    }
+                    onClick={addInvoiceProductItem}
+                  >
+                    {t('新增产品明细')}
+                  </Button>
+                </div>
+              </Card>
+            </>
+          ) : null}
 
           <Card
             bordered={false}
@@ -4517,14 +5390,24 @@ const TopupHistoryModal = ({
           >
             <Space wrap>
               <Text strong>
-                {t('已选')} {selectedInvoiceOrders.length} {t('笔订单')}
+                {invoiceForm.sourceType === 'manual_transfer'
+                  ? `${t('已录入')} ${invoiceForm.manualTransactions.length} ${t('笔转账')}`
+                  : `${t('已选')} ${selectedInvoiceOrders.length} ${t('笔订单')}`}
               </Text>
               <Text type='danger'>
-                {t('金额')} {formatMoney(selectedInvoiceSummary.money)}
+                {t('金额')} {formatMoney(invoiceApplySummary.money)}
               </Text>
-              {selectedInvoiceSummary.quota > 0 ? (
+              {invoiceApplySummary.quota > 0 ? (
                 <Text type='tertiary'>
-                  {t('额度')} {renderQuota(selectedInvoiceSummary.quota)}
+                  {t('额度')} {renderQuota(invoiceApplySummary.quota)}
+                </Text>
+              ) : null}
+              {invoiceForm.sourceType === 'manual_transfer' ? (
+                <Text type={manualProductAmountMismatch ? 'danger' : 'success'}>
+                  {t('产品合计')} {formatMoney(invoiceProductSummary.money)}
+                  {manualProductAmountMismatch
+                    ? `（${t('与转账金额不一致')}）`
+                    : ''}
                 </Text>
               ) : null}
               {estimatedInvoiceFeeQuota > 0 ? (
@@ -4541,20 +5424,22 @@ const TopupHistoryModal = ({
             </Space>
           </Card>
 
-          <Table
-            columns={invoiceOrderColumns}
-            dataSource={eligibleInvoiceOrders}
-            loading={eligibleInvoiceLoading}
-            rowKey={(record) => getInvoiceOrderKey(record)}
-            size='small'
-            pagination={false}
-            scroll={{ x: '100%' }}
-            rowSelection={{
-              selectedRowKeys: selectedInvoiceOrderKeys,
-              onChange: (keys) => setSelectedInvoiceOrderKeys(keys),
-            }}
-            empty={buildTableEmpty(t, '暂无可开票订单')}
-          />
+          {invoiceForm.sourceType === 'system_order' ? (
+            <Table
+              columns={invoiceOrderColumns}
+              dataSource={eligibleInvoiceOrders}
+              loading={eligibleInvoiceLoading}
+              rowKey={(record) => getInvoiceOrderKey(record)}
+              size='small'
+              pagination={false}
+              scroll={{ x: '100%' }}
+              rowSelection={{
+                selectedRowKeys: selectedInvoiceOrderKeys,
+                onChange: (keys) => setSelectedInvoiceOrderKeys(keys),
+              }}
+              empty={buildTableEmpty(t, '暂无可开票订单')}
+            />
+          ) : null}
         </div>
       </Modal>
 
@@ -4710,7 +5595,7 @@ const TopupHistoryModal = ({
                   }))
                 }
               >
-                {t('同时发送服务确认单 PDF 附件')}
+                {t('同时发送产品明细清单 PDF 附件')}
               </Checkbox>
               {invoiceReviewForm.sendEmail &&
               invoiceReviewForm.sendServiceConfirmation ? (
@@ -4724,7 +5609,7 @@ const TopupHistoryModal = ({
                   <div className='mb-2 flex flex-wrap items-center justify-between gap-2'>
                     <Text type='tertiary' size='small'>
                       {t(
-                        '上传服务确认单 PDF：可先生成打印并“另存为 PDF”，再上传',
+                        '上传产品明细清单 PDF：可先生成打印并“另存为 PDF”，再上传',
                       )}
                     </Text>
                     <Button
@@ -4736,7 +5621,7 @@ const TopupHistoryModal = ({
                         )
                       }
                     >
-                      {t('生成服务确认单')}
+                      {t('生成产品明细清单')}
                     </Button>
                   </div>
                   <input
@@ -4755,7 +5640,7 @@ const TopupHistoryModal = ({
                       </Text>
                     ) : (
                       <Text type='tertiary' size='small'>
-                        {t('尚未选择服务确认单 PDF')}
+                        {t('尚未选择产品明细清单 PDF')}
                       </Text>
                     )}
                   </div>
@@ -4890,7 +5775,7 @@ const TopupHistoryModal = ({
               }))
             }
           >
-            {t('同时发送服务确认单 PDF 附件')}
+            {t('同时发送产品明细清单 PDF 附件')}
           </Checkbox>
           {invoiceEmailState.sendServiceConfirmation ? (
             <div
@@ -4902,7 +5787,9 @@ const TopupHistoryModal = ({
             >
               <div className='mb-2 flex flex-wrap items-center justify-between gap-2'>
                 <Text type='tertiary' size='small'>
-                  {t('上传服务确认单 PDF：可先生成打印并“另存为 PDF”，再上传')}
+                  {t(
+                    '上传产品明细清单 PDF：可先生成打印并“另存为 PDF”，再上传',
+                  )}
                 </Text>
                 <Button
                   size='small'
@@ -4913,7 +5800,7 @@ const TopupHistoryModal = ({
                     )
                   }
                 >
-                  {t('生成服务确认单')}
+                  {t('生成产品明细清单')}
                 </Button>
               </div>
               <input
@@ -4933,7 +5820,7 @@ const TopupHistoryModal = ({
                   </Text>
                 ) : (
                   <Text type='tertiary' size='small'>
-                    {t('尚未选择服务确认单 PDF')}
+                    {t('尚未选择产品明细清单 PDF')}
                   </Text>
                 )}
               </div>

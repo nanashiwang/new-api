@@ -24,20 +24,22 @@ const (
 )
 
 type createInvoiceRequestPayload struct {
-	InvoiceType             string                  `json:"invoice_type"`
-	TitleType               string                  `json:"title_type"`
-	Title                   string                  `json:"title"`
-	TaxNumber               string                  `json:"tax_number"`
-	RegisteredAddress       string                  `json:"registered_address"`
-	RegisteredPhone         string                  `json:"registered_phone"`
-	BankName                string                  `json:"bank_name"`
-	BankAccount             string                  `json:"bank_account"`
-	Email                   string                  `json:"email"`
-	Phone                   string                  `json:"phone"`
-	Remark                  string                  `json:"remark"`
-	NeedDetailBill          *bool                   `json:"need_detail_bill"`
-	NeedServiceConfirmation bool                    `json:"need_service_confirmation"`
-	Orders                  []model.InvoiceOrderRef `json:"orders"`
+	InvoiceType             string                                `json:"invoice_type"`
+	TitleType               string                                `json:"title_type"`
+	Title                   string                                `json:"title"`
+	TaxNumber               string                                `json:"tax_number"`
+	RegisteredAddress       string                                `json:"registered_address"`
+	RegisteredPhone         string                                `json:"registered_phone"`
+	BankName                string                                `json:"bank_name"`
+	BankAccount             string                                `json:"bank_account"`
+	Email                   string                                `json:"email"`
+	Phone                   string                                `json:"phone"`
+	Remark                  string                                `json:"remark"`
+	NeedDetailBill          *bool                                 `json:"need_detail_bill"`
+	NeedServiceConfirmation bool                                  `json:"need_service_confirmation"`
+	Orders                  []model.InvoiceOrderRef               `json:"orders"`
+	ManualTransactions      []model.InvoiceManualTransactionInput `json:"manual_transactions"`
+	ProductItems            []model.InvoiceProductItemInput       `json:"product_items"`
 }
 
 type reviewInvoiceRequestPayload struct {
@@ -104,6 +106,8 @@ func CreateInvoiceRequest(c *gin.Context) {
 		NeedDetailBill:          needDetailBill,
 		NeedServiceConfirmation: req.NeedServiceConfirmation,
 		Orders:                  req.Orders,
+		ManualTransactions:      req.ManualTransactions,
+		ProductItems:            req.ProductItems,
 	})
 	if err != nil {
 		common.ApiError(c, err)
@@ -371,7 +375,7 @@ func parseInvoiceApprovePayload(c *gin.Context, id int) (invoiceApprovePayload, 
 			if serviceConfirmationFileHeader, err := c.FormFile("service_confirmation_file"); err == nil {
 				payload.ServiceConfirmationFileHeader = serviceConfirmationFileHeader
 			} else if payload.SendEmail {
-				return payload, fmt.Errorf("请上传服务确认单 PDF")
+				return payload, fmt.Errorf("请上传产品明细清单 PDF")
 			}
 		}
 		if payload.SendEmail && payload.InvoiceSentTo == "" {
@@ -412,7 +416,7 @@ func parseInvoiceEmailPayload(c *gin.Context) (invoiceEmailPayload, error) {
 			if fileHeader, err := c.FormFile("service_confirmation_file"); err == nil {
 				payload.ServiceConfirmationFileHeader = fileHeader
 			} else {
-				return payload, fmt.Errorf("请上传服务确认单 PDF")
+				return payload, fmt.Errorf("请上传产品明细清单 PDF")
 			}
 		}
 		return payload, nil
@@ -431,7 +435,7 @@ func parseInvoiceEmailPayload(c *gin.Context) (invoiceEmailPayload, error) {
 		return payload, fmt.Errorf("请上传明细账单 PDF")
 	}
 	if req.SendServiceConfirmation {
-		return payload, fmt.Errorf("请上传服务确认单 PDF")
+		return payload, fmt.Errorf("请上传产品明细清单 PDF")
 	}
 	payload.SendDetailBill = req.SendDetailBill
 	payload.SendServiceConfirmation = req.SendServiceConfirmation
@@ -506,7 +510,7 @@ func readInvoiceDetailBillAttachment(fileHeader *multipart.FileHeader) (*common.
 }
 
 func readInvoiceServiceConfirmationAttachment(fileHeader *multipart.FileHeader) (*common.EmailAttachment, error) {
-	return readInvoicePDFAttachment(fileHeader, "服务确认单", "服务确认单.pdf")
+	return readInvoicePDFAttachment(fileHeader, "产品明细清单", "产品明细清单.pdf")
 }
 
 func readInvoicePDFAttachment(fileHeader *multipart.FileHeader, label string, defaultFilename string) (*common.EmailAttachment, error) {
@@ -676,14 +680,15 @@ func buildInvoiceDetailBillHTML(request *model.InvoiceRequest) string {
 	}
 	orderRows := strings.Builder{}
 	if len(items) == 0 {
-		orderRows.WriteString(`<tr><td colspan="8" class="empty">暂无订单明细</td></tr>`)
+		orderRows.WriteString(`<tr><td colspan="9" class="empty">暂无交易明细</td></tr>`)
 	} else {
 		for index, item := range items {
 			fmt.Fprintf(&orderRows, `<tr>
 <td class="center">%d</td>
 <td class="center">%s</td>
-<td class="center">%d</td>
+<td class="center">%s</td>
 <td>%s</td>
+<td class="center">%s</td>
 <td class="center">%s</td>
 <td class="center">%s</td>
 <td class="money">%s</td>
@@ -691,15 +696,17 @@ func buildInvoiceDetailBillHTML(request *model.InvoiceRequest) string {
 </tr>`,
 				index+1,
 				cell(invoiceDetailBillOrderTypeLabel(item.OrderType)),
-				item.OrderId,
+				cell(invoiceDetailBillBusinessID(item)),
 				cell(invoiceDetailBillCode(item)),
+				cell(invoiceDetailBillTransferParties(item)),
 				cell(item.ProductName),
-				cell(invoiceDetailBillPaymentLabel(item.PaymentMethod)),
+				cell(invoiceDetailBillPaymentLabelForItem(item)),
 				cell(invoiceDetailBillPaymentAmount(item)),
 				cell(invoiceDetailBillTime(invoiceDetailBillOrderTime(item))),
 			)
 		}
 	}
+	intro, sourceNotes := invoiceDetailBillSourceWording(request)
 	typeSummary := invoiceDetailBillTypeSummaryText(byType)
 	timeRange := "-"
 	if startTime > 0 {
@@ -739,18 +746,19 @@ func buildInvoiceDetailBillHTML(request *model.InvoiceRequest) string {
   <main class="certificate">
     <h1>曜算平台交易明细证明</h1>
     <div class="title-line"></div>
-    <p class="intro">兹证明：用户 %s 于曜算平台存在相关交易记录。根据该用户申请时所选择的交易类型及时间范围，平台系统记录的交易明细如下：</p>
+	<p class="intro">%s</p>
 
     <h2>交易明细表</h2>
     <table>
       <thead>
         <tr>
           <th style="width: 44px;">序号</th>
-          <th style="width: 90px;">订单类型</th>
-          <th style="width: 96px;">平台订单 ID</th>
+          <th style="width: 90px;">交易类型</th>
+          <th style="width: 96px;">业务编号</th>
           <th>订单编码/交易号</th>
+          <th style="width: 120px;">付款方</th>
           <th style="width: 110px;">商品/套餐</th>
-          <th style="width: 96px;">支付渠道</th>
+          <th style="width: 118px;">支付渠道</th>
           <th style="width: 120px;">支付金额</th>
           <th style="width: 160px;">支付时间</th>
         </tr>
@@ -766,8 +774,7 @@ func buildInvoiceDetailBillHTML(request *model.InvoiceRequest) string {
 
     <section class="notes">
       <h2>说明</h2>
-      <p>本《曜算平台交易明细证明》仅用于证明用户在其申请范围内，于曜算平台产生的相关支付订单记录。</p>
-      <p>本证明所列订单明细依据用户申请时选择的订单及平台系统记录生成，具体筛选条件以用户申请页面选择内容为准。</p>
+	  %s
       <p>本证明仅限用于证明用户在曜算平台的相关交易记录，不作为其他权利义务认定依据。</p>
       <p>本证明不得擅自修改、涂改、拆分或用于与申请目的不一致的其他用途。</p>
       <p>本证明中所列时间均为北京时间（UTC+08:00）。</p>
@@ -783,12 +790,13 @@ func buildInvoiceDetailBillHTML(request *model.InvoiceRequest) string {
 </body>
 </html>`,
 		cell(request.Id),
-		cell(invoiceDetailBillUser(request)),
+		cell(fmt.Sprintf(intro, invoiceDetailBillUser(request))),
 		orderRows.String(),
 		count,
 		cell(invoiceDetailBillMoney(totalMoney)),
 		cell(typeSummary),
 		cell(timeRange),
+		sourceNotes,
 		cell(invoiceDetailBillDate(common.GetTimestamp())),
 	)
 }
@@ -801,6 +809,8 @@ func invoiceDetailBillOrderTypeLabel(orderType string) string {
 		return "订阅订单"
 	case model.PaymentRecordTypeSellableTokenPurchase:
 		return "钱包购买令牌"
+	case model.InvoiceOrderTypeManualTransfer:
+		return "公对公转账"
 	default:
 		if strings.TrimSpace(orderType) == "" {
 			return "-"
@@ -821,6 +831,8 @@ func invoiceDetailBillPaymentLabel(paymentMethod string) string {
 		return "Creem"
 	case model.PaymentMethodWallet:
 		return "钱包余额"
+	case model.InvoicePaymentMethodBankTransfer:
+		return "银行转账"
 	default:
 		if strings.TrimSpace(paymentMethod) == "" {
 			return "-"
@@ -829,9 +841,59 @@ func invoiceDetailBillPaymentLabel(paymentMethod string) string {
 	}
 }
 
+func invoiceDetailBillPaymentLabelForItem(item model.InvoiceRequestItem) string {
+	label := invoiceDetailBillPaymentLabel(item.PaymentMethod)
+	if item.PaymentMethod == model.InvoicePaymentMethodBankTransfer && strings.TrimSpace(item.TransferBankName) != "" {
+		return fmt.Sprintf("%s（%s）", label, strings.TrimSpace(item.TransferBankName))
+	}
+	return label
+}
+
+func invoiceDetailBillTransferParties(item model.InvoiceRequestItem) string {
+	payer := strings.TrimSpace(item.PayerName)
+	payee := strings.TrimSpace(item.PayeeName)
+	if payer != "" && payee != "" {
+		return payer + " → " + payee
+	}
+	if payer != "" {
+		return payer
+	}
+	return payee
+}
+
+func invoiceDetailBillBusinessID(item model.InvoiceRequestItem) string {
+	if item.SourceType == model.InvoiceSourceTypeManualTransfer || item.OrderType == model.InvoiceOrderTypeManualTransfer || item.OrderId <= 0 {
+		return "-"
+	}
+	return strconv.Itoa(item.OrderId)
+}
+
+func invoiceDetailBillSourceWording(request *model.InvoiceRequest) (string, string) {
+	manual := request != nil && request.SourceType == model.InvoiceSourceTypeManualTransfer
+	if !manual && request != nil {
+		for _, item := range request.Items {
+			if item.SourceType == model.InvoiceSourceTypeManualTransfer || item.OrderType == model.InvoiceOrderTypeManualTransfer {
+				manual = true
+				break
+			}
+		}
+	}
+	if manual {
+		return "兹证明：用户 %s 提交了公对公银行转账资料。根据申请人提交的银行转账凭证及平台审核结果，相关交易明细如下：",
+			`<p>本《曜算平台交易明细证明》所列人工转账信息依据申请人提交的银行转账资料及平台审核记录生成。</p>
+      <p>人工转账记录不属于平台支付渠道自动回传订单，不会据此自动增加或扣减用户钱包余额。</p>`
+	}
+	return "兹证明：用户 %s 于曜算平台存在相关交易记录。根据该用户申请时所选择的交易类型及时间范围，平台系统记录的交易明细如下：",
+		`<p>本《曜算平台交易明细证明》仅用于证明用户在其申请范围内，于曜算平台产生的相关支付订单记录。</p>
+      <p>本证明所列订单明细依据用户申请时选择的订单及平台系统记录生成，具体筛选条件以用户申请页面选择内容为准。</p>`
+}
+
 func invoiceDetailBillCode(item model.InvoiceRequestItem) string {
 	if strings.TrimSpace(item.TradeNo) != "" {
 		return item.TradeNo
+	}
+	if item.SourceType == model.InvoiceSourceTypeManualTransfer || item.OrderType == model.InvoiceOrderTypeManualTransfer || item.OrderId <= 0 {
+		return "-"
 	}
 	return fmt.Sprintf("%s-%d", item.OrderType, item.OrderId)
 }

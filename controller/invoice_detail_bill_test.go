@@ -52,3 +52,48 @@ func TestBuildInvoiceDetailBillHTMLUsesTransactionProofWording(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildInvoiceDetailBillHTMLUsesManualTransferWordingAndNoFakeOrderID(t *testing.T) {
+	html := buildInvoiceDetailBillHTML(&model.InvoiceRequest{
+		Id:         8,
+		UserId:     30,
+		Username:   "manual-user",
+		SourceType: model.InvoiceSourceTypeManualTransfer,
+		TotalMoney: 1000,
+		Items: []model.InvoiceRequestItem{{
+			SourceType:       model.InvoiceSourceTypeManualTransfer,
+			OrderType:        model.InvoiceOrderTypeManualTransfer,
+			TradeNo:          "BANK-001",
+			PaymentMethod:    model.InvoicePaymentMethodBankTransfer,
+			Money:            1000,
+			PayerName:        "付款测试公司",
+			PayeeName:        "收款测试公司",
+			TransferBankName: "测试银行",
+			CompleteTime:     1775702400,
+		}},
+	})
+
+	for _, want := range []string{
+		"公对公转账",
+		"申请人提交的银行转账凭证及平台审核结果",
+		"付款测试公司",
+		"收款测试公司",
+		"付款测试公司 → 收款测试公司",
+		"银行转账（测试银行）",
+		"BANK-001",
+		"不会据此自动增加或扣减用户钱包余额",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("manual detail bill html missing %q:\n%s", want, html)
+		}
+	}
+	for _, unexpected := range []string{
+		"平台订单 ID",
+		">0</td>",
+		"平台系统记录的交易明细如下",
+	} {
+		if strings.Contains(html, unexpected) {
+			t.Fatalf("manual detail bill html should not contain %q:\n%s", unexpected, html)
+		}
+	}
+}
