@@ -56,6 +56,13 @@ import {
 } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
 import { StatusContext } from '../../../../context/Status';
+import {
+  buildTokenGroupVendorOptions,
+  filterTokenGroupsByVendor,
+  formatTokenGroupSelectedLabel,
+  resolveTokenGroupVendor,
+  shouldClearTokenGroupForVendor,
+} from '../tokenGroupUtils';
 
 const { Text, Title } = Typography;
 const TOKEN_CHANNEL_LIMIT_TAG_MODE_KEY = 'token-channel-limit-tag-mode';
@@ -84,6 +91,10 @@ const EditTokenModal = (props) => {
   const [channelLimitTagMode, setChannelLimitTagMode] = useState(
     readStoredChannelLimitTagMode,
   );
+  const groupVendorOptions = useMemo(
+    () => buildTokenGroupVendorOptions(groups, t('其他')),
+    [groups, t],
+  );
 
   const getInitValues = () => ({
     name: '',
@@ -97,6 +108,7 @@ const EditTokenModal = (props) => {
     channel_limits: [],
     allow_ips: '',
     group: '',
+    group_vendor: '',
     cross_group_retry: false,
     max_concurrency: 0,
     window_request_limit: 0,
@@ -382,7 +394,9 @@ const EditTokenModal = (props) => {
     if (normalizedFormValues.length > 0) {
       return normalizedFormValues;
     }
-    return normalizeChannelLimitValues(loadedTokenValuesRef.current?.channel_limits);
+    return normalizeChannelLimitValues(
+      loadedTokenValuesRef.current?.channel_limits,
+    );
   };
 
   const syncChannelLimitsWithOptions = (optionList, shouldNotify = false) => {
@@ -466,7 +480,27 @@ const EditTokenModal = (props) => {
           localGroupOptions.sort((a, b) => (a.value === 'auto' ? -1 : 1));
         }
       }
+      const currentGroup =
+        formApiRef.current?.getValue('group') ||
+        loadedTokenValuesRef.current?.group ||
+        '';
+      if (
+        currentGroup &&
+        !localGroupOptions.some((group) => group.value === currentGroup)
+      ) {
+        localGroupOptions.push({
+          label: t('令牌分组'),
+          value: currentGroup,
+          ratio: null,
+        });
+      }
       setGroups(localGroupOptions);
+      if (currentGroup) {
+        formApiRef.current?.setValue(
+          'group_vendor',
+          resolveTokenGroupVendor(currentGroup),
+        );
+      }
     } else {
       showError(t(message));
     }
@@ -498,6 +532,23 @@ const EditTokenModal = (props) => {
       data.package_limit_amount = quotaToUSDAmount(
         data.package_limit_quota || 0,
       );
+      data.group_vendor = resolveTokenGroupVendor(data.group);
+      setGroups((currentGroups) => {
+        if (
+          !data.group ||
+          currentGroups.some((group) => group.value === data.group)
+        ) {
+          return currentGroups;
+        }
+        return [
+          ...currentGroups,
+          {
+            label: t('令牌分组'),
+            value: data.group,
+            ratio: null,
+          },
+        ];
+      });
       loadedTokenValuesRef.current = { ...getInitValues(), ...data };
       applyLoadedTokenValues();
       await loadModels(data.group || '');
@@ -529,6 +580,10 @@ const EditTokenModal = (props) => {
       }
     }
     if (!isEdit) {
+      formApiRef.current?.setValue(
+        'group_vendor',
+        resolveTokenGroupVendor(props.editingToken.group || ''),
+      );
       loadModels(props.editingToken.group || '');
       loadChannels(
         props.editingToken.group || '',
@@ -873,6 +928,7 @@ const EditTokenModal = (props) => {
         localInputs.channel_limits = localInputs.channel_limits.join(',');
         localInputs.channel_limits_enabled =
           localInputs.channel_limits.length > 0;
+        delete localInputs.group_vendor;
       } else {
         localInputs = {
           name: localInputs.name,
@@ -937,6 +993,7 @@ const EditTokenModal = (props) => {
         localInputs.channel_limits = localInputs.channel_limits.join(',');
         localInputs.channel_limits_enabled =
           localInputs.channel_limits.length > 0;
+        delete localInputs.group_vendor;
         const packageResult = normalizePackageFields(localInputs);
         if (!packageResult.ok) {
           showError(packageResult.message);
@@ -1033,8 +1090,32 @@ const EditTokenModal = (props) => {
             formApiRef.current = api;
             applyLoadedTokenValues();
           }}
-          onValueChange={(values) => {
-            if (Object.prototype.hasOwnProperty.call(values, 'group')) {
+          onValueChange={(values, changedValues) => {
+            if (
+              Object.prototype.hasOwnProperty.call(
+                changedValues,
+                'group_vendor',
+              )
+            ) {
+              const currentGroup = formApiRef.current?.getValue('group') || '';
+              if (
+                shouldClearTokenGroupForVendor(
+                  currentGroup,
+                  values.group_vendor,
+                )
+              ) {
+                formApiRef.current?.setValue('group', '');
+              }
+            }
+            if (Object.prototype.hasOwnProperty.call(changedValues, 'group')) {
+              if (values.group) {
+                const nextVendor = resolveTokenGroupVendor(values.group);
+                if (
+                  formApiRef.current?.getValue('group_vendor') !== nextVendor
+                ) {
+                  formApiRef.current?.setValue('group_vendor', nextVendor);
+                }
+              }
               loadModels(values.group || '', true);
               loadChannels(
                 values.group || '',
@@ -1042,7 +1123,12 @@ const EditTokenModal = (props) => {
                 true,
               );
             }
-            if (Object.prototype.hasOwnProperty.call(values, 'model_limits')) {
+            if (
+              Object.prototype.hasOwnProperty.call(
+                changedValues,
+                'model_limits',
+              )
+            ) {
               loadChannels(
                 formApiRef.current?.getValue('group') || '',
                 values.model_limits || [],
@@ -1132,31 +1218,73 @@ const EditTokenModal = (props) => {
                       showClear
                     />
                   </Col>
-                  <Col span={24}>
-                    {groups.length > 0 ? (
-                      <Form.Select
-                        field='group'
-                        label={t('令牌分组')}
-                        placeholder={t('请选择令牌分组')}
-                        optionList={groups}
-                        renderOptionItem={renderGroupOption}
-                        rules={[
-                          {
-                            required: true,
-                            message: t('请选择令牌分组'),
-                          },
-                        ]}
-                        style={{ width: '100%' }}
-                      />
-                    ) : (
-                      <Form.Select
-                        placeholder={t('管理员未设置用户可选分组')}
-                        disabled
-                        label={t('令牌分组')}
-                        style={{ width: '100%' }}
-                      />
-                    )}
-                  </Col>
+                  {groups.length > 0 ? (
+                    <>
+                      <Col xs={24} sm={10}>
+                        <Form.Select
+                          field='group_vendor'
+                          label={t('供应商')}
+                          placeholder={t('选择模型供应商')}
+                          optionList={groupVendorOptions}
+                          filter={selectFilter}
+                          rules={[
+                            {
+                              required: true,
+                              message: t('选择模型供应商'),
+                            },
+                          ]}
+                          style={{ width: '100%' }}
+                        />
+                      </Col>
+                      <Col xs={24} sm={14}>
+                        <Form.Select
+                          field='group'
+                          label={t('令牌分组')}
+                          placeholder={
+                            values.group_vendor
+                              ? t('请选择令牌分组')
+                              : t('选择模型供应商')
+                          }
+                          optionList={filterTokenGroupsByVendor(
+                            groups,
+                            values.group_vendor,
+                          )}
+                          disabled={!values.group_vendor}
+                          filter={selectFilter}
+                          renderOptionItem={renderGroupOption}
+                          renderSelectedItem={(optionNode) =>
+                            formatTokenGroupSelectedLabel(optionNode)
+                          }
+                          rules={[
+                            {
+                              required: true,
+                              message: t('请选择令牌分组'),
+                            },
+                          ]}
+                          style={{ width: '100%' }}
+                        />
+                      </Col>
+                    </>
+                  ) : (
+                    <>
+                      <Col xs={24} sm={10}>
+                        <Form.Select
+                          placeholder={t('管理员未设置用户可选分组')}
+                          disabled
+                          label={t('供应商')}
+                          style={{ width: '100%' }}
+                        />
+                      </Col>
+                      <Col xs={24} sm={14}>
+                        <Form.Select
+                          placeholder={t('管理员未设置用户可选分组')}
+                          disabled
+                          label={t('令牌分组')}
+                          style={{ width: '100%' }}
+                        />
+                      </Col>
+                    </>
+                  )}
                   {!isSellableToken && (
                     <>
                       <Col
