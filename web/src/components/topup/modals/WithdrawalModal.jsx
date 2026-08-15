@@ -25,6 +25,11 @@ import {
   displayAmountToQuota,
   quotaToDisplayAmount,
 } from '../../../helpers/quota';
+import {
+  AFF_WITHDRAWAL_MINIMUM_PAYMENT_CNY,
+  AFF_WITHDRAWAL_MINIMUM_QUOTA,
+  calculateAffWithdrawalPaymentAmount,
+} from '../../../constants';
 
 const roundCurrencyAmountUp = (amount) => {
   const numericAmount = Number(amount || 0);
@@ -36,18 +41,7 @@ const roundCurrencyAmountDown = (amount) => {
   return Math.floor(numericAmount * 100 + 1e-8) / 100;
 };
 
-const getTopUpPrice = () => {
-  try {
-    const status = JSON.parse(localStorage.getItem('status') || '{}');
-    const price = Number(status?.price || 0);
-    return Number.isFinite(price) && price > 0 ? price : 0;
-  } catch (_) {
-    return 0;
-  }
-};
-
-const formatPaymentAmount = (value) =>
-  `¥${Number(value || 0).toFixed(2)}`;
+const formatPaymentAmount = (value) => `¥${Number(value || 0).toFixed(2)}`;
 
 const WithdrawalModal = ({
   t,
@@ -58,6 +52,7 @@ const WithdrawalModal = ({
   userState,
   renderQuota,
   getQuotaPerUnit,
+  topUpPrice,
   withdrawalAmount,
   setWithdrawalAmount,
   alipayAccount,
@@ -68,8 +63,8 @@ const WithdrawalModal = ({
   const currencyConfig = getCurrencyConfig();
   const isTokenDisplay = currencyConfig.type === 'TOKENS';
   const minWithdrawalAmount = isTokenDisplay
-    ? getQuotaPerUnit()
-    : roundCurrencyAmountUp(quotaToDisplayAmount(getQuotaPerUnit()));
+    ? AFF_WITHDRAWAL_MINIMUM_QUOTA
+    : roundCurrencyAmountUp(quotaToDisplayAmount(AFF_WITHDRAWAL_MINIMUM_QUOTA));
   const maxWithdrawalAmount = isTokenDisplay
     ? userState?.user?.aff_quota || 0
     : roundCurrencyAmountDown(
@@ -89,11 +84,16 @@ const WithdrawalModal = ({
     [safeWithdrawalAmount],
   );
   const estimatedPaymentAmount = useMemo(() => {
-    const price = getTopUpPrice();
     const quotaPerUnit = Number(getQuotaPerUnit() || 0);
-    if (!price || !quotaPerUnit || estimatedQuota <= 0) return 0;
-    return (estimatedQuota / quotaPerUnit) * price;
-  }, [estimatedQuota, getQuotaPerUnit]);
+    return calculateAffWithdrawalPaymentAmount(
+      estimatedQuota,
+      quotaPerUnit,
+      topUpPrice,
+    );
+  }, [estimatedQuota, getQuotaPerUnit, topUpPrice]);
+  const paymentBelowMinimum =
+    estimatedQuota >= AFF_WITHDRAWAL_MINIMUM_QUOTA &&
+    estimatedPaymentAmount < AFF_WITHDRAWAL_MINIMUM_PAYMENT_CNY;
 
   return (
     <Modal
@@ -127,7 +127,8 @@ const WithdrawalModal = ({
             {(isTokenDisplay ? t('提现额度') : t('提现金额')) +
               ' · ' +
               t('最低') +
-              renderQuota(getQuotaPerUnit())}
+              renderQuota(AFF_WITHDRAWAL_MINIMUM_QUOTA) +
+              ` / ¥${AFF_WITHDRAWAL_MINIMUM_PAYMENT_CNY.toFixed(2)}`}
           </Typography.Text>
           <InputNumber
             min={minWithdrawalAmount}
@@ -140,7 +141,13 @@ const WithdrawalModal = ({
             step={isTokenDisplay ? undefined : 0.01}
             className='w-full !rounded-lg'
           />
-          <div className='mt-2 text-sm text-semi-color-text-2'>
+          <div
+            className={`mt-2 text-sm ${
+              paymentBelowMinimum
+                ? 'text-semi-color-danger'
+                : 'text-semi-color-text-2'
+            }`}
+          >
             {t('预计到账金额')}：{formatPaymentAmount(estimatedPaymentAmount)}
           </div>
         </div>

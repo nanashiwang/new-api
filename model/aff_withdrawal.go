@@ -2,7 +2,7 @@ package model
 
 import (
 	"errors"
-	"fmt"
+	"math"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -16,12 +16,16 @@ const (
 	AffWithdrawalStatusPending  = "pending"
 	AffWithdrawalStatusApproved = "approved"
 	AffWithdrawalStatusRejected = "rejected"
+
+	AffWithdrawalMinimumQuota       = 250
+	AffWithdrawalMinimumAmountCents = int64(5000)
 )
 
 var (
 	ErrAffWithdrawalInvalidQuota      = errors.New("提现额度不合法")
 	ErrAffWithdrawalInvalidPayment    = errors.New("提现换算配置不合法")
-	ErrAffWithdrawalAmountTooLow      = errors.New("提现金额过低")
+	ErrAffWithdrawalQuotaTooLow       = errors.New("提现额度不能低于 250 闪电")
+	ErrAffWithdrawalAmountTooLow      = errors.New("提现金额不能低于 50 元")
 	ErrAffWithdrawalInsufficientQuota = errors.New("待使用收益不足")
 	ErrAffWithdrawalAlreadyReviewed   = errors.New("提现申请已审核")
 	ErrAffWithdrawalNotFound          = errors.New("提现申请不存在")
@@ -55,19 +59,44 @@ func CalculateAffWithdrawalAmountCents(quota int, quotaPerUnit float64, price fl
 	if quota <= 0 {
 		return 0, ErrAffWithdrawalInvalidQuota
 	}
-	if quotaPerUnit <= 0 || price <= 0 {
+	if quotaPerUnit <= 0 || price <= 0 ||
+		math.IsNaN(quotaPerUnit) || math.IsInf(quotaPerUnit, 0) ||
+		math.IsNaN(price) || math.IsInf(price, 0) {
 		return 0, ErrAffWithdrawalInvalidPayment
 	}
-	cents := decimal.NewFromInt(int64(quota)).
+	roundedCents := decimal.NewFromInt(int64(quota)).
 		Div(decimal.NewFromFloat(quotaPerUnit)).
 		Mul(decimal.NewFromFloat(price)).
 		Mul(decimal.NewFromInt(100)).
-		Round(0).
-		IntPart()
-	if cents <= 0 {
+		Round(0)
+	if !roundedCents.IsPositive() {
 		return 0, ErrAffWithdrawalAmountTooLow
 	}
-	return cents, nil
+	cents := roundedCents.BigInt()
+	if !cents.IsInt64() {
+		return 0, ErrAffWithdrawalInvalidPayment
+	}
+	return cents.Int64(), nil
+}
+
+func validateAffWithdrawalQuota(quota int) error {
+	if quota <= 0 {
+		return ErrAffWithdrawalInvalidQuota
+	}
+	if quota < AffWithdrawalMinimumQuota {
+		return ErrAffWithdrawalQuotaTooLow
+	}
+	return nil
+}
+
+func validateAffWithdrawalMinimum(quota int, amountCents int64) error {
+	if err := validateAffWithdrawalQuota(quota); err != nil {
+		return err
+	}
+	if amountCents < AffWithdrawalMinimumAmountCents {
+		return ErrAffWithdrawalAmountTooLow
+	}
+	return nil
 }
 
 func CreateAffWithdrawal(userID int, quota int, alipayAccount string, alipayName string) (*AffWithdrawal, error) {
@@ -76,8 +105,8 @@ func CreateAffWithdrawal(userID int, quota int, alipayAccount string, alipayName
 	if userID <= 0 {
 		return nil, errors.New("用户不存在")
 	}
-	if float64(quota) < common.QuotaPerUnit {
-		return nil, fmt.Errorf("提现额度最小为%d", int(common.QuotaPerUnit))
+	if err := validateAffWithdrawalQuota(quota); err != nil {
+		return nil, err
 	}
 	if account == "" {
 		return nil, errors.New("支付宝账号不能为空")
@@ -96,6 +125,9 @@ func CreateAffWithdrawal(userID int, quota int, alipayAccount string, alipayName
 	priceSnapshot := operation_setting.Price
 	amountCents, err := CalculateAffWithdrawalAmountCents(quota, quotaPerUnitSnapshot, priceSnapshot)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateAffWithdrawalMinimum(quota, amountCents); err != nil {
 		return nil, err
 	}
 
@@ -163,6 +195,11 @@ func reviewAffWithdrawal(id int, reviewerUserID int, targetStatus string, adminR
 		}
 		if withdrawal.Status != AffWithdrawalStatusPending {
 			return ErrAffWithdrawalAlreadyReviewed
+		}
+		if targetStatus == AffWithdrawalStatusApproved {
+			if err := validateAffWithdrawalMinimum(withdrawal.Quota, withdrawal.AmountCents); err != nil {
+				return err
+			}
 		}
 
 		result := tx.Model(&AffWithdrawal{}).

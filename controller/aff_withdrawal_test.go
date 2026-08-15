@@ -40,7 +40,7 @@ func setupAffWithdrawalControllerTestDB(t *testing.T) {
 	common.UsingMySQL = false
 	common.UsingPostgreSQL = false
 	common.QuotaPerUnit = 100
-	operation_setting.Price = 0.2
+	operation_setting.Price = 20
 
 	t.Cleanup(func() {
 		model.DB = originDB
@@ -91,10 +91,10 @@ func newAffWithdrawalTestContext(t *testing.T, method string, target string, bod
 
 func TestCreateAffWithdrawalAPI_FreezesQuota(t *testing.T) {
 	setupAffWithdrawalControllerTestDB(t)
-	user := createAffWithdrawalControllerTestUser(t, "api_withdraw_create", 200)
+	user := createAffWithdrawalControllerTestUser(t, "api_withdraw_create", 500)
 
 	ctx, recorder := newAffWithdrawalTestContext(t, http.MethodPost, "/api/user/aff-withdrawals", gin.H{
-		"quota":          100,
+		"quota":          model.AffWithdrawalMinimumQuota,
 		"alipay_account": "user@example.com",
 		"alipay_name":    "张三",
 	}, user.Id)
@@ -109,20 +109,49 @@ func TestCreateAffWithdrawalAPI_FreezesQuota(t *testing.T) {
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 	assert.True(t, response.Success, response.Message)
 	assert.Equal(t, model.AffWithdrawalStatusPending, response.Data.Status)
-	assert.EqualValues(t, 20, response.Data.AmountCents)
+	assert.EqualValues(t, model.AffWithdrawalMinimumAmountCents, response.Data.AmountCents)
 
 	var updated model.User
 	require.NoError(t, model.DB.First(&updated, "id = ?", user.Id).Error)
-	assert.Equal(t, 100, updated.AffQuota)
+	assert.Equal(t, 250, updated.AffQuota)
+}
+
+func TestCreateAffWithdrawalAPI_RejectsBelowMinimumWithoutMutation(t *testing.T) {
+	setupAffWithdrawalControllerTestDB(t)
+	user := createAffWithdrawalControllerTestUser(t, "api_withdraw_below_minimum", 500)
+
+	ctx, recorder := newAffWithdrawalTestContext(t, http.MethodPost, "/api/user/aff-withdrawals", gin.H{
+		"quota":          model.AffWithdrawalMinimumQuota - 1,
+		"alipay_account": "user@example.com",
+		"alipay_name":    "张三",
+	}, user.Id)
+
+	CreateAffWithdrawal(ctx)
+
+	var response struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.False(t, response.Success)
+	assert.Contains(t, response.Message, "250")
+
+	var updated model.User
+	require.NoError(t, model.DB.First(&updated, "id = ?", user.Id).Error)
+	assert.Equal(t, 500, updated.AffQuota)
+
+	var count int64
+	require.NoError(t, model.DB.Model(&model.AffWithdrawal{}).Where("user_id = ?", user.Id).Count(&count).Error)
+	assert.Zero(t, count)
 }
 
 func TestGetUserAffWithdrawalsAPI_ReturnsOnlyCurrentUser(t *testing.T) {
 	setupAffWithdrawalControllerTestDB(t)
-	user := createAffWithdrawalControllerTestUser(t, "api_withdraw_self", 300)
-	other := createAffWithdrawalControllerTestUser(t, "api_withdraw_other", 300)
-	_, err := model.CreateAffWithdrawal(user.Id, 100, "user@example.com", "张三")
+	user := createAffWithdrawalControllerTestUser(t, "api_withdraw_self", 500)
+	other := createAffWithdrawalControllerTestUser(t, "api_withdraw_other", 500)
+	_, err := model.CreateAffWithdrawal(user.Id, model.AffWithdrawalMinimumQuota, "user@example.com", "张三")
 	require.NoError(t, err)
-	_, err = model.CreateAffWithdrawal(other.Id, 100, "other@example.com", "李四")
+	_, err = model.CreateAffWithdrawal(other.Id, model.AffWithdrawalMinimumQuota, "other@example.com", "李四")
 	require.NoError(t, err)
 
 	ctx, recorder := newAffWithdrawalTestContext(t, http.MethodGet, "/api/user/aff-withdrawals/self?p=1&page_size=10", nil, user.Id)
@@ -145,10 +174,10 @@ func TestGetUserAffWithdrawalsAPI_ReturnsOnlyCurrentUser(t *testing.T) {
 
 func TestReviewAffWithdrawalAPI_ApproveAndReject(t *testing.T) {
 	setupAffWithdrawalControllerTestDB(t)
-	user := createAffWithdrawalControllerTestUser(t, "api_withdraw_review", 400)
-	approved, err := model.CreateAffWithdrawal(user.Id, 100, "user@example.com", "张三")
+	user := createAffWithdrawalControllerTestUser(t, "api_withdraw_review", 1000)
+	approved, err := model.CreateAffWithdrawal(user.Id, model.AffWithdrawalMinimumQuota, "user@example.com", "张三")
 	require.NoError(t, err)
-	rejected, err := model.CreateAffWithdrawal(user.Id, 100, "user@example.com", "张三")
+	rejected, err := model.CreateAffWithdrawal(user.Id, model.AffWithdrawalMinimumQuota, "user@example.com", "张三")
 	require.NoError(t, err)
 
 	approveCtx, approveRecorder := newAffWithdrawalTestContext(t, http.MethodPost, "/api/user/aff-withdrawals/1/approve", gin.H{
@@ -181,5 +210,5 @@ func TestReviewAffWithdrawalAPI_ApproveAndReject(t *testing.T) {
 
 	var updated model.User
 	require.NoError(t, model.DB.First(&updated, "id = ?", user.Id).Error)
-	assert.Equal(t, 300, updated.AffQuota)
+	assert.Equal(t, 750, updated.AffQuota)
 }
