@@ -210,7 +210,7 @@ func limitEvidenceText(value string) string {
 }
 
 func scheduleContentSafetyEmail(result *model.ContentSafetyEnforcementResult) error {
-	if result == nil || result.Violation == nil || result.Duplicate || result.Violation.Action == model.ContentSafetyActionCooldownActive {
+	if result == nil || result.Violation == nil || result.Duplicate || result.Violation.Action == model.ContentSafetyActionRecorded || result.Violation.Action == model.ContentSafetyActionCooldownActive {
 		return nil
 	}
 	email, username, err := model.GetContentSafetyNotificationIdentity(result.Violation.UserId)
@@ -311,7 +311,7 @@ func StartContentSafetyMaintenanceTask() {
 }
 
 func EnrichContentSafetyClientError(err *types.NewAPIError, result *model.ContentSafetyEnforcementResult) *types.NewAPIError {
-	if err == nil || result == nil || result.Violation == nil {
+	if err == nil || result == nil || result.Violation == nil || result.Violation.Action == model.ContentSafetyActionRecorded {
 		return err
 	}
 	upstream := err.ToOpenAIError()

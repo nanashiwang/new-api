@@ -91,6 +91,62 @@ func TestRecordContentSafetyViolationStartsCooldownWithoutAutoDisable(t *testing
 	require.EqualValues(t, 3, eventCount, "cooldown lookups and local blocks must not create violations")
 }
 
+func TestRecordContentSafetyViolationRecordOnlyDoesNotAffectEnforcement(t *testing.T) {
+	setupContentSafetyViolationTestDB(t)
+	user := createContentSafetyTestUser(t, "record-only-user", common.RoleCommonUser)
+	now := time.Now().Unix()
+
+	for sequence := 1; sequence <= 5; sequence++ {
+		params := contentSafetyTestParams(user.Id, sequence, now+int64(sequence))
+		params.RecordOnly = true
+		params.BurstThreshold = 0
+		params.CooldownSeconds = 0
+		params.ReviewAfterCooldowns = 0
+		result, err := RecordContentSafetyViolation(params)
+		require.NoError(t, err)
+		require.Equal(t, ContentSafetyActionRecorded, result.Violation.Action)
+		require.Zero(t, result.Violation.WindowCount)
+		require.Zero(t, result.Violation.BurstCount)
+		require.Zero(t, result.Violation.CooldownUntil)
+		require.Equal(t, result.Violation.CreatedAt, result.Violation.WarningReadAt)
+		require.Nil(t, result.ReviewCase)
+	}
+
+	duplicateParams := contentSafetyTestParams(user.Id, 1, now+1)
+	duplicateParams.RecordOnly = true
+	duplicate, err := RecordContentSafetyViolation(duplicateParams)
+	require.NoError(t, err)
+	require.True(t, duplicate.Duplicate)
+	require.Equal(t, ContentSafetyActionRecorded, duplicate.Violation.Action)
+
+	state, err := GetUserContentSafetyState(user.Id)
+	require.NoError(t, err)
+	require.Equal(t, ContentSafetyLevelNormal, state.Level)
+	require.Zero(t, state.WindowCount)
+	require.Zero(t, state.BurstCount)
+	require.Zero(t, state.CooldownUntil)
+	require.Zero(t, state.ReviewCaseId)
+	require.False(t, state.HasUnreadWarning)
+	require.Nil(t, state.LatestViolation)
+
+	activeUntil, err := GetActiveContentSafetyCooldown(user.Id, now+10)
+	require.NoError(t, err)
+	require.Zero(t, activeUntil)
+	var reviews int64
+	require.NoError(t, DB.Model(&ContentSafetyReviewCase{}).Where("user_id = ?", user.Id).Count(&reviews).Error)
+	require.Zero(t, reviews)
+	var records int64
+	require.NoError(t, DB.Model(&ContentSafetyViolation{}).Where("user_id = ? AND action = ?", user.Id, ContentSafetyActionRecorded).Count(&records).Error)
+	require.EqualValues(t, 5, records)
+
+	normalParams := contentSafetyTestParams(user.Id, 99, now+20)
+	normalResult, err := RecordContentSafetyViolation(normalParams)
+	require.NoError(t, err)
+	require.Equal(t, ContentSafetyActionWarning, normalResult.Violation.Action)
+	require.Equal(t, 1, normalResult.Violation.WindowCount)
+	require.Equal(t, 1, normalResult.Violation.BurstCount)
+}
+
 func TestRecordContentSafetyViolationNeverAutoDisablesAnyRole(t *testing.T) {
 	setupContentSafetyViolationTestDB(t)
 	roles := []int{common.RoleCommonUser, common.RoleAdminUser, common.RoleRootUser}

@@ -18,12 +18,17 @@ import (
 )
 
 const (
+	ContentSafetyRecordOnlyGroup            = "破甲"
 	ContentSafetyPolicyWindow               = 30 * 24 * time.Hour
 	ContentSafetyPolicyBurstWindow          = 10 * time.Minute
 	ContentSafetyPolicyCooldown             = 10 * time.Minute
 	ContentSafetyPolicyBurstThreshold       = 3
 	ContentSafetyPolicyReviewAfterCooldowns = 3
 )
+
+func IsContentSafetyRecordOnlyGroup(group string) bool {
+	return group == ContentSafetyRecordOnlyGroup
+}
 
 var contentSafetyPolicyCodes = map[string]struct{}{
 	"content_filter":                  {},
@@ -88,6 +93,7 @@ func RecordContentSafetyPolicyViolation(c *gin.Context, info *relaycommon.RelayI
 	oai := err.ToOpenAIError()
 	errorCode := canonicalContentSafetyPolicyCode(err)
 	classification := classifyContentSafetyViolation(c, err, errorCode)
+	recordOnly := IsContentSafetyRecordOnlyGroup(info.UsingGroup)
 	requestID := strings.TrimSpace(info.RequestId)
 	if requestID == "" {
 		requestID = fmt.Sprintf("generated:%d", info.StartTime.UnixNano())
@@ -110,6 +116,7 @@ func RecordContentSafetyPolicyViolation(c *gin.Context, info *relaycommon.RelayI
 		BurstThreshold:       ContentSafetyPolicyBurstThreshold,
 		CooldownSeconds:      int64(ContentSafetyPolicyCooldown.Seconds()),
 		ReviewAfterCooldowns: ContentSafetyPolicyReviewAfterCooldowns,
+		RecordOnly:           recordOnly,
 	})
 	if recordErr != nil || result == nil || result.Duplicate || result.Violation == nil {
 		return result, recordErr
@@ -118,10 +125,12 @@ func RecordContentSafetyPolicyViolation(c *gin.Context, info *relaycommon.RelayI
 	if evidenceErr := captureContentSafetyEvidence(c, result); evidenceErr != nil {
 		common.SysError(fmt.Sprintf("content safety evidence capture failed: violation_id=%d err=%s", result.Violation.Id, sanitizeContentSafetyAuditText(evidenceErr.Error(), 256)))
 	}
-	if notificationErr := scheduleContentSafetyEmail(result); notificationErr != nil {
-		common.SysError(fmt.Sprintf("content safety email scheduling failed: violation_id=%d err=%s", result.Violation.Id, sanitizeContentSafetyAuditText(notificationErr.Error(), 256)))
+	if !recordOnly {
+		if notificationErr := scheduleContentSafetyEmail(result); notificationErr != nil {
+			common.SysError(fmt.Sprintf("content safety email scheduling failed: violation_id=%d err=%s", result.Violation.Id, sanitizeContentSafetyAuditText(notificationErr.Error(), 256)))
+		}
+		recordContentSafetyUserNotice(result)
 	}
-	recordContentSafetyUserNotice(result)
 	return result, nil
 }
 
@@ -170,7 +179,7 @@ func hashContentSafetyRequest(c *gin.Context) (string, error) {
 }
 
 func recordContentSafetyUserNotice(result *model.ContentSafetyEnforcementResult) {
-	if result == nil || result.Violation == nil {
+	if result == nil || result.Violation == nil || result.Violation.Action == model.ContentSafetyActionRecorded {
 		return
 	}
 	count := result.Violation.WindowCount

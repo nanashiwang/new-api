@@ -129,26 +129,28 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	// Enforce a user-scoped cooling-off period before token counting, billing,
 	// channel selection, or any upstream request. Local rejections never create
 	// additional safety events and cannot extend the cooling-off period.
-	nowUnix := time.Now().Unix()
-	cooldownUntil, cooldownErr := model.GetActiveContentSafetyCooldown(relayInfo.UserId, nowUnix)
-	if cooldownErr != nil {
-		newAPIError = types.NewErrorWithStatusCode(
-			fmt.Errorf("content safety state unavailable: %w", cooldownErr),
-			types.ErrorCode("content_safety_state_unavailable"),
-			http.StatusInternalServerError,
-			types.ErrOptionWithSkipRetry(),
-		)
-		return
-	}
-	if cooldownUntil > nowUnix {
-		retryAfter := cooldownUntil - nowUnix
-		c.Header("Retry-After", fmt.Sprintf("%d", retryAfter))
-		newAPIError = types.WithOpenAIError(types.OpenAIError{
-			Message: fmt.Sprintf("内容安全冷静期仍在生效，请在 %d 秒后重试。该本地拒绝不会新增风控记录。", retryAfter),
-			Type:    "content_safety_cooldown",
-			Code:    "content_safety_cooldown",
-		}, http.StatusTooManyRequests, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
-		return
+	if !service.IsContentSafetyRecordOnlyGroup(relayInfo.UsingGroup) {
+		nowUnix := time.Now().Unix()
+		cooldownUntil, cooldownErr := model.GetActiveContentSafetyCooldown(relayInfo.UserId, nowUnix)
+		if cooldownErr != nil {
+			newAPIError = types.NewErrorWithStatusCode(
+				fmt.Errorf("content safety state unavailable: %w", cooldownErr),
+				types.ErrorCode("content_safety_state_unavailable"),
+				http.StatusInternalServerError,
+				types.ErrOptionWithSkipRetry(),
+			)
+			return
+		}
+		if cooldownUntil > nowUnix {
+			retryAfter := cooldownUntil - nowUnix
+			c.Header("Retry-After", fmt.Sprintf("%d", retryAfter))
+			newAPIError = types.WithOpenAIError(types.OpenAIError{
+				Message: fmt.Sprintf("内容安全冷静期仍在生效，请在 %d 秒后重试。该本地拒绝不会新增风控记录。", retryAfter),
+				Type:    "content_safety_cooldown",
+				Code:    "content_safety_cooldown",
+			}, http.StatusTooManyRequests, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+			return
+		}
 	}
 
 	needSensitiveCheck := setting.ShouldCheckPromptSensitive()

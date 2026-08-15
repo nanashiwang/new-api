@@ -11,6 +11,7 @@ import (
 )
 
 const (
+	ContentSafetyActionRecorded        = "recorded"
 	ContentSafetyActionWarning         = "warning"
 	ContentSafetyActionCooldownStarted = "cooldown_started"
 	ContentSafetyActionCooldownActive  = "cooldown_active"
@@ -88,6 +89,7 @@ type RecordContentSafetyViolationParams struct {
 	BurstThreshold       int
 	CooldownSeconds      int64
 	ReviewAfterCooldowns int
+	RecordOnly           bool
 }
 
 type ContentSafetyEnforcementResult struct {
@@ -126,7 +128,7 @@ func contentSafetyLevelForState(user *User, state *ContentSafetyState, now int64
 	if state.CooldownCount >= 2 {
 		return ContentSafetyLevelFocus
 	}
-	if state.LatestViolation != nil && now-state.LatestViolation.CreatedAt < int64(contentSafetyBurstWindow.Seconds()) && state.LatestViolation.CooldownUntil == 0 {
+	if state.LatestViolation != nil && state.LatestViolation.Action != ContentSafetyActionRecorded && now-state.LatestViolation.CreatedAt < int64(contentSafetyBurstWindow.Seconds()) && state.LatestViolation.CooldownUntil == 0 {
 		switch state.LatestViolation.BurstCount {
 		case 1:
 			return ContentSafetyLevelWarning1
@@ -155,11 +157,11 @@ func applyUserContentSafetyFilters(tx *gorm.DB, query *gorm.DB, params UserSearc
 	now := time.Now().Unix()
 	cutoff := now - int64(contentSafetyWindow.Seconds())
 	burstCutoff := now - int64(contentSafetyBurstWindow.Seconds())
-	countSQL := "SELECT COUNT(1) FROM content_safety_violations csv WHERE csv.user_id = users.id AND csv.created_at >= ?"
+	countSQL := "SELECT COUNT(1) FROM content_safety_violations csv WHERE csv.user_id = users.id AND csv.created_at >= ? AND COALESCE(csv.action, '') <> 'recorded'"
 	episodeSQL := "SELECT COUNT(1) FROM content_safety_violations cse WHERE cse.user_id = users.id AND cse.created_at >= ? AND cse.action = 'cooldown_started'"
 	activeSQL := "SELECT COUNT(1) FROM content_safety_violations csa WHERE csa.user_id = users.id AND csa.cooldown_until > ?"
 	lastCooldownSQL := "SELECT COALESCE(MAX(csl.cooldown_until), 0) FROM content_safety_violations csl WHERE csl.user_id = users.id"
-	recentSQL := "SELECT COUNT(1) FROM content_safety_violations csr WHERE csr.user_id = users.id AND csr.created_at >= ? AND csr.created_at > (" + lastCooldownSQL + ")"
+	recentSQL := "SELECT COUNT(1) FROM content_safety_violations csr WHERE csr.user_id = users.id AND csr.created_at >= ? AND COALESCE(csr.action, '') <> 'recorded' AND csr.created_at > (" + lastCooldownSQL + ")"
 	hasReviewTable := tx.Migrator().HasTable(&ContentSafetyReviewCase{})
 	pendingSQL := "SELECT COUNT(1) FROM content_safety_review_cases csp WHERE csp.user_id = users.id AND csp.status = 'pending'"
 	approvedSQL := "SELECT COUNT(1) FROM content_safety_review_cases csa2 WHERE csa2.user_id = users.id AND csa2.status = 'approved_disable'"
@@ -233,7 +235,7 @@ func applyUserContentSafetySort(tx *gorm.DB, query *gorm.DB, sortOrder string, f
 	cutoff := time.Now().Unix() - int64(contentSafetyWindow.Seconds())
 	latestViolation := tx.Model(&ContentSafetyViolation{}).
 		Select("user_id, MAX(created_at) AS last_at").
-		Where("created_at >= ?", cutoff).
+		Where("created_at >= ? AND COALESCE(action, '') <> ?", cutoff, ContentSafetyActionRecorded).
 		Group("user_id")
 	query = query.Joins(
 		"LEFT JOIN (?) AS content_safety_sort ON content_safety_sort.user_id = users.id",
@@ -281,7 +283,7 @@ func AttachUserContentSafetyMetadata(tx *gorm.DB, users []*User) error {
 	cutoff := now - int64(contentSafetyWindow.Seconds())
 	var counts []struct{ UserId, Count int }
 	if err := tx.Model(&ContentSafetyViolation{}).Select("user_id, COUNT(1) AS count").
-		Where("user_id IN ? AND created_at >= ?", userIDs, cutoff).Group("user_id").Scan(&counts).Error; err != nil {
+		Where("user_id IN ? AND created_at >= ? AND COALESCE(action, '') <> ?", userIDs, cutoff, ContentSafetyActionRecorded).Group("user_id").Scan(&counts).Error; err != nil {
 		return err
 	}
 	for _, row := range counts {
@@ -313,10 +315,10 @@ func AttachUserContentSafetyMetadata(tx *gorm.DB, users []*User) error {
 	latest := make([]ContentSafetyViolation, 0, len(userIDs))
 	latestSQL := `NOT EXISTS (
 		SELECT 1 FROM content_safety_violations newer
-		WHERE newer.user_id = v.user_id AND newer.created_at >= ?
+		WHERE newer.user_id = v.user_id AND newer.created_at >= ? AND COALESCE(newer.action, '') <> 'recorded'
 		AND (newer.created_at > v.created_at OR (newer.created_at = v.created_at AND newer.id > v.id))
 	)`
-	if err := tx.Table("content_safety_violations AS v").Where("v.user_id IN ? AND v.created_at >= ?", userIDs, cutoff).
+	if err := tx.Table("content_safety_violations AS v").Where("v.user_id IN ? AND v.created_at >= ? AND COALESCE(v.action, '') <> ?", userIDs, cutoff, ContentSafetyActionRecorded).
 		Where(latestSQL, cutoff).Scan(&latest).Error; err != nil {
 		return err
 	}
@@ -326,7 +328,7 @@ func AttachUserContentSafetyMetadata(tx *gorm.DB, users []*User) error {
 		state := states[violation.UserId]
 		state.LatestViolation = &copy
 		state.BurstCount = violation.BurstCount
-		state.HasUnreadWarning = violation.WarningReadAt == 0
+		state.HasUnreadWarning = violation.Action != ContentSafetyActionRecorded && violation.WarningReadAt == 0
 	}
 	var legacyRows []struct{ UserId int }
 	if err := tx.Model(&ContentSafetyViolation{}).Distinct("user_id").
@@ -401,7 +403,7 @@ func GetUserContentSafetyState(userID int) (*ContentSafetyState, error) {
 			return nil, err
 		}
 		state.LatestViolation = &latest
-		state.HasUnreadWarning = latest.WarningReadAt == 0
+		state.HasUnreadWarning = latest.Action != ContentSafetyActionRecorded && latest.WarningReadAt == 0
 	}
 	return state, nil
 }
@@ -428,7 +430,7 @@ func RecordContentSafetyViolation(params RecordContentSafetyViolationParams) (*C
 	if params.UserId <= 0 || params.EventKey == "" || params.ErrorCode == "" {
 		return nil, errors.New("invalid content safety violation identity")
 	}
-	if params.BurstThreshold <= 0 || params.CooldownSeconds <= 0 || params.ReviewAfterCooldowns <= 0 {
+	if !params.RecordOnly && (params.BurstThreshold <= 0 || params.CooldownSeconds <= 0 || params.ReviewAfterCooldowns <= 0) {
 		return nil, errors.New("invalid content safety enforcement policy")
 	}
 
@@ -474,16 +476,25 @@ func RecordContentSafetyViolation(params RecordContentSafetyViolationParams) (*C
 			ClassifierVersion: truncateSafetyAuditValue(params.ClassifierVersion, 32), InputHash: truncateSafetyAuditValue(params.InputHash, 64),
 			IsStream: params.IsStream, CreatedAt: params.CreatedAt, Action: ContentSafetyActionWarning,
 		}
+		if params.RecordOnly {
+			violation.Action = ContentSafetyActionRecorded
+			violation.WarningReadAt = params.CreatedAt
+		}
 		if err := tx.Create(violation).Error; err != nil {
 			return err
 		}
+		if params.RecordOnly {
+			violation.Username = user.Username
+			result.Violation = violation
+			return nil
+		}
 
 		var windowCount, burstCount int64
-		if err := tx.Model(&ContentSafetyViolation{}).Where("user_id = ? AND created_at >= ?", params.UserId, params.WindowStart).
+		if err := tx.Model(&ContentSafetyViolation{}).Where("user_id = ? AND created_at >= ? AND COALESCE(action, '') <> ?", params.UserId, params.WindowStart, ContentSafetyActionRecorded).
 			Count(&windowCount).Error; err != nil {
 			return err
 		}
-		if err := tx.Model(&ContentSafetyViolation{}).Where("user_id = ? AND created_at >= ? AND created_at <= ?", params.UserId, burstStart, params.CreatedAt).
+		if err := tx.Model(&ContentSafetyViolation{}).Where("user_id = ? AND created_at >= ? AND created_at <= ? AND COALESCE(action, '') <> ?", params.UserId, burstStart, params.CreatedAt, ContentSafetyActionRecorded).
 			Count(&burstCount).Error; err != nil {
 			return err
 		}
