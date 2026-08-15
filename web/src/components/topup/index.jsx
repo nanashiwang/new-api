@@ -55,6 +55,11 @@ import { Sparkles, BellRing } from 'lucide-react';
 import { IconGift } from '@douyinfe/semi-icons';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
+import {
+  AFF_WITHDRAWAL_MINIMUM_PAYMENT_CNY,
+  AFF_WITHDRAWAL_MINIMUM_QUOTA,
+  meetsAffWithdrawalMinimum,
+} from '../../constants';
 
 import RechargeCard from './RechargeCard';
 import InvitationCard from './InvitationCard';
@@ -160,7 +165,9 @@ const TopUp = () => {
       : roundCurrencyAmountUp(minTransferAmount);
   });
   const [withdrawalAmount, setWithdrawalAmount] = useState(() => {
-    const minWithdrawalAmount = quotaToDisplayAmount(getQuotaPerUnit());
+    const minWithdrawalAmount = quotaToDisplayAmount(
+      AFF_WITHDRAWAL_MINIMUM_QUOTA,
+    );
     return getCurrencyConfig().type === 'TOKENS'
       ? minWithdrawalAmount
       : roundCurrencyAmountUp(minWithdrawalAmount);
@@ -639,8 +646,14 @@ const TopUp = () => {
 
   const submitWithdrawal = async () => {
     const withdrawalQuota = displayAmountToQuota(withdrawalAmount);
-    if (withdrawalQuota < getQuotaPerUnit()) {
-      showError(t('提现额度不能低于最低额度'));
+    const quotaPerUnit = Number(getQuotaPerUnit() || 0);
+    const topUpPrice = Number(statusState?.status?.price || 0);
+    if (!meetsAffWithdrawalMinimum(withdrawalQuota, quotaPerUnit, topUpPrice)) {
+      showError(
+        `${t('提现额度不能低于最低额度')}：${renderQuota(
+          AFF_WITHDRAWAL_MINIMUM_QUOTA,
+        )} / ¥${AFF_WITHDRAWAL_MINIMUM_PAYMENT_CNY.toFixed(2)}`,
+      );
       return;
     }
     if (!alipayAccount.trim()) {
@@ -716,7 +729,7 @@ const TopUp = () => {
   };
 
   const tryOpenWithdrawal = () => {
-    const minQuota = getQuotaPerUnit();
+    const minQuota = AFF_WITHDRAWAL_MINIMUM_QUOTA;
     const currentQuota = Number(userState?.user?.aff_quota || 0);
     if (currentQuota < minQuota) {
       showError(
@@ -835,6 +848,7 @@ const TopUp = () => {
         userState={userState}
         renderQuota={renderQuota}
         getQuotaPerUnit={getQuotaPerUnit}
+        topUpPrice={Number(statusState?.status?.price || 0)}
         withdrawalAmount={withdrawalAmount}
         setWithdrawalAmount={setWithdrawalAmount}
         alipayAccount={alipayAccount}
