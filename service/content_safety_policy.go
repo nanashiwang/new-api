@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	ContentSafetyRecordOnlyGroup            = "破甲"
+	ContentSafetyRecordOnlyGroup            = "OpenAI · 破甲分组"
 	ContentSafetyPolicyWindow               = 30 * 24 * time.Hour
 	ContentSafetyPolicyBurstWindow          = 10 * time.Minute
 	ContentSafetyPolicyCooldown             = 10 * time.Minute
