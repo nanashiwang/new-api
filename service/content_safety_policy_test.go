@@ -89,10 +89,12 @@ func TestNormalizeContentSafetyPolicyErrorHandlesNil(t *testing.T) {
 }
 
 func TestContentSafetyRecordOnlyGroupUsesExactMatch(t *testing.T) {
-	require.True(t, IsContentSafetyRecordOnlyGroup("破甲"))
-	require.False(t, IsContentSafetyRecordOnlyGroup("破甲测试"))
-	require.False(t, IsContentSafetyRecordOnlyGroup(" 破甲"))
-	require.False(t, IsContentSafetyRecordOnlyGroup("破甲 "))
+	require.True(t, IsContentSafetyRecordOnlyGroup("OpenAI · 破甲分组"))
+	require.False(t, IsContentSafetyRecordOnlyGroup("破甲"))
+	require.False(t, IsContentSafetyRecordOnlyGroup("OpenAI · 破甲"))
+	require.False(t, IsContentSafetyRecordOnlyGroup("OpenAI · 破甲分组测试"))
+	require.False(t, IsContentSafetyRecordOnlyGroup(" OpenAI · 破甲分组"))
+	require.False(t, IsContentSafetyRecordOnlyGroup("OpenAI · 破甲分组 "))
 }
 
 func TestRecordContentSafetyPolicyViolationRecordOnlyKeepsAuditWithoutUserAction(t *testing.T) {
