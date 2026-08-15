@@ -196,6 +196,7 @@ type RelayInfo struct {
 	ClientWs                      *websocket.Conn
 	TargetWs                      *websocket.Conn
 	InputAudioFormat              string
+	InputAudioDurationSeconds     int64
 	OutputAudioFormat             string
 	RealtimeTools                 []dto.RealTimeTool
 	IsFirstRequest                bool

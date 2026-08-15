@@ -10,6 +10,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -59,4 +60,63 @@ func TestModelPriceHelperTieredUsesPreloadedRequestInput(t *testing.T) {
 	require.Equal(t, "stream", info.TieredBillingSnapshot.EstimatedTier)
 	require.Equal(t, billing_setting.BillingModeTieredExpr, info.TieredBillingSnapshot.BillingMode)
 	require.Equal(t, common.QuotaPerUnit, info.TieredBillingSnapshot.QuotaPerUnit)
+}
+
+func TestModelPriceHelperUsesMiMoAudioDurationPrice(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	originalAudioDurationPrices := ratio_setting.AudioDurationPrice2JSONString()
+	if err := ratio_setting.UpdateAudioDurationPriceByJSONString(`{"mimo-v2.5-asr":0.074}`); err != nil {
+		t.Fatalf("set audio duration price: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := ratio_setting.UpdateAudioDurationPriceByJSONString(originalAudioDurationPrices); err != nil {
+			t.Fatalf("restore audio duration price: %v", err)
+		}
+	})
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	info := &relaycommon.RelayInfo{
+		OriginModelName:           "mimo-v2.5-asr",
+		UsingGroup:                "default",
+		UserGroup:                 "default",
+		InputAudioDurationSeconds: 3600,
+	}
+	priceData, err := ModelPriceHelper(ctx, info, 0, &types.TokenCountMeta{})
+	if err != nil {
+		t.Fatalf("ModelPriceHelper returned error: %v", err)
+	}
+	if !priceData.UseAudioDurationPrice {
+		t.Fatal("expected audio duration billing")
+	}
+	if priceData.AudioDurationPrice != 0.074 {
+		t.Fatalf("AudioDurationPrice = %v, want 0.074", priceData.AudioDurationPrice)
+	}
+	if priceData.QuotaToPreConsume != 37000 {
+		t.Fatalf("QuotaToPreConsume = %d, want 37000", priceData.QuotaToPreConsume)
+	}
+	if priceData.ConservativeQuotaToPreConsume != 37000 {
+		t.Fatalf("ConservativeQuotaToPreConsume = %d, want 37000", priceData.ConservativeQuotaToPreConsume)
+	}
+}
+
+func TestModelPriceHelperRejectsDurationPricedModelWithoutAudio(t *testing.T) {
+	originalAudioDurationPrices := ratio_setting.AudioDurationPrice2JSONString()
+	if err := ratio_setting.UpdateAudioDurationPriceByJSONString(`{"mimo-v2.5-asr":0.074}`); err != nil {
+		t.Fatalf("set audio duration price: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := ratio_setting.UpdateAudioDurationPriceByJSONString(originalAudioDurationPrices); err != nil {
+			t.Fatalf("restore audio duration price: %v", err)
+		}
+	})
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	_, err := ModelPriceHelper(ctx, &relaycommon.RelayInfo{
+		OriginModelName: "mimo-v2.5-asr",
+		UsingGroup:      "default",
+		UserGroup:       "default",
+	}, 0, &types.TokenCountMeta{})
+	if err == nil {
+		t.Fatal("duration-priced model without audio duration should be rejected")
+	}
 }

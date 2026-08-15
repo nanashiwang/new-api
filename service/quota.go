@@ -476,6 +476,9 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 	}
 
 	quota := calculateAudioQuota(quotaInfo)
+	if relayInfo.PriceData.UseAudioDurationPrice {
+		quota = relayInfo.PriceData.QuotaToPreConsume
+	}
 	if tieredOk {
 		quota = tieredQuota
 	}
@@ -493,7 +496,7 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 	}
 
 	// record all the consume log even if quota is 0
-	if totalTokens == 0 {
+	if totalTokens == 0 && !relayInfo.PriceData.UseAudioDurationPrice {
 		// in this case, must be some error happened
 		// we cannot just return, because we may have to return the pre-consumed quota
 		quota = 0
@@ -514,11 +517,21 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 	}
 	other := GenerateAudioOtherInfo(ctx, relayInfo, usage, modelRatio, groupRatio,
 		completionRatio.InexactFloat64(), audioRatio.InexactFloat64(), audioCompletionRatio.InexactFloat64(), modelPrice, relayInfo.PriceData.GroupRatioInfo.GroupSpecialRatio)
+	if relayInfo.PriceData.UseAudioDurationPrice {
+		other["audio_duration_billing"] = true
+		other["audio_duration_seconds"] = relayInfo.PriceData.AudioDurationSeconds
+		other["audio_duration_price_per_hour"] = relayInfo.PriceData.AudioDurationPrice
+		logContent = fmt.Sprintf("音频输入按时长计费 %d 秒，单价 $%g/小时，分组倍率 %.2f",
+			relayInfo.PriceData.AudioDurationSeconds,
+			relayInfo.PriceData.AudioDurationPrice,
+			groupRatio,
+		)
+	}
 	if tieredResult != nil {
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	}
 	quota, logContent, other = FinalizeConsumeLogAfterSettle(logContent, other, actualQuota, relayInfo, settleErr)
-	if totalTokens != 0 {
+	if totalTokens != 0 || relayInfo.PriceData.UseAudioDurationPrice {
 		UpdateUsageStats(relayInfo.UserId, relayInfo.ChannelId, quota, true)
 	}
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{

@@ -35,3 +35,15 @@ func TestUpdateUsageFromStreamDataNormalizesResponsesStyleUsage(t *testing.T) {
 	require.Equal(t, 8, usage.CompletionTokens)
 	require.Equal(t, 96, usage.PromptTokensDetails.CachedTokens)
 }
+
+func TestUpdateUsageFromStreamDataRetainsMiMoSearchOnlyUsage(t *testing.T) {
+	usage := &dto.Usage{}
+	containStreamUsage := false
+
+	chunk := `{"choices":[],"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0,"web_search_usage":{"tool_usage":3,"page_usage":3}}}`
+	updateUsageFromStreamData(chunk, &usage, &containStreamUsage)
+
+	require.True(t, containStreamUsage)
+	require.Equal(t, 3, usage.WebSearchRequests)
+	require.Nil(t, usage.WebSearchUsage)
+}

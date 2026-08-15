@@ -51,6 +51,19 @@ func (m *RWMap[K, V]) AddAll(other map[K]V) {
 	}
 }
 
+// ReplaceAll atomically replaces the map with a defensive copy of other.
+// Callers can validate a temporary map first and publish it without exposing
+// a partially updated or temporarily empty configuration to readers.
+func (m *RWMap[K, V]) ReplaceAll(other map[K]V) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	replacement := make(map[K]V, len(other))
+	for k, v := range other {
+		replacement[k] = v
+	}
+	m.data = replacement
+}
+
 func (m *RWMap[K, V]) Clear() {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()

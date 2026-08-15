@@ -177,8 +177,9 @@ func (r *GeneralOpenAIRequest) GetTokenCountMeta() *types.TokenCountMeta {
 					if inputAudio != nil && inputAudio.Data != "" {
 						source := createFileSource(inputAudio.Data)
 						fileMeta = append(fileMeta, &types.FileMeta{
-							FileType: types.FileTypeAudio,
-							Source:   source,
+							FileType:    types.FileTypeAudio,
+							AudioFormat: inputAudio.Format,
+							Source:      source,
 						})
 					}
 				} else if m.Type == ContentTypeFile {
@@ -587,8 +588,8 @@ func (m *Message) ParseContent() []MediaContent {
 		case ContentTypeInputAudio:
 			if audioData, ok := contentItem["input_audio"].(map[string]interface{}); ok {
 				data, ok1 := audioData["data"].(string)
-				format, ok2 := audioData["format"].(string)
-				if ok1 && ok2 {
+				format, _ := audioData["format"].(string)
+				if ok1 {
 					temp := &MessageInputAudio{
 						Data:   data,
 						Format: format,
@@ -764,8 +765,8 @@ func (m *Message) ParseContent() []MediaContent {
 			case ContentTypeInputAudio:
 				if audioData, ok := contentItem["input_audio"].(map[string]interface{}); ok {
 					data, ok1 := audioData["data"].(string)
-					format, ok2 := audioData["format"].(string)
-					if ok1 && ok2 {
+					format, _ := audioData["format"].(string)
+					if ok1 {
 						temp := &MessageInputAudio{
 							Data:   data,
 							Format: format,

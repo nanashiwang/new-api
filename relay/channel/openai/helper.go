@@ -180,6 +180,7 @@ func handleLastResponse(lastStreamData string, responseId *string, createAt *int
 	*createAt = lastStreamResponse.Created
 	*systemFingerprint = lastStreamResponse.GetSystemFingerprint()
 	*model = lastStreamResponse.Model
+	normalizeOpenAIUsage(lastStreamResponse.Usage)
 
 	if service.ValidUsage(lastStreamResponse.Usage) {
 		*containStreamUsage = true

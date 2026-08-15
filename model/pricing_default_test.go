@@ -93,3 +93,23 @@ func TestInitDefaultVendorMappingLeavesOtherUnassignedMetadataUntouched(t *testi
 	require.Same(t, originalMeta, metaMap["qwen-custom"])
 	require.Zero(t, metaMap["qwen-custom"].VendorID)
 }
+
+func TestGetOrCreateVendorBackfillsEmptyMiMoIconInMemory(t *testing.T) {
+	vendor := &Vendor{Id: 7, Name: defaultMiMoVendorName}
+	vendorMap := map[int]*Vendor{7: vendor}
+
+	vendorID := getOrCreateVendor(defaultMiMoVendorName, vendorMap)
+
+	require.Equal(t, 7, vendorID)
+	require.Equal(t, "Xiaomi.color='#FF6900'", vendor.Icon)
+}
+
+func TestGetOrCreateVendorPreservesExplicitMiMoIcon(t *testing.T) {
+	vendor := &Vendor{Id: 7, Name: defaultMiMoVendorName, Icon: "CustomIcon"}
+	vendorMap := map[int]*Vendor{7: vendor}
+
+	vendorID := getOrCreateVendor(defaultMiMoVendorName, vendorMap)
+
+	require.Equal(t, 7, vendorID)
+	require.Equal(t, "CustomIcon", vendor.Icon)
+}

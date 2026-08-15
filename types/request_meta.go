@@ -32,9 +32,10 @@ type TokenCountMeta struct {
 
 type FileMeta struct {
 	FileType
-	MimeType string
-	Source   *FileSource // 统一的文件来源（URL 或 base64）
-	Detail   string      // 图片细节级别（low/high/auto）
+	MimeType    string
+	AudioFormat string      // 音频容器或编码格式（例如 wav/mp3）
+	Source      *FileSource // 统一的文件来源（URL 或 base64）
+	Detail      string      // 图片细节级别（low/high/auto）
 }
 
 // NewFileMeta 创建新的 FileMeta

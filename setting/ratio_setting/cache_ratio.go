@@ -74,6 +74,10 @@ var defaultCacheRatio = map[string]float64{
 }
 
 var defaultCreateCacheRatio = map[string]float64{
+	"mimo-v2.5":                          0,
+	"mimo-v2.5-pro":                      0,
+	"MiMo-V2.5":                          0,
+	"MiMo-V2.5-Pro":                      0,
 	"claude-3-sonnet-20240229":            1.25,
 	"claude-3-opus-20240229":              1.25,
 	"claude-3-haiku-20240307":             1.25,
@@ -150,6 +154,12 @@ func GetCacheRatio(name string) (float64, bool) {
 func GetCreateCacheRatio(name string) (float64, bool) {
 	ratio, ok := createCacheRatioMap.Get(name)
 	if !ok {
+		// Persisted option maps may predate a newly introduced provider default.
+		// Keep the fallback scoped to explicit defaults so existing custom values
+		// always win while missing MiMo cache-write prices remain officially free.
+		if defaultRatio, exists := defaultCreateCacheRatio[name]; exists {
+			return defaultRatio, true
+		}
 		return 1.25, false // Default to 1.25 if not found
 	}
 	return ratio, true

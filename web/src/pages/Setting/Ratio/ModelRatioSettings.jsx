@@ -48,6 +48,7 @@ export default function ModelRatioSettings(props) {
     ImageRatio: '',
     AudioRatio: '',
     AudioCompletionRatio: '',
+    AudioDurationPrice: '',
     ExposeRatioEnabled: false,
   });
   const refForm = useRef();
@@ -221,6 +222,28 @@ export default function ModelRatioSettings(props) {
               ]}
               onChange={(value) =>
                 setInputs({ ...inputs, CreateCacheRatio: value })
+              }
+            />
+          </Col>
+        </Row>
+        <Row gutter={16}>
+          <Col xs={24} sm={16}>
+            <Form.TextArea
+              label={`${t('音频输入价格')} / ${t('小时')}`}
+              extraText={`${t('音频输入价格')}：USD / ${t('小时')}`}
+              placeholder='{"mimo-v2.5-asr": 0.074}'
+              field={'AudioDurationPrice'}
+              autosize={{ minRows: 4, maxRows: 10 }}
+              trigger='blur'
+              stopValidateWithError
+              rules={[
+                {
+                  validator: (rule, value) => verifyJSON(value),
+                  message: '不是合法的 JSON 字符串',
+                },
+              ]}
+              onChange={(value) =>
+                setInputs({ ...inputs, AudioDurationPrice: value })
               }
             />
           </Col>

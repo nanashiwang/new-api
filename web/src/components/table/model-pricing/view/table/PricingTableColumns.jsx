@@ -48,6 +48,12 @@ function renderQuotaType(type, t) {
           {t('按量计费')}
         </Tag>
       );
+    case 2:
+      return (
+        <Tag color='blue' shape='circle'>
+          {t('按量计费')} / {t('小时')}
+        </Tag>
+      );
     default:
       return t('未知');
   }

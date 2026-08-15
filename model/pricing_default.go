@@ -67,6 +67,7 @@ var defaultVendorIcons = map[string]string{
 	"微软":         "AzureAI",
 	"Microsoft":  "AzureAI",
 	"Azure":      "AzureAI",
+	"MiMo":       "Xiaomi.color='#FF6900'",
 }
 
 func hasModelNameSegment(modelName string, segments ...string) bool {
@@ -149,6 +150,9 @@ func getOrCreateVendor(vendorName string, vendorMap map[int]*Vendor) int {
 	// 查找现有供应商
 	for id, vendor := range vendorMap {
 		if vendor.Name == vendorName {
+			if vendor.Name == defaultMiMoVendorName && strings.TrimSpace(vendor.Icon) == "" {
+				vendor.Icon = getDefaultVendorIcon(vendorName)
+			}
 			return id
 		}
 	}

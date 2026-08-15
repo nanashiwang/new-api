@@ -151,6 +151,13 @@ const renderQuotaTypes = (arr, t) => {
           </Tag>
         );
       }
+      if (qt === 2) {
+        return (
+          <Tag key={`${qt}-${idx}`} color='blue' size='small' shape='circle'>
+            {t('按量计费')} / {t('小时')}
+          </Tag>
+        );
+      }
       return (
         <Tag key={`${qt}-${idx}`} color='white' size='small' shape='circle'>
           {qt}
