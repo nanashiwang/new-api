@@ -23,6 +23,7 @@ type Pricing struct {
 	QuotaType              int                     `json:"quota_type"`
 	ModelRatio             float64                 `json:"model_ratio"`
 	ModelPrice             float64                 `json:"model_price"`
+	AudioDurationPrice     float64                 `json:"audio_duration_price"`
 	OwnerBy                string                  `json:"owner_by"`
 	CompletionRatio        float64                 `json:"completion_ratio"`
 	SupportsCacheRead      bool                    `json:"supports_cache_read"`
@@ -309,8 +310,12 @@ func updatePricing() {
 			pricing.Tags = meta.Tags
 			pricing.VendorID = meta.VendorID
 		}
+		audioDurationPrice, findAudioDurationPrice := ratio_setting.GetAudioDurationPrice(model)
 		modelPrice, findPrice := ratio_setting.GetModelPrice(model, false)
-		if findPrice {
+		if findAudioDurationPrice {
+			pricing.AudioDurationPrice = audioDurationPrice
+			pricing.QuotaType = 2
+		} else if findPrice {
 			pricing.ModelPrice = modelPrice
 			pricing.QuotaType = 1
 		} else {

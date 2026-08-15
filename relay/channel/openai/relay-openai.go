@@ -660,6 +660,7 @@ func normalizeOpenAIUsage(usage *dto.Usage) {
 	if usage == nil {
 		return
 	}
+	usage.NormalizeWebSearchUsage()
 	if usage.InputTokens != 0 {
 		usage.PromptTokens = usage.InputTokens
 	}

@@ -326,6 +326,10 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 		toolUsage.WebSearchCalls = claudeSearchCalls
 		toolUsage.WebSearchToolName = "web_search"
 	}
+	if usage.WebSearchRequests > toolUsage.WebSearchCalls {
+		toolUsage.WebSearchCalls = usage.WebSearchRequests
+		toolUsage.WebSearchToolName = dto.BuildInToolWebSearch
+	}
 	toolResult := service.ComputeToolCallQuota(toolUsage, groupRatio*timeRatio)
 	for _, item := range toolResult.Items {
 		extraContent = append(extraContent, fmt.Sprintf("%s 调用 %d 次，花费 %d", item.Name, item.CallCount, item.Quota))
@@ -335,7 +339,14 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 
 	var audioInputQuota decimal.Decimal
 	var audioInputPrice float64
-	if !relayInfo.PriceData.UsePrice {
+	if relayInfo.PriceData.UseAudioDurationPrice {
+		quotaCalculateDecimal = decimal.NewFromInt(int64(relayInfo.PriceData.QuotaToPreConsume))
+		extraContent = append(extraContent, fmt.Sprintf(
+			"音频输入按时长计费 %d 秒，单价 $%g/小时",
+			relayInfo.PriceData.AudioDurationSeconds,
+			relayInfo.PriceData.AudioDurationPrice,
+		))
+	} else if !relayInfo.PriceData.UsePrice {
 		baseTokens := dPromptTokens
 		// 减去 cached tokens
 		// Anthropic API 的 input_tokens 已经不包含缓存 tokens，不需要减去
@@ -409,7 +420,9 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 
 	// record all the consume log even if quota is 0
 	if totalTokens == 0 {
-		if toolResult.TotalQuota > 0 {
+		if relayInfo.PriceData.UseAudioDurationPrice {
+			extraContent = append(extraContent, "上游未返回 token 用量，按输入音频时长结算")
+		} else if toolResult.TotalQuota > 0 {
 			if quota < toolResult.TotalQuota {
 				quota = toolResult.TotalQuota
 			}
@@ -488,11 +501,16 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 		other["audio_input_token_count"] = audioTokens
 		other["audio_input_price"] = audioInputPrice
 	}
+	if relayInfo.PriceData.UseAudioDurationPrice {
+		other["audio_duration_billing"] = true
+		other["audio_duration_seconds"] = relayInfo.PriceData.AudioDurationSeconds
+		other["audio_duration_price_per_hour"] = relayInfo.PriceData.AudioDurationPrice
+	}
 	if tieredResult != nil {
 		service.InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	}
 	quota, logContent, other = service.FinalizeConsumeLogAfterSettle(logContent, other, actualQuota, relayInfo, settleErr)
-	if totalTokens != 0 || toolResult.TotalQuota > 0 {
+	if totalTokens != 0 || toolResult.TotalQuota > 0 || relayInfo.PriceData.UseAudioDurationPrice {
 		service.UpdateUsageStats(relayInfo.UserId, relayInfo.ChannelId, quota, true)
 	}
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{

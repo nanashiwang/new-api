@@ -29,3 +29,27 @@ func TestComputeToolCallQuotaCountsImageGenerationCalls(t *testing.T) {
 		t.Fatalf("TotalQuota = %d, want positive", result.TotalQuota)
 	}
 }
+
+func TestComputeToolCallQuotaUsesMiMoOfficialWebSearchPrice(t *testing.T) {
+	result := ComputeToolCallQuota(ToolCallUsage{
+		ModelName:         "mimo-v2.5-pro",
+		WebSearchCalls:    3,
+		WebSearchToolName: "web_search",
+	}, 1)
+	if len(result.Items) != 1 {
+		t.Fatalf("items length = %d, want 1", len(result.Items))
+	}
+	item := result.Items[0]
+	if item.PricePer1K != 5 {
+		t.Fatalf("PricePer1K = %v, want 5", item.PricePer1K)
+	}
+	if item.CallCount != 3 {
+		t.Fatalf("CallCount = %d, want 3", item.CallCount)
+	}
+	if item.TotalPrice != 0.015 {
+		t.Fatalf("TotalPrice = %v, want 0.015", item.TotalPrice)
+	}
+	if result.TotalQuota != 7500 {
+		t.Fatalf("TotalQuota = %d, want 7500", result.TotalQuota)
+	}
+}

@@ -38,8 +38,11 @@ type PriceData struct {
 	ImageRatio                    float64
 	AudioRatio                    float64
 	AudioCompletionRatio          float64
+	AudioDurationPrice            float64
+	AudioDurationSeconds          int64
 	OtherRatios                   map[string]float64
 	UsePrice                      bool
+	UseAudioDurationPrice         bool
 	Quota                         int // 按次计费的最终额度（MJ / Task）
 	QuotaToPreConsume             int // 按量计费的预消耗额度
 	ConservativeQuotaToPreConsume int // 套餐令牌前置拦截使用的保守预估额度
@@ -58,5 +61,5 @@ func (p *PriceData) AddOtherRatio(key string, ratio float64) {
 }
 
 func (p *PriceData) ToSetting() string {
-	return fmt.Sprintf("ModelPrice: %f, ModelRatio: %f, CompletionRatio: %f, CacheRatio: %f, GroupRatio: %f, TimeRatio: %f, UsePrice: %t, CacheCreationRatio: %f, CacheCreation5mRatio: %f, CacheCreation1hRatio: %f, QuotaToPreConsume: %d, ConservativeQuotaToPreConsume: %d, ImageRatio: %f, AudioRatio: %f, AudioCompletionRatio: %f", p.ModelPrice, p.ModelRatio, p.CompletionRatio, p.CacheRatio, p.GroupRatioInfo.GroupRatio, p.TimeRatioInfo.EffectiveRatio(), p.UsePrice, p.CacheCreationRatio, p.CacheCreation5mRatio, p.CacheCreation1hRatio, p.QuotaToPreConsume, p.ConservativeQuotaToPreConsume, p.ImageRatio, p.AudioRatio, p.AudioCompletionRatio)
+	return fmt.Sprintf("ModelPrice: %f, ModelRatio: %f, CompletionRatio: %f, CacheRatio: %f, GroupRatio: %f, TimeRatio: %f, UsePrice: %t, UseAudioDurationPrice: %t, AudioDurationPrice: %f, AudioDurationSeconds: %d, CacheCreationRatio: %f, CacheCreation5mRatio: %f, CacheCreation1hRatio: %f, QuotaToPreConsume: %d, ConservativeQuotaToPreConsume: %d, ImageRatio: %f, AudioRatio: %f, AudioCompletionRatio: %f", p.ModelPrice, p.ModelRatio, p.CompletionRatio, p.CacheRatio, p.GroupRatioInfo.GroupRatio, p.TimeRatioInfo.EffectiveRatio(), p.UsePrice, p.UseAudioDurationPrice, p.AudioDurationPrice, p.AudioDurationSeconds, p.CacheCreationRatio, p.CacheCreation5mRatio, p.CacheCreation1hRatio, p.QuotaToPreConsume, p.ConservativeQuotaToPreConsume, p.ImageRatio, p.AudioRatio, p.AudioCompletionRatio)
 }

@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"bytes"
 	"reflect"
 	"testing"
 
@@ -137,6 +138,25 @@ func TestOpenAIChatCompletionsWireUsageWhitelist(t *testing.T) {
 	assertWireUsageWhitelist(t, stream)
 	if !reflect.DeepEqual(internal, before) {
 		t.Fatalf("wire projection mutated internal usage: got %#v want %#v", internal, before)
+	}
+}
+
+func TestUsageUnmarshalCapturesMiMoWebSearchCallsWithoutRemarshalingProviderField(t *testing.T) {
+	payload := `{"prompt_tokens":2106,"completion_tokens":204,"total_tokens":2310,"web_search_usage":{"tool_usage":3,"page_usage":3}}`
+	var usage Usage
+	if err := common.Unmarshal([]byte(payload), &usage); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	usage.NormalizeWebSearchUsage()
+	if usage.WebSearchRequests != 3 {
+		t.Fatalf("WebSearchRequests = %d, want 3", usage.WebSearchRequests)
+	}
+	encoded, err := common.Marshal(usage)
+	if err != nil {
+		t.Fatalf("Marshal returned error: %v", err)
+	}
+	if bytes.Contains(encoded, []byte("web_search_usage")) {
+		t.Fatalf("provider-specific web_search_usage leaked into marshaled usage: %s", encoded)
 	}
 }
 

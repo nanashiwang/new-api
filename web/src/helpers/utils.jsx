@@ -861,6 +861,22 @@ export const calculateModelPrice = ({
     };
   }
 
+  if (record.quota_type === 2) {
+    const priceUSD =
+      parseFloat(record.audio_duration_price) * effectiveBillingRatio;
+    return {
+      price: displayPrice(priceUSD),
+      isPerToken: false,
+      isPerHour: true,
+      isTokensDisplay: false,
+      usedGroup,
+      usedGroupRatio,
+      timeRatio,
+      timeRatioInfo: usedTimeRatioInfo,
+      effectiveBillingRatio,
+    };
+  }
+
   // 未知计费类型，返回占位信息
   return {
     price: '-',
@@ -997,6 +1013,21 @@ export const getModelPriceItems = (priceData, t, quotaDisplayType = 'USD') => {
         (item) =>
           item.value !== null && item.value !== undefined && item.value !== '',
       ),
+      priceData,
+      t,
+    );
+  }
+
+  if (priceData.isPerHour) {
+    return appendTimeRatioItem(
+      [
+        {
+          key: 'audio-duration',
+          label: t('音频输入价格'),
+          value: priceData.price,
+          suffix: ` / ${t('小时')}`,
+        },
+      ],
       priceData,
       t,
     );

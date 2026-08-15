@@ -223,13 +223,14 @@ type CompletionsStreamResponse struct {
 }
 
 type Usage struct {
-	PromptTokens         int    `json:"prompt_tokens"`
-	CompletionTokens     int    `json:"completion_tokens"`
-	TotalTokens          int    `json:"total_tokens"`
-	PromptCacheHitTokens int    `json:"prompt_cache_hit_tokens,omitempty"`
-	UsageSemantic        string `json:"usage_semantic,omitempty"`
-	UsageSource          string `json:"usage_source,omitempty"`
-	WebSearchRequests    int    `json:"-"`
+	PromptTokens         int             `json:"prompt_tokens"`
+	CompletionTokens     int             `json:"completion_tokens"`
+	TotalTokens          int             `json:"total_tokens"`
+	PromptCacheHitTokens int             `json:"prompt_cache_hit_tokens,omitempty"`
+	UsageSemantic        string          `json:"usage_semantic,omitempty"`
+	UsageSource          string          `json:"usage_source,omitempty"`
+	WebSearchRequests    int             `json:"-"`
+	WebSearchUsage       *WebSearchUsage `json:"web_search_usage,omitempty"`
 
 	PromptTokensDetails    InputTokenDetails  `json:"prompt_tokens_details"`
 	CompletionTokenDetails OutputTokenDetails `json:"completion_tokens_details"`
@@ -243,6 +244,21 @@ type Usage struct {
 
 	// OpenRouter Params
 	Cost any `json:"cost,omitempty"`
+}
+
+type WebSearchUsage struct {
+	ToolUsage int `json:"tool_usage"`
+	PageUsage int `json:"page_usage"`
+}
+
+func (u *Usage) NormalizeWebSearchUsage() {
+	if u == nil || u.WebSearchUsage == nil {
+		return
+	}
+	if u.WebSearchUsage.ToolUsage > u.WebSearchRequests {
+		u.WebSearchRequests = u.WebSearchUsage.ToolUsage
+	}
+	u.WebSearchUsage = nil
 }
 
 // OpenAIChatCompletionsUsage is the public Chat Completions usage shape.

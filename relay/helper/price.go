@@ -21,7 +21,7 @@ import (
 const defaultConservativeCompletionTokens = 4096
 
 func shouldApplyDefaultCompletionReserve(info *relaycommon.RelayInfo, priceData types.PriceData) bool {
-	if priceData.UsePrice || priceData.ImageRatio > 1 {
+	if priceData.UsePrice || priceData.UseAudioDurationPrice || priceData.ImageRatio > 1 {
 		return false
 	}
 	if info == nil {
@@ -132,7 +132,9 @@ func EstimateConservativePreConsumeQuota(info *relaycommon.RelayInfo, promptToke
 	quotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
 
 	quota := decimal.Zero
-	if priceData.UsePrice {
+	if priceData.UseAudioDurationPrice {
+		quota = decimal.NewFromInt(int64(CalculateAudioDurationPreConsumeQuota(priceData)))
+	} else if priceData.UsePrice {
 		quota = decimal.NewFromFloat(priceData.ModelPrice).Mul(quotaPerUnit).Mul(groupRatio)
 	} else {
 		promptQuota := decimal.NewFromInt(int64(conservativePromptTokens))
@@ -167,11 +169,21 @@ func EstimateConservativePreConsumeQuota(info *relaycommon.RelayInfo, promptToke
 	return int(quota.Round(0).IntPart())
 }
 
+func CalculateAudioDurationPreConsumeQuota(priceData types.PriceData) int {
+	return common.CalculateAudioDurationQuota(
+		priceData.AudioDurationPrice,
+		priceData.AudioDurationSeconds,
+		priceData.GroupRatioInfo.GroupRatio,
+		priceData.TimeRatioInfo.EffectiveRatio(),
+	)
+}
+
 func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens int, meta *types.TokenCountMeta) (types.PriceData, error) {
 	if meta == nil {
 		meta = &types.TokenCountMeta{}
 	}
 	modelPrice, usePrice := ratio_setting.GetModelPrice(info.OriginModelName, false)
+	audioDurationPrice, useAudioDurationPrice := ratio_setting.GetAudioDurationPrice(info.OriginModelName)
 
 	groupRatioInfo := HandleGroupRatio(c, info)
 	timeRatioInfo := ratio_setting.ResolveTimeRatio(info.OriginModelName, info.UsingGroup, info.UserGroup, info.StartTime)
@@ -193,7 +205,17 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 	var audioRatio float64
 	var audioCompletionRatio float64
 	var freeModel bool
-	if !usePrice {
+	if useAudioDurationPrice {
+		if info.InputAudioDurationSeconds <= 0 {
+			return types.PriceData{}, fmt.Errorf("model %s uses audio duration billing but no valid input audio duration was measured", info.OriginModelName)
+		}
+		preConsumedQuota = common.CalculateAudioDurationQuota(
+			audioDurationPrice,
+			info.InputAudioDurationSeconds,
+			groupRatioInfo.GroupRatio,
+			timeRatio,
+		)
+	} else if !usePrice {
 		preConsumedTokens := common.Max(promptTokens, common.PreConsumedQuota)
 		if meta.MaxTokens != 0 {
 			preConsumedTokens += meta.MaxTokens
@@ -234,6 +256,11 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		if groupRatioInfo.GroupRatio == 0 {
 			preConsumedQuota = 0
 			freeModel = true
+		} else if useAudioDurationPrice {
+			if audioDurationPrice == 0 {
+				preConsumedQuota = 0
+				freeModel = true
+			}
 		} else if usePrice {
 			if modelPrice == 0 {
 				preConsumedQuota = 0
@@ -248,21 +275,24 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 	}
 
 	priceData := types.PriceData{
-		FreeModel:            freeModel,
-		ModelPrice:           modelPrice,
-		ModelRatio:           modelRatio,
-		CompletionRatio:      completionRatio,
-		GroupRatioInfo:       groupRatioInfo,
-		UsePrice:             usePrice,
-		CacheRatio:           cacheRatio,
-		ImageRatio:           imageRatio,
-		AudioRatio:           audioRatio,
-		AudioCompletionRatio: audioCompletionRatio,
-		CacheCreationRatio:   cacheCreationRatio,
-		CacheCreation5mRatio: cacheCreationRatio5m,
-		CacheCreation1hRatio: cacheCreationRatio1h,
-		QuotaToPreConsume:    preConsumedQuota,
-		TimeRatioInfo:        timeRatioInfo,
+		FreeModel:             freeModel,
+		ModelPrice:            modelPrice,
+		ModelRatio:            modelRatio,
+		CompletionRatio:       completionRatio,
+		GroupRatioInfo:        groupRatioInfo,
+		UsePrice:              usePrice && !useAudioDurationPrice,
+		CacheRatio:            cacheRatio,
+		ImageRatio:            imageRatio,
+		AudioRatio:            audioRatio,
+		AudioCompletionRatio:  audioCompletionRatio,
+		AudioDurationPrice:    audioDurationPrice,
+		AudioDurationSeconds:  info.InputAudioDurationSeconds,
+		UseAudioDurationPrice: useAudioDurationPrice,
+		CacheCreationRatio:    cacheCreationRatio,
+		CacheCreation5mRatio:  cacheCreationRatio5m,
+		CacheCreation1hRatio:  cacheCreationRatio1h,
+		QuotaToPreConsume:     preConsumedQuota,
+		TimeRatioInfo:         timeRatioInfo,
 	}
 	priceData.ConservativeQuotaToPreConsume = EstimateConservativePreConsumeQuota(info, promptTokens, meta, priceData)
 	if priceData.ConservativeQuotaToPreConsume < priceData.QuotaToPreConsume {

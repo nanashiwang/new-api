@@ -61,8 +61,9 @@ func collectModelPermissionCandidates() ([]string, error) {
 	addModelPermissionCandidatesFromFloatMap(candidateSet, ratio_setting.GetCompletionRatioCopy())
 	addModelPermissionCandidatesFromFloatMap(candidateSet, ratio_setting.GetCacheRatioCopy())
 	addModelPermissionCandidatesFromFloatMap(candidateSet, ratio_setting.GetCreateCacheRatioCopy())
+	addModelPermissionCandidatesFromFloatMap(candidateSet, ratio_setting.GetAudioDurationPriceCopy())
 
-	for _, optionKey := range []string{"ImageRatio", "AudioRatio", "AudioCompletionRatio"} {
+	for _, optionKey := range []string{"ImageRatio", "AudioRatio", "AudioCompletionRatio", "AudioDurationPrice"} {
 		addModelPermissionCandidatesFromOption(candidateSet, optionKey)
 	}
 

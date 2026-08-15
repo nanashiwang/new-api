@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	constant2 "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -181,6 +182,15 @@ func getImageToken(c *gin.Context, fileMeta *types.FileMeta, model string, strea
 }
 
 func EstimateRequestToken(c *gin.Context, meta *types.TokenCountMeta, info *relaycommon.RelayInfo) (int, error) {
+	_, useAudioDurationPrice := ratio_setting.GetAudioDurationPrice(info.OriginModelName)
+	if useAudioDurationPrice {
+		billedSeconds, err := MeasureInputAudioDuration(c, meta, info)
+		if err != nil {
+			return 0, fmt.Errorf("error measuring input audio duration: %v", err)
+		}
+		info.InputAudioDurationSeconds = billedSeconds
+	}
+
 	// 是否统计token
 	if !constant.CountToken {
 		return 0, nil
@@ -193,7 +203,7 @@ func EstimateRequestToken(c *gin.Context, meta *types.TokenCountMeta, info *rela
 	if info.RelayFormat == types.RelayFormatOpenAIRealtime {
 		return 0, nil
 	}
-	if info.RelayMode == constant2.RelayModeAudioTranscription || info.RelayMode == constant2.RelayModeAudioTranslation {
+	if !useAudioDurationPrice && (info.RelayMode == constant2.RelayModeAudioTranscription || info.RelayMode == constant2.RelayModeAudioTranslation) {
 		multiForm, err := common.ParseMultipartFormReusable(c)
 		if err != nil {
 			return 0, fmt.Errorf("error parsing multipart form: %v", err)

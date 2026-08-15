@@ -31,6 +31,8 @@ var defaultToolPriceOverrides = map[string]float64{
 	"web_search_preview:gpt-4.1*":      25.0,
 	"web_search_preview:gpt-4o-mini*":  25.0,
 	"web_search_preview:gpt-4.1-mini*": 25.0,
+	"web_search:mimo-v2.5*":            5.0, // Xiaomi MiMo overseas web search
+	"web_search:MiMo-V2.5*":            5.0,
 }
 
 // ToolPriceSetting is managed by config.GlobalConfig.Register.

@@ -106,7 +106,12 @@ import {
   SiTwitch,
   SiWechat,
   SiX,
+  SiXiaomi,
 } from 'react-icons/si';
+
+const customLobeIconMap = {
+  Xiaomi: SiXiaomi,
+};
 
 // 获取侧边栏Lucide图标组件
 export function getLucideIcon(key, selected = false) {
@@ -443,7 +448,7 @@ export function getLobeHubIcon(iconName, size = 14) {
   // 解析组件路径与点号链式属性
   const segments = String(iconName).split('.');
   const baseKey = segments[0];
-  const BaseIcon = LobeIcons[baseKey];
+  const BaseIcon = customLobeIconMap[baseKey] || LobeIcons[baseKey];
 
   let IconComponent = undefined;
   let propStartIndex = 1;
@@ -452,7 +457,7 @@ export function getLobeHubIcon(iconName, size = 14) {
     IconComponent = BaseIcon[segments[1]];
     propStartIndex = 2;
   } else {
-    IconComponent = LobeIcons[baseKey];
+    IconComponent = BaseIcon;
     propStartIndex = 1;
   }
 

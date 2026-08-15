@@ -85,7 +85,9 @@ const ModelPricingTable = ({
               ? t('按量计费')
               : modelData?.quota_type === 1
                 ? t('按次计费')
-                : '-',
+                : modelData?.quota_type === 2
+                  ? `${t('按量计费')} / ${t('小时')}`
+                  : '-',
         priceItems: getModelPriceItems(priceData, t, siteDisplayType),
       };
     });
