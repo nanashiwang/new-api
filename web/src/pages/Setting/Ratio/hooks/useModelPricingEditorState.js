@@ -31,6 +31,7 @@ const EMPTY_MODEL = {
   name: '',
   billingMode: 'per-token',
   fixedPrice: '',
+  audioDurationPrice: '',
   inputPrice: '',
   completionPrice: '',
   lockedCompletionRatio: '',
@@ -104,6 +105,25 @@ const parseOptionJSON = (rawValue) => {
   }
 };
 
+export const collectModelNames = (candidateModelNames, sourceMaps) =>
+  Array.from(
+    new Set([
+      ...candidateModelNames,
+      ...Object.keys(sourceMaps.ModelPrice),
+      ...Object.keys(sourceMaps.ModelRatio),
+      ...Object.keys(sourceMaps.CompletionRatio),
+      ...Object.keys(sourceMaps.CompletionRatioMeta),
+      ...Object.keys(sourceMaps.CacheRatio),
+      ...Object.keys(sourceMaps.CreateCacheRatio),
+      ...Object.keys(sourceMaps.ImageRatio),
+      ...Object.keys(sourceMaps.AudioRatio),
+      ...Object.keys(sourceMaps.AudioCompletionRatio),
+      ...Object.keys(sourceMaps.AudioDurationPrice),
+      ...Object.keys(sourceMaps.ModelBillingMode),
+      ...Object.keys(sourceMaps.ModelBillingExpr),
+    ]),
+  );
+
 const ratioToBasePrice = (ratio) => {
   const num = toNumberOrNull(ratio);
   if (num === null) return '';
@@ -130,7 +150,7 @@ const normalizeCompletionRatioMeta = (rawMeta) => {
   };
 };
 
-const buildModelState = (name, sourceMaps) => {
+export const buildModelState = (name, sourceMaps) => {
   const billingMode = sourceMaps.ModelBillingMode?.[name];
   if (billingMode === 'tiered_expr') {
     const fullBillingExpr = sourceMaps.ModelBillingExpr?.[name] || '';
@@ -159,6 +179,9 @@ const buildModelState = (name, sourceMaps) => {
   const audioCompletionRatio = toNumericString(
     sourceMaps.AudioCompletionRatio[name],
   );
+  const audioDurationPrice = toNumericString(
+    sourceMaps.AudioDurationPrice[name],
+  );
   const fixedPrice = toNumericString(sourceMaps.ModelPrice[name]);
   const inputPrice = ratioToBasePrice(modelRatio);
   const inputPriceNumber = toNumberOrNull(inputPrice);
@@ -167,11 +190,27 @@ const buildModelState = (name, sourceMaps) => {
       ? formatNumber(inputPriceNumber * Number(audioRatio))
       : '';
 
+  const ratioFields = [
+    modelRatio,
+    completionRatio,
+    cacheRatio,
+    createCacheRatio,
+    imageRatio,
+    audioRatio,
+    audioCompletionRatio,
+  ];
+  const hasRatioPricing = ratioFields.some(hasValue);
+
   return {
     ...EMPTY_MODEL,
     name,
-    billingMode: hasValue(fixedPrice) ? 'per-request' : 'per-token',
+    billingMode: hasValue(audioDurationPrice)
+      ? 'per-audio-hour'
+      : hasValue(fixedPrice)
+        ? 'per-request'
+        : 'per-token',
     fixedPrice,
+    audioDurationPrice,
     inputPrice,
     completionRatioLocked: completionRatioMeta.locked,
     completionRatioCanOverride: completionRatioMeta.canOverride,
@@ -228,22 +267,22 @@ const buildModelState = (name, sourceMaps) => {
       audioCompletionRatio,
     },
     hasConflict:
-      hasValue(fixedPrice) &&
-      [
-        modelRatio,
-        completionRatio,
-        cacheRatio,
-        createCacheRatio,
-        imageRatio,
-        audioRatio,
-        audioCompletionRatio,
-      ].some(hasValue),
+      (hasValue(audioDurationPrice) &&
+        (hasValue(fixedPrice) || hasRatioPricing)) ||
+      (hasValue(fixedPrice) && hasRatioPricing),
   };
 };
 
-export const isBasePricingUnset = (model) =>
-  model.billingMode !== 'tiered_expr' &&
-  !hasValue(model.fixedPrice) && !hasValue(model.inputPrice);
+export const isBasePricingUnset = (model) => {
+  if (model.billingMode === 'tiered_expr') return false;
+  if (model.billingMode === 'per-audio-hour') {
+    return !hasValue(model.audioDurationPrice);
+  }
+  if (model.billingMode === 'per-request') {
+    return !hasValue(model.fixedPrice);
+  }
+  return !hasValue(model.inputPrice);
+};
 
 export const getModelWarnings = (model, t) => {
   if (!model) {
@@ -325,6 +364,13 @@ export const buildSummaryText = (model, t) => {
     return `${t('按次')} $${model.fixedPrice} / ${t('次')}${requestRuleSuffix}`;
   }
 
+  if (
+    model.billingMode === 'per-audio-hour' &&
+    hasValue(model.audioDurationPrice)
+  ) {
+    return `${t('音频输入价格')} $${model.audioDurationPrice} / ${t('小时')}${requestRuleSuffix}`;
+  }
+
   if (hasValue(model.inputPrice)) {
     const extraCount = [
       model.completionPrice,
@@ -352,9 +398,10 @@ export const buildOptionalFieldToggles = (model) => ({
   audioOutputPrice: hasValue(model.audioOutputPrice),
 });
 
-const serializeModel = (model, t) => {
+export const serializeModel = (model, t) => {
   const result = {
     ModelPrice: null,
+    AudioDurationPrice: null,
     ModelRatio: null,
     CompletionRatio: null,
     CacheRatio: null,
@@ -363,6 +410,13 @@ const serializeModel = (model, t) => {
     AudioRatio: null,
     AudioCompletionRatio: null,
   };
+
+  if (model.billingMode === 'per-audio-hour') {
+    if (hasValue(model.audioDurationPrice)) {
+      result.AudioDurationPrice = toNormalizedNumber(model.audioDurationPrice);
+    }
+    return result;
+  }
 
   if (model.billingMode === 'per-request') {
     if (hasValue(model.fixedPrice)) {
@@ -520,6 +574,18 @@ export const buildPreviewRows = (model, t) => {
     return rows;
   }
 
+  if (model.billingMode === 'per-audio-hour') {
+    return [
+      {
+        key: 'AudioDurationPrice',
+        label: 'AudioDurationPrice',
+        value: hasValue(model.audioDurationPrice)
+          ? `${model.audioDurationPrice} USD / ${t('小时')}`
+          : t('空'),
+      },
+    ];
+  }
+
   const inputPrice = toNumberOrNull(model.inputPrice);
   if (inputPrice === null) {
     const rows = [
@@ -669,26 +735,14 @@ export function useModelPricingEditorState({
       ImageRatio: parseOptionJSON(options.ImageRatio),
       AudioRatio: parseOptionJSON(options.AudioRatio),
       AudioCompletionRatio: parseOptionJSON(options.AudioCompletionRatio),
+      AudioDurationPrice: parseOptionJSON(options.AudioDurationPrice),
       ModelBillingMode: parseOptionJSON(options['billing_setting.billing_mode']),
       ModelBillingExpr: parseOptionJSON(options['billing_setting.billing_expr']),
     };
 
-    const names = new Set([
-      ...candidateModelNames,
-      ...Object.keys(sourceMaps.ModelPrice),
-      ...Object.keys(sourceMaps.ModelRatio),
-      ...Object.keys(sourceMaps.CompletionRatio),
-      ...Object.keys(sourceMaps.CompletionRatioMeta),
-      ...Object.keys(sourceMaps.CacheRatio),
-      ...Object.keys(sourceMaps.CreateCacheRatio),
-      ...Object.keys(sourceMaps.ImageRatio),
-      ...Object.keys(sourceMaps.AudioRatio),
-      ...Object.keys(sourceMaps.AudioCompletionRatio),
-      ...Object.keys(sourceMaps.ModelBillingMode),
-      ...Object.keys(sourceMaps.ModelBillingExpr),
-    ]);
+    const names = collectModelNames(candidateModelNames, sourceMaps);
 
-    const nextModels = Array.from(names)
+    const nextModels = names
       .map((name) => buildModelState(name, sourceMaps))
       .sort((a, b) => a.name.localeCompare(b.name));
 
@@ -1001,6 +1055,7 @@ export function useModelPricingEditorState({
           ...model,
           billingMode: selectedModel.billingMode,
           fixedPrice: selectedModel.fixedPrice,
+          audioDurationPrice: selectedModel.audioDurationPrice,
           inputPrice: selectedModel.inputPrice,
           completionPrice: selectedModel.completionPrice,
           cachePrice: selectedModel.cachePrice,
@@ -1069,6 +1124,7 @@ export function useModelPricingEditorState({
     try {
       const output = {
         ModelPrice: {},
+        AudioDurationPrice: {},
         ModelRatio: {},
         CompletionRatio: {},
         CacheRatio: {},
