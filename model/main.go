@@ -336,6 +336,9 @@ func migrateDB() error {
 			return err
 		}
 	}
+	if err := NormalizeMiMoVendorMetadata(); err != nil {
+		return fmt.Errorf("failed to normalize Xiaomi MiMo vendor metadata: %w", err)
+	}
 	return nil
 }
 
@@ -444,6 +447,9 @@ func migrateDBFast() error {
 		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
 			return err
 		}
+	}
+	if err := NormalizeMiMoVendorMetadata(); err != nil {
+		return fmt.Errorf("failed to normalize Xiaomi MiMo vendor metadata: %w", err)
 	}
 	common.SysLog("database migrated")
 	return nil

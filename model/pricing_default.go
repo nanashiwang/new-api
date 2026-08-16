@@ -4,8 +4,6 @@ import (
 	"strings"
 )
 
-const defaultMiMoVendorName = "MiMo"
-
 // 简化的供应商映射规则
 var defaultVendorRules = map[string]string{
 	"gpt":      "OpenAI",
@@ -67,7 +65,7 @@ var defaultVendorIcons = map[string]string{
 	"微软":         "AzureAI",
 	"Microsoft":  "AzureAI",
 	"Azure":      "AzureAI",
-	"MiMo":       "Xiaomi.color='#FF6900'",
+	"小米 MiMo":    "Xiaomi.color='#FF6900'",
 }
 
 func hasModelNameSegment(modelName string, segments ...string) bool {
@@ -147,10 +145,24 @@ func initDefaultVendorMapping(metaMap map[string]*Model, vendorMap map[int]*Vend
 
 // 查找或创建供应商
 func getOrCreateVendor(vendorName string, vendorMap map[int]*Vendor) int {
-	// 查找现有供应商
+	vendorName = CanonicalVendorName(vendorName)
+	// 优先查找规范名称，避免 map 遍历顺序导致选中旧别名。
 	for id, vendor := range vendorMap {
 		if vendor.Name == vendorName {
 			if vendor.Name == defaultMiMoVendorName && strings.TrimSpace(vendor.Icon) == "" {
+				vendor.Icon = getDefaultVendorIcon(vendorName)
+			}
+			return id
+		}
+	}
+	// 兼容尚未执行持久化归一化的从节点或旧数据库快照。
+	if vendorName == defaultMiMoVendorName {
+		for id, vendor := range vendorMap {
+			if !isMiMoVendorAlias(vendor.Name) {
+				continue
+			}
+			vendor.Name = defaultMiMoVendorName
+			if strings.TrimSpace(vendor.Icon) == "" {
 				vendor.Icon = getDefaultVendorIcon(vendorName)
 			}
 			return id
@@ -174,6 +186,7 @@ func getOrCreateVendor(vendorName string, vendorMap map[int]*Vendor) int {
 
 // 获取供应商默认图标
 func getDefaultVendorIcon(vendorName string) string {
+	vendorName = CanonicalVendorName(vendorName)
 	if icon, exists := defaultVendorIcons[vendorName]; exists {
 		return icon
 	}
