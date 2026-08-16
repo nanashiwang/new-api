@@ -18,9 +18,9 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Tabs, TabPane, Tag } from '@douyinfe/semi-ui';
+import { Tabs, TabPane, Tag, Typography } from '@douyinfe/semi-ui';
 import { CHANNEL_OPTIONS } from '../../../constants';
-import { getChannelIcon } from '../../../helpers';
+import { getChannelIcon, getLobeHubIcon } from '../../../helpers';
 
 const ChannelsTabs = ({
   enableTagMode,
@@ -28,6 +28,9 @@ const ChannelsTabs = ({
   setActiveTypeKey,
   channelTypeCounts,
   availableTypeKeys,
+  activeVendorKey,
+  setActiveVendorKey,
+  vendorCounts,
   loadChannels,
   activePage,
   pageSize,
@@ -43,54 +46,118 @@ const ChannelsTabs = ({
     loadChannels(1, pageSize, idSort, enableTagMode, key);
   };
 
-  return (
-    <Tabs
-      activeKey={activeTypeKey}
-      type='card'
-      collapsible
-      onChange={handleTabChange}
-      className='mb-2'
-    >
-      <TabPane
-        itemKey='all'
-        tab={
-          <span className='flex items-center gap-2'>
-            {t('全部')}
-            <Tag
-              color={activeTypeKey === 'all' ? 'red' : 'grey'}
-              shape='circle'
-            >
-              {channelTypeCounts['all'] || 0}
-            </Tag>
-          </span>
-        }
-      />
+  const handleVendorChange = (key) => {
+    setActiveVendorKey(key);
+    setActivePage(1);
+    loadChannels(
+      1,
+      pageSize,
+      idSort,
+      enableTagMode,
+      activeTypeKey,
+      undefined,
+      key,
+    );
+  };
 
-      {CHANNEL_OPTIONS.filter((opt) =>
-        availableTypeKeys.includes(String(opt.value)),
-      ).map((option) => {
-        const key = String(option.value);
-        const count = channelTypeCounts[option.value] || 0;
-        return (
-          <TabPane
-            key={key}
-            itemKey={key}
-            tab={
-              <span className='flex items-center gap-2'>
-                {getChannelIcon(option.value)}
-                {option.label}
-                <Tag
-                  color={activeTypeKey === key ? 'red' : 'grey'}
-                  shape='circle'
-                >
-                  {count}
-                </Tag>
-              </span>
-            }
-          />
-        );
-      })}
-    </Tabs>
+  const mimoCount = Number(vendorCounts?.mimo || 0);
+
+  return (
+    <div className='mb-2 flex flex-col gap-1'>
+      <Typography.Text type='tertiary' size='small'>
+        {t('类型')}
+      </Typography.Text>
+      <Tabs
+        activeKey={activeTypeKey}
+        type='card'
+        collapsible
+        onChange={handleTabChange}
+      >
+        <TabPane
+          itemKey='all'
+          tab={
+            <span className='flex items-center gap-2'>
+              {t('全部')}
+              <Tag
+                color={activeTypeKey === 'all' ? 'red' : 'grey'}
+                shape='circle'
+              >
+                {channelTypeCounts['all'] || 0}
+              </Tag>
+            </span>
+          }
+        />
+
+        {CHANNEL_OPTIONS.filter((opt) =>
+          availableTypeKeys.includes(String(opt.value)),
+        ).map((option) => {
+          const key = String(option.value);
+          const count = channelTypeCounts[option.value] || 0;
+          return (
+            <TabPane
+              key={key}
+              itemKey={key}
+              tab={
+                <span className='flex items-center gap-2'>
+                  {getChannelIcon(option.value)}
+                  {option.label}
+                  <Tag
+                    color={activeTypeKey === key ? 'red' : 'grey'}
+                    shape='circle'
+                  >
+                    {count}
+                  </Tag>
+                </span>
+              }
+            />
+          );
+        })}
+      </Tabs>
+
+      {(mimoCount > 0 || activeVendorKey === 'mimo') && (
+        <>
+          <Typography.Text type='tertiary' size='small'>
+            {t('供应商')}
+          </Typography.Text>
+          <Tabs
+            activeKey={activeVendorKey}
+            type='card'
+            collapsible
+            onChange={handleVendorChange}
+          >
+            <TabPane
+              itemKey='all'
+              tab={
+                <span className='flex items-center gap-2'>
+                  {t('全部供应商')}
+                  <Tag
+                    color={activeVendorKey === 'all' ? 'red' : 'grey'}
+                    shape='circle'
+                  >
+                    {vendorCounts?.all || 0}
+                  </Tag>
+                </span>
+              }
+            />
+            <TabPane
+              itemKey='mimo'
+              tab={
+                <span className='flex items-center gap-2'>
+                  {getLobeHubIcon("Xiaomi.color='#FF6900'", 16)}
+                  小米 MiMo
+                  <Tag
+                    color={activeVendorKey === 'mimo' ? 'red' : 'grey'}
+                    shape='circle'
+                  >
+                    {mimoCount}
+                  </Tag>
+                </span>
+              }
+            />
+          </Tabs>
+        </>
+      )}
+    </div>
   );
 };
 
