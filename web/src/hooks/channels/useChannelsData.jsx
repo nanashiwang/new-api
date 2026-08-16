@@ -93,6 +93,11 @@ export const useChannelsData = () => {
   const [activeTypeKey, setActiveTypeKey] = useState('all');
   const [typeCounts, setTypeCounts] = useState({});
 
+  // Vendor facet states. This is deliberately independent from channel type:
+  // an OpenAI-compatible transport can still carry Xiaomi MiMo models.
+  const [activeVendorKey, setActiveVendorKey] = useState('all');
+  const [vendorCounts, setVendorCounts] = useState({});
+
   // Model test states
   const [showModelTestModal, setShowModelTestModal] = useState(false);
   const [currentTestChannel, setCurrentTestChannel] = useState(null);
@@ -455,6 +460,7 @@ export const useChannelsData = () => {
     enableTagMode,
     typeKey = activeTypeKey,
     statusF,
+    vendorKey = activeVendorKey,
   ) => {
     if (statusF === undefined) statusF = statusFilter;
 
@@ -467,6 +473,7 @@ export const useChannelsData = () => {
         page,
         pageSize,
         idSort,
+        vendorKey,
       );
       return;
     }
@@ -475,8 +482,12 @@ export const useChannelsData = () => {
     setLoading(true);
     const typeParam = typeKey !== 'all' ? `&type=${typeKey}` : '';
     const statusParam = statusF !== 'all' ? `&status=${statusF}` : '';
+    const vendorParam =
+      !enableTagMode && vendorKey !== 'all'
+        ? `&vendor=${encodeURIComponent(vendorKey)}`
+        : '';
     const res = await API.get(
-      `/api/channel/?p=${page}&page_size=${pageSize}&id_sort=${idSort}&tag_mode=${enableTagMode}${typeParam}${statusParam}`,
+      `/api/channel/?p=${page}&page_size=${pageSize}&id_sort=${idSort}&tag_mode=${enableTagMode}${typeParam}${statusParam}${vendorParam}`,
     );
 
     if (res === undefined || reqId !== requestCounter.current) {
@@ -485,13 +496,16 @@ export const useChannelsData = () => {
 
     const { success, message, data } = res.data;
     if (success) {
-      const { items, total, type_counts } = data;
+      const { items, total, type_counts, vendor_counts } = data;
       if (type_counts) {
         const sumAll = Object.values(type_counts).reduce(
           (acc, v) => acc + v,
           0,
         );
         setTypeCounts({ ...type_counts, all: sumAll });
+      }
+      if (vendor_counts) {
+        setVendorCounts(vendor_counts);
       }
       setChannelFormat(items, enableTagMode);
       setChannelCount(total);
@@ -509,6 +523,7 @@ export const useChannelsData = () => {
     page = 1,
     pageSz = pageSize,
     sortFlag = idSort,
+    vendorKey = activeVendorKey,
   ) => {
     const { searchKeyword, searchGroup, searchModel } = getFormValues();
     const reqId = ++requestCounter.current;
@@ -523,26 +538,37 @@ export const useChannelsData = () => {
           enableTagMode,
           typeKey,
           statusF,
+          vendorKey,
         );
         return;
       }
 
       const typeParam = typeKey !== 'all' ? `&type=${typeKey}` : '';
       const statusParam = statusF !== 'all' ? `&status=${statusF}` : '';
+      const vendorParam =
+        !enableTagMode && vendorKey !== 'all'
+          ? `&vendor=${encodeURIComponent(vendorKey)}`
+          : '';
       const res = await API.get(
-        `/api/channel/search?keyword=${searchKeyword}&group=${searchGroup}&model=${searchModel}&id_sort=${sortFlag}&tag_mode=${enableTagMode}&p=${page}&page_size=${pageSz}${typeParam}${statusParam}`,
+        `/api/channel/search?keyword=${searchKeyword}&group=${searchGroup}&model=${searchModel}&id_sort=${sortFlag}&tag_mode=${enableTagMode}&p=${page}&page_size=${pageSz}${typeParam}${statusParam}${vendorParam}`,
       );
       if (reqId !== requestCounter.current) {
         return;
       }
       const { success, message, data } = res.data;
       if (success) {
-        const { items = [], total = 0, type_counts = {} } = data;
+        const {
+          items = [],
+          total = 0,
+          type_counts = {},
+          vendor_counts = {},
+        } = data;
         const sumAll = Object.values(type_counts).reduce(
           (acc, v) => acc + v,
           0,
         );
         setTypeCounts({ ...type_counts, all: sumAll });
+        setVendorCounts(vendor_counts);
         setChannelFormat(items, enableTagMode);
         setChannelCount(total);
         setActivePage(page);
@@ -1592,6 +1618,11 @@ export const useChannelsData = () => {
     typeCounts,
     channelTypeCounts,
     availableTypeKeys,
+
+    // Vendor facet states
+    activeVendorKey,
+    setActiveVendorKey,
+    vendorCounts,
 
     // Model test states
     showModelTestModal,

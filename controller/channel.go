@@ -91,6 +91,21 @@ func GetAllChannels(c *gin.Context) {
 			typeFilter = t
 		}
 	}
+	vendorFilter := model.ChannelVendorAll
+	if !enableTagMode {
+		vendorFilter = model.NormalizeChannelVendorFilter(c.Query("vendor"))
+	}
+
+	// Vendor facets intentionally ignore the active protocol type, just as
+	// protocol counts ignore the active protocol tab. Their intersection is
+	// applied only to the result list.
+	facetChannels, err := model.SearchChannelsWithFilters("", "", "", idSort, statusFilter, -1)
+	if err != nil {
+		common.SysError("failed to get channel vendor facets: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "获取渠道厂商失败，请稍后重试"})
+		return
+	}
+	vendorCounts := model.CountChannelVendors(facetChannels)
 
 	var total int64
 
@@ -112,6 +127,19 @@ func GetAllChannels(c *gin.Context) {
 			channelData = append(channelData, tagChannels...)
 		}
 		total, _ = model.CountAllTagsWithFilters(statusFilter, typeFilter)
+	} else if vendorFilter != model.ChannelVendorAll {
+		filteredChannels := model.FilterChannelsByVendor(facetChannels, vendorFilter)
+		filteredChannels = model.FilterChannelsByType(filteredChannels, typeFilter)
+		total = int64(len(filteredChannels))
+		startIdx := pageInfo.GetStartIdx()
+		if startIdx > len(filteredChannels) {
+			startIdx = len(filteredChannels)
+		}
+		endIdx := startIdx + pageInfo.GetPageSize()
+		if endIdx > len(filteredChannels) {
+			endIdx = len(filteredChannels)
+		}
+		channelData = filteredChannels[startIdx:endIdx]
 	} else {
 		baseQuery := model.DB.Model(&model.Channel{})
 		if typeFilter >= 0 {
@@ -143,27 +171,32 @@ func GetAllChannels(c *gin.Context) {
 		clearChannelInfo(datum)
 	}
 
-	countQuery := model.DB.Model(&model.Channel{})
-	if statusFilter == common.ChannelStatusEnabled {
-		countQuery = countQuery.Where("status = ?", common.ChannelStatusEnabled)
-	} else if statusFilter == 0 {
-		countQuery = countQuery.Where("status != ?", common.ChannelStatusEnabled)
-	}
-	var results []struct {
-		Type  int64
-		Count int64
-	}
-	_ = countQuery.Select("type, count(*) as count").Group("type").Find(&results).Error
 	typeCounts := make(map[int64]int64)
-	for _, r := range results {
-		typeCounts[r.Type] = r.Count
+	if vendorFilter != model.ChannelVendorAll {
+		typeCounts = model.CountChannelTypes(model.FilterChannelsByVendor(facetChannels, vendorFilter))
+	} else {
+		countQuery := model.DB.Model(&model.Channel{})
+		if statusFilter == common.ChannelStatusEnabled {
+			countQuery = countQuery.Where("status = ?", common.ChannelStatusEnabled)
+		} else if statusFilter == 0 {
+			countQuery = countQuery.Where("status != ?", common.ChannelStatusEnabled)
+		}
+		var results []struct {
+			Type  int64
+			Count int64
+		}
+		_ = countQuery.Select("type, count(*) as count").Group("type").Find(&results).Error
+		for _, r := range results {
+			typeCounts[r.Type] = r.Count
+		}
 	}
 	common.ApiSuccess(c, gin.H{
-		"items":       channelData,
-		"total":       total,
-		"page":        pageInfo.GetPage(),
-		"page_size":   pageInfo.GetPageSize(),
-		"type_counts": typeCounts,
+		"items":         channelData,
+		"total":         total,
+		"page":          pageInfo.GetPage(),
+		"page_size":     pageInfo.GetPageSize(),
+		"type_counts":   typeCounts,
+		"vendor_counts": vendorCounts,
 	})
 	return
 }
@@ -396,8 +429,14 @@ func SearchChannels(c *gin.Context) {
 			typeFilter = tp
 		}
 	}
+	vendorFilter := model.ChannelVendorAll
+	if !enableTagMode {
+		vendorFilter = model.NormalizeChannelVendorFilter(c.Query("vendor"))
+	}
 
-	typeCounts, err := model.SearchChannelTypeCounts(keyword, group, modelKeyword, statusFilter)
+	// Build both facets from the unpaginated search result so a vendor filter
+	// cannot produce incorrect totals or partially filtered pages.
+	facetChannels, err := model.SearchChannelsWithFilters(keyword, group, modelKeyword, idSort, statusFilter, -1)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -405,6 +444,8 @@ func SearchChannels(c *gin.Context) {
 		})
 		return
 	}
+	vendorCounts := model.CountChannelVendors(facetChannels)
+	typeCounts := model.CountChannelTypes(model.FilterChannelsByVendor(facetChannels, vendorFilter))
 
 	if enableTagMode {
 		tags, err := model.SearchTagsWithFilters(keyword, group, modelKeyword, idSort, statusFilter, typeFilter)
@@ -424,15 +465,8 @@ func SearchChannels(c *gin.Context) {
 			}
 		}
 	} else {
-		channels, err := model.SearchChannelsWithFilters(keyword, group, modelKeyword, idSort, statusFilter, typeFilter)
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": err.Error(),
-			})
-			return
-		}
-		channelData = channels
+		channelData = model.FilterChannelsByVendor(facetChannels, vendorFilter)
+		channelData = model.FilterChannelsByType(channelData, typeFilter)
 	}
 
 	page, _ := strconv.Atoi(c.DefaultQuery("p", "1"))
@@ -465,9 +499,10 @@ func SearchChannels(c *gin.Context) {
 		"success": true,
 		"message": "",
 		"data": gin.H{
-			"items":       pagedData,
-			"total":       total,
-			"type_counts": typeCounts,
+			"items":         pagedData,
+			"total":         total,
+			"type_counts":   typeCounts,
+			"vendor_counts": vendorCounts,
 		},
 	})
 	return
