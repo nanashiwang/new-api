@@ -240,8 +240,8 @@ export const getModelCategories = (() => {
         filter: (model) => model.model_name.toLowerCase().includes('qwen'),
       },
       mimo: {
-        label: 'MiMo',
-        icon: null,
+        label: '小米 MiMo',
+        icon: getLobeHubIcon("Xiaomi.color='#FF6900'", 16),
         filter: (model) => isMiMoModel(model.model_name),
       },
       deepseek: {

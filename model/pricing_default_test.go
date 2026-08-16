@@ -113,3 +113,14 @@ func TestGetOrCreateVendorPreservesExplicitMiMoIcon(t *testing.T) {
 	require.Equal(t, 7, vendorID)
 	require.Equal(t, "CustomIcon", vendor.Icon)
 }
+
+func TestGetOrCreateVendorReusesLegacyMiMoAliasInMemory(t *testing.T) {
+	vendor := &Vendor{Id: 7, Name: legacyMiMoVendorName}
+	vendorMap := map[int]*Vendor{7: vendor}
+
+	vendorID := getOrCreateVendor(defaultMiMoVendorName, vendorMap)
+
+	require.Equal(t, 7, vendorID)
+	require.Equal(t, defaultMiMoVendorName, vendor.Name)
+	require.Equal(t, "Xiaomi.color='#FF6900'", vendor.Icon)
+}
