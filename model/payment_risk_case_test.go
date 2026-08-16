@@ -53,6 +53,8 @@ func setupPaymentRiskCaseTestDB(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(
 		&User{},
 		&TopUp{},
+		&InviteCommissionLedger{},
+		&InviteCommissionDailyCapState{},
 		&PaymentRiskCase{},
 		&Log{},
 		&SubscriptionPlan{},
@@ -61,6 +63,8 @@ func setupPaymentRiskCaseTestDB(t *testing.T) {
 		&UserSubscription{},
 		&BenefitChangeRecord{},
 		&BenefitRollbackOperation{},
+		&Redemption{},
+		&WalletTransferLock{},
 	))
 }
 
@@ -222,10 +226,168 @@ func TestResolvePaymentRiskCase_ReverseDeductsGrantedQuota(t *testing.T) {
 	require.Equal(t, PaymentRiskStatusReversed, updatedCase.Status)
 	require.Equal(t, -grantedQuota, updatedCase.AppliedQuotaDelta)
 	require.Equal(t, 7, updatedCase.HandlerAdminId)
+	updatedTopUp := GetTopUpByTradeNo(topup.TradeNo)
+	require.NotNil(t, updatedTopUp)
+	require.Equal(t, common.TopUpStatusFailed, updatedTopUp.Status)
 
 	updatedUser, err := GetUserById(user.Id, false)
 	require.NoError(t, err)
 	require.Equal(t, 0, updatedUser.Quota)
+}
+
+func TestResolvePaymentRiskCase_ReverseReclaimsWalletCodesAndRecipientQuota(t *testing.T) {
+	setupPaymentRiskCaseTestDB(t)
+	originalQuotaPerUnit := common.QuotaPerUnit
+	originalBatchUpdateEnabled := common.BatchUpdateEnabled
+	common.QuotaPerUnit = 10
+	common.BatchUpdateEnabled = false
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originalQuotaPerUnit
+		common.BatchUpdateEnabled = originalBatchUpdateEnabled
+	})
+
+	creator := createPaymentRiskCaseTestUser(t, "wallet_reverse_creator")
+	recipient := createPaymentRiskCaseTestUser(t, "wallet_reverse_recipient")
+	topup := createPaymentRiskCaseTestTopUp(t, creator.Id, "RISK-REVERSE-WALLET-CODE-001", common.TopUpStatusSuccess, 30, 240, "alipay")
+	riskCase := createPaymentRiskCaseRecord(t, topup, PaymentRiskReasonManualReview)
+
+	grantedQuota, err := CalculateGrantedQuotaForTopUp(topup)
+	require.NoError(t, err)
+	require.Equal(t, 300, grantedQuota)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", creator.Id).Updates(map[string]any{
+		"quota":              grantedQuota,
+		"transferable_quota": grantedQuota,
+	}).Error)
+
+	activeCode, err := CreateWalletFundedRedemption(creator.Id, 100, "risk-wallet-active-code-001")
+	require.NoError(t, err)
+	usedCode, err := CreateWalletFundedRedemption(creator.Id, 100, "risk-wallet-used-code-001")
+	require.NoError(t, err)
+	_, err = RedeemWithResult(usedCode.Redemption.Key, recipient.Id)
+	require.NoError(t, err)
+
+	require.NoError(t, ResolvePaymentRiskCase(riskCase.Id, 7, PaymentRiskActionReverse, "reverse transferred wallet quota"))
+
+	var refreshedCreator User
+	var refreshedRecipient User
+	require.NoError(t, DB.First(&refreshedCreator, creator.Id).Error)
+	require.NoError(t, DB.First(&refreshedRecipient, recipient.Id).Error)
+	require.Zero(t, refreshedCreator.Quota)
+	require.Zero(t, refreshedCreator.TransferableQuota)
+	require.Zero(t, refreshedRecipient.Quota)
+
+	var refreshedActive Redemption
+	var refreshedUsed Redemption
+	require.NoError(t, DB.First(&refreshedActive, activeCode.Redemption.Id).Error)
+	require.NoError(t, DB.First(&refreshedUsed, usedCode.Redemption.Id).Error)
+	require.Equal(t, common.RedemptionCodeStatusDisabled, refreshedActive.Status)
+	require.Zero(t, refreshedActive.Quota)
+	require.Zero(t, refreshedActive.TransferableQuota)
+	require.Equal(t, common.RedemptionCodeStatusUsed, refreshedUsed.Status)
+	require.Zero(t, refreshedUsed.TransferableQuota)
+
+	_, err = RedeemWithResult(activeCode.Redemption.Key, recipient.Id)
+	require.ErrorIs(t, err, ErrRedemptionDisabled)
+}
+
+func TestResolvePaymentRiskCase_ReverseSkipsPendingInviteCommission(t *testing.T) {
+	setupPaymentRiskCaseTestDB(t)
+
+	inviter := createPaymentRiskCaseTestUser(t, "reverse_pending_inviter")
+	invitee := createPaymentRiskCaseTestUser(t, "reverse_pending_invitee")
+	topup := createPaymentRiskCaseTestTopUp(t, invitee.Id, "RISK-REVERSE-PENDING-COMMISSION-001", common.TopUpStatusSuccess, 3, 24, "alipay")
+	riskCase := createPaymentRiskCaseRecord(t, topup, PaymentRiskReasonManualReview)
+
+	grantedQuota, err := CalculateGrantedQuotaForTopUp(topup)
+	require.NoError(t, err)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", invitee.Id).Updates(map[string]any{
+		"quota":              grantedQuota,
+		"transferable_quota": grantedQuota,
+	}).Error)
+	ledger := &InviteCommissionLedger{
+		InviteeUserId:   invitee.Id,
+		InviterUserId:   inviter.Id,
+		TopupTradeNo:    topup.TradeNo,
+		BizDate:         "2026-08-14",
+		BaseQuota:       1000,
+		CommissionRate:  0.1,
+		CommissionQuota: 100,
+		Status:          InviteCommissionStatusPending,
+		CreatedAt:       common.GetTimestamp(),
+	}
+	require.NoError(t, DB.Create(ledger).Error)
+
+	require.NoError(t, ResolvePaymentRiskCase(riskCase.Id, 7, PaymentRiskActionReverse, "reverse before commission settlement"))
+
+	var refreshedLedger InviteCommissionLedger
+	require.NoError(t, DB.First(&refreshedLedger, ledger.Id).Error)
+	require.Equal(t, InviteCommissionStatusSkipped, refreshedLedger.Status)
+	require.Equal(t, InviteCommissionRiskReasonPaymentReversed, refreshedLedger.RiskReason)
+	require.Zero(t, refreshedLedger.SettledQuota)
+
+	var refreshedInviter User
+	require.NoError(t, DB.First(&refreshedInviter, inviter.Id).Error)
+	require.Zero(t, refreshedInviter.AffQuota)
+	require.Zero(t, refreshedInviter.Quota)
+}
+
+func TestResolvePaymentRiskCase_ReverseReclaimsSettledInviteCommission(t *testing.T) {
+	setupPaymentRiskCaseTestDB(t)
+
+	inviter := createPaymentRiskCaseTestUser(t, "reverse_settled_inviter")
+	invitee := createPaymentRiskCaseTestUser(t, "reverse_settled_invitee")
+	topup := createPaymentRiskCaseTestTopUp(t, invitee.Id, "RISK-REVERSE-SETTLED-COMMISSION-001", common.TopUpStatusSuccess, 3, 24, "alipay")
+	riskCase := createPaymentRiskCaseRecord(t, topup, PaymentRiskReasonManualReview)
+
+	grantedQuota, err := CalculateGrantedQuotaForTopUp(topup)
+	require.NoError(t, err)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", invitee.Id).Updates(map[string]any{
+		"quota":              grantedQuota,
+		"transferable_quota": grantedQuota,
+	}).Error)
+	// 100 返佣中 40 仍在邀请额度，60 已转入钱包。
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", inviter.Id).Updates(map[string]any{
+		"quota":       60,
+		"aff_quota":   40,
+		"aff_history": 100,
+	}).Error)
+	ledger := &InviteCommissionLedger{
+		InviteeUserId:   invitee.Id,
+		InviterUserId:   inviter.Id,
+		TopupTradeNo:    topup.TradeNo,
+		BizDate:         "2026-08-14",
+		BaseQuota:       1000,
+		CommissionRate:  0.1,
+		CommissionQuota: 100,
+		SettledQuota:    100,
+		Status:          InviteCommissionStatusSettled,
+		CreatedAt:       common.GetTimestamp(),
+		SettledAt:       common.GetTimestamp(),
+	}
+	require.NoError(t, DB.Create(ledger).Error)
+	require.NoError(t, DB.Create(&InviteCommissionDailyCapState{
+		InviterUserId: inviter.Id,
+		BizDate:       ledger.BizDate,
+		SettledQuota:  100,
+	}).Error)
+
+	require.NoError(t, ResolvePaymentRiskCase(riskCase.Id, 7, PaymentRiskActionReverse, "reverse after commission settlement"))
+
+	var refreshedLedger InviteCommissionLedger
+	require.NoError(t, DB.First(&refreshedLedger, ledger.Id).Error)
+	require.Equal(t, InviteCommissionStatusSkipped, refreshedLedger.Status)
+	require.Equal(t, InviteCommissionRiskReasonPaymentReversed, refreshedLedger.RiskReason)
+	require.Zero(t, refreshedLedger.SettledQuota)
+
+	var refreshedInviter User
+	require.NoError(t, DB.First(&refreshedInviter, inviter.Id).Error)
+	require.Zero(t, refreshedInviter.AffQuota)
+	require.Zero(t, refreshedInviter.AffHistoryQuota)
+	require.Zero(t, refreshedInviter.Quota)
+
+	var capState InviteCommissionDailyCapState
+	require.NoError(t, DB.Where("inviter_user_id = ? AND biz_date = ?", inviter.Id, ledger.BizDate).First(&capState).Error)
+	require.Zero(t, capState.SettledQuota)
 }
 
 func TestResolvePaymentRiskCase_VoidExpiresPendingTopUp(t *testing.T) {

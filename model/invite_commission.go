@@ -42,6 +42,10 @@ const (
 	InviteCommissionRiskReasonPaymentSourceInvalid = "payment_source_invalid"
 	// 历史订单缺少可信实付金额，无法安全计算返佣。
 	InviteCommissionRiskReasonPaidMoneyMissing = "paid_money_missing"
+	// 结算时邀请人已删除、禁用或不存在。
+	InviteCommissionRiskReasonInviterUnavailable = "inviter_unavailable"
+	// 对应支付已撤销，待结算返佣作废；已发放返佣同步回退。
+	InviteCommissionRiskReasonPaymentReversed = "payment_reversed"
 )
 
 var errInviteCommissionAlreadyProcessed = errors.New("invite commission ledger already processed")
@@ -97,35 +101,42 @@ func EnqueueInviteCommissionFromTopUp(topUp *TopUp) error {
 		return nil
 	}
 
-	// 仅信任订单 ID，金额、状态和归属统一从数据库读取，避免调用方伪造返佣基数。
-	dbTopUp := &TopUp{}
-	if err := DB.Select("id", "user_id", "trade_no", "money", "paid_money", "payment_method", "payment_provider", "complete_time", "status").
-		First(dbTopUp, "id = ?", topUp.Id).Error; err != nil {
-		return err
-	}
-	if dbTopUp.Status != common.TopUpStatusSuccess {
-		return nil
-	}
-
-	paidMoney := dbTopUp.PaidMoney
-	if paidMoney <= 0 {
-		// 兼容升级前创建的订单；旧订单的 money 字段就是支付金额快照。
-		if InferPaymentProvider(dbTopUp.PaymentProvider, dbTopUp.PaymentMethod) == PaymentProviderStripe {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		// Reading the source and inserting the ledger happen in one transaction.
+		// The row lock serializes payment reversal so a reversed order cannot be
+		// re-enqueued in the gap between validation and ledger creation.
+		dbTopUp := &TopUp{}
+		query := tx.Select("id", "user_id", "trade_no", "money", "paid_money", "payment_method", "payment_provider", "complete_time", "status")
+		if !common.UsingSQLite {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := query.First(dbTopUp, "id = ?", topUp.Id).Error; err != nil {
+			return err
+		}
+		if dbTopUp.Status != common.TopUpStatusSuccess {
 			return nil
 		}
-		paidMoney = dbTopUp.Money
-	}
-	if paidMoney <= 0 || math.IsNaN(paidMoney) || math.IsInf(paidMoney, 0) {
-		return nil
-	}
 
-	baseQuota := int(decimal.NewFromFloat(paidMoney).
-		Mul(decimal.NewFromFloat(common.QuotaPerUnit)).
-		Div(decimal.NewFromFloat(operation_setting.Price)).IntPart())
-	if baseQuota <= 0 {
-		return nil
-	}
-	return enqueueInviteCommission(dbTopUp.UserId, dbTopUp.TradeNo, dbTopUp.CompleteTime, baseQuota)
+		paidMoney := dbTopUp.PaidMoney
+		if paidMoney <= 0 {
+			// 兼容升级前创建的订单；旧订单的 money 字段就是支付金额快照。
+			if InferPaymentProvider(dbTopUp.PaymentProvider, dbTopUp.PaymentMethod) == PaymentProviderStripe {
+				return nil
+			}
+			paidMoney = dbTopUp.Money
+		}
+		if paidMoney <= 0 || math.IsNaN(paidMoney) || math.IsInf(paidMoney, 0) {
+			return nil
+		}
+
+		baseQuota := int(decimal.NewFromFloat(paidMoney).
+			Mul(decimal.NewFromFloat(common.QuotaPerUnit)).
+			Div(decimal.NewFromFloat(operation_setting.Price)).IntPart())
+		if baseQuota <= 0 {
+			return nil
+		}
+		return enqueueInviteCommissionWithDB(tx, dbTopUp.UserId, dbTopUp.TradeNo, dbTopUp.CompleteTime, baseQuota)
+	})
 }
 
 // EnqueueInviteCommissionFromSubscriptionOrderTx 将“订阅支付成功”纳入邀请返佣口径。
@@ -149,8 +160,11 @@ func EnqueueInviteCommissionFromSubscriptionOrderTx(tx *gorm.DB, order *Subscrip
 
 	// 仅信任 order.id；其余字段从 DB 读取，避免调用方传入被篡改数据。
 	dbOrder := &SubscriptionOrder{}
-	if err := tx.Select("id", "user_id", "trade_no", "money", "complete_time", "status").
-		First(dbOrder, "id = ?", order.Id).Error; err != nil {
+	query := tx.Select("id", "user_id", "trade_no", "money", "complete_time", "status")
+	if !common.UsingSQLite {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	if err := query.First(dbOrder, "id = ?", order.Id).Error; err != nil {
 		return err
 	}
 	// 仅已支付成功订单允许入返佣池。
@@ -167,12 +181,6 @@ func EnqueueInviteCommissionFromSubscriptionOrderTx(tx *gorm.DB, order *Subscrip
 	}
 
 	return enqueueInviteCommissionWithDB(tx, dbOrder.UserId, dbOrder.TradeNo, dbOrder.CompleteTime, baseQuota)
-}
-
-func enqueueInviteCommission(inviteeUserID int, tradeNo string, completeTime int64, baseQuota int) error {
-	return DB.Transaction(func(tx *gorm.DB) error {
-		return enqueueInviteCommissionWithDB(tx, inviteeUserID, tradeNo, completeTime, baseQuota)
-	})
 }
 
 func enqueueInviteCommissionWithDB(db *gorm.DB, inviteeUserID int, tradeNo string, completeTime int64, baseQuota int) error {
@@ -341,6 +349,21 @@ func settleSingleInviteCommissionLedger(ledger *InviteCommissionLedger, dailyCap
 			allowedQuota = 0
 			riskReason = InviteCommissionRiskReasonSelfInvite
 		}
+		if allowedQuota > 0 {
+			inviter := &User{}
+			inviterQuery := tx.Select("id", "status")
+			if !common.UsingSQLite {
+				inviterQuery = inviterQuery.Clauses(clause.Locking{Strength: "UPDATE"})
+			}
+			inviterErr := inviterQuery.First(inviter, "id = ?", ledger.InviterUserId).Error
+			if errors.Is(inviterErr, gorm.ErrRecordNotFound) ||
+				(inviterErr == nil && inviter.Status != common.UserStatusEnabled) {
+				allowedQuota = 0
+				riskReason = InviteCommissionRiskReasonInviterUnavailable
+			} else if inviterErr != nil {
+				return inviterErr
+			}
+		}
 
 		// 在事务内做日上限 CAS 预占，避免并发超发。
 		if allowedQuota > 0 && dailyCap > 0 {
@@ -415,6 +438,137 @@ func settleSingleInviteCommissionLedger(ledger *InviteCommissionLedger, dailyCap
 	}
 
 	return processed, settled, nil
+}
+
+// reverseInviteCommissionsByTradeNoTx invalidates every commission created by
+// a reversed payment. Pending ledgers are skipped before they can settle. For
+// already-settled ledgers, the payout is reclaimed from aff_quota first and
+// then from wallet quota, covering the case where the inviter already moved
+// the commission into the wallet.
+func reverseInviteCommissionsByTradeNoTx(tx *gorm.DB, tradeNo string) (int, error) {
+	if tx == nil {
+		return 0, errors.New("tx is nil")
+	}
+	tradeNo = strings.TrimSpace(tradeNo)
+	if tradeNo == "" {
+		return 0, nil
+	}
+
+	var ledgers []*InviteCommissionLedger
+	if err := tx.Where("topup_trade_no = ? AND status IN ?", tradeNo, []string{
+		InviteCommissionStatusPending,
+		InviteCommissionStatusSettled,
+	}).Order("id ASC").Find(&ledgers).Error; err != nil {
+		return 0, err
+	}
+
+	reversedQuota := 0
+	for _, ledger := range ledgers {
+		if ledger == nil {
+			continue
+		}
+		if ledger.Status == InviteCommissionStatusPending {
+			result := tx.Model(&InviteCommissionLedger{}).
+				Where("id = ? AND status = ?", ledger.Id, InviteCommissionStatusPending).
+				Updates(map[string]any{
+					"status":        InviteCommissionStatusSkipped,
+					"settled_quota": 0,
+					"risk_reason":   InviteCommissionRiskReasonPaymentReversed,
+					"settled_at":    common.GetTimestamp(),
+				})
+			if result.Error != nil {
+				return 0, result.Error
+			}
+			continue
+		}
+
+		settledQuota := ledger.SettledQuota
+		if settledQuota <= 0 {
+			settledQuota = ledger.CommissionQuota
+		}
+		if settledQuota <= 0 {
+			continue
+		}
+
+		// Keep the same lock order as settlement: inviter -> daily cap -> ledger.
+		// This prevents a payment reversal and the T+1 worker from deadlocking.
+		inviterQuery := tx.Unscoped().Select("id", "quota", "transferable_quota", "aff_quota", "aff_history").Where("id = ?", ledger.InviterUserId)
+		if !common.UsingSQLite {
+			inviterQuery = inviterQuery.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		var inviter User
+		inviterErr := inviterQuery.First(&inviter).Error
+		if inviterErr != nil && !errors.Is(inviterErr, gorm.ErrRecordNotFound) {
+			return 0, inviterErr
+		}
+
+		var capState InviteCommissionDailyCapState
+		capQuery := tx.Where("inviter_user_id = ? AND biz_date = ?", ledger.InviterUserId, ledger.BizDate)
+		if !common.UsingSQLite {
+			capQuery = capQuery.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		capErr := capQuery.First(&capState).Error
+		if capErr != nil && !errors.Is(capErr, gorm.ErrRecordNotFound) {
+			return 0, capErr
+		}
+
+		ledgerResult := tx.Model(&InviteCommissionLedger{}).
+			Where("id = ? AND status = ?", ledger.Id, InviteCommissionStatusSettled).
+			Updates(map[string]any{
+				"status":        InviteCommissionStatusSkipped,
+				"settled_quota": 0,
+				"risk_reason":   InviteCommissionRiskReasonPaymentReversed,
+				"settled_at":    common.GetTimestamp(),
+			})
+		if ledgerResult.Error != nil {
+			return 0, ledgerResult.Error
+		}
+		if ledgerResult.RowsAffected != 1 {
+			continue
+		}
+
+		if capErr == nil {
+			newSettledQuota := capState.SettledQuota - settledQuota
+			if newSettledQuota < 0 {
+				newSettledQuota = 0
+			}
+			if err := tx.Model(&InviteCommissionDailyCapState{}).
+				Where("id = ?", capState.Id).
+				Update("settled_quota", newSettledQuota).Error; err != nil {
+				return 0, err
+			}
+		}
+
+		if errors.Is(inviterErr, gorm.ErrRecordNotFound) {
+			continue
+		}
+
+		affDebit := inviter.AffQuota
+		if affDebit < 0 {
+			affDebit = 0
+		}
+		if affDebit > settledQuota {
+			affDebit = settledQuota
+		}
+		walletDebit := settledQuota - affDebit
+		newQuota := inviter.Quota - walletDebit
+		newTransferableQuota := EffectiveTransferableQuota(newQuota, inviter.TransferableQuota)
+		newAffHistoryQuota := inviter.AffHistoryQuota - settledQuota
+		if newAffHistoryQuota < 0 {
+			newAffHistoryQuota = 0
+		}
+		if err := tx.Unscoped().Model(&User{}).Where("id = ?", inviter.Id).Updates(map[string]any{
+			"quota":              newQuota,
+			"transferable_quota": newTransferableQuota,
+			"aff_quota":          inviter.AffQuota - affDebit,
+			"aff_history":        newAffHistoryQuota,
+		}).Error; err != nil {
+			return 0, err
+		}
+		reversedQuota += settledQuota
+	}
+
+	return reversedQuota, nil
 }
 
 func reconcilePendingInviteCommissionAmountTx(tx *gorm.DB, ledger *InviteCommissionLedger) (string, error) {

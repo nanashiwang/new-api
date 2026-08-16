@@ -842,19 +842,23 @@ func GetSelf(c *gin.Context) {
 
 	// 构建响应数据，包含用户信息和权限
 	responseData := map[string]interface{}{
-		"id":                user.Id,
-		"username":          user.Username,
-		"display_name":      user.DisplayName,
-		"role":              user.Role,
-		"status":            user.Status,
-		"email":             user.Email,
-		"github_id":         user.GitHubId,
-		"discord_id":        user.DiscordId,
-		"oidc_id":           user.OidcId,
-		"wechat_id":         user.WeChatId,
-		"telegram_id":       user.TelegramId,
-		"group":             user.Group,
-		"quota":             currentQuota,
+		"id":           user.Id,
+		"username":     user.Username,
+		"display_name": user.DisplayName,
+		"role":         user.Role,
+		"status":       user.Status,
+		"email":        user.Email,
+		"github_id":    user.GitHubId,
+		"discord_id":   user.DiscordId,
+		"oidc_id":      user.OidcId,
+		"wechat_id":    user.WeChatId,
+		"telegram_id":  user.TelegramId,
+		"group":        user.Group,
+		"quota":        currentQuota,
+		"transferable_quota": model.EffectiveTransferableQuota(
+			currentQuota,
+			user.TransferableQuota,
+		),
 		"used_quota":        user.UsedQuota,
 		"request_count":     user.RequestCount,
 		"aff_code":          user.AffCode,
@@ -1692,6 +1696,10 @@ func TopUp(c *gin.Context) {
 			common.ApiErrorMsg(c, "该兑换码已过期")
 			return
 		}
+		if errors.Is(err, model.ErrLegacyWalletRedemptionRestricted) {
+			common.ApiErrorMsg(c, "该历史钱包兑换码只能由创建者本人兑换并取回额度")
+			return
+		}
 		if errors.Is(err, model.ErrRedeemFailed) {
 			common.ApiErrorI18n(c, i18n.MsgRedeemFailed)
 			return
@@ -1770,6 +1778,10 @@ func Redeem(c *gin.Context) {
 		}
 		if errors.Is(err, model.ErrRedemptionExpired) {
 			common.ApiErrorMsg(c, "该兑换码已过期")
+			return
+		}
+		if errors.Is(err, model.ErrLegacyWalletRedemptionRestricted) {
+			common.ApiErrorMsg(c, "该历史钱包兑换码只能由创建者本人兑换并取回额度")
 			return
 		}
 		if errors.Is(err, model.ErrRedeemFailed) {

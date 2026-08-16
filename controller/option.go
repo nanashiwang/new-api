@@ -374,6 +374,15 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "InviterCommissionDailyCap":
+		dailyCap, parseErr := strconv.Atoi(strings.TrimSpace(option.Value.(string)))
+		if parseErr != nil || dailyCap < 0 {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "邀请返佣单日上限必须是非负整数，0 表示不限制",
+			})
+			return
+		}
 	case "console_setting.api_info":
 		err = console_setting.ValidateConsoleSettings(option.Value.(string), "ApiInfo")
 		if err != nil {

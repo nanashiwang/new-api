@@ -813,11 +813,12 @@ const TopUp = () => {
   const renderAmount = () =>
     `${getPaymentCurrencySymbol()}${Number(amount || 0).toFixed(2)}`;
 
-  const updateWalletQuota = (remainingQuota) => {
+  const updateWalletQuota = (remainingQuota, remainingTransferableQuota) => {
     if (!userState.user) return;
     const updatedUser = {
       ...userState.user,
       quota: Number(remainingQuota || 0),
+      transferable_quota: Number(remainingTransferableQuota || 0),
     };
     userDispatch({ type: 'login', payload: updatedUser });
     setUserData(updatedUser);
@@ -865,6 +866,8 @@ const TopUp = () => {
         visible={openWalletRedemption}
         onCancel={() => setOpenWalletRedemption(false)}
         walletQuota={userState?.user?.quota || 0}
+        transferableQuota={userState?.user?.transferable_quota || 0}
+        isAdmin={Number(userState?.user?.role || 0) >= 10}
         onQuotaChanged={updateWalletQuota}
         t={t}
       />

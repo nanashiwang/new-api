@@ -30,6 +30,7 @@ import { Copy, Gift, RefreshCw } from 'lucide-react';
 import {
   API,
   getCurrencyConfig,
+  getQuotaPerUnit,
   renderQuota,
   showError,
   showSuccess,
@@ -54,11 +55,14 @@ const WalletRedemptionModal = ({
   visible,
   onCancel,
   walletQuota,
+  transferableQuota,
+  isAdmin,
   onQuotaChanged,
   t,
 }) => {
   const currencyConfig = getCurrencyConfig();
   const isTokenDisplay = currencyConfig.type === 'TOKENS';
+  const minimumQuota = isAdmin ? 1 : 10 * getQuotaPerUnit();
   const [amount, setAmount] = useState(0);
   const [creating, setCreating] = useState(false);
   const [loadingList, setLoadingList] = useState(false);
@@ -68,8 +72,14 @@ const WalletRedemptionModal = ({
   const pendingRequestRef = useRef(null);
 
   const maxAmount = isTokenDisplay
-    ? Number(walletQuota || 0)
-    : Math.floor(quotaToDisplayAmount(walletQuota || 0) * 100 + 1e-8) / 100;
+    ? Number(transferableQuota || 0)
+    : Math.floor(quotaToDisplayAmount(transferableQuota || 0) * 100 + 1e-8) /
+      100;
+  const minimumAmount = isTokenDisplay
+    ? minimumQuota
+    : isAdmin
+      ? 0.01
+      : quotaToDisplayAmount(minimumQuota);
 
   const loadRedemptions = async () => {
     setLoadingList(true);
@@ -101,8 +111,20 @@ const WalletRedemptionModal = ({
       showError(t('兑换码额度必须大于 0'));
       return;
     }
+    if (!isAdmin && quota < minimumQuota) {
+      showError(
+        t('兑换码额度不能低于 {{amount}}', {
+          amount: renderQuota(minimumQuota),
+        }),
+      );
+      return;
+    }
     if (quota > Number(walletQuota || 0)) {
       showError(t('钱包余额不足'));
+      return;
+    }
+    if (quota > Number(transferableQuota || 0)) {
+      showError(t('可创建兑换码额度不足'));
       return;
     }
 
@@ -144,7 +166,10 @@ const WalletRedemptionModal = ({
         redemption,
         ...items.filter((item) => item.id !== redemption.id),
       ]);
-      onQuotaChanged?.(Number(data.remaining_quota || 0));
+      onQuotaChanged?.(
+        Number(data.remaining_quota || 0),
+        Number(data.remaining_transferable_quota || 0),
+      );
       showSuccess(t('创建成功'));
     } catch {
       // 请求可能已经在服务端成功，保留同一个 request_id，让重试只返回
@@ -183,12 +208,20 @@ const WalletRedemptionModal = ({
         <div className='rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900'>
           <div>{t('创建兑换码会立即从钱包扣除对应额度')}</div>
           <div className='mt-1'>
+            {t(
+              '仅充值获得的额度可以创建兑换码；注册、签到、邀请及管理员赠送额度不可转赠',
+            )}
+          </div>
+          <div className='mt-1'>
             {t('自己兑换自己的码只会返还额度，不会建立邀请关系或产生邀请奖励')}
           </div>
           <div className='mt-1'>
             {t(
-              '其他未绑定上游的用户兑换后，会自动绑定你为上游；兑换码本身不产生返佣',
+              '其他未绑定上游的用户兑换后，会按邀请阈值与概率尝试绑定你为上游；兑换码本身不产生返佣',
             )}
+          </div>
+          <div className='mt-1'>
+            {t('转赠给他人后的额度不能再次创建兑换码')}
           </div>
         </div>
 
@@ -199,11 +232,16 @@ const WalletRedemptionModal = ({
               {t('当前钱包余额')}：{renderQuota(walletQuota || 0)}
             </Text>
           </div>
+          <div className='mb-2'>
+            <Text type='tertiary'>
+              {t('可创建兑换码额度')}：{renderQuota(transferableQuota || 0)}
+            </Text>
+          </div>
           <Space align='end' className='w-full'>
             <InputNumber
               value={amount}
               onChange={(value) => setAmount(Number(value || 0))}
-              min={isTokenDisplay ? 1 : 0.01}
+              min={minimumAmount}
               max={maxAmount}
               precision={isTokenDisplay ? 0 : 2}
               disabled={uncertainRequest}

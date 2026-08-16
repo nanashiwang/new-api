@@ -10,6 +10,7 @@ import (
 
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type TopUp struct {
@@ -140,7 +141,11 @@ func UpdatePendingTopUpStatus(tradeNo string, expectedPaymentProvider string, ta
 
 	return DB.Transaction(func(tx *gorm.DB) error {
 		topUp := &TopUp{}
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", tradeNo).First(topUp).Error; err != nil {
+		query := tx.Where(refCol+" = ?", tradeNo)
+		if !common.UsingSQLite {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := query.First(topUp).Error; err != nil {
 			return ErrTopUpNotFound
 		}
 		if expectedPaymentProvider != "" && !PaymentProviderMatches(topUp.PaymentProvider, topUp.PaymentMethod, expectedPaymentProvider, "") {
@@ -165,6 +170,7 @@ func Recharge(referenceId string, customerId string, callerIp string, paidMoney 
 
 	var quota float64
 	topUp := &TopUp{}
+	alreadyCompleted := false
 
 	refCol := "`trade_no`"
 	if common.UsingPostgreSQL {
@@ -172,7 +178,11 @@ func Recharge(referenceId string, customerId string, callerIp string, paidMoney 
 	}
 
 	err = DB.Transaction(func(tx *gorm.DB) error {
-		err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", referenceId).First(topUp).Error
+		query := tx.Where(refCol+" = ?", referenceId)
+		if !common.UsingSQLite {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		err := query.First(topUp).Error
 		if err != nil {
 			return errors.New("充值订单不存在")
 		}
@@ -181,6 +191,10 @@ func Recharge(referenceId string, customerId string, callerIp string, paidMoney 
 			return ErrPaymentMethodMismatch
 		}
 
+		if topUp.Status == common.TopUpStatusSuccess {
+			alreadyCompleted = true
+			return nil
+		}
 		if topUp.Status != common.TopUpStatusPending {
 			return errors.New("充值订单状态错误")
 		}
@@ -202,8 +216,11 @@ func Recharge(referenceId string, customerId string, callerIp string, paidMoney 
 		}
 
 		quota = topUp.Money * common.QuotaPerUnit
-		err = tx.Model(&User{}).Where("id = ?", topUp.UserId).Updates(map[string]interface{}{"stripe_customer": customerId, "quota": gorm.Expr("quota + ?", quota)}).Error
+		err = tx.Model(&User{}).Where("id = ?", topUp.UserId).Update("stripe_customer", customerId).Error
 		if err != nil {
+			return err
+		}
+		if err := GrantUserQuotaTx(tx, topUp.UserId, int(quota), int(quota)); err != nil {
 			return err
 		}
 		if err := recordQuotaBenefitGrantTx(tx, topUp, int(quota), "stripe"); err != nil {
@@ -216,6 +233,12 @@ func Recharge(referenceId string, customerId string, callerIp string, paidMoney 
 	if err != nil {
 		common.SysError("topup failed: " + err.Error())
 		return errors.New("充值失败，请稍后重试")
+	}
+	if alreadyCompleted {
+		return nil
+	}
+	if cacheErr := cacheIncrUserQuota(topUp.UserId, int64(quota)); cacheErr != nil {
+		common.SysLog("failed to update user quota cache after stripe top-up: " + cacheErr.Error())
 	}
 
 	RecordTopupLog(topUp.UserId,
@@ -450,7 +473,11 @@ func CompleteTopUpByTradeNoWithPayment(tradeNo string, source string, callerIp s
 
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		topUp := &TopUp{}
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", tradeNo).First(topUp).Error; err != nil {
+		query := tx.Where(refCol+" = ?", tradeNo)
+		if !common.UsingSQLite {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := query.First(topUp).Error; err != nil {
 			return errors.New("top-up order not found")
 		}
 
@@ -487,7 +514,7 @@ func CompleteTopUpByTradeNoWithPayment(tradeNo string, source string, callerIp s
 			return err
 		}
 
-		if err := tx.Model(&User{}).Where("id = ?", topUp.UserId).Update("quota", gorm.Expr("quota + ?", quotaToAdd)).Error; err != nil {
+		if err := GrantUserQuotaTx(tx, topUp.UserId, quotaToAdd, quotaToAdd); err != nil {
 			return err
 		}
 		if err := recordQuotaBenefitGrantTx(tx, topUp, quotaToAdd, source); err != nil {
@@ -505,6 +532,9 @@ func CompleteTopUpByTradeNoWithPayment(tradeNo string, source string, callerIp s
 	}
 	if alreadyCompleted {
 		return nil
+	}
+	if cacheErr := cacheIncrUserQuota(userId, int64(quotaToAdd)); cacheErr != nil {
+		common.SysLog("failed to update user quota cache after top-up: " + cacheErr.Error())
 	}
 
 	logMessage := fmt.Sprintf("online top-up succeeded, quota: %v, paid amount: %f", logger.FormatQuota(quotaToAdd), payMoney)
@@ -537,6 +567,7 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 
 	var quota int64
 	topUp := &TopUp{}
+	alreadyCompleted := false
 
 	refCol := "`trade_no`"
 	if common.UsingPostgreSQL {
@@ -544,7 +575,11 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 	}
 
 	err = DB.Transaction(func(tx *gorm.DB) error {
-		err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", referenceId).First(topUp).Error
+		query := tx.Where(refCol+" = ?", referenceId)
+		if !common.UsingSQLite {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		err := query.First(topUp).Error
 		if err != nil {
 			return errors.New("充值订单不存在")
 		}
@@ -553,6 +588,10 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 			return ErrPaymentMethodMismatch
 		}
 
+		if topUp.Status == common.TopUpStatusSuccess {
+			alreadyCompleted = true
+			return nil
+		}
 		if topUp.Status != common.TopUpStatusPending {
 			return errors.New("充值订单状态错误")
 		}
@@ -574,9 +613,7 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 		quota = topUp.Amount
 
 		// 构建更新字段，优先使用邮箱，如果邮箱为空则使用用户名
-		updateFields := map[string]interface{}{
-			"quota": gorm.Expr("quota + ?", quota),
-		}
+		updateFields := map[string]interface{}{}
 
 		// 如果有客户邮箱，尝试更新用户邮箱（仅当用户邮箱为空时）
 		if customerEmail != "" {
@@ -593,8 +630,13 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 			}
 		}
 
-		err = tx.Model(&User{}).Where("id = ?", topUp.UserId).Updates(updateFields).Error
-		if err != nil {
+		if len(updateFields) > 0 {
+			err = tx.Model(&User{}).Where("id = ?", topUp.UserId).Updates(updateFields).Error
+			if err != nil {
+				return err
+			}
+		}
+		if err := GrantUserQuotaTx(tx, topUp.UserId, int(quota), int(quota)); err != nil {
 			return err
 		}
 		if err := recordQuotaBenefitGrantTx(tx, topUp, int(quota), "creem"); err != nil {
@@ -607,6 +649,12 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 	if err != nil {
 		common.SysError("creem topup failed: " + err.Error())
 		return errors.New("充值失败，请稍后重试")
+	}
+	if alreadyCompleted {
+		return nil
+	}
+	if cacheErr := cacheIncrUserQuota(topUp.UserId, quota); cacheErr != nil {
+		common.SysLog("failed to update user quota cache after creem top-up: " + cacheErr.Error())
 	}
 
 	RecordTopupLog(topUp.UserId,
