@@ -31,6 +31,7 @@ func TestEnsureRedemptionColumnsSQLite_AddsWalletFundingColumnsWithLegacyDefault
 
 	require.NoError(t, ensureRedemptionColumnsSQLite())
 	assert.True(t, db.Migrator().HasColumn("redemptions", "funding_source"))
+	assert.True(t, db.Migrator().HasColumn("redemptions", "transferable_quota"))
 	assert.True(t, db.Migrator().HasColumn("redemptions", "create_request_id"))
 	var fundingSource string
 	require.NoError(t, db.Raw("SELECT funding_source FROM redemptions WHERE id = 1").Scan(&fundingSource).Error)
@@ -40,12 +41,34 @@ func TestEnsureRedemptionColumnsSQLite_AddsWalletFundingColumnsWithLegacyDefault
 func setupWalletRedemptionTest(t *testing.T) {
 	t.Helper()
 	setupInviteCommissionSubscriptionTest(t)
+	originalQuotaPerUnit := common.QuotaPerUnit
+	originalBindingSettings := common.GetInviteBindingSettings()
+	common.QuotaPerUnit = 10
+	require.NoError(t, common.SetInviteBindingSettings(common.InviteBindingSettings{
+		Threshold:          0,
+		RateAfterThreshold: 100,
+	}))
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originalQuotaPerUnit
+		_ = common.SetInviteBindingSettings(originalBindingSettings)
+	})
 	require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&Redemption{}).Error)
 }
 
 func setWalletQuota(t *testing.T, userID int, quota int) {
 	t.Helper()
-	require.NoError(t, DB.Model(&User{}).Where("id = ?", userID).Update("quota", quota).Error)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", userID).Updates(map[string]any{
+		"quota":              quota,
+		"transferable_quota": quota,
+	}).Error)
+}
+
+func setNonTransferableWalletQuota(t *testing.T, userID int, quota int) {
+	t.Helper()
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", userID).Updates(map[string]any{
+		"quota":              quota,
+		"transferable_quota": 0,
+	}).Error)
 }
 
 func countInviteCommissionLedgers(t *testing.T) int64 {
@@ -77,11 +100,64 @@ func TestCreateWalletFundedRedemption_DeductsQuotaAndReplaysIdempotently(t *test
 	var refreshed User
 	require.NoError(t, DB.First(&refreshed, creator.Id).Error)
 	assert.Equal(t, 700, refreshed.Quota)
+	assert.Equal(t, 700, refreshed.TransferableQuota)
 	var redemptions []Redemption
 	require.NoError(t, DB.Find(&redemptions).Error)
 	require.Len(t, redemptions, 1)
 	assert.Equal(t, RedemptionFundingSourceWallet, redemptions[0].FundingSource)
 	assert.NotNil(t, redemptions[0].CreateRequestId)
+}
+
+func TestCreateWalletFundedRedemption_RejectsFreeAndTinyQuota(t *testing.T) {
+	setupWalletRedemptionTest(t)
+	creator := createInviteCommissionTestUser(t, "wallet_non_transferable", 0)
+	setNonTransferableWalletQuota(t, creator.Id, 1000)
+
+	_, err := CreateWalletFundedRedemption(creator.Id, 100, "wallet-free-request-001")
+	assert.ErrorIs(t, err, ErrRedemptionInsufficientTransferableQuota)
+
+	setWalletQuota(t, creator.Id, 1000)
+	_, err = CreateWalletFundedRedemption(creator.Id, MinimumWalletRedemptionQuota()-1, "wallet-tiny-request-001")
+	assert.ErrorIs(t, err, ErrRedemptionBelowMinimum)
+
+	var refreshed User
+	require.NoError(t, DB.First(&refreshed, creator.Id).Error)
+	assert.Equal(t, 1000, refreshed.Quota)
+	assert.Equal(t, 1000, refreshed.TransferableQuota)
+}
+
+func TestCreateWalletFundedRedemption_AdminCanCreateBelowUserMinimum(t *testing.T) {
+	setupWalletRedemptionTest(t)
+	creator := createInviteCommissionTestUser(t, "wallet_admin_small_code", 0)
+	creator.Role = common.RoleAdminUser
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", creator.Id).Update("role", creator.Role).Error)
+	setWalletQuota(t, creator.Id, 1000)
+
+	quota := MinimumWalletRedemptionQuota() - 1
+	result, err := CreateWalletFundedRedemption(creator.Id, quota, "wallet-admin-small-001")
+	require.NoError(t, err)
+	assert.Equal(t, quota, result.Redemption.Quota)
+	assert.Equal(t, 1000-quota, result.RemainingQuota)
+	assert.Equal(t, 1000-quota, result.RemainingTransferableQuota)
+}
+
+func TestCreateWalletFundedRedemption_RejectsBatchUpdatedBalance(t *testing.T) {
+	setupWalletRedemptionTest(t)
+	creator := createInviteCommissionTestUser(t, "wallet_batch_update_unsafe", 0)
+	setWalletQuota(t, creator.Id, 1000)
+	originalBatchUpdateEnabled := common.BatchUpdateEnabled
+	common.BatchUpdateEnabled = true
+	t.Cleanup(func() {
+		common.BatchUpdateEnabled = originalBatchUpdateEnabled
+	})
+
+	_, err := CreateWalletFundedRedemption(creator.Id, 100, "wallet-batch-update-001")
+	assert.ErrorIs(t, err, ErrRedemptionBatchUpdateUnsafe)
+
+	var refreshed User
+	require.NoError(t, DB.First(&refreshed, creator.Id).Error)
+	assert.Equal(t, 1000, refreshed.Quota)
+	assert.Equal(t, 1000, refreshed.TransferableQuota)
 }
 
 func TestCreateWalletFundedRedemption_RejectsInsufficientQuotaWithoutMutation(t *testing.T) {
@@ -140,6 +216,7 @@ func TestCreateWalletFundedRedemption_EnforcesActiveCodeLimitWithoutDeduction(t 
 	var refreshed User
 	require.NoError(t, DB.First(&refreshed, creator.Id).Error)
 	assert.Equal(t, 1000, refreshed.Quota)
+	assert.Equal(t, 1000, refreshed.TransferableQuota)
 }
 
 func TestWalletRedemption_SelfRedeemOnlyRestoresQuota(t *testing.T) {
@@ -181,10 +258,85 @@ func TestWalletRedemption_BindsUnboundRedeemerWithoutRewards(t *testing.T) {
 	require.NoError(t, DB.First(&refreshedRedeemer, redeemer.Id).Error)
 	assert.Equal(t, creator.Id, refreshedRedeemer.InviterId)
 	assert.Equal(t, 350, refreshedRedeemer.Quota)
+	assert.Equal(t, 50, refreshedRedeemer.TransferableQuota)
 	assert.Equal(t, 1, refreshedCreator.AffCount)
 	assert.Zero(t, refreshedCreator.AffQuota)
 	assert.Zero(t, refreshedCreator.AffHistoryQuota)
 	assert.Zero(t, countInviteCommissionLedgers(t))
+}
+
+func TestWalletRedemption_LegacyCodeCannotTransferButCreatorCanRecover(t *testing.T) {
+	setupWalletRedemptionTest(t)
+	creator := createInviteCommissionTestUser(t, "wallet_legacy_creator", 0)
+	redeemer := createInviteCommissionTestUser(t, "wallet_legacy_redeemer", 0)
+	legacy := &Redemption{
+		UserId:            creator.Id,
+		Key:               common.GetUUID(),
+		Status:            common.RedemptionCodeStatusEnabled,
+		Name:              "历史钱包兑换码",
+		BenefitType:       RedemptionBenefitTypeQuota,
+		Quota:             100,
+		CreatedTime:       common.GetTimestamp(),
+		FundingSource:     RedemptionFundingSourceWallet,
+		TransferableQuota: 0,
+	}
+	require.NoError(t, legacy.Insert())
+
+	_, err := RedeemWithResult(legacy.Key, redeemer.Id)
+	assert.ErrorIs(t, err, ErrLegacyWalletRedemptionRestricted)
+
+	result, err := RedeemWithResult(legacy.Key, creator.Id)
+	require.NoError(t, err)
+	assert.Equal(t, 100, result.QuotaAdded)
+
+	var refreshedCreator User
+	require.NoError(t, DB.First(&refreshedCreator, creator.Id).Error)
+	assert.Equal(t, 100, refreshedCreator.Quota)
+	assert.Zero(t, refreshedCreator.TransferableQuota)
+}
+
+func TestWalletRedemption_BindingHonorsThresholdProbabilityWithoutRewards(t *testing.T) {
+	setupWalletRedemptionTest(t)
+	originalInviterReward := common.QuotaForInviter
+	originalInviteeReward := common.QuotaForInvitee
+	common.QuotaForInviter = 500
+	common.QuotaForInvitee = 300
+	require.NoError(t, common.SetInviteBindingSettings(common.InviteBindingSettings{
+		Threshold:          1,
+		RateAfterThreshold: 0,
+	}))
+	t.Cleanup(func() {
+		common.QuotaForInviter = originalInviterReward
+		common.QuotaForInvitee = originalInviteeReward
+	})
+
+	creator := createInviteCommissionTestUser(t, "wallet_threshold_creator", 0)
+	firstRedeemer := createInviteCommissionTestUser(t, "wallet_threshold_first", 0)
+	secondRedeemer := createInviteCommissionTestUser(t, "wallet_threshold_second", 0)
+	setWalletQuota(t, creator.Id, 1000)
+	firstCode, err := CreateWalletFundedRedemption(creator.Id, 100, "wallet-threshold-first-001")
+	require.NoError(t, err)
+	secondCode, err := CreateWalletFundedRedemption(creator.Id, 100, "wallet-threshold-second-001")
+	require.NoError(t, err)
+
+	_, err = RedeemWithResult(firstCode.Redemption.Key, firstRedeemer.Id)
+	require.NoError(t, err)
+	_, err = RedeemWithResult(secondCode.Redemption.Key, secondRedeemer.Id)
+	require.NoError(t, err)
+
+	var refreshedCreator User
+	var refreshedFirst User
+	var refreshedSecond User
+	require.NoError(t, DB.First(&refreshedCreator, creator.Id).Error)
+	require.NoError(t, DB.First(&refreshedFirst, firstRedeemer.Id).Error)
+	require.NoError(t, DB.First(&refreshedSecond, secondRedeemer.Id).Error)
+	assert.Equal(t, 1, refreshedCreator.AffCount)
+	assert.Zero(t, refreshedCreator.AffQuota)
+	assert.Zero(t, refreshedCreator.AffHistoryQuota)
+	assert.Equal(t, creator.Id, refreshedFirst.InviterId)
+	assert.Equal(t, 100, refreshedFirst.Quota, "wallet binding must not add invitee reward")
+	assert.Zero(t, refreshedSecond.InviterId)
+	assert.Equal(t, 100, refreshedSecond.Quota)
 }
 
 func TestWalletRedemption_DoesNotOverrideExistingInviter(t *testing.T) {

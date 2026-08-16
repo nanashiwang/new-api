@@ -60,13 +60,21 @@ func updateInviterForBinding(tx *gorm.DB, inviterID int, inviterRewardQuota int,
 }
 
 func decideInviteBindingWithTx(tx *gorm.DB, inviterID int) (inviteBindingDecision, error) {
+	return decideInviteBindingWithRewardsTx(tx, inviterID, common.QuotaForInviter, common.QuotaForInvitee)
+}
+
+func decideInviteBindingWithoutRewardsWithTx(tx *gorm.DB, inviterID int) (inviteBindingDecision, error) {
+	return decideInviteBindingWithRewardsTx(tx, inviterID, 0, 0)
+}
+
+func decideInviteBindingWithRewardsTx(tx *gorm.DB, inviterID int, inviterRewardQuota int, inviteeRewardQuota int) (inviteBindingDecision, error) {
 	settings := common.GetInviteBindingSettings()
 	decision := inviteBindingDecision{
 		RequestedInviterID: inviterID,
 		Threshold:          settings.Threshold,
 		RateAfterThreshold: settings.RateAfterThreshold,
-		InviterRewardQuota: common.QuotaForInviter,
-		InviteeRewardQuota: common.QuotaForInvitee,
+		InviterRewardQuota: inviterRewardQuota,
+		InviteeRewardQuota: inviteeRewardQuota,
 		Outcome:            inviteBindingOutcomeNoInviter,
 	}
 	if inviterID <= 0 {

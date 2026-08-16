@@ -33,3 +33,19 @@ func TestUpdateOptionMapValidatesCombinedInviteCommissionRates(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, 0.2, common.InviterRechargeSecondLevelCommissionRate)
 }
+
+func TestUpdateOptionMapRejectsNegativeInviteCommissionDailyCap(t *testing.T) {
+	originalOptionMap := common.OptionMap
+	originalDailyCap := common.InviterCommissionDailyCap
+	common.OptionMap = map[string]string{}
+	t.Cleanup(func() {
+		common.OptionMap = originalOptionMap
+		common.InviterCommissionDailyCap = originalDailyCap
+	})
+
+	common.InviterCommissionDailyCap = 0
+	require.Error(t, updateOptionMap("InviterCommissionDailyCap", "-1"))
+	require.Equal(t, 0, common.InviterCommissionDailyCap)
+	require.NoError(t, updateOptionMap("InviterCommissionDailyCap", "1000"))
+	require.Equal(t, 1000, common.InviterCommissionDailyCap)
+}

@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/cachex"
 	"github.com/samber/hot"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // 订阅时长单位
@@ -960,7 +961,11 @@ func completeSubscriptionOrderCoreTx(tx *gorm.DB, tradeNo string, providerPayloa
 		refCol = `"trade_no"`
 	}
 	var order SubscriptionOrder
-	if err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", tradeNo).First(&order).Error; err != nil {
+	query := tx.Where(refCol+" = ?", tradeNo)
+	if !common.UsingSQLite {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	if err := query.First(&order).Error; err != nil {
 		return subscriptionOrderCompletionResult{}, ErrSubscriptionOrderNotFound
 	}
 	result := subscriptionOrderCompletionResult{
@@ -1143,7 +1148,11 @@ func ExpireSubscriptionOrder(tradeNo string) error {
 	}
 	return DB.Transaction(func(tx *gorm.DB) error {
 		var order SubscriptionOrder
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", tradeNo).First(&order).Error; err != nil {
+		query := tx.Where(refCol+" = ?", tradeNo)
+		if !common.UsingSQLite {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := query.First(&order).Error; err != nil {
 			return ErrSubscriptionOrderNotFound
 		}
 		if order.Status != common.TopUpStatusPending {

@@ -220,8 +220,14 @@ func CreateSelfRedemption(c *gin.Context) {
 		switch {
 		case errors.Is(err, model.ErrRedemptionInvalidQuota):
 			common.ApiErrorMsg(c, "兑换码额度必须大于 0")
+		case errors.Is(err, model.ErrRedemptionBelowMinimum):
+			common.ApiErrorMsg(c, "普通用户创建兑换码的额度不能低于 10")
 		case errors.Is(err, model.ErrRedemptionInsufficientQuota):
 			common.ApiErrorMsg(c, "钱包余额不足")
+		case errors.Is(err, model.ErrRedemptionInsufficientTransferableQuota):
+			common.ApiErrorMsg(c, "可转赠额度不足；注册、签到、邀请赠送及管理员赠送额度不能创建兑换码")
+		case errors.Is(err, model.ErrRedemptionBatchUpdateUnsafe):
+			common.ApiErrorMsg(c, "当前余额采用批量更新模式，为避免余额不同步，暂不支持创建兑换码")
 		case errors.Is(err, model.ErrRedemptionActiveLimit):
 			common.ApiErrorMsg(c, "最多只能保留 100 个未使用兑换码")
 		case errors.Is(err, model.ErrRedemptionInvalidRequestID):

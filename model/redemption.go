@@ -17,14 +17,18 @@ import (
 var ErrRedeemFailed = errors.New("redeem.failed")
 
 var (
-	ErrRedemptionAlreadyUsed           = errors.New("redemption.already_used")
-	ErrRedemptionDisabled              = errors.New("redemption.disabled")
-	ErrRedemptionExpired               = errors.New("redemption.expired")
-	ErrRedemptionInvalidQuota          = errors.New("redemption.invalid_quota")
-	ErrRedemptionInsufficientQuota     = errors.New("redemption.insufficient_quota")
-	ErrRedemptionActiveLimit           = errors.New("redemption.active_limit")
-	ErrRedemptionInvalidRequestID      = errors.New("redemption.invalid_request_id")
-	ErrWalletFundedRedemptionImmutable = errors.New("wallet-funded redemption is immutable")
+	ErrRedemptionAlreadyUsed                   = errors.New("redemption.already_used")
+	ErrRedemptionDisabled                      = errors.New("redemption.disabled")
+	ErrRedemptionExpired                       = errors.New("redemption.expired")
+	ErrRedemptionInvalidQuota                  = errors.New("redemption.invalid_quota")
+	ErrRedemptionBelowMinimum                  = errors.New("redemption.below_minimum")
+	ErrRedemptionInsufficientQuota             = errors.New("redemption.insufficient_quota")
+	ErrRedemptionInsufficientTransferableQuota = errors.New("redemption.insufficient_transferable_quota")
+	ErrRedemptionBatchUpdateUnsafe             = errors.New("redemption.batch_update_unsafe")
+	ErrRedemptionActiveLimit                   = errors.New("redemption.active_limit")
+	ErrRedemptionInvalidRequestID              = errors.New("redemption.invalid_request_id")
+	ErrLegacyWalletRedemptionRestricted        = errors.New("legacy wallet redemption can only be redeemed by its creator")
+	ErrWalletFundedRedemptionImmutable         = errors.New("wallet-funded redemption is immutable")
 )
 
 const (
@@ -39,6 +43,10 @@ const (
 
 	maxActiveWalletRedemptionsPerUser = 100
 )
+
+func MinimumWalletRedemptionQuota() int {
+	return int(10 * common.QuotaPerUnit)
+}
 
 type RedemptionResult struct {
 	// BenefitType 标识本次兑换最终发放的是哪类权益，前端据此决定提示文案和刷新动作。
@@ -64,9 +72,10 @@ type RedemptionResult struct {
 // WalletRedemptionCreationResult is safe to return to the creator. It omits
 // UsedUserId so the redeemer's identity is never disclosed to another user.
 type WalletRedemptionCreationResult struct {
-	Redemption     *UserWalletRedemption `json:"redemption"`
-	RemainingQuota int                   `json:"remaining_quota"`
-	Replayed       bool                  `json:"replayed"`
+	Redemption                 *UserWalletRedemption `json:"redemption"`
+	RemainingQuota             int                   `json:"remaining_quota"`
+	RemainingTransferableQuota int                   `json:"remaining_transferable_quota"`
+	Replayed                   bool                  `json:"replayed"`
 }
 
 type UserWalletRedemption struct {
@@ -123,6 +132,7 @@ type Redemption struct {
 	Count                        int     `json:"count" gorm:"-:all"`
 	UsedUserId                   int     `json:"used_user_id"`
 	FundingSource                string  `json:"funding_source" gorm:"type:varchar(16);not null;default:'admin';index"`
+	TransferableQuota            int     `json:"-" gorm:"type:int;not null;default:0;column:transferable_quota"`
 	CreateRequestId              *string `json:"-" gorm:"type:varchar(64);uniqueIndex:idx_redemptions_user_request"`
 	// PlanTitle 仅用于列表展示当前套餐标题，不落库，不保留历史快照。
 	PlanTitle   string         `json:"plan_title" gorm:"-"`
@@ -169,16 +179,26 @@ func CreateWalletFundedRedemption(userID int, quota int, requestID string) (*Wal
 	if quota <= 0 {
 		return nil, ErrRedemptionInvalidQuota
 	}
+	// BatchUpdateEnabled allows wallet consumption deltas to live outside the
+	// database temporarily (and independently on every application instance).
+	// A bearer code must never be authorized from that stale DB balance.
+	if common.BatchUpdateEnabled {
+		return nil, ErrRedemptionBatchUpdateUnsafe
+	}
 	if !validWalletRedemptionRequestID(requestID) {
 		return nil, ErrRedemptionInvalidRequestID
 	}
 
 	redemption := &Redemption{}
 	remainingQuota := 0
+	remainingTransferableQuota := 0
 	replayed := false
 	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockWalletTransferTx(tx, userID); err != nil {
+			return err
+		}
 		creator := &User{}
-		creatorQuery := tx.Select("id", "quota", "status").Where("id = ?", userID)
+		creatorQuery := tx.Select("id", "quota", "transferable_quota", "status", "role").Where("id = ?", userID)
 		if !common.UsingSQLite {
 			creatorQuery = creatorQuery.Clauses(clause.Locking{Strength: "UPDATE"})
 		}
@@ -193,10 +213,14 @@ func CreateWalletFundedRedemption(userID int, quota int, requestID string) (*Wal
 		// Recheck idempotency after acquiring it so concurrent retries cannot deduct twice.
 		if err := tx.Where("user_id = ? AND create_request_id = ?", userID, requestID).First(redemption).Error; err == nil {
 			remainingQuota = creator.Quota
+			remainingTransferableQuota = EffectiveTransferableQuota(creator.Quota, creator.TransferableQuota)
 			replayed = true
 			return nil
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
+		}
+		if creator.Role < common.RoleAdminUser && quota < MinimumWalletRedemptionQuota() {
+			return ErrRedemptionBelowMinimum
 		}
 
 		var activeCount int64
@@ -212,10 +236,17 @@ func CreateWalletFundedRedemption(userID int, quota int, requestID string) (*Wal
 		if creator.Quota < quota {
 			return ErrRedemptionInsufficientQuota
 		}
+		effectiveTransferableQuota := EffectiveTransferableQuota(creator.Quota, creator.TransferableQuota)
+		if effectiveTransferableQuota < quota {
+			return ErrRedemptionInsufficientTransferableQuota
+		}
 
 		updateResult := tx.Model(&User{}).
-			Where("id = ? AND status = ? AND quota >= ?", userID, common.UserStatusEnabled, quota).
-			Update("quota", gorm.Expr("quota - ?", quota))
+			Where("id = ? AND status = ?", userID, common.UserStatusEnabled).
+			Updates(map[string]any{
+				"quota":              creator.Quota - quota,
+				"transferable_quota": effectiveTransferableQuota - quota,
+			})
 		if updateResult.Error != nil {
 			return updateResult.Error
 		}
@@ -225,20 +256,22 @@ func CreateWalletFundedRedemption(userID int, quota int, requestID string) (*Wal
 
 		requestIDCopy := requestID
 		redemption = &Redemption{
-			UserId:          userID,
-			Key:             common.GetUUID(),
-			Status:          common.RedemptionCodeStatusEnabled,
-			Name:            "用户钱包兑换码",
-			BenefitType:     RedemptionBenefitTypeQuota,
-			Quota:           quota,
-			CreatedTime:     common.GetTimestamp(),
-			FundingSource:   RedemptionFundingSourceWallet,
-			CreateRequestId: &requestIDCopy,
+			UserId:            userID,
+			Key:               common.GetUUID(),
+			Status:            common.RedemptionCodeStatusEnabled,
+			Name:              "用户钱包兑换码",
+			BenefitType:       RedemptionBenefitTypeQuota,
+			Quota:             quota,
+			CreatedTime:       common.GetTimestamp(),
+			FundingSource:     RedemptionFundingSourceWallet,
+			TransferableQuota: quota,
+			CreateRequestId:   &requestIDCopy,
 		}
 		if err := tx.Create(redemption).Error; err != nil {
 			return err
 		}
 		remainingQuota = creator.Quota - quota
+		remainingTransferableQuota = effectiveTransferableQuota - quota
 		return nil
 	})
 	if err != nil {
@@ -252,9 +285,10 @@ func CreateWalletFundedRedemption(userID int, quota int, requestID string) (*Wal
 		RecordLog(userID, LogTypeSystem, fmt.Sprintf("创建钱包兑换码扣除 %s（兑换码ID:%d）", logger.LogQuota(quota), redemption.Id))
 	}
 	return &WalletRedemptionCreationResult{
-		Redemption:     walletRedemptionView(redemption),
-		RemainingQuota: remainingQuota,
-		Replayed:       replayed,
+		Redemption:                 walletRedemptionView(redemption),
+		RemainingQuota:             remainingQuota,
+		RemainingTransferableQuota: remainingTransferableQuota,
+		Replayed:                   replayed,
 	}, nil
 }
 
@@ -426,7 +460,21 @@ func RedeemWithOptions(key string, userId int, renewTargetSubscriptionId int, pu
 	}
 	common.RandomSleep()
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		// 兑换码先锁定，保证并发下只有一个请求能消费成功。
+		// First identify wallet-funded codes without taking a row lock. Their
+		// creator-scoped transfer lock must be acquired before the redemption
+		// row so create, redeem, and payment reversal share one lock order.
+		var preview Redemption
+		if err := tx.Select("id", "user_id", "funding_source").Where(keyCol+" = ?", key).First(&preview).Error; err != nil {
+			return errors.New("无效的兑换码")
+		}
+		if preview.FundingSource == RedemptionFundingSourceWallet {
+			if err := lockWalletTransferTx(tx, preview.UserId); err != nil {
+				return err
+			}
+		}
+
+		// Re-read under a row lock after the creator lock. This is the source of
+		// truth for status, ownership, amount, and benefit type.
 		redemptionQuery := tx.Where(keyCol+" = ?", key)
 		if !common.UsingSQLite {
 			redemptionQuery = redemptionQuery.Clauses(clause.Locking{Strength: "UPDATE"})
@@ -448,6 +496,10 @@ func RedeemWithOptions(key string, userId int, renewTargetSubscriptionId int, pu
 		}
 		if redemption.ExpiredTime != 0 && redemption.ExpiredTime < common.GetTimestamp() {
 			return ErrRedemptionExpired
+		}
+		if redemption.FundingSource == RedemptionFundingSourceWallet &&
+			redemption.UserId != userId && redemption.TransferableQuota < redemption.Quota {
+			return ErrLegacyWalletRedemptionRestricted
 		}
 
 		// 钱包码先锁定创建者和兑换者，再发放权益。这样 A/B 互兑时不会因为
@@ -491,8 +543,14 @@ func RedeemWithOptions(key string, userId int, renewTargetSubscriptionId int, pu
 			result.ProductId = product.Id
 			result.ProductName = product.Name
 		default:
-			// 余额码保持旧行为：直接把额度加到用户余额。
-			if err := tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota)).Error; err != nil {
+			// 管理员余额码属于赠送额度；钱包码只有创建者自兑时恢复
+			// 原可转赠属性。转赠给他人后变为最终消费额度，禁止同一笔
+			// 资金在小号之间循环创建兑换码并反复建立邀请链。
+			transferableQuota := 0
+			if redemption.FundingSource == RedemptionFundingSourceWallet && redemption.UserId == userId {
+				transferableQuota = redemption.TransferableQuota
+			}
+			if err := GrantUserQuotaTx(tx, userId, redemption.Quota, transferableQuota); err != nil {
 				return err
 			}
 			result.QuotaAdded = redemption.Quota
@@ -598,24 +656,22 @@ func bindWalletRedemptionCreatorTx(tx *gorm.DB, redemption *Redemption, redeemer
 		return false, false, nil
 	}
 
+	decision, err := decideInviteBindingWithoutRewardsWithTx(tx, creatorUserID)
+	if err != nil {
+		return false, false, err
+	}
+	if decision.EffectiveInviterID == 0 {
+		return false, false, nil
+	}
+
 	bindResult := tx.Model(&User{}).
 		Where("id = ? AND inviter_id = 0", redeemerUserID).
-		Update("inviter_id", creatorUserID)
+		Update("inviter_id", decision.EffectiveInviterID)
 	if bindResult.Error != nil {
 		return false, false, bindResult.Error
 	}
 	if bindResult.RowsAffected != 1 {
-		return false, false, nil
-	}
-
-	creatorResult := tx.Model(&User{}).
-		Where("id = ? AND status = ?", creatorUserID, common.UserStatusEnabled).
-		Update("aff_count", gorm.Expr("aff_count + 1"))
-	if creatorResult.Error != nil {
-		return false, false, creatorResult.Error
-	}
-	if creatorResult.RowsAffected != 1 {
-		return false, false, errors.New("兑换码创建者状态已变化")
+		return false, false, errors.New("兑换用户邀请关系已变化")
 	}
 	return true, false, nil
 }
@@ -930,7 +986,8 @@ func legacyRedeemUnsupportedError(benefitType string) error {
 func isRedeemBusinessError(err error) bool {
 	return errors.Is(err, ErrRedemptionAlreadyUsed) ||
 		errors.Is(err, ErrRedemptionDisabled) ||
-		errors.Is(err, ErrRedemptionExpired)
+		errors.Is(err, ErrRedemptionExpired) ||
+		errors.Is(err, ErrLegacyWalletRedemptionRestricted)
 }
 
 func validateRedemptionSubscriptionLimitsTx(tx *gorm.DB, userId int, plan *SubscriptionPlan, purchaseMode string, purchaseQuantity int) error {

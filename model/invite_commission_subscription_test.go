@@ -62,6 +62,7 @@ func setupInviteCommissionSubscriptionTest(t *testing.T) {
 		&TopUp{},
 		&Log{},
 		&Redemption{},
+		&WalletTransferLock{},
 		&SellableTokenProduct{},
 		&SellableTokenOrder{},
 		&SellableTokenIssuance{},

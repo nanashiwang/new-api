@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func RollbackBenefitsBySource(businessType string, businessId int, sourceType string, sourceRef string) (int, string, error) {
@@ -27,6 +28,11 @@ func RollbackBenefitsBySource(businessType string, businessId int, sourceType st
 			appliedQuotaDelta = 0
 			summary = strings.TrimSpace(op.ResultSummary)
 			return nil
+		}
+		if sourceType == BenefitSourceTopUpOrder || sourceType == BenefitSourceSubscriptionOrder {
+			if err := lockPaymentSourceForRollbackTx(tx, sourceType, sourceRef); err != nil {
+				return err
+			}
 		}
 
 		grants, err := findBenefitGrantRecordsBySourceTx(tx, sourceType, sourceRef)
@@ -58,6 +64,19 @@ func RollbackBenefitsBySource(businessType string, businessId int, sourceType st
 		if strings.TrimSpace(subSummary) != "" {
 			summaries = append(summaries, subSummary)
 		}
+
+		if sourceType == BenefitSourceTopUpOrder || sourceType == BenefitSourceSubscriptionOrder {
+			reversedCommissionQuota, reverseErr := reverseInviteCommissionsByTradeNoTx(tx, sourceRef)
+			if reverseErr != nil {
+				return reverseErr
+			}
+			if reversedCommissionQuota > 0 {
+				summaries = append(summaries, fmt.Sprintf("回退邀请返佣 %s", logger.FormatQuota(reversedCommissionQuota)))
+			}
+			if reverseErr := markReversedPaymentSourceTx(tx, sourceType, sourceRef); reverseErr != nil {
+				return reverseErr
+			}
+		}
 		if len(summaries) == 0 {
 			err = errors.New("no benefit grants found to rollback")
 			_ = tx.Model(op).Updates(map[string]any{
@@ -78,7 +97,121 @@ func RollbackBenefitsBySource(businessType string, businessId int, sourceType st
 	if err != nil {
 		return 0, "", err
 	}
+	if cacheErr := invalidateBenefitRollbackUserCaches(sourceType, sourceRef); cacheErr != nil {
+		common.SysLog("failed to invalidate user quota cache after benefit rollback: " + cacheErr.Error())
+	}
 	return appliedQuotaDelta, summary, nil
+}
+
+func lockPaymentSourceForRollbackTx(tx *gorm.DB, sourceType string, sourceRef string) error {
+	if tx == nil {
+		return errors.New("tx is nil")
+	}
+	sourceRef = strings.TrimSpace(sourceRef)
+	if sourceRef == "" {
+		return errors.New("payment source is empty")
+	}
+	lock := func(query *gorm.DB) *gorm.DB {
+		if common.UsingSQLite {
+			return query
+		}
+		return query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+
+	switch sourceType {
+	case BenefitSourceTopUpOrder:
+		var topUp TopUp
+		return lock(tx.Select("id", "status").Where("trade_no = ?", sourceRef)).First(&topUp).Error
+	case BenefitSourceSubscriptionOrder:
+		var order SubscriptionOrder
+		return lock(tx.Select("id", "status").Where("trade_no = ?", sourceRef)).First(&order).Error
+	default:
+		return nil
+	}
+}
+
+func invalidateBenefitRollbackUserCaches(sourceType string, sourceRef string) error {
+	if !common.RedisEnabled {
+		return nil
+	}
+	userIDs := make(map[int]struct{})
+	switch sourceType {
+	case BenefitSourceTopUpOrder:
+		var topUp TopUp
+		if err := DB.Select("user_id").Where("trade_no = ?", sourceRef).First(&topUp).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		} else if err == nil && topUp.UserId > 0 {
+			userIDs[topUp.UserId] = struct{}{}
+			var recipientIDs []int
+			if err := DB.Model(&Redemption{}).
+				Where("user_id = ? AND funding_source = ? AND used_user_id > ?", topUp.UserId, RedemptionFundingSourceWallet, 0).
+				Distinct("used_user_id").
+				Pluck("used_user_id", &recipientIDs).Error; err != nil {
+				return err
+			}
+			for _, recipientID := range recipientIDs {
+				if recipientID > 0 {
+					userIDs[recipientID] = struct{}{}
+				}
+			}
+		}
+	case BenefitSourceSubscriptionOrder:
+		var order SubscriptionOrder
+		if err := DB.Select("user_id").Where("trade_no = ?", sourceRef).First(&order).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		} else if err == nil && order.UserId > 0 {
+			userIDs[order.UserId] = struct{}{}
+		}
+	}
+
+	var inviterIDs []int
+	if err := DB.Model(&InviteCommissionLedger{}).
+		Where("topup_trade_no = ?", sourceRef).
+		Distinct("inviter_user_id").
+		Pluck("inviter_user_id", &inviterIDs).Error; err != nil {
+		return err
+	}
+	for _, userID := range inviterIDs {
+		if userID > 0 {
+			userIDs[userID] = struct{}{}
+		}
+	}
+
+	var firstErr error
+	for userID := range userIDs {
+		if err := invalidateUserCache(userID); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func markReversedPaymentSourceTx(tx *gorm.DB, sourceType string, sourceRef string) error {
+	if tx == nil {
+		return errors.New("tx is nil")
+	}
+	sourceRef = strings.TrimSpace(sourceRef)
+	if sourceRef == "" {
+		return nil
+	}
+
+	switch sourceType {
+	case BenefitSourceTopUpOrder:
+		return tx.Model(&TopUp{}).
+			Where("trade_no = ? AND status = ?", sourceRef, common.TopUpStatusSuccess).
+			Update("status", common.TopUpStatusFailed).Error
+	case BenefitSourceSubscriptionOrder:
+		if err := tx.Model(&SubscriptionOrder{}).
+			Where("trade_no = ? AND status = ?", sourceRef, common.TopUpStatusSuccess).
+			Update("status", common.TopUpStatusFailed).Error; err != nil {
+			return err
+		}
+		return tx.Model(&TopUp{}).
+			Where("trade_no = ? AND status = ?", sourceRef, common.TopUpStatusSuccess).
+			Update("status", common.TopUpStatusFailed).Error
+	default:
+		return nil
+	}
 }
 
 func rollbackQuotaBenefitsTx(tx *gorm.DB, op *BenefitRollbackOperation, sourceType string, sourceRef string, grants []*BenefitChangeRecord) (int, string, error) {
@@ -105,7 +238,7 @@ func rollbackQuotaBenefitsTx(tx *gorm.DB, op *BenefitRollbackOperation, sourceTy
 		if detail.QuotaDelta <= 0 {
 			continue
 		}
-		if err := tx.Model(&User{}).Where("id = ?", grant.UserId).Update("quota", gorm.Expr("quota - ?", detail.QuotaDelta)).Error; err != nil {
+		if err := RevokeTransferableQuotaGrantTx(tx, grant.UserId, detail.QuotaDelta); err != nil {
 			return 0, "", err
 		}
 		totalQuota += detail.QuotaDelta
@@ -151,7 +284,7 @@ func rollbackQuotaBenefitsTx(tx *gorm.DB, op *BenefitRollbackOperation, sourceTy
 		if fallbackQuota <= 0 {
 			return 0, "", nil
 		}
-		if err := tx.Model(&User{}).Where("id = ?", topUp.UserId).Update("quota", gorm.Expr("quota - ?", fallbackQuota)).Error; err != nil {
+		if err := RevokeTransferableQuotaGrantTx(tx, topUp.UserId, fallbackQuota); err != nil {
 			return 0, "", err
 		}
 		totalQuota = fallbackQuota

@@ -182,6 +182,28 @@ func TestEnqueueInviteCommissionFromTopUp_SkipsCyclicGrandparent(t *testing.T) {
 	assert.Equal(t, parent.Id, ledgers[0].InviterUserId)
 }
 
+func TestSettleInviteCommission_SkipsUnavailableInviter(t *testing.T) {
+	setupInviteCommissionTopUpTest(t)
+
+	inviter := createInviteCommissionTestUser(t, "inviter_unavailable_settlement", 0)
+	invitee := createInviteCommissionTestUser(t, "invitee_unavailable_settlement", inviter.Id)
+	topUp := createInviteCommissionTopUp(t, invitee.Id, "topup_unavailable_inviter_001", 100, 100, 100, common.TopUpStatusSuccess)
+	require.NoError(t, EnqueueInviteCommissionFromTopUp(topUp))
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", inviter.Id).Update("status", common.UserStatusDisabled).Error)
+
+	settled, skipped, processed, err := SettleInviteCommissionByBizDate("2099-01-01", 10)
+	require.NoError(t, err)
+	assert.Zero(t, settled)
+	assert.Equal(t, 1, skipped)
+	assert.Equal(t, 1, processed)
+
+	var ledger InviteCommissionLedger
+	require.NoError(t, DB.Where("topup_trade_no = ?", topUp.TradeNo).First(&ledger).Error)
+	assert.Equal(t, InviteCommissionStatusSkipped, ledger.Status)
+	assert.Equal(t, InviteCommissionRiskReasonInviterUnavailable, ledger.RiskReason)
+	assert.Zero(t, ledger.SettledQuota)
+}
+
 func createInviteCommissionTopUp(t *testing.T, userID int, tradeNo string, amount int64, money, paidMoney float64, status string) *TopUp {
 	t.Helper()
 	topUp := &TopUp{

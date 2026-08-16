@@ -15,6 +15,7 @@ import (
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const UserNameMaxLength = 20
@@ -78,6 +79,7 @@ type User struct {
 	VerificationCode     string         `json:"verification_code" gorm:"-:all"`                         // this field is only for Email verification, don't save it to database!
 	AccessToken          *string        `json:"-" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
 	Quota                int            `json:"quota" gorm:"type:int;default:0"`
+	TransferableQuota    int            `json:"transferable_quota" gorm:"type:int;not null;default:0;column:transferable_quota"`
 	UsedQuota            int            `json:"used_quota" gorm:"type:int;default:0;column:used_quota"` // used quota
 	RequestCount         int            `json:"request_count" gorm:"type:int;default:0;"`               // request number
 	Group                string         `json:"group" gorm:"type:varchar(64);default:'default'"`
@@ -1458,8 +1460,12 @@ func (user *User) TransferAffQuotaToQuota(quota int) error {
 	}
 	defer tx.Rollback() // 确保在函数退出时事务能回滚
 
-	// 加锁查询用户以确保数据一致性
-	err := tx.Set("gorm:query_option", "FOR UPDATE").First(&user, user.Id).Error
+	// 加锁查询用户以确保数据一致性；SQLite 由写事务串行化。
+	query := tx
+	if !common.UsingSQLite {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	err := query.First(user, user.Id).Error
 	if err != nil {
 		return err
 	}
@@ -1471,6 +1477,7 @@ func (user *User) TransferAffQuotaToQuota(quota int) error {
 
 	// 更新用户额度
 	user.AffQuota -= quota
+	user.TransferableQuota = EffectiveTransferableQuota(user.Quota, user.TransferableQuota)
 	user.Quota += quota
 
 	// 保存用户状态
@@ -1603,8 +1610,18 @@ func (user *User) Update(updatePassword bool) error {
 		}
 	}
 	newUser := *user
-	DB.First(&user, user.Id)
-	if err = DB.Model(user).Updates(newUser).Error; err != nil {
+	currentUser := &User{}
+	if err = DB.Select("id", "quota", "transferable_quota").First(currentUser, user.Id).Error; err != nil {
+		return err
+	}
+	newUser.TransferableQuota = EffectiveTransferableQuota(currentUser.Quota, currentUser.TransferableQuota)
+	if newUser.TransferableQuota > newUser.Quota {
+		newUser.TransferableQuota = newUser.Quota
+	}
+	if newUser.TransferableQuota < 0 {
+		newUser.TransferableQuota = 0
+	}
+	if err = DB.Model(&User{}).Where("id = ?", user.Id).Updates(newUser).Error; err != nil {
 		return err
 	}
 
@@ -1633,8 +1650,19 @@ func (user *User) Edit(updatePassword bool) error {
 		updates["password"] = newUser.Password
 	}
 
-	DB.First(&user, user.Id)
-	if err = DB.Model(user).Updates(updates).Error; err != nil {
+	currentUser := &User{}
+	if err = DB.Select("id", "quota", "transferable_quota").First(currentUser, user.Id).Error; err != nil {
+		return err
+	}
+	transferableQuota := EffectiveTransferableQuota(currentUser.Quota, currentUser.TransferableQuota)
+	if transferableQuota > newUser.Quota {
+		transferableQuota = newUser.Quota
+	}
+	if transferableQuota < 0 {
+		transferableQuota = 0
+	}
+	updates["transferable_quota"] = transferableQuota
+	if err = DB.Model(&User{}).Where("id = ?", user.Id).Updates(updates).Error; err != nil {
 		return err
 	}
 

@@ -263,6 +263,7 @@ func migrateDB() error {
 		&PasskeyCredential{},
 		&Option{},
 		&Redemption{},
+		&WalletTransferLock{},
 		&SellableTokenProduct{},
 		&SellableTokenOrder{},
 		&SellableTokenIssuance{},
@@ -353,6 +354,7 @@ func migrateDBFast() error {
 		{&PasskeyCredential{}, "PasskeyCredential"},
 		{&Option{}, "Option"},
 		{&Redemption{}, "Redemption"},
+		{&WalletTransferLock{}, "WalletTransferLock"},
 		{&SellableTokenProduct{}, "SellableTokenProduct"},
 		{&SellableTokenOrder{}, "SellableTokenOrder"},
 		{&SellableTokenIssuance{}, "SellableTokenIssuance"},
@@ -675,6 +677,7 @@ func ensureRedemptionColumnsSQLite() error {
 		{Name: "benefit_type", DDL: "`benefit_type` varchar(32) NOT NULL DEFAULT 'quota'"},
 		{Name: "sellable_token_product_id", DDL: "`sellable_token_product_id` integer DEFAULT 0"},
 		{Name: "funding_source", DDL: "`funding_source` varchar(16) NOT NULL DEFAULT 'admin'"},
+		{Name: "transferable_quota", DDL: "`transferable_quota` integer NOT NULL DEFAULT 0"},
 		{Name: "create_request_id", DDL: "`create_request_id` varchar(64)"},
 	}
 	for _, col := range required {

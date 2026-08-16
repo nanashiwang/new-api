@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -251,6 +252,9 @@ func UpdateOption(key string, value string) error {
 	if err := validateInviteCommissionRateOption(key, value); err != nil {
 		return err
 	}
+	if err := validateInviteCommissionDailyCapOption(key, value); err != nil {
+		return err
+	}
 	// Save to database first
 	option := Option{
 		Key: key,
@@ -290,6 +294,9 @@ func updateOptionMapUnlocked(key string, value string) (err error) {
 		}
 	}
 	if err = validateInviteCommissionRateOption(key, value); err != nil {
+		return err
+	}
+	if err = validateInviteCommissionDailyCapOption(key, value); err != nil {
 		return err
 	}
 	common.OptionMapRWMutex.Lock()
@@ -700,6 +707,17 @@ func validateInviteCommissionRateOption(key string, value string) error {
 
 func isInviteCommissionRateOption(key string) bool {
 	return key == "InviterRechargeCommissionRate" || key == "InviterRechargeSecondLevelCommissionRate"
+}
+
+func validateInviteCommissionDailyCapOption(key string, value string) error {
+	if key != "InviterCommissionDailyCap" {
+		return nil
+	}
+	dailyCap, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || dailyCap < 0 {
+		return errors.New("invite commission daily cap must be a non-negative integer")
+	}
+	return nil
 }
 
 // handleConfigUpdate 处理分层配置更新，返回是否已处理
