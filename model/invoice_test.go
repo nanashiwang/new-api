@@ -66,15 +66,6 @@ func createManualInvoiceRequestInput(tradeNo string) CreateInvoiceRequestInput {
 			PaidAt:           common.GetTimestamp() - 60,
 			Remark:           "公对公转账",
 		}},
-		ProductItems: []InvoiceProductItemInput{{
-			ProductName:   "API 调用服务",
-			Specification: "标准版",
-			Unit:          "项",
-			Quantity:      1,
-			UnitPrice:     1000,
-			Money:         1000,
-			Quota:         500000,
-		}},
 	}
 }
 
@@ -344,7 +335,7 @@ func TestCreateInvoiceRequest_ManualTransferStoresAuditableSnapshotsWithoutTopUp
 	require.NoError(t, err)
 	require.Equal(t, InvoiceSourceTypeManualTransfer, request.SourceType)
 	require.Equal(t, 1000.0, request.TotalMoney)
-	require.Equal(t, int64(500000), request.TotalQuota)
+	require.Zero(t, request.TotalQuota)
 	require.Len(t, request.Items, 1)
 	require.Len(t, request.ProductItems, 1)
 	require.Equal(t, InvoiceSourceTypeManualTransfer, request.Items[0].SourceType)
@@ -352,7 +343,13 @@ func TestCreateInvoiceRequest_ManualTransferStoresAuditableSnapshotsWithoutTopUp
 	require.Equal(t, 0, request.Items[0].OrderId)
 	require.Equal(t, InvoicePaymentMethodBankTransfer, request.Items[0].PaymentMethod)
 	require.Equal(t, "付款测试公司", request.Items[0].PayerName)
-	require.Equal(t, "API 调用服务", request.ProductItems[0].ProductName)
+	require.Equal(t, InvoiceManualTransferProductName, request.ProductItems[0].ProductName)
+	require.Empty(t, request.ProductItems[0].Specification)
+	require.Equal(t, InvoiceManualTransferProductUnit, request.ProductItems[0].Unit)
+	require.Equal(t, float64(1), request.ProductItems[0].Quantity)
+	require.Equal(t, request.TotalMoney, request.ProductItems[0].UnitPrice)
+	require.Equal(t, request.TotalMoney, request.ProductItems[0].Money)
+	require.Zero(t, request.ProductItems[0].Quota)
 
 	var afterTopUps int64
 	require.NoError(t, DB.Model(&TopUp{}).Where("user_id = ?", user.Id).Count(&afterTopUps).Error)
@@ -379,42 +376,37 @@ func TestCreateInvoiceRequest_ManualTransferRejectsMixedSources(t *testing.T) {
 	require.ErrorContains(t, err, "不能在同一申请中混用")
 }
 
-func TestCreateInvoiceRequest_ManualTransferRequiresMatchingProductTotal(t *testing.T) {
+func TestCreateInvoiceRequest_ManualTransferAutoGeneratesProductSnapshot(t *testing.T) {
 	setupInvoiceTestDB(t)
 
-	user := createPaymentRecordTestUser(t, "manual-total-user")
-	input := createManualInvoiceRequestInput("BANK-TRANSFER-TOTAL")
-	input.ProductItems[0].Money = 999
-	input.ProductItems[0].UnitPrice = 999
+	user := createPaymentRecordTestUser(t, "manual-auto-product-user")
+	input := createManualInvoiceRequestInput("BANK-TRANSFER-AUTO-PRODUCT-1")
+	second := input.ManualTransactions[0]
+	second.TradeNo = "BANK-TRANSFER-AUTO-PRODUCT-2"
+	second.Money = 288.88
+	input.ManualTransactions = append(input.ManualTransactions, second)
+	input.ProductItems = []InvoiceProductItemInput{{
+		ProductName: "篡改产品",
+		Unit:        "个",
+		Quantity:    99,
+		UnitPrice:   0.01,
+		Money:       0.99,
+		Quota:       999999,
+	}}
 
-	_, err := CreateInvoiceRequest(user.Id, input)
-	require.ErrorContains(t, err, "产品明细金额合计")
-}
-
-func TestCreateInvoiceRequest_ManualTransferRejectsOneCentProductMismatch(t *testing.T) {
-	t.Run("数量单价与金额相差一分", func(t *testing.T) {
-		setupInvoiceTestDB(t)
-
-		user := createPaymentRecordTestUser(t, "manual-line-cent-mismatch-user")
-		input := createManualInvoiceRequestInput("BANK-TRANSFER-LINE-CENT-MISMATCH")
-		input.ProductItems[0].UnitPrice = 999.99
-		input.ProductItems[0].Money = 1000
-
-		_, err := CreateInvoiceRequest(user.Id, input)
-		require.ErrorContains(t, err, "数量、单价与金额不一致")
-	})
-
-	t.Run("产品合计与转账金额相差一分", func(t *testing.T) {
-		setupInvoiceTestDB(t)
-
-		user := createPaymentRecordTestUser(t, "manual-total-cent-mismatch-user")
-		input := createManualInvoiceRequestInput("BANK-TRANSFER-TOTAL-CENT-MISMATCH")
-		input.ProductItems[0].UnitPrice = 999.99
-		input.ProductItems[0].Money = 999.99
-
-		_, err := CreateInvoiceRequest(user.Id, input)
-		require.ErrorContains(t, err, "产品明细金额合计")
-	})
+	request, err := CreateInvoiceRequest(user.Id, input)
+	require.NoError(t, err)
+	require.Equal(t, 1288.88, request.TotalMoney)
+	require.Zero(t, request.TotalQuota)
+	require.Len(t, request.ProductItems, 1)
+	product := request.ProductItems[0]
+	require.Equal(t, InvoiceManualTransferProductName, product.ProductName)
+	require.Empty(t, product.Specification)
+	require.Equal(t, InvoiceManualTransferProductUnit, product.Unit)
+	require.Equal(t, float64(1), product.Quantity)
+	require.Equal(t, request.TotalMoney, product.UnitPrice)
+	require.Equal(t, request.TotalMoney, product.Money)
+	require.Zero(t, product.Quota)
 }
 
 func TestCreateInvoiceRequest_ManualTransferDuplicateReleasedAfterRejection(t *testing.T) {
@@ -502,17 +494,6 @@ func TestCreateInvoiceRequest_SystemOrderRejectsCustomProductItems(t *testing.T)
 	require.ErrorContains(t, err, "不能自定义")
 }
 
-func TestCreateInvoiceRequest_ManualTransferRejectsZeroUnitPrice(t *testing.T) {
-	setupInvoiceTestDB(t)
-
-	user := createPaymentRecordTestUser(t, "manual-zero-price-user")
-	input := createManualInvoiceRequestInput("BANK-TRANSFER-ZERO-PRICE")
-	input.ProductItems[0].UnitPrice = 0
-
-	_, err := CreateInvoiceRequest(user.Id, input)
-	require.ErrorContains(t, err, "单价必须大于 0")
-}
-
 func TestCreateInvoiceRequest_ManualTransferFingerprintNormalizesWidthAndSeparators(t *testing.T) {
 	setupInvoiceTestDB(t)
 
@@ -552,23 +533,13 @@ func TestCreateInvoiceRequest_ManualTransferFeeFailureRollsBackAllSnapshots(t *t
 	require.Zero(t, productCount)
 }
 
-func TestCreateInvoiceRequest_ManualTransferRejectsNonCanonicalIdentifiersAndPrecisionOverflow(t *testing.T) {
+func TestCreateInvoiceRequest_ManualTransferRejectsNonCanonicalIdentifiers(t *testing.T) {
 	setupInvoiceTestDB(t)
 
 	user := createPaymentRecordTestUser(t, "manual-canonical-validation-user")
 	invalidTradeNo := createManualInvoiceRequestInput("---")
 	_, err := CreateInvoiceRequest(user.Id, invalidTradeNo)
 	require.ErrorContains(t, err, "银行流水号必须包含字母或数字")
-
-	invalidPrice := createManualInvoiceRequestInput("BANK-TRANSFER-UNIT-PRICE-PRECISION")
-	invalidPrice.ProductItems[0].UnitPrice = 1000.001
-	_, err = CreateInvoiceRequest(user.Id, invalidPrice)
-	require.ErrorContains(t, err, "单价最多保留 2 位小数")
-
-	invalidQuantity := createManualInvoiceRequestInput("BANK-TRANSFER-QUANTITY-PRECISION")
-	invalidQuantity.ProductItems[0].Quantity = 1.0000001
-	_, err = CreateInvoiceRequest(user.Id, invalidQuantity)
-	require.ErrorContains(t, err, "数量最多保留 6 位小数")
 }
 
 func TestRejectInvoiceRequest_ManualTransferRefundsFeeAndReleasesFingerprintAtomically(t *testing.T) {

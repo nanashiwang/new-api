@@ -810,7 +810,7 @@ func invoiceDetailBillOrderTypeLabel(orderType string) string {
 	case model.PaymentRecordTypeSellableTokenPurchase:
 		return "钱包购买令牌"
 	case model.InvoiceOrderTypeManualTransfer:
-		return "公对公转账"
+		return "转账"
 	default:
 		if strings.TrimSpace(orderType) == "" {
 			return "-"
@@ -879,7 +879,7 @@ func invoiceDetailBillSourceWording(request *model.InvoiceRequest) (string, stri
 		}
 	}
 	if manual {
-		return "兹证明：用户 %s 提交了公对公银行转账资料。根据申请人提交的银行转账凭证及平台审核结果，相关交易明细如下：",
+		return "兹证明：用户 %s 提交了转账资料。根据申请人提交的银行转账凭证及平台审核结果，相关交易明细如下：",
 			`<p>本《曜算平台交易明细证明》所列人工转账信息依据申请人提交的银行转账资料及平台审核记录生成。</p>
       <p>人工转账记录不属于平台支付渠道自动回传订单，不会据此自动增加或扣减用户钱包余额。</p>`
 	}

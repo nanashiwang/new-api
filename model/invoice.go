@@ -37,6 +37,8 @@ const (
 	InvoiceOrderTypeManualTransfer   = "manual_transfer"
 	InvoicePaymentMethodBankTransfer = "bank_transfer"
 	InvoiceManualTransferPayeeName   = "上海曜算智能科技有限公司"
+	InvoiceManualTransferProductName = "AI API 调用服务"
+	InvoiceManualTransferProductUnit = "项"
 
 	maxInvoiceMoney = int64(1_000_000_000_000)
 )
@@ -261,7 +263,6 @@ func CreateInvoiceRequest(userID int, input CreateInvoiceRequestInput) (*Invoice
 			totalQuota += item.Amount
 		}
 
-		manualProductSummary := summarizeInvoiceProductNames(input.ProductItems)
 		for _, transfer := range input.ManualTransactions {
 			fingerprint := invoiceManualTransferFingerprint(transfer)
 			if _, ok := seenManualTransfers[fingerprint]; ok {
@@ -284,7 +285,7 @@ func CreateInvoiceRequest(userID int, input CreateInvoiceRequestInput) (*Invoice
 				TradeNo:           transfer.TradeNo,
 				PaymentMethod:     InvoicePaymentMethodBankTransfer,
 				Money:             transfer.Money,
-				ProductName:       manualProductSummary,
+				ProductName:       InvoiceManualTransferProductName,
 				PayerName:         transfer.PayerName,
 				PayeeName:         transfer.PayeeName,
 				TransferBankName:  transfer.TransferBankName,
@@ -301,7 +302,7 @@ func CreateInvoiceRequest(userID int, input CreateInvoiceRequestInput) (*Invoice
 			return errors.New("开票金额合计不能超过 1000000000000 元")
 		}
 		totalMoney, _ := totalMoneyDecimal.Float64()
-		productItems, productQuota, err := buildInvoiceProductItems(input.ProductItems, sourceType, totalMoney, totalQuota, items)
+		productItems, productQuota, err := buildInvoiceProductItems(sourceType, totalMoney, totalQuota, items)
 		if err != nil {
 			return err
 		}
@@ -544,12 +545,8 @@ func normalizeCreateInvoiceInput(input CreateInvoiceRequestInput) CreateInvoiceR
 		// 人工凭证的核心产物就是交易明细与产品清单，服务端强制保留，不能由篡改请求关闭。
 		input.NeedDetailBill = true
 		input.NeedServiceConfirmation = true
-	}
-	for i := range input.ProductItems {
-		input.ProductItems[i].ProductName = strings.TrimSpace(input.ProductItems[i].ProductName)
-		input.ProductItems[i].Specification = strings.TrimSpace(input.ProductItems[i].Specification)
-		input.ProductItems[i].Unit = strings.TrimSpace(input.ProductItems[i].Unit)
-		input.ProductItems[i].Remark = strings.TrimSpace(input.ProductItems[i].Remark)
+		// 产品明细完全由转账快照派生，忽略旧客户端或篡改请求提交的自定义内容。
+		input.ProductItems = nil
 	}
 	return input
 }
@@ -571,12 +568,6 @@ func validateCreateInvoiceInput(input CreateInvoiceRequestInput) error {
 	}
 	if len(input.ManualTransactions) > 50 {
 		return errors.New("单次最多填写 50 笔银行转账")
-	}
-	if hasManualTransfers && len(input.ProductItems) == 0 {
-		return errors.New("银行转账申请必须填写产品明细")
-	}
-	if len(input.ProductItems) > 50 {
-		return errors.New("单次最多填写 50 条产品明细")
 	}
 	if input.Title == "" {
 		if input.InvoiceType == InvoiceTypeSpecial {
@@ -623,11 +614,6 @@ func validateCreateInvoiceInput(input CreateInvoiceRequestInput) error {
 	for index, transfer := range input.ManualTransactions {
 		if err := validateInvoiceManualTransaction(transfer); err != nil {
 			return fmt.Errorf("第 %d 笔银行转账：%w", index+1, err)
-		}
-	}
-	for index, item := range input.ProductItems {
-		if err := validateInvoiceProductItem(item); err != nil {
-			return fmt.Errorf("第 %d 条产品明细：%w", index+1, err)
 		}
 	}
 	return nil
@@ -685,57 +671,6 @@ func validateInvoiceManualTransaction(input InvoiceManualTransactionInput) error
 	return nil
 }
 
-func validateInvoiceProductItem(input InvoiceProductItemInput) error {
-	if input.ProductName == "" {
-		return errors.New("产品名称不能为空")
-	}
-	if len([]rune(input.ProductName)) > 255 {
-		return errors.New("产品名称不能超过 255 个字符")
-	}
-	if len([]rune(input.Specification)) > 255 {
-		return errors.New("规格说明不能超过 255 个字符")
-	}
-	if input.Unit == "" {
-		return errors.New("单位不能为空")
-	}
-	if len([]rune(input.Unit)) > 32 {
-		return errors.New("单位不能超过 32 个字符")
-	}
-	if math.IsNaN(input.Quantity) || math.IsInf(input.Quantity, 0) || input.Quantity <= 0 || input.Quantity > 1_000_000_000 {
-		return errors.New("数量必须大于 0")
-	}
-	quantity := decimal.NewFromFloat(input.Quantity)
-	if !quantity.Equal(quantity.Round(6)) {
-		return errors.New("数量最多保留 6 位小数")
-	}
-	if math.IsNaN(input.UnitPrice) || math.IsInf(input.UnitPrice, 0) || input.UnitPrice <= 0 || input.UnitPrice > float64(maxInvoiceMoney) {
-		return errors.New("单价必须大于 0")
-	}
-	unitPrice := decimal.NewFromFloat(input.UnitPrice)
-	if !unitPrice.Equal(unitPrice.Round(2)) {
-		return errors.New("单价最多保留 2 位小数")
-	}
-	if err := validateInvoiceMoney(input.Money, true); err != nil {
-		return err
-	}
-	if input.Quota < 0 {
-		return errors.New("额度不能为负数")
-	}
-	if input.ServiceStartAt < 0 || input.ServiceEndAt < 0 {
-		return errors.New("服务周期不合法")
-	}
-	if (input.ServiceStartAt == 0) != (input.ServiceEndAt == 0) {
-		return errors.New("服务周期开始和结束时间必须同时填写")
-	}
-	if input.ServiceStartAt > 0 && input.ServiceEndAt < input.ServiceStartAt {
-		return errors.New("服务结束时间不能早于开始时间")
-	}
-	if len([]rune(input.Remark)) > 500 {
-		return errors.New("产品备注不能超过 500 个字符")
-	}
-	return nil
-}
-
 func validateInvoiceMoney(value float64, requirePositive bool) error {
 	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > float64(maxInvoiceMoney) {
 		return errors.New("金额不合法")
@@ -778,91 +713,32 @@ func normalizeInvoiceFingerprintPart(value string) string {
 	return builder.String()
 }
 
-func summarizeInvoiceProductNames(items []InvoiceProductItemInput) string {
-	names := make([]string, 0, 2)
-	seen := make(map[string]struct{}, len(items))
-	for _, item := range items {
-		name := strings.TrimSpace(item.ProductName)
-		if name == "" {
-			continue
-		}
-		if _, ok := seen[name]; ok {
-			continue
-		}
-		seen[name] = struct{}{}
-		names = append(names, name)
-		if len(names) == 2 {
-			break
-		}
-	}
-	if len(names) == 0 {
-		return ""
-	}
-	summary := strings.Join(names, "、")
-	if len(seen) > len(names) || len(items) > len(names) {
-		summary += "等"
-	}
-	runes := []rune(summary)
-	if len(runes) > 255 {
-		return string(runes[:255])
-	}
-	return summary
-}
-
-func buildInvoiceProductItems(inputs []InvoiceProductItemInput, sourceType string, totalMoney float64, totalQuota int64, transactionItems []InvoiceRequestItem) ([]InvoiceRequestProductItem, int64, error) {
-	if len(inputs) == 0 {
-		if sourceType == InvoiceSourceTypeManualTransfer {
-			return nil, 0, errors.New("银行转账申请必须填写产品明细")
-		}
-		name := "AI API 调用额度"
-		for _, item := range transactionItems {
-			if strings.TrimSpace(item.ProductName) != "" {
-				name = strings.TrimSpace(item.ProductName)
-				break
-			}
-		}
+func buildInvoiceProductItems(sourceType string, totalMoney float64, totalQuota int64, transactionItems []InvoiceRequestItem) ([]InvoiceRequestProductItem, int64, error) {
+	if sourceType == InvoiceSourceTypeManualTransfer {
 		return []InvoiceRequestProductItem{{
-			ProductName: name,
-			Unit:        "项",
+			ProductName: InvoiceManualTransferProductName,
+			Unit:        InvoiceManualTransferProductUnit,
 			Quantity:    1,
 			UnitPrice:   totalMoney,
 			Money:       totalMoney,
-			Quota:       totalQuota,
-		}}, totalQuota, nil
+		}}, 0, nil
 	}
 
-	items := make([]InvoiceRequestProductItem, 0, len(inputs))
-	totalProductMoney := decimal.Zero
-	var productQuota int64
-	for index, input := range inputs {
-		expectedMoney := decimal.NewFromFloat(input.Quantity).Mul(decimal.NewFromFloat(input.UnitPrice)).Round(2)
-		actualMoney := decimal.NewFromFloat(input.Money).Round(2)
-		if !expectedMoney.Equal(actualMoney) {
-			return nil, 0, fmt.Errorf("第 %d 条产品明细的数量、单价与金额不一致", index+1)
+	name := "AI API 调用额度"
+	for _, item := range transactionItems {
+		if strings.TrimSpace(item.ProductName) != "" {
+			name = strings.TrimSpace(item.ProductName)
+			break
 		}
-		if input.Quota > 0 && productQuota > (1<<63-1)-input.Quota {
-			return nil, 0, errors.New("产品额度合计超出范围")
-		}
-		productQuota += input.Quota
-		totalProductMoney = totalProductMoney.Add(actualMoney)
-		items = append(items, InvoiceRequestProductItem{
-			ProductName:    input.ProductName,
-			Specification:  input.Specification,
-			Unit:           input.Unit,
-			Quantity:       input.Quantity,
-			UnitPrice:      input.UnitPrice,
-			Money:          input.Money,
-			Quota:          input.Quota,
-			ServiceStartAt: input.ServiceStartAt,
-			ServiceEndAt:   input.ServiceEndAt,
-			Remark:         input.Remark,
-		})
 	}
-	requestMoney := decimal.NewFromFloat(totalMoney).Round(2)
-	if !totalProductMoney.Equal(requestMoney) {
-		return nil, 0, fmt.Errorf("产品明细金额合计 %.2f 元与交易金额 %.2f 元不一致", totalProductMoney.InexactFloat64(), requestMoney.InexactFloat64())
-	}
-	return items, productQuota, nil
+	return []InvoiceRequestProductItem{{
+		ProductName: name,
+		Unit:        "项",
+		Quantity:    1,
+		UnitPrice:   totalMoney,
+		Money:       totalMoney,
+		Quota:       totalQuota,
+	}}, totalQuota, nil
 }
 
 func normalizeInvoiceType(invoiceType string) string {

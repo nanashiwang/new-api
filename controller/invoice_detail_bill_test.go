@@ -74,7 +74,7 @@ func TestBuildInvoiceDetailBillHTMLUsesManualTransferWordingAndNoFakeOrderID(t *
 	})
 
 	for _, want := range []string{
-		"公对公转账",
+		"转账",
 		"申请人提交的银行转账凭证及平台审核结果",
 		"付款测试公司",
 		"收款测试公司",
@@ -91,6 +91,7 @@ func TestBuildInvoiceDetailBillHTMLUsesManualTransferWordingAndNoFakeOrderID(t *
 		"平台订单 ID",
 		">0</td>",
 		"平台系统记录的交易明细如下",
+		"公对公",
 	} {
 		if strings.Contains(html, unexpected) {
 			t.Fatalf("manual detail bill html should not contain %q:\n%s", unexpected, html)
