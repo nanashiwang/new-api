@@ -107,9 +107,9 @@ func selectChannelWithConcurrency(
 			// 有渠道，但都被容量准入临时排除了 → 进入等待。
 			needWait = true
 		default:
-			// 同优先级候选先按当前并发占比从低到高排列；并发占比相同则先随机打散，
-			// 避免所有实例同时命中固定 ID 最小的渠道。压力快照只负责排序，最终由 acquire 原子裁决。
-			candidates = rankChannelsByConcurrencyPressure(candidates)
+			// 同优先级候选按 max(并发占比, RPM 占比) 从低到高排列；压力相同时随机打散，
+			// 避免所有实例同时命中固定渠道。快照只负责排序，最终由原子准入裁决。
+			candidates = rankChannelsByCapacityPressure(candidates)
 			for _, channel := range candidates {
 				maxConcurrency := middleware.ResolveChannelMaxConcurrency(channel)
 				rpmLimit := middleware.ResolveChannelRpmLimit(channel)
@@ -230,15 +230,17 @@ func getChannelCapacityCandidates(
 	return channels, selectGroup, nil
 }
 
-type channelConcurrencyCandidate struct {
+type channelCapacityCandidate struct {
 	channel        *model.Channel
 	inflight       int64
 	maxConcurrency int
+	rpmUsed        int64
+	rpmLimit       int
 }
 
-// rankChannelsByConcurrencyPressure 按 inflight/maxConcurrency 升序排列。
-// 查询失败时退化为随机顺序，原子 acquire 仍会保证不会突破并发上限。
-func rankChannelsByConcurrencyPressure(channels []*model.Channel) []*model.Channel {
+// rankChannelsByCapacityPressure 按 max(inflight/maxConcurrency, rpmUsed/rpmLimit) 升序排列。
+// 查询失败时退化为随机顺序，最终原子准入仍会保证不突破任何容量上限。
+func rankChannelsByCapacityPressure(channels []*model.Channel) []*model.Channel {
 	if len(channels) <= 1 {
 		return channels
 	}
@@ -252,21 +254,26 @@ func rankChannelsByConcurrencyPressure(channels []*model.Channel) []*model.Chann
 	for _, channel := range ranked {
 		channelIDs = append(channelIDs, channel.Id)
 	}
-	inflightByChannel, err := middleware.QueryChannelConcurrencies(channelIDs)
+	setting := operation_setting.GetChannelConcurrencySetting()
+	rpmWindow := time.Duration(setting.NormalizedRpmWindowSeconds()) * time.Second
+	usageByChannel, err := middleware.QueryChannelCapacityUsages(channelIDs, rpmWindow)
 	if err != nil {
 		return ranked
 	}
 
-	candidates := make([]channelConcurrencyCandidate, 0, len(ranked))
+	candidates := make([]channelCapacityCandidate, 0, len(ranked))
 	for _, channel := range ranked {
-		candidates = append(candidates, channelConcurrencyCandidate{
+		usage := usageByChannel[channel.Id]
+		candidates = append(candidates, channelCapacityCandidate{
 			channel:        channel,
-			inflight:       inflightByChannel[channel.Id],
+			inflight:       usage.Inflight,
 			maxConcurrency: middleware.ResolveChannelMaxConcurrency(channel),
+			rpmUsed:        usage.RpmUsed,
+			rpmLimit:       middleware.ResolveChannelRpmLimit(channel),
 		})
 	}
 	sort.SliceStable(candidates, func(i, j int) bool {
-		return concurrencyPressureLess(candidates[i], candidates[j])
+		return capacityPressureLess(candidates[i], candidates[j])
 	})
 	for i, candidate := range candidates {
 		ranked[i] = candidate.channel
@@ -274,16 +281,26 @@ func rankChannelsByConcurrencyPressure(channels []*model.Channel) []*model.Chann
 	return ranked
 }
 
-func concurrencyPressureLess(left, right channelConcurrencyCandidate) bool {
-	leftMax := left.maxConcurrency
-	if leftMax <= 0 {
-		leftMax = 1
+func capacityPressureLess(left, right channelCapacityCandidate) bool {
+	leftNumerator, leftDenominator := dominantCapacityPressure(left)
+	rightNumerator, rightDenominator := dominantCapacityPressure(right)
+	return leftNumerator*rightDenominator < rightNumerator*leftDenominator
+}
+
+// dominantCapacityPressure 返回候选渠道较高压力维度的分数，以分数形式避免浮点误差。
+// 对应上限为 0 时该维度不限制、压力按 0 处理。
+func dominantCapacityPressure(candidate channelCapacityCandidate) (int64, int64) {
+	numerator := int64(0)
+	denominator := int64(1)
+	if candidate.maxConcurrency > 0 {
+		numerator = candidate.inflight
+		denominator = int64(candidate.maxConcurrency)
 	}
-	rightMax := right.maxConcurrency
-	if rightMax <= 0 {
-		rightMax = 1
+	if candidate.rpmLimit > 0 && candidate.rpmUsed*denominator > numerator*int64(candidate.rpmLimit) {
+		numerator = candidate.rpmUsed
+		denominator = int64(candidate.rpmLimit)
 	}
-	return left.inflight*int64(rightMax) < right.inflight*int64(leftMax)
+	return numerator, denominator
 }
 
 func containsChannelID(ids []int, target int) bool {
