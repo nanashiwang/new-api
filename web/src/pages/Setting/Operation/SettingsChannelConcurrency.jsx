@@ -44,6 +44,8 @@ import { useTranslation } from 'react-i18next';
 const DEFAULT_INPUTS = {
   'channel_concurrency_setting.enabled': false,
   'channel_concurrency_setting.default_max_concurrency': 100,
+  'channel_concurrency_setting.default_rpm_limit': 0,
+  'channel_concurrency_setting.rpm_window_seconds': 60,
   'channel_concurrency_setting.wait_timeout_ms': 3000,
   'channel_concurrency_setting.max_queue_length': 200,
   'channel_concurrency_setting.poll_interval_ms': 50,
@@ -61,6 +63,14 @@ const NUMERIC_RULES = {
   'channel_concurrency_setting.default_max_concurrency': {
     min: 1,
     label: '全局默认单渠道并发',
+  },
+  'channel_concurrency_setting.default_rpm_limit': {
+    min: 0,
+    label: '全局默认单渠道 RPM',
+  },
+  'channel_concurrency_setting.rpm_window_seconds': {
+    min: 1,
+    label: 'RPM 统计窗口',
   },
   'channel_concurrency_setting.wait_timeout_ms': {
     min: 1,
@@ -201,13 +211,25 @@ export default function SettingsChannelConcurrency(props) {
     Number(runtimeConfig.default_max_concurrency) > 0
       ? Number(runtimeConfig.default_max_concurrency)
       : DEFAULT_INPUTS['channel_concurrency_setting.default_max_concurrency'];
+  const runtimeDefaultRpm = Math.max(
+    0,
+    Number(runtimeConfig.default_rpm_limit) || 0,
+  );
+  const runtimeRpmWindow =
+    Number(runtimeConfig.rpm_window_seconds) > 0
+      ? Number(runtimeConfig.rpm_window_seconds)
+      : DEFAULT_INPUTS['channel_concurrency_setting.rpm_window_seconds'];
   const runtimeDiffersFromSaved =
     runtime !== null &&
     (runtimeEnabled !== savedInputs['channel_concurrency_setting.enabled'] ||
       runtimeDefaultMax !==
         Number(
           savedInputs['channel_concurrency_setting.default_max_concurrency'],
-        ));
+        ) ||
+      runtimeDefaultRpm !==
+        Number(savedInputs['channel_concurrency_setting.default_rpm_limit']) ||
+      runtimeRpmWindow !==
+        Number(savedInputs['channel_concurrency_setting.rpm_window_seconds']));
 
   return (
     <Spin spinning={loading}>
@@ -221,7 +243,7 @@ export default function SettingsChannelConcurrency(props) {
             fullMode={false}
             type='info'
             description={t(
-              '开启后，所有渠道最大并发为 0 的渠道都会使用全局默认值；只有特殊渠道需要单独覆盖。',
+              '开启后，渠道最大并发或 RPM 为 0 时会继承对应全局值；全局 RPM 为 0 表示不限制。只有特殊渠道需要单独覆盖。',
             )}
           />
 
@@ -236,8 +258,10 @@ export default function SettingsChannelConcurrency(props) {
               </Tag>
               {runtime && (
                 <Text type='tertiary'>
-                  {t('实际默认并发')}: {runtimeDefaultMax} · {t('当前等待请求')}
-                  : {runtime.metrics?.current_waiting ?? 0}
+                  {t('实际默认并发')}: {runtimeDefaultMax} · {t('实际默认 RPM')}
+                  : {runtimeDefaultRpm || t('不限')} / {runtimeRpmWindow}{' '}
+                  {t('秒')} · {t('当前等待请求')}:{' '}
+                  {runtime.metrics?.current_waiting ?? 0}
                 </Text>
               )}
               {runtimeDiffersFromSaved && (
@@ -272,6 +296,19 @@ export default function SettingsChannelConcurrency(props) {
                 )}
               />
             </Col>
+            <Col xs={24} sm={12} md={8}>
+              <Form.InputNumber
+                field='channel_concurrency_setting.default_rpm_limit'
+                label={t('全局默认单渠道 RPM')}
+                min={0}
+                step={1}
+                style={{ width: '100%' }}
+                extraText={t('每个渠道在统计窗口内的请求上限，0 表示不限制')}
+                onChange={setField(
+                  'channel_concurrency_setting.default_rpm_limit',
+                )}
+              />
+            </Col>
           </Row>
 
           <Collapse
@@ -280,6 +317,20 @@ export default function SettingsChannelConcurrency(props) {
           >
             <Collapse.Panel header={t('过载保护高级参数')} itemKey='advanced'>
               <Row gutter={16}>
+                <Col xs={24} sm={12} md={8}>
+                  <Form.InputNumber
+                    field='channel_concurrency_setting.rpm_window_seconds'
+                    label={t('RPM 统计窗口')}
+                    min={1}
+                    step={1}
+                    suffix={t('秒')}
+                    style={{ width: '100%' }}
+                    extraText={t('渠道请求频率统计采用的滑动时间窗口')}
+                    onChange={setField(
+                      'channel_concurrency_setting.rpm_window_seconds',
+                    )}
+                  />
+                </Col>
                 <Col xs={24} sm={12} md={8}>
                   <Form.InputNumber
                     field='channel_concurrency_setting.wait_timeout_ms'

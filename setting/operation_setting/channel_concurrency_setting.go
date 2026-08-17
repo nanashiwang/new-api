@@ -20,6 +20,10 @@ type ChannelConcurrencySetting struct {
 	Enabled bool `json:"enabled"`
 	// 单渠道默认在途并发上限。渠道可通过 channel.setting.max_concurrency 覆盖（>0 时）。
 	DefaultMaxConcurrency int `json:"default_max_concurrency"`
+	// 单渠道默认每分钟请求上限。0 表示不限制；渠道可通过 channel.setting.rpm_limit 覆盖（>0 时）。
+	DefaultRpmLimit int `json:"default_rpm_limit"`
+	// RPM 统计窗口（秒）。默认 60 秒，后续准入逻辑在该窗口内限制请求次数。
+	RpmWindowSeconds int `json:"rpm_window_seconds"`
 	// Layer C 有界等待的总超时（毫秒）。所有渠道满时，最多等这么久，超时返回 503。
 	WaitTimeoutMs int `json:"wait_timeout_ms"`
 	// 全局同时处于 Layer C 等待状态的请求数上限。超过则新请求快速失败（503），
@@ -42,6 +46,8 @@ type ChannelConcurrencySetting struct {
 var channelConcurrencySetting = ChannelConcurrencySetting{
 	Enabled:               false,
 	DefaultMaxConcurrency: 100,
+	DefaultRpmLimit:       0,
+	RpmWindowSeconds:      60,
 	WaitTimeoutMs:         3000,
 	MaxQueueLength:        200,
 	PollIntervalMs:        50,
@@ -66,6 +72,16 @@ func GetChannelConcurrencySetting() *ChannelConcurrencySetting {
 			channelConcurrencySetting.DefaultMaxConcurrency = n
 		}
 	}
+	if v := os.Getenv("CHANNEL_RPM_DEFAULT_LIMIT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			channelConcurrencySetting.DefaultRpmLimit = n
+		}
+	}
+	if v := os.Getenv("CHANNEL_RPM_WINDOW_SECONDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			channelConcurrencySetting.RpmWindowSeconds = n
+		}
+	}
 	return &channelConcurrencySetting
 }
 
@@ -76,6 +92,20 @@ func (s *ChannelConcurrencySetting) NormalizedDefaultMaxConcurrency() int {
 		return 100
 	}
 	return s.DefaultMaxConcurrency
+}
+
+func (s *ChannelConcurrencySetting) NormalizedDefaultRpmLimit() int {
+	if s.DefaultRpmLimit < 0 {
+		return 0
+	}
+	return s.DefaultRpmLimit
+}
+
+func (s *ChannelConcurrencySetting) NormalizedRpmWindowSeconds() int {
+	if s.RpmWindowSeconds <= 0 {
+		return 60
+	}
+	return s.RpmWindowSeconds
 }
 
 func (s *ChannelConcurrencySetting) NormalizedWaitTimeoutMs() int {
@@ -126,6 +156,8 @@ func ValidateChannelConcurrencyOption(key, value string) error {
 	case "channel_concurrency_setting.enabled":
 		return nil
 	case "channel_concurrency_setting.default_max_concurrency",
+		"channel_concurrency_setting.default_rpm_limit",
+		"channel_concurrency_setting.rpm_window_seconds",
 		"channel_concurrency_setting.wait_timeout_ms",
 		"channel_concurrency_setting.max_queue_length",
 		"channel_concurrency_setting.poll_interval_ms",

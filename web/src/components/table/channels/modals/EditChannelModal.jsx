@@ -182,6 +182,7 @@ const EditChannelModal = (props) => {
     system_prompt: '',
     system_prompt_override: false,
     max_concurrency: 0,
+    rpm_limit: 0,
     settings: '',
     // 客户端限制设置
     client_restriction_mode: '',
@@ -779,6 +780,7 @@ const EditChannelModal = (props) => {
           data.system_prompt_override =
             parsedSettings.system_prompt_override || false;
           data.max_concurrency = Number(parsedSettings.max_concurrency) || 0;
+          data.rpm_limit = Number(parsedSettings.rpm_limit) || 0;
           data.client_restriction_mode =
             parsedSettings.client_restriction_mode || '';
           data.client_restriction_clients =
@@ -805,6 +807,7 @@ const EditChannelModal = (props) => {
           data.system_prompt = '';
           data.system_prompt_override = false;
           data.max_concurrency = 0;
+          data.rpm_limit = 0;
           data.client_restriction_mode = '';
           data.client_restriction_clients = [];
           data.crs_site_id = 0;
@@ -825,6 +828,7 @@ const EditChannelModal = (props) => {
         data.system_prompt = '';
         data.system_prompt_override = false;
         data.max_concurrency = 0;
+        data.rpm_limit = 0;
         data.client_restriction_mode = '';
         data.client_restriction_clients = [];
         data.crs_site_id = 0;
@@ -956,6 +960,7 @@ const EditChannelModal = (props) => {
         system_prompt: data.system_prompt,
         system_prompt_override: data.system_prompt_override || false,
         max_concurrency: data.max_concurrency || 0,
+        rpm_limit: data.rpm_limit || 0,
         crs_site_id: data.crs_site_id || 0,
         crs_platform: data.crs_platform || 'openai-responses',
         crs_auto_manage: data.crs_auto_manage || false,
@@ -1798,6 +1803,7 @@ const EditChannelModal = (props) => {
       system_prompt: localInputs.system_prompt || '',
       system_prompt_override: localInputs.system_prompt_override || false,
       max_concurrency: Math.max(0, Number(localInputs.max_concurrency) || 0),
+      rpm_limit: Math.max(0, Number(localInputs.rpm_limit) || 0),
       client_restriction_mode: localInputs.client_restriction_mode || '',
       client_restriction_clients: normalizedClientRestrictionClients,
       crs_site_id: Math.max(0, Number(localInputs.crs_site_id) || 0),
@@ -4499,6 +4505,20 @@ const EditChannelModal = (props) => {
                       placeholder={t('0 表示使用全局默认')}
                       extraText={t(
                         '该渠道的在途并发上限，0 表示使用全局默认值。需在「运营设置」开启渠道并发控制后生效；超过上限时请求会切换到其它未满渠道，全部满时进入有界等待或返回 503',
+                      )}
+                    />
+
+                    <Form.InputNumber
+                      field='rpm_limit'
+                      label={t('渠道每分钟请求上限')}
+                      min={0}
+                      onChange={(value) =>
+                        handleChannelSettingsChange('rpm_limit', value)
+                      }
+                      style={{ width: '100%' }}
+                      placeholder={t('0 表示使用全局默认')}
+                      extraText={t(
+                        '该渠道在 RPM 统计窗口内允许进入的请求数，0 表示使用全局默认值；全局也为 0 时不限制',
                       )}
                     />
 

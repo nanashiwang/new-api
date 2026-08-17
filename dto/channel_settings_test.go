@@ -141,6 +141,18 @@ func TestChannelSettingsValidateCRSAutoManage(t *testing.T) {
 	}
 }
 
+func TestChannelSettingsValidateRateLimits(t *testing.T) {
+	if err := (ChannelSettings{MaxConcurrency: -1}).Validate(); err == nil {
+		t.Fatal("expected max_concurrency validation error")
+	}
+	if err := (ChannelSettings{RpmLimit: -1}).Validate(); err == nil {
+		t.Fatal("expected rpm_limit validation error")
+	}
+	if err := (ChannelSettings{MaxConcurrency: 10, RpmLimit: 120}).Validate(); err != nil {
+		t.Fatalf("valid rate limits rejected: %v", err)
+	}
+}
+
 func TestNormalizeClientRestrictionClients(t *testing.T) {
 	got := NormalizeClientRestrictionClients([]string{" codex-cli ", "", "codex-cli", "cursor"})
 	want := []string{"codex-cli", "cursor"}

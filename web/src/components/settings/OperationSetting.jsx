@@ -85,6 +85,8 @@ const OperationSetting = () => {
     UserScopedCircuitBreakerFailureThreshold: 2,
     'channel_concurrency_setting.enabled': false,
     'channel_concurrency_setting.default_max_concurrency': 100,
+    'channel_concurrency_setting.default_rpm_limit': 0,
+    'channel_concurrency_setting.rpm_window_seconds': 60,
     'channel_concurrency_setting.wait_timeout_ms': 3000,
     'channel_concurrency_setting.max_queue_length': 200,
     'channel_concurrency_setting.poll_interval_ms': 50,

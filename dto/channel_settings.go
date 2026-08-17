@@ -128,6 +128,9 @@ type ChannelSettings struct {
 	// MaxConcurrency 覆盖该渠道的在途并发上限（>0 时生效）。0/缺省表示沿用全局
 	// channel_concurrency_setting.default_max_concurrency。仅在全局开关开启时才起作用。
 	MaxConcurrency int `json:"max_concurrency,omitempty"`
+	// RpmLimit 覆盖该渠道的 RPM 上限（>0 时生效）。0/缺省表示沿用全局
+	// channel_concurrency_setting.default_rpm_limit；全局也为 0 时表示不限制。
+	RpmLimit int `json:"rpm_limit,omitempty"`
 }
 
 func (s ChannelSettings) Validate() error {
@@ -145,6 +148,9 @@ func (s ChannelSettings) Validate() error {
 	}
 	if s.MaxConcurrency < 0 {
 		return fmt.Errorf("max_concurrency cannot be negative")
+	}
+	if s.RpmLimit < 0 {
+		return fmt.Errorf("rpm_limit cannot be negative")
 	}
 	if s.CRSSiteID < 0 {
 		return fmt.Errorf("crs_site_id cannot be negative")
