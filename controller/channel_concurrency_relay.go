@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -33,13 +34,13 @@ import (
 //   - 等到容量：清除因满而排除的渠道，重新选择并占用。
 //
 // 关键正确性保证：
-//   - 全程在请求自身 goroutine 内 select 等待，不创建任何额外 goroutine（无 goroutine 泄漏）；
+//   - 等待逻辑全程在请求自身 goroutine 内 select；Redis Lease 仅为已准入请求创建可由 release 终止的心跳；
 //   - 等待时长由 WaitTimeoutMs 上界，等待并发数由 MaxQueueLength 上界（双重有界）；
 //   - 返回的 releaseSlot 由调用方在本轮上游调用结束后 defer 释放，覆盖所有退出路径。
 //
 // 未启用（Enabled=false）时完全短路，直接透传 getChannel，行为与未引入本功能一致。
 
-// selectChannelWithConcurrency 选择一个可用且未超并发上限的渠道。
+// selectChannelWithConcurrency 选择一个可用且通过并发 + RPM 原子准入的渠道。
 // 返回 (channel, releaseSlot, apiErr, isOverloadControl)：
 //   - 成功：channel 非 nil，releaseSlot 非 nil（须在本轮上游调用后释放一次）；
 //   - 客户端在等待中断开：apiErr 为可跳过重试的 client-canceled 错误，isOverloadControl=true；
@@ -62,6 +63,7 @@ func selectChannelWithConcurrency(
 	setting := operation_setting.GetChannelConcurrencySetting()
 	waitTimeout := time.Duration(setting.NormalizedWaitTimeoutMs()) * time.Millisecond
 	pollInterval := time.Duration(setting.NormalizedPollIntervalMs()) * time.Millisecond
+	rpmWindow := time.Duration(setting.NormalizedRpmWindowSeconds()) * time.Second
 	maxQueueLen := setting.NormalizedMaxQueueLength()
 	deadline := time.Now().Add(waitTimeout)
 
@@ -81,8 +83,8 @@ func selectChannelWithConcurrency(
 	}
 
 	// ---- 阶段2：正常负载均衡 + 并发控制（有界过载兜底）----
-	// 本次请求内因“并发已满”而被临时排除的渠道集合。等到容量后从 ExcludeChannels 中移除它们重试。
-	fullChannels := make(map[int]bool)
+	// 本次请求内因“并发或 RPM 容量不足”而被临时排除的渠道集合。
+	blockedChannels := make(map[int]bool)
 	inWaitQueue := false
 	var waitStart time.Time
 	defer func() {
@@ -98,11 +100,11 @@ func selectChannelWithConcurrency(
 		needWait := false
 		switch {
 		case chErr != nil:
-			if len(fullChannels) == 0 {
+			if len(blockedChannels) == 0 {
 				// 与并发无关的“无可用渠道”（如模型确实无渠道）：透传原始错误。
 				return nil, nil, chErr, false
 			}
-			// 有渠道，但都被并发占满排除了 → 进入等待。
+			// 有渠道，但都被容量准入临时排除了 → 进入等待。
 			needWait = true
 		default:
 			// 同优先级候选先按当前并发占比从低到高排列；并发占比相同则先随机打散，
@@ -110,12 +112,19 @@ func selectChannelWithConcurrency(
 			candidates = rankChannelsByConcurrencyPressure(candidates)
 			for _, channel := range candidates {
 				maxConcurrency := middleware.ResolveChannelMaxConcurrency(channel)
-				release, acquired := middleware.AcquireChannelSlotWithMetric(channel.Id, maxConcurrency)
-				if !acquired {
-					fullChannels[channel.Id] = true
+				rpmLimit := middleware.ResolveChannelRpmLimit(channel)
+				admission := middleware.AcquireChannelCapacityWithMetric(
+					channel.Id, maxConcurrency, rpmLimit, rpmWindow, c.GetString(common.RequestIdKey),
+				)
+				if !admission.Acquired {
+					if admission.Reason == middleware.ChannelAdmissionBackendUnavailable {
+						return nil, nil, buildChannelOverload503(c, setting, "channel capacity backend unavailable"), true
+					}
+					blockedChannels[channel.Id] = true
 					retryParam.ExcludeChannels = appendUniqueInt(retryParam.ExcludeChannels, channel.Id)
 					continue
 				}
+				release := admission.Release
 
 				// 只有原子申请容量成功后才正式写入渠道上下文，避免“先选死渠道再等待”的旧流程。
 				setupErr := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
@@ -130,9 +139,9 @@ func selectChannelWithConcurrency(
 				service.CommitChannelCandidateSelection(retryParam, selectGroup)
 				info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
 
-				// 临时满载排除只在本轮选渠期间生效，成功后恢复，避免影响后续真实失败重试。
-				if len(fullChannels) > 0 {
-					retryParam.ExcludeChannels = removeChannelsFromExclusion(retryParam.ExcludeChannels, fullChannels)
+				// 临时容量排除只在本轮选渠期间生效，成功后恢复，避免影响后续真实失败重试。
+				if len(blockedChannels) > 0 {
+					retryParam.ExcludeChannels = removeChannelsFromExclusion(retryParam.ExcludeChannels, blockedChannels)
 				}
 				if inWaitQueue {
 					middleware.RecordChannelWaitAcquired()
@@ -140,7 +149,7 @@ func selectChannelWithConcurrency(
 				return channel, release, nil, false
 			}
 
-			// 当前优先级候选都满载或初始化失败，继续获取下一优先级/下一分组候选。
+			// 当前优先级候选都容量不足或初始化失败，继续获取下一优先级/下一分组候选。
 			continue
 		}
 
@@ -163,7 +172,7 @@ func selectChannelWithConcurrency(
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
 			middleware.RecordChannelWaitTimeout()
-			return nil, nil, buildChannelOverload503(c, setting, "all channels reached concurrency limit"), true
+			return nil, nil, buildChannelOverload503(c, setting, "all channels reached capacity limit"), true
 		}
 		wait := pollInterval
 		if wait > remaining {
@@ -176,9 +185,9 @@ func selectChannelWithConcurrency(
 			middleware.RecordChannelWaitCancel()
 			return nil, nil, buildClientCanceledError(), true
 		case <-timer.C:
-			// 一个轮询周期过去：清除因满而排除的渠道，重新参与选择（可能已有渠道释放容量）。
-			retryParam.ExcludeChannels = removeChannelsFromExclusion(retryParam.ExcludeChannels, fullChannels)
-			fullChannels = make(map[int]bool)
+			// 一个轮询周期过去：清除容量临时排除，让渠道重新参与选择。
+			retryParam.ExcludeChannels = removeChannelsFromExclusion(retryParam.ExcludeChannels, blockedChannels)
+			blockedChannels = make(map[int]bool)
 			continue
 		}
 	}
@@ -347,6 +356,8 @@ func tryStickToAffinityChannel(
 	}
 
 	maxConcurrency := middleware.ResolveChannelMaxConcurrency(affinityCh)
+	rpmLimit := middleware.ResolveChannelRpmLimit(affinityCh)
+	rpmWindow := time.Duration(setting.NormalizedRpmWindowSeconds()) * time.Second
 	// 亲和等待预算：不超过 AffinityWaitMs，也不超过总 deadline（把剩余时间留给降级阶段的等待）。
 	affinityDeadline := time.Now().Add(time.Duration(setting.NormalizedAffinityWaitMs()) * time.Millisecond)
 	if affinityDeadline.After(overallDeadline) {
@@ -365,8 +376,11 @@ func tryStickToAffinityChannel(
 	}()
 
 	for {
-		release, acquired := middleware.AcquireChannelSlotWithMetric(affinityCh.Id, maxConcurrency)
-		if acquired {
+		admission := middleware.AcquireChannelCapacityWithMetric(
+			affinityCh.Id, maxConcurrency, rpmLimit, rpmWindow, c.GetString(common.RequestIdKey),
+		)
+		if admission.Acquired {
+			release := admission.Release
 			// 阶段1 绕过了 getChannel，需自己把亲和渠道写入 context 供后续转发链路使用。
 			if setupErr := middleware.SetupContextForSelectedChannel(c, affinityCh, info.OriginModelName); setupErr != nil {
 				release()
@@ -380,8 +394,11 @@ func tryStickToAffinityChannel(
 			}
 			return affinityCh, release, affinityStickAcquired
 		}
+		if admission.Reason == middleware.ChannelAdmissionBackendUnavailable {
+			return nil, nil, affinityStickDegrade
+		}
 
-		// 亲和渠道并发满：在预算内有界等待它释放（而非立即换渠道，以保住缓存）。
+		// 亲和渠道容量不足：在预算内有界等待（并发释放或 RPM 窗口推进）。
 		if !inWaitQueue {
 			if !middleware.EnterChannelWaitQueue(maxQueueLen) {
 				// 等待队列已满 → 降级换渠道，保障体验（不无界堆积）。

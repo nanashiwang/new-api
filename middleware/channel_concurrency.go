@@ -3,7 +3,7 @@ package middleware
 import (
 	"context"
 	"fmt"
-	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,80 +13,192 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/go-redis/redis/v8"
+	"github.com/google/uuid"
 )
 
-// channel_concurrency.go 实现渠道级在途并发计数与过载指标，是渠道并发控制（含 Layer C
-// 有界等待）的底层原语层。设计与 token_runtime_limit.go 的令牌并发计数完全同构：
-//   - Redis 优先（跨多实例准确，INCR/DECR + Expire 兜底防泄漏）
-//   - Redis 未启用时回退进程内内存（sync.Map + atomic，单实例场景）
+// channel_concurrency.go 实现渠道级并发 Lease、RPM 滑动窗口与过载指标：
+//   - Redis 模式使用 Lua 原子清理、检查并写入两个 ZSET，跨实例不超发；
+//   - Lease 由心跳续期，实例崩溃后自动过期回收；
+//   - Redis 未启用时回退到进程内互斥状态，保证单实例并发 + RPM 原子准入。
 //
 // 编排逻辑（选渠道 → acquire → 满则换渠道 → 全满进入有界等待）在 controller 层，
 // 这里只暴露被其调用的原语，避免 middleware → controller 的反向依赖。
 
 const (
-	// Redis key 前缀，独立命名空间，避免与 token:concurrency:* 撞车。
-	channelConcurrencyKeyPrefix = "channel:concurrency:"
-	// Redis 计数 key 的 TTL 兜底：远大于最长可能的单次上游请求（含超长流式生成），
-	// 防止 release 因进程崩溃丢失导致计数永久占用；正常路径 release 会主动 DECR。
-	channelConcurrencyKeyTTL = 2 * time.Hour
+	// Redis key 前缀。每个渠道使用 leases/rpm 两个 ZSET；同一渠道用相同 hash tag，
+	// 便于 Redis Cluster 将原子准入脚本涉及的两个 key 放在同一 slot。
+	channelCapacityKeyPrefix = "channel:capacity:"
+	// Lease 通过心跳续期；实例崩溃或 release 丢失后，过期成员会由后续准入/查询自动清理。
+	channelLeaseTTL               = 2 * time.Minute
+	channelLeaseHeartbeatInterval = 30 * time.Second
+	channelCapacityBackendRetry   = time.Second
 )
 
-// channelConcurrencyIncrScript 原子执行 INCR + PEXPIRE，保证“有计数必有 TTL”，
-// 消除 INCR 成功而 Expire 单独失败导致 key 无 TTL、进而永久占用名额的泄漏路径。
-var channelConcurrencyIncrScript = redis.NewScript(`
-local v = redis.call('INCR', KEYS[1])
-redis.call('PEXPIRE', KEYS[1], ARGV[1])
-return v
+// channelCapacityAcquireScript 在 Redis 服务端使用同一时钟原子完成：
+// 1. 清理过期 Lease 和 RPM 窗口外记录；2. 检查并发；3. 检查 RPM；4. 同时写入。
+// 返回值：[是否成功, 拒绝原因(1=并发/2=RPM), retry_after_ms, inflight, rpm_used]。
+var channelCapacityAcquireScript = redis.NewScript(`
+local lease_key = KEYS[1]
+local rpm_key = KEYS[2]
+local max_concurrency = tonumber(ARGV[1])
+local rpm_limit = tonumber(ARGV[2])
+local rpm_window_ms = tonumber(ARGV[3])
+local lease_ttl_ms = tonumber(ARGV[4])
+local lease_key_ttl_ms = tonumber(ARGV[5])
+local rpm_key_ttl_ms = tonumber(ARGV[6])
+local member = ARGV[7]
+
+local server_time = redis.call('TIME')
+local now_ms = tonumber(server_time[1]) * 1000 + math.floor(tonumber(server_time[2]) / 1000)
+
+redis.call('ZREMRANGEBYSCORE', lease_key, '-inf', now_ms)
+if rpm_window_ms > 0 then
+    redis.call('ZREMRANGEBYSCORE', rpm_key, '-inf', now_ms - rpm_window_ms)
+end
+
+local inflight = redis.call('ZCARD', lease_key)
+local rpm_used = redis.call('ZCARD', rpm_key)
+
+if max_concurrency > 0 and inflight >= max_concurrency then
+    local oldest = redis.call('ZRANGE', lease_key, 0, 0, 'WITHSCORES')
+    local retry_after_ms = 1
+    if #oldest >= 2 then
+        retry_after_ms = math.max(1, math.floor(tonumber(oldest[2]) - now_ms))
+    end
+    redis.call('PEXPIRE', lease_key, lease_key_ttl_ms)
+    return {0, 1, retry_after_ms, inflight, rpm_used}
+end
+
+if rpm_limit > 0 and rpm_used >= rpm_limit then
+    local oldest = redis.call('ZRANGE', rpm_key, 0, 0, 'WITHSCORES')
+    local retry_after_ms = 1
+    if #oldest >= 2 then
+        retry_after_ms = math.max(1, math.floor(tonumber(oldest[2]) + rpm_window_ms - now_ms))
+    end
+    redis.call('PEXPIRE', rpm_key, rpm_key_ttl_ms)
+    return {0, 2, retry_after_ms, inflight, rpm_used}
+end
+
+if max_concurrency > 0 then
+    redis.call('ZADD', lease_key, now_ms + lease_ttl_ms, member)
+    redis.call('PEXPIRE', lease_key, lease_key_ttl_ms)
+    inflight = inflight + 1
+end
+if rpm_limit > 0 then
+    redis.call('ZADD', rpm_key, now_ms, member)
+    redis.call('PEXPIRE', rpm_key, rpm_key_ttl_ms)
+    rpm_used = rpm_used + 1
+end
+return {1, 0, 0, inflight, rpm_used}
 `)
 
-// ---- 内存态计数（Redis 未启用时的回退） ----
+var channelLeaseHeartbeatScript = redis.NewScript(`
+local lease_key = KEYS[1]
+local member = ARGV[1]
+local lease_ttl_ms = tonumber(ARGV[2])
+local lease_key_ttl_ms = tonumber(ARGV[3])
+local server_time = redis.call('TIME')
+local now_ms = tonumber(server_time[1]) * 1000 + math.floor(tonumber(server_time[2]) / 1000)
+local score = redis.call('ZSCORE', lease_key, member)
+if not score then
+    return 0
+end
+if tonumber(score) <= now_ms then
+    redis.call('ZREM', lease_key, member)
+    return 0
+end
+redis.call('ZADD', lease_key, now_ms + lease_ttl_ms, member)
+redis.call('PEXPIRE', lease_key, lease_key_ttl_ms)
+return 1
+`)
 
-var channelConcurrencyCounters sync.Map // key(string) -> *channelConcurrencyCounter
+var channelLeaseReleaseScript = redis.NewScript(`
+local removed = redis.call('ZREM', KEYS[1], ARGV[1])
+if redis.call('ZCARD', KEYS[1]) == 0 then
+    redis.call('DEL', KEYS[1])
+end
+return removed
+`)
 
-type channelConcurrencyCounter struct {
-	value int64
-	// idleRounds 仅由 cleanup goroutine 单线程访问：连续为 0 的清理轮数。
+// 查询脚本批量清理并返回每个渠道的 [inflight, rpm_used]，使用一次 EVAL 避免逐渠道查询。
+var channelCapacityQueryScript = redis.NewScript(`
+local rpm_window_ms = tonumber(ARGV[1])
+local server_time = redis.call('TIME')
+local now_ms = tonumber(server_time[1]) * 1000 + math.floor(tonumber(server_time[2]) / 1000)
+local result = {}
+for i = 1, #KEYS, 2 do
+    local lease_key = KEYS[i]
+    local rpm_key = KEYS[i + 1]
+    redis.call('ZREMRANGEBYSCORE', lease_key, '-inf', now_ms)
+    if rpm_window_ms > 0 then
+        redis.call('ZREMRANGEBYSCORE', rpm_key, '-inf', now_ms - rpm_window_ms)
+    end
+    table.insert(result, redis.call('ZCARD', lease_key))
+    table.insert(result, redis.call('ZCARD', rpm_key))
+end
+return result
+`)
+
+// ---- 内存态准入（Redis 未启用时的回退） ----
+
+var channelCapacityStates sync.Map // key(string) -> *channelCapacityState
+
+type channelCapacityState struct {
+	mu         sync.Mutex
+	inflight   int64
+	rpmEntries []int64
+	// idleRounds 仅由 cleanup goroutine 在持锁状态下访问：连续为空的清理轮数。
 	idleRounds int
 }
 
-func getChannelConcurrencyCounter(key string) *channelConcurrencyCounter {
-	if counter, ok := channelConcurrencyCounters.Load(key); ok {
-		return counter.(*channelConcurrencyCounter)
+func getChannelCapacityState(key string) *channelCapacityState {
+	if state, ok := channelCapacityStates.Load(key); ok {
+		return state.(*channelCapacityState)
 	}
-	counter := &channelConcurrencyCounter{}
-	actual, _ := channelConcurrencyCounters.LoadOrStore(key, counter)
-	return actual.(*channelConcurrencyCounter)
+	state := &channelCapacityState{}
+	actual, _ := channelCapacityStates.LoadOrStore(key, state)
+	return actual.(*channelCapacityState)
 }
 
 func init() {
-	go cleanupIdleChannelConcurrencyCounters()
+	go cleanupIdleChannelCapacityStates()
 }
 
-// 定期清理归零的内存计数器 key，防止 sync.Map 无界增长。
-func cleanupIdleChannelConcurrencyCounters() {
+// 定期清理空闲的内存渠道状态，防止 sync.Map 随历史渠道数无界增长。
+func cleanupIdleChannelCapacityStates() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 	for range ticker.C {
-		channelConcurrencyCounters.Range(func(key, value any) bool {
-			counter := value.(*channelConcurrencyCounter)
-			if atomic.LoadInt64(&counter.value) == 0 {
-				// 连续两轮（≥5 分钟）都为 0 才删除，规避与“已读到 counter 指针、尚未自增”的
-				// acquire 之间的 TOCTOU 竞态：一个进行中的 acquire 不可能让计数跨越两个 tick
-				// 仍保持 0，因此“连续两轮为 0”可安全判定该 key 确实空闲。
-				counter.idleRounds++
-				if counter.idleRounds >= 2 {
-					channelConcurrencyCounters.Delete(key)
+		rpmWindow := time.Duration(operation_setting.GetChannelConcurrencySetting().NormalizedRpmWindowSeconds()) * time.Second
+		cutoff := time.Now().Add(-rpmWindow).UnixNano()
+		channelCapacityStates.Range(func(key, value any) bool {
+			state := value.(*channelCapacityState)
+			state.mu.Lock()
+			state.pruneRpmEntriesLocked(cutoff)
+			if state.inflight == 0 && len(state.rpmEntries) == 0 {
+				state.idleRounds++
+				if state.idleRounds >= 2 {
+					channelCapacityStates.Delete(key)
 				}
 			} else {
-				counter.idleRounds = 0
+				state.idleRounds = 0
 			}
+			state.mu.Unlock()
 			return true
 		})
 	}
 }
 
-func channelConcurrencyKey(channelID int) string {
-	return fmt.Sprintf("%s%d", channelConcurrencyKeyPrefix, channelID)
+func channelLeaseKey(channelID int) string {
+	return fmt.Sprintf("%s{%d}:leases", channelCapacityKeyPrefix, channelID)
+}
+
+func channelRpmKey(channelID int) string {
+	return fmt.Sprintf("%s{%d}:rpm", channelCapacityKeyPrefix, channelID)
+}
+
+func channelMemoryCapacityKey(channelID int) string {
+	return fmt.Sprintf("%s%d", channelCapacityKeyPrefix, channelID)
 }
 
 // ---- 过载指标（进程内 atomic，重启清零；仅用于观测，不作硬依据） ----
@@ -172,9 +284,9 @@ func LeaveChannelWaitQueue() {
 	channelConcurrencyMetrics.currentWaiting.Add(-1)
 }
 
-// ---- 渠道并发信号量 ----
+// ---- 渠道容量准入 ----
 
-// ChannelConcurrencyEnabled 全局开关，关闭时所有并发控制逻辑短路。
+// ChannelConcurrencyEnabled 全局开关，关闭时所有渠道容量控制逻辑短路。
 func ChannelConcurrencyEnabled() bool {
 	return operation_setting.GetChannelConcurrencySetting().Enabled
 }
@@ -190,101 +302,266 @@ func ResolveChannelMaxConcurrency(channel *model.Channel) int {
 	return setting.NormalizedDefaultMaxConcurrency()
 }
 
-// TryAcquireChannelSlot 尝试占用渠道一个在途并发名额（不等待）。
-//   - 成功：返回 (release, true)，release 必须在本次上游调用结束后调用一次且仅一次。
-//   - 已满：返回 (nil, false)。
-//   - maxConcurrency<=0：视为不限并发，返回一个 no-op release。
-//
-// release 用 sync.Once 保护，防止重复 DECR 把计数打成负数。
-func TryAcquireChannelSlot(channelID int, maxConcurrency int) (func(), bool) {
-	if maxConcurrency <= 0 {
-		return func() {}, true
+// ResolveChannelRpmLimit 计算某渠道的 RPM 上限：渠道级 rpm_limit>0 时覆盖全局默认；
+// 渠道与全局均为 0 时表示不限制请求频率。
+func ResolveChannelRpmLimit(channel *model.Channel) int {
+	setting := operation_setting.GetChannelConcurrencySetting()
+	if channel != nil {
+		if override := channel.GetSetting().RpmLimit; override > 0 {
+			return override
+		}
 	}
-	key := channelConcurrencyKey(channelID)
+	return setting.NormalizedDefaultRpmLimit()
+}
+
+// ChannelAdmissionRejectReason 表示渠道容量准入失败原因。
+type ChannelAdmissionRejectReason string
+
+const (
+	ChannelAdmissionAllowed            ChannelAdmissionRejectReason = ""
+	ChannelAdmissionConcurrencyLimited ChannelAdmissionRejectReason = "concurrency"
+	ChannelAdmissionRpmLimited         ChannelAdmissionRejectReason = "rpm"
+	ChannelAdmissionBackendUnavailable ChannelAdmissionRejectReason = "backend_unavailable"
+)
+
+// ChannelAdmissionResult 是一次并发 + RPM 原子准入结果。
+type ChannelAdmissionResult struct {
+	Release    func()
+	Acquired   bool
+	Reason     ChannelAdmissionRejectReason
+	RetryAfter time.Duration
+}
+
+// ChannelCapacityUsage 是渠道当前容量使用快照。
+type ChannelCapacityUsage struct {
+	Inflight int64
+	RpmUsed  int64
+}
+
+// TryAcquireChannelCapacity 原子申请渠道容量。RPM 名额在成功准入时消费，Release 只释放
+// 在途 Lease，不回滚 RPM；这与上游已接收请求后即应计入频率窗口的语义一致。
+func TryAcquireChannelCapacity(
+	channelID int,
+	maxConcurrency int,
+	rpmLimit int,
+	rpmWindow time.Duration,
+	requestID string,
+) ChannelAdmissionResult {
+	if maxConcurrency <= 0 && rpmLimit <= 0 {
+		return ChannelAdmissionResult{Release: func() {}, Acquired: true}
+	}
+	if rpmWindow <= 0 {
+		rpmWindow = time.Minute
+	}
 
 	if common.RedisEnabled {
-		ctx := context.Background()
-		// 原子 INCR+PEXPIRE：保证有计数必有 TTL（消除 Expire 单独失败的无 TTL 泄漏）。
-		value, err := channelConcurrencyIncrScript.Run(ctx, common.RDB, []string{key}, channelConcurrencyKeyTTL.Milliseconds()).Int64()
-		if err != nil {
-			// Redis 异常时不阻断请求：放行并给一个 no-op release。
-			// 权衡：Redis 故障期间该渠道暂不受并发限制（宁可短暂不限流也不误杀正常流量）。
-			// 若脚本实际已在 Redis 端 +1 但响应超时，该名额由 channelConcurrencyKeyTTL 兜底最终回收。
-			return func() {}, true
-		}
-		if value > int64(maxConcurrency) {
-			_, _ = common.RDB.Decr(ctx, key).Result()
-			return nil, false
-		}
-		return redisReleaseOnce(key), true
+		return tryAcquireRedisChannelCapacity(channelID, maxConcurrency, rpmLimit, rpmWindow, requestID)
 	}
-
-	counter := getChannelConcurrencyCounter(key)
-	next := atomic.AddInt64(&counter.value, 1)
-	if next > int64(maxConcurrency) {
-		atomic.AddInt64(&counter.value, -1)
-		return nil, false
-	}
-	return memoryReleaseOnce(counter), true
+	return tryAcquireMemoryChannelCapacityAt(channelID, maxConcurrency, rpmLimit, rpmWindow, time.Time{})
 }
 
-func redisReleaseOnce(key string) func() {
+func tryAcquireRedisChannelCapacity(
+	channelID int,
+	maxConcurrency int,
+	rpmLimit int,
+	rpmWindow time.Duration,
+	requestID string,
+) ChannelAdmissionResult {
+	if common.RDB == nil {
+		return ChannelAdmissionResult{Reason: ChannelAdmissionBackendUnavailable, RetryAfter: channelCapacityBackendRetry}
+	}
+
+	member := uuid.NewString()
+	if requestID = strings.TrimSpace(requestID); requestID != "" {
+		member = requestID + ":" + member
+	}
+	leaseKey := channelLeaseKey(channelID)
+	rpmKey := channelRpmKey(channelID)
+	leaseKeyTTL := channelLeaseTTL * 2
+	rpmKeyTTL := rpmWindow * 2
+	if rpmKeyTTL < time.Minute {
+		rpmKeyTTL = time.Minute
+	}
+
+	values, err := channelCapacityAcquireScript.Run(
+		context.Background(),
+		common.RDB,
+		[]string{leaseKey, rpmKey},
+		maxConcurrency,
+		rpmLimit,
+		rpmWindow.Milliseconds(),
+		channelLeaseTTL.Milliseconds(),
+		leaseKeyTTL.Milliseconds(),
+		rpmKeyTTL.Milliseconds(),
+		member,
+	).Int64Slice()
+	if err != nil || len(values) < 3 {
+		return ChannelAdmissionResult{Reason: ChannelAdmissionBackendUnavailable, RetryAfter: channelCapacityBackendRetry}
+	}
+	if values[0] != 1 {
+		reason := ChannelAdmissionConcurrencyLimited
+		if values[1] == 2 {
+			reason = ChannelAdmissionRpmLimited
+		}
+		return ChannelAdmissionResult{
+			Reason:     reason,
+			RetryAfter: time.Duration(values[2]) * time.Millisecond,
+		}
+	}
+
+	if maxConcurrency <= 0 {
+		return ChannelAdmissionResult{Release: func() {}, Acquired: true}
+	}
+	return ChannelAdmissionResult{
+		Release:  redisLeaseReleaseOnce(leaseKey, member),
+		Acquired: true,
+	}
+}
+
+func redisLeaseReleaseOnce(leaseKey, member string) func() {
 	var once sync.Once
+	done := make(chan struct{})
+
+	go func() {
+		ticker := time.NewTicker(channelLeaseHeartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				if common.RDB == nil {
+					continue
+				}
+				_, _ = channelLeaseHeartbeatScript.Run(
+					context.Background(),
+					common.RDB,
+					[]string{leaseKey},
+					member,
+					channelLeaseTTL.Milliseconds(),
+					(channelLeaseTTL * 2).Milliseconds(),
+				).Result()
+			}
+		}
+	}()
+
 	return func() {
 		once.Do(func() {
-			// 用 Background ctx：release 可能在客户端断开（请求 ctx 已 cancel）后执行，
-			// 不能因请求 ctx 失效而漏放名额。DecrBy 的下限由 max(0) 语义近似保证——
-			// 这里 DECR 后若为负说明有异常，但 TTL 兜底会最终清理。
-			_, _ = common.RDB.Decr(context.Background(), key).Result()
+			close(done)
+			if common.RDB != nil {
+				_, _ = channelLeaseReleaseScript.Run(
+					context.Background(), common.RDB, []string{leaseKey}, member,
+				).Result()
+			}
 		})
 	}
 }
 
-func memoryReleaseOnce(counter *channelConcurrencyCounter) func() {
+func tryAcquireMemoryChannelCapacityAt(
+	channelID int,
+	maxConcurrency int,
+	rpmLimit int,
+	rpmWindow time.Duration,
+	now time.Time,
+) ChannelAdmissionResult {
+	state := getChannelCapacityState(channelMemoryCapacityKey(channelID))
+	state.mu.Lock()
+	if now.IsZero() {
+		now = time.Now()
+	}
+	nowNanos := now.UnixNano()
+	cutoff := now.Add(-rpmWindow).UnixNano()
+	state.pruneRpmEntriesLocked(cutoff)
+	if maxConcurrency > 0 && state.inflight >= int64(maxConcurrency) {
+		state.mu.Unlock()
+		return ChannelAdmissionResult{Reason: ChannelAdmissionConcurrencyLimited}
+	}
+	if rpmLimit > 0 && len(state.rpmEntries) >= rpmLimit {
+		retryAfter := time.Duration(state.rpmEntries[0]+rpmWindow.Nanoseconds()-nowNanos) * time.Nanosecond
+		if retryAfter < time.Millisecond {
+			retryAfter = time.Millisecond
+		}
+		state.mu.Unlock()
+		return ChannelAdmissionResult{Reason: ChannelAdmissionRpmLimited, RetryAfter: retryAfter}
+	}
+	if maxConcurrency > 0 {
+		state.inflight++
+	}
+	if rpmLimit > 0 {
+		state.rpmEntries = append(state.rpmEntries, nowNanos)
+	}
+	state.idleRounds = 0
+	state.mu.Unlock()
+
+	if maxConcurrency <= 0 {
+		return ChannelAdmissionResult{Release: func() {}, Acquired: true}
+	}
+	return ChannelAdmissionResult{Release: memoryCapacityReleaseOnce(state), Acquired: true}
+}
+
+func (state *channelCapacityState) pruneRpmEntriesLocked(cutoff int64) {
+	firstActive := 0
+	for firstActive < len(state.rpmEntries) && state.rpmEntries[firstActive] <= cutoff {
+		firstActive++
+	}
+	if firstActive == 0 {
+		return
+	}
+	if firstActive == len(state.rpmEntries) {
+		state.rpmEntries = nil
+		return
+	}
+	state.rpmEntries = append(state.rpmEntries[:0], state.rpmEntries[firstActive:]...)
+}
+
+func memoryCapacityReleaseOnce(state *channelCapacityState) func() {
 	var once sync.Once
 	return func() {
 		once.Do(func() {
-			atomic.AddInt64(&counter.value, -1)
+			state.mu.Lock()
+			if state.inflight > 0 {
+				state.inflight--
+			}
+			state.mu.Unlock()
 		})
 	}
 }
 
-// AcquireChannelSlotWithMetric 在 TryAcquireChannelSlot 基础上记录成功指标，供 controller 编排层用。
-func AcquireChannelSlotWithMetric(channelID int, maxConcurrency int) (func(), bool) {
-	release, ok := TryAcquireChannelSlot(channelID, maxConcurrency)
-	if ok {
+// TryAcquireChannelSlot 保留原并发原语接口，内部统一走新准入器且不启用 RPM。
+func TryAcquireChannelSlot(channelID int, maxConcurrency int) (func(), bool) {
+	result := TryAcquireChannelCapacity(channelID, maxConcurrency, 0, time.Minute, "")
+	return result.Release, result.Acquired
+}
+
+// AcquireChannelCapacityWithMetric 在原子准入成功后记录指标，供 controller 编排层使用。
+func AcquireChannelCapacityWithMetric(
+	channelID int,
+	maxConcurrency int,
+	rpmLimit int,
+	rpmWindow time.Duration,
+	requestID string,
+) ChannelAdmissionResult {
+	result := TryAcquireChannelCapacity(channelID, maxConcurrency, rpmLimit, rpmWindow, requestID)
+	if result.Acquired {
 		recordChannelAcquire()
 	}
-	return release, ok
+	return result
 }
 
-// QueryChannelConcurrency 只读返回某渠道当前在途并发数（供监控/仪表盘展示）。
-func QueryChannelConcurrency(channelID int) (int64, error) {
-	key := channelConcurrencyKey(channelID)
-	if common.RedisEnabled {
-		ctx := context.Background()
-		val, err := common.RDB.Get(ctx, key).Int64()
-		if err != nil {
-			// redis: nil 表示 key 不存在，即并发为 0（与 QueryTokenConcurrency 判定一致）。
-			if err.Error() == "redis: nil" {
-				return 0, nil
-			}
-			return 0, err
-		}
-		return val, nil
-	}
-	if counter, ok := channelConcurrencyCounters.Load(key); ok {
-		return atomic.LoadInt64(&counter.(*channelConcurrencyCounter).value), nil
-	}
-	return 0, nil
+// AcquireChannelSlotWithMetric 保留原接口，供尚未迁移的调用方使用。
+func AcquireChannelSlotWithMetric(channelID int, maxConcurrency int) (func(), bool) {
+	result := AcquireChannelCapacityWithMetric(channelID, maxConcurrency, 0, time.Minute, "")
+	return result.Release, result.Acquired
 }
 
-// QueryChannelConcurrencies 批量返回渠道当前在途并发数，供容量感知选渠计算压力。
-// Redis 模式使用一次 MGET，避免候选渠道逐个 GET；内存模式直接读取各原子计数器。
-func QueryChannelConcurrencies(channelIDs []int) (map[int]int64, error) {
-	result := make(map[int]int64, len(channelIDs))
+// QueryChannelCapacityUsages 批量返回渠道当前在途并发和 RPM 窗口使用量。
+func QueryChannelCapacityUsages(channelIDs []int, rpmWindow time.Duration) (map[int]ChannelCapacityUsage, error) {
+	result := make(map[int]ChannelCapacityUsage, len(channelIDs))
 	if len(channelIDs) == 0 {
 		return result, nil
+	}
+	if rpmWindow <= 0 {
+		rpmWindow = time.Minute
 	}
 
 	uniqueIDs := make([]int, 0, len(channelIDs))
@@ -295,36 +572,76 @@ func QueryChannelConcurrencies(channelIDs []int) (map[int]int64, error) {
 		}
 		seen[channelID] = struct{}{}
 		uniqueIDs = append(uniqueIDs, channelID)
-		result[channelID] = 0
+		result[channelID] = ChannelCapacityUsage{}
 	}
 
 	if common.RedisEnabled {
-		keys := make([]string, len(uniqueIDs))
-		for i, channelID := range uniqueIDs {
-			keys[i] = channelConcurrencyKey(channelID)
+		if common.RDB == nil {
+			return nil, fmt.Errorf("redis client is nil")
 		}
-		values, err := common.RDB.MGet(context.Background(), keys...).Result()
+		keys := make([]string, 0, len(uniqueIDs)*2)
+		for _, channelID := range uniqueIDs {
+			keys = append(keys, channelLeaseKey(channelID), channelRpmKey(channelID))
+		}
+		values, err := channelCapacityQueryScript.Run(
+			context.Background(), common.RDB, keys, rpmWindow.Milliseconds(),
+		).Int64Slice()
 		if err != nil {
 			return nil, err
 		}
-		for i, value := range values {
-			if value == nil {
-				continue
+		if len(values) != len(uniqueIDs)*2 {
+			return nil, fmt.Errorf("unexpected channel capacity query result length: %d", len(values))
+		}
+		for i, channelID := range uniqueIDs {
+			result[channelID] = ChannelCapacityUsage{
+				Inflight: values[i*2],
+				RpmUsed:  values[i*2+1],
 			}
-			parsed, err := strconv.ParseInt(fmt.Sprint(value), 10, 64)
-			if err != nil {
-				return nil, err
-			}
-			result[uniqueIDs[i]] = parsed
 		}
 		return result, nil
 	}
 
+	now := time.Now()
+	cutoff := now.Add(-rpmWindow).UnixNano()
 	for _, channelID := range uniqueIDs {
-		key := channelConcurrencyKey(channelID)
-		if counter, ok := channelConcurrencyCounters.Load(key); ok {
-			result[channelID] = atomic.LoadInt64(&counter.(*channelConcurrencyCounter).value)
+		if value, ok := channelCapacityStates.Load(channelMemoryCapacityKey(channelID)); ok {
+			state := value.(*channelCapacityState)
+			state.mu.Lock()
+			state.pruneRpmEntriesLocked(cutoff)
+			result[channelID] = ChannelCapacityUsage{
+				Inflight: state.inflight,
+				RpmUsed:  int64(len(state.rpmEntries)),
+			}
+			state.mu.Unlock()
 		}
+	}
+	return result, nil
+}
+
+// QueryChannelConcurrency 只读返回某渠道当前有效 Lease 数。
+func QueryChannelConcurrency(channelID int) (int64, error) {
+	usages, err := QueryChannelCapacityUsages(
+		[]int{channelID},
+		time.Duration(operation_setting.GetChannelConcurrencySetting().NormalizedRpmWindowSeconds())*time.Second,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return usages[channelID].Inflight, nil
+}
+
+// QueryChannelConcurrencies 批量返回渠道当前有效 Lease 数。
+func QueryChannelConcurrencies(channelIDs []int) (map[int]int64, error) {
+	usages, err := QueryChannelCapacityUsages(
+		channelIDs,
+		time.Duration(operation_setting.GetChannelConcurrencySetting().NormalizedRpmWindowSeconds())*time.Second,
+	)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[int]int64, len(usages))
+	for channelID, usage := range usages {
+		result[channelID] = usage.Inflight
 	}
 	return result, nil
 }

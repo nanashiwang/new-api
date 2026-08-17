@@ -217,3 +217,101 @@ func TestQueryChannelConcurrenciesMemoryBatch(t *testing.T) {
 	assert.Equal(t, int64(1), got[channelB])
 	assert.Equal(t, int64(0), got[990203])
 }
+
+func TestResolveChannelRpmLimit(t *testing.T) {
+	t.Setenv("CHANNEL_RPM_DEFAULT_LIMIT", "")
+	setting := operation_setting.GetChannelConcurrencySetting()
+	origDefault := setting.DefaultRpmLimit
+	setting.DefaultRpmLimit = 120
+	t.Cleanup(func() { setting.DefaultRpmLimit = origDefault })
+
+	assert.Equal(t, 120, ResolveChannelRpmLimit(&model.Channel{}))
+
+	override := `{"rpm_limit": 45}`
+	assert.Equal(t, 45, ResolveChannelRpmLimit(&model.Channel{Setting: &override}))
+
+	zero := `{"rpm_limit": 0}`
+	assert.Equal(t, 120, ResolveChannelRpmLimit(&model.Channel{Setting: &zero}))
+	assert.Equal(t, 120, ResolveChannelRpmLimit(nil))
+}
+
+func TestTryAcquireChannelCapacityRpmWindow(t *testing.T) {
+	forceMemoryMode(t)
+	const channelID = 990301
+	window := time.Minute
+	base := time.Unix(1_700_000_000, 0)
+
+	first := tryAcquireMemoryChannelCapacityAt(channelID, 10, 2, window, base)
+	require.True(t, first.Acquired)
+	first.Release()
+
+	second := tryAcquireMemoryChannelCapacityAt(channelID, 10, 2, window, base.Add(10*time.Second))
+	require.True(t, second.Acquired)
+	second.Release()
+
+	limited := tryAcquireMemoryChannelCapacityAt(channelID, 10, 2, window, base.Add(20*time.Second))
+	assert.False(t, limited.Acquired)
+	assert.Equal(t, ChannelAdmissionRpmLimited, limited.Reason)
+	assert.Equal(t, 40*time.Second, limited.RetryAfter)
+
+	afterWindow := tryAcquireMemoryChannelCapacityAt(channelID, 10, 2, window, base.Add(61*time.Second))
+	require.True(t, afterWindow.Acquired)
+	afterWindow.Release()
+}
+
+func TestChannelCapacityConcurrencyRejectDoesNotConsumeRpm(t *testing.T) {
+	forceMemoryMode(t)
+	const channelID = 990302
+	window := time.Minute
+	base := time.Unix(1_700_000_100, 0)
+
+	first := tryAcquireMemoryChannelCapacityAt(channelID, 1, 2, window, base)
+	require.True(t, first.Acquired)
+
+	concurrencyLimited := tryAcquireMemoryChannelCapacityAt(channelID, 1, 2, window, base.Add(time.Second))
+	assert.False(t, concurrencyLimited.Acquired)
+	assert.Equal(t, ChannelAdmissionConcurrencyLimited, concurrencyLimited.Reason)
+
+	first.Release()
+	second := tryAcquireMemoryChannelCapacityAt(channelID, 1, 2, window, base.Add(2*time.Second))
+	require.True(t, second.Acquired, "并发拒绝不应消耗 RPM 名额")
+	second.Release()
+
+	rpmLimited := tryAcquireMemoryChannelCapacityAt(channelID, 1, 2, window, base.Add(3*time.Second))
+	assert.False(t, rpmLimited.Acquired)
+	assert.Equal(t, ChannelAdmissionRpmLimited, rpmLimited.Reason)
+}
+
+func TestQueryChannelCapacityUsagesMemory(t *testing.T) {
+	forceMemoryMode(t)
+	const channelID = 990303
+
+	first := TryAcquireChannelCapacity(channelID, 5, 10, time.Minute, "request-a")
+	require.True(t, first.Acquired)
+	second := TryAcquireChannelCapacity(channelID, 5, 10, time.Minute, "request-b")
+	require.True(t, second.Acquired)
+	t.Cleanup(func() {
+		first.Release()
+		second.Release()
+	})
+
+	usages, err := QueryChannelCapacityUsages([]int{channelID, channelID}, time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, ChannelCapacityUsage{Inflight: 2, RpmUsed: 2}, usages[channelID])
+}
+
+func TestTryAcquireChannelCapacityRedisFailureIsClosed(t *testing.T) {
+	originalRedisEnabled := common.RedisEnabled
+	originalRDB := common.RDB
+	common.RedisEnabled = true
+	common.RDB = nil
+	t.Cleanup(func() {
+		common.RedisEnabled = originalRedisEnabled
+		common.RDB = originalRDB
+	})
+
+	result := TryAcquireChannelCapacity(990304, 10, 60, time.Minute, "request")
+	assert.False(t, result.Acquired)
+	assert.Equal(t, ChannelAdmissionBackendUnavailable, result.Reason)
+	assert.Equal(t, time.Second, result.RetryAfter)
+}
