@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/require"
@@ -91,4 +92,28 @@ func TestRelayErrorHandlerAttachesUpstreamDiagnostics(t *testing.T) {
 	if !strings.Contains(apiErr.UpstreamDiagnosticsLogString(), "2hr1mdrh0ni") {
 		t.Fatalf("diagnostics log missing request id: %s", apiErr.UpstreamDiagnosticsLogString())
 	}
+}
+
+func TestParseRetryAfter(t *testing.T) {
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	require.Equal(t, 30*time.Second, ParseRetryAfter("30", now))
+	require.Equal(t, 45*time.Second, ParseRetryAfter(now.Add(45*time.Second).Format(http.TimeFormat), now))
+	require.Zero(t, ParseRetryAfter("0", now))
+	require.Zero(t, ParseRetryAfter(now.Add(-time.Second).Format(http.TimeFormat), now))
+	require.Zero(t, ParseRetryAfter("invalid", now))
+}
+
+func TestRelayErrorHandlerPreservesRateLimitMetadataAfterMapping(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Header:     http.Header{"Retry-After": []string{"7"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"rate limited","type":"rate_limit_error","code":"rate_limit"}}`)),
+	}
+
+	apiErr := RelayErrorHandler(context.Background(), resp, false)
+	ResetStatusCode(apiErr, `{"429":503}`)
+	require.Equal(t, http.StatusServiceUnavailable, apiErr.StatusCode)
+	require.Equal(t, http.StatusTooManyRequests, apiErr.UpstreamStatusCode)
+	require.Equal(t, 7*time.Second, apiErr.RetryAfter)
+	require.True(t, IsUpstreamRateLimitError(apiErr))
 }

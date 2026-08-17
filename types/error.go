@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 )
@@ -89,15 +90,17 @@ const (
 )
 
 type NewAPIError struct {
-	Err            error
-	RelayError     any
-	skipRetry      bool
-	recordErrorLog *bool
-	errorType      ErrorType
-	errorCode      ErrorCode
-	StatusCode     int
-	Metadata       json.RawMessage
-	Upstream       *UpstreamDiagnostics
+	Err                error
+	RelayError         any
+	skipRetry          bool
+	recordErrorLog     *bool
+	errorType          ErrorType
+	errorCode          ErrorCode
+	StatusCode         int
+	UpstreamStatusCode int
+	RetryAfter         time.Duration
+	Metadata           json.RawMessage
+	Upstream           *UpstreamDiagnostics
 }
 
 type UpstreamDiagnostics struct {

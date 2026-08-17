@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -26,15 +29,38 @@ func TestRemoveChannelsFromExclusion(t *testing.T) {
 	assert.Empty(t, removeChannelsFromExclusion([]int{5, 6}, map[int]bool{5: true, 6: true}))
 }
 
-// TestBuildChannelOverload503 验证过载 503 错误的状态码与跳过重试属性
-// （已在 Layer C 等过，不应被 controller 再次重试）。
-func TestBuildChannelOverload503(t *testing.T) {
-	setting := &operation_setting.ChannelConcurrencySetting{RetryAfterSeconds: 5}
-	apiErr := buildChannelOverload503(nil, setting, "all channels reached concurrency limit")
+func TestBuildChannelCapacityErrorRoundsRetryAfterUp(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	apiErr := buildChannelCapacityError(ctx, http.StatusTooManyRequests, "rpm limited", 1500*time.Millisecond)
 	if assert.NotNil(t, apiErr) {
-		assert.Equal(t, 503, apiErr.StatusCode)
-		assert.True(t, types.IsSkipRetryError(apiErr), "过载 503 已等待过，不应再被重试")
+		assert.Equal(t, http.StatusTooManyRequests, apiErr.StatusCode)
+		assert.Equal(t, "2", recorder.Header().Get("Retry-After"))
+		assert.Equal(t, 2*time.Second, apiErr.RetryAfter)
+		assert.True(t, types.IsSkipRetryError(apiErr), "容量终态错误不应再次重试")
 	}
+}
+
+func TestBuildBlockedChannelCapacityErrorOnlyRpmReturns429(t *testing.T) {
+	setting := &operation_setting.ChannelConcurrencySetting{RetryAfterSeconds: 5}
+	summary := channelCapacityBlockSummary{}
+	summary.Record(middleware.ChannelAdmissionResult{Reason: middleware.ChannelAdmissionRpmLimited, RetryAfter: 2200 * time.Millisecond})
+	summary.Record(middleware.ChannelAdmissionResult{Reason: middleware.ChannelAdmissionRpmLimited, RetryAfter: 1200 * time.Millisecond})
+
+	apiErr := buildBlockedChannelCapacityError(nil, setting, summary, "all channels reached rpm limit")
+	assert.Equal(t, http.StatusTooManyRequests, apiErr.StatusCode)
+	assert.Equal(t, 2*time.Second, apiErr.RetryAfter)
+}
+
+func TestBuildBlockedChannelCapacityErrorMixedReturns503(t *testing.T) {
+	setting := &operation_setting.ChannelConcurrencySetting{RetryAfterSeconds: 5}
+	summary := channelCapacityBlockSummary{}
+	summary.Record(middleware.ChannelAdmissionResult{Reason: middleware.ChannelAdmissionRpmLimited, RetryAfter: time.Second})
+	summary.Record(middleware.ChannelAdmissionResult{Reason: middleware.ChannelAdmissionConcurrencyLimited})
+
+	apiErr := buildBlockedChannelCapacityError(nil, setting, summary, "all channels reached capacity limit")
+	assert.Equal(t, http.StatusServiceUnavailable, apiErr.StatusCode)
+	assert.Equal(t, 5*time.Second, apiErr.RetryAfter)
 }
 
 // TestBuildClientCanceledError 验证客户端断开错误跳过重试且隐藏内部细节。

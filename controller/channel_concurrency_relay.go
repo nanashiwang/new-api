@@ -29,8 +29,8 @@ import (
 // 当所有候选渠道都满时进入
 // Layer C——有界等待容量释放：
 //   - 客户端断开：立即取消等待（不返回错误响应，客户端已走）；
-//   - 等待超时：返回 503 + Retry-After，指导客户端退避；
-//   - 等待队列已满：快速失败 503，防止过载时等待请求无界堆积；
+//   - 等待超时：仅 RPM 满返回 429，并发满或混合满返回 503，同时携带 Retry-After；
+//   - 等待队列已满：按当前瓶颈快速失败 429/503，防止过载时等待请求无界堆积；
 //   - 等到容量：清除因满而排除的渠道，重新选择并占用。
 //
 // 关键正确性保证：
@@ -44,7 +44,7 @@ import (
 // 返回 (channel, releaseSlot, apiErr, isOverloadControl)：
 //   - 成功：channel 非 nil，releaseSlot 非 nil（须在本轮上游调用后释放一次）；
 //   - 客户端在等待中断开：apiErr 为可跳过重试的 client-canceled 错误，isOverloadControl=true；
-//   - 等待超时/队列满：apiErr 为 503（已设置 Retry-After 响应头），isOverloadControl=true；
+//   - 等待超时/队列满：仅 RPM 满为 429，其它容量不足为 503（均设置 Retry-After），isOverloadControl=true；
 //   - 真无可用渠道（非并发原因）：透传 getChannel 的原始错误，isOverloadControl=false。
 //
 // isOverloadControl=true 表示这是 Layer C 过载控制的终态错误，调用方应直接采用它，
@@ -85,6 +85,7 @@ func selectChannelWithConcurrency(
 	// ---- 阶段2：正常负载均衡 + 并发控制（有界过载兜底）----
 	// 本次请求内因“并发或 RPM 容量不足”而被临时排除的渠道集合。
 	blockedChannels := make(map[int]bool)
+	var blockSummary channelCapacityBlockSummary
 	inWaitQueue := false
 	var waitStart time.Time
 	defer func() {
@@ -118,8 +119,9 @@ func selectChannelWithConcurrency(
 				)
 				if !admission.Acquired {
 					if admission.Reason == middleware.ChannelAdmissionBackendUnavailable {
-						return nil, nil, buildChannelOverload503(c, setting, "channel capacity backend unavailable"), true
+						return nil, nil, buildChannelCapacityError(c, http.StatusServiceUnavailable, "channel capacity backend unavailable", admission.RetryAfter), true
 					}
+					blockSummary.Record(admission)
 					blockedChannels[channel.Id] = true
 					retryParam.ExcludeChannels = appendUniqueInt(retryParam.ExcludeChannels, channel.Id)
 					continue
@@ -158,23 +160,32 @@ func selectChannelWithConcurrency(
 		}
 
 		// ---- Layer C 有界等待 ----
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			middleware.RecordChannelWaitTimeout()
+			return nil, nil, buildBlockedChannelCapacityError(c, setting, blockSummary, "all channels reached capacity limit"), true
+		}
+		// RPM 名额只能随窗口推进恢复；若最短恢复时间已超过本层等待预算，直接返回精确 429。
+		if blockSummary.OnlyRpmLimited() && blockSummary.RetryAfter > remaining {
+			middleware.RecordChannelWaitTimeout()
+			return nil, nil, buildBlockedChannelCapacityError(c, setting, blockSummary, "all channels reached rpm limit"), true
+		}
+
 		if !inWaitQueue {
 			if !middleware.EnterChannelWaitQueue(maxQueueLen) {
 				// 等待队列已满：快速失败，防止过载时等待请求无界堆积。
 				middleware.RecordChannelQueueReject()
-				return nil, nil, buildChannelOverload503(c, setting, "concurrency wait queue is full"), true
+				return nil, nil, buildBlockedChannelCapacityError(c, setting, blockSummary, "channel capacity wait queue is full"), true
 			}
 			inWaitQueue = true
 			waitStart = time.Now()
 			middleware.RecordChannelWaitEnter()
 		}
 
-		remaining := time.Until(deadline)
-		if remaining <= 0 {
-			middleware.RecordChannelWaitTimeout()
-			return nil, nil, buildChannelOverload503(c, setting, "all channels reached capacity limit"), true
-		}
 		wait := pollInterval
+		if blockSummary.OnlyRpmLimited() && blockSummary.RetryAfter > 0 {
+			wait = blockSummary.RetryAfter
+		}
 		if wait > remaining {
 			wait = remaining
 		}
@@ -188,6 +199,7 @@ func selectChannelWithConcurrency(
 			// 一个轮询周期过去：清除容量临时排除，让渠道重新参与选择。
 			retryParam.ExcludeChannels = removeChannelsFromExclusion(retryParam.ExcludeChannels, blockedChannels)
 			blockedChannels = make(map[int]bool)
+			blockSummary = channelCapacityBlockSummary{}
 			continue
 		}
 	}
@@ -205,6 +217,7 @@ func getChannelCapacityCandidates(
 			channelID := c.GetInt("channel_id")
 			if !containsChannelID(retryParam.ExcludeChannels, channelID) {
 				if selected, err := model.CacheGetChannel(channelID); err == nil && selected != nil &&
+					!service.IsChannelRateLimitCoolingDown(selected) &&
 					!service.IsChannelModelCircuitOpen(selected, retryParam.ModelName) {
 					return []*model.Channel{selected}, "", nil
 				}
@@ -312,17 +325,64 @@ func containsChannelID(ids []int, target int) bool {
 	return false
 }
 
-// buildChannelOverload503 构造过载 503 错误，并设置 Retry-After 响应头指导客户端退避重试。
-func buildChannelOverload503(c *gin.Context, setting *operation_setting.ChannelConcurrencySetting, reason string) *types.NewAPIError {
-	if c != nil {
-		c.Header("Retry-After", strconv.Itoa(setting.NormalizedRetryAfterSeconds()))
+type channelCapacityBlockSummary struct {
+	ConcurrencyLimited bool
+	RpmLimited         bool
+	RetryAfter         time.Duration
+}
+
+func (s *channelCapacityBlockSummary) Record(admission middleware.ChannelAdmissionResult) {
+	switch admission.Reason {
+	case middleware.ChannelAdmissionConcurrencyLimited:
+		s.ConcurrencyLimited = true
+	case middleware.ChannelAdmissionRpmLimited:
+		s.RpmLimited = true
+		if admission.RetryAfter > 0 && (s.RetryAfter <= 0 || admission.RetryAfter < s.RetryAfter) {
+			s.RetryAfter = admission.RetryAfter
+		}
 	}
-	return types.NewErrorWithStatusCode(
+}
+
+func (s channelCapacityBlockSummary) OnlyRpmLimited() bool {
+	return s.RpmLimited && !s.ConcurrencyLimited
+}
+
+func buildBlockedChannelCapacityError(
+	c *gin.Context,
+	setting *operation_setting.ChannelConcurrencySetting,
+	summary channelCapacityBlockSummary,
+	reason string,
+) *types.NewAPIError {
+	if summary.OnlyRpmLimited() {
+		retryAfter := summary.RetryAfter
+		if retryAfter <= 0 {
+			retryAfter = time.Duration(setting.NormalizedRetryAfterSeconds()) * time.Second
+		}
+		return buildChannelCapacityError(c, http.StatusTooManyRequests, reason, retryAfter)
+	}
+	return buildChannelCapacityError(
+		c, http.StatusServiceUnavailable, reason,
+		time.Duration(setting.NormalizedRetryAfterSeconds())*time.Second,
+	)
+}
+
+// buildChannelCapacityError 构造容量错误，并设置向上取整的 Retry-After。
+func buildChannelCapacityError(c *gin.Context, statusCode int, reason string, retryAfter time.Duration) *types.NewAPIError {
+	retryAfterSeconds := int((retryAfter + time.Second - 1) / time.Second)
+	if retryAfterSeconds < 1 {
+		retryAfterSeconds = 1
+	}
+	if c != nil {
+		c.Header("Retry-After", strconv.Itoa(retryAfterSeconds))
+	}
+	apiErr := types.NewErrorWithStatusCode(
 		errors.New(reason+", please retry later"),
 		types.ErrorCodeGetChannelFailed,
-		http.StatusServiceUnavailable,
+		statusCode,
 		types.ErrOptionWithSkipRetry(),
 	)
+	apiErr.RetryAfter = time.Duration(retryAfterSeconds) * time.Second
+	return apiErr
 }
 
 // buildClientCanceledError 构造客户端断开取消的错误：跳过重试、隐藏内部细节，不污染错误率指标。

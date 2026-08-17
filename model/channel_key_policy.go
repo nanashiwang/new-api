@@ -56,6 +56,31 @@ func IsMultiKeyInCooldown(channelId int, keyIndex int) bool {
 	return err == nil
 }
 
+// SetMultiKeyCooldownAtLeast 设置多 Key 冷却，并保证不会缩短已有冷却时间。
+// 返回最终剩余冷却秒数。
+func SetMultiKeyCooldownAtLeast(channelId int, keyIndex int, reason string, seconds int) (int, error) {
+	if !common.RedisEnabled || common.RDB == nil || channelId <= 0 || keyIndex < 0 || seconds <= 0 {
+		return 0, nil
+	}
+	if reason == "" {
+		reason = "upstream_rate_limit"
+	}
+	ttlMs := int64(seconds) * int64(time.Second/time.Millisecond)
+	result, err := common.RDB.Eval(context.Background(), `
+local current_ttl = redis.call('PTTL', KEYS[1])
+local requested_ttl = tonumber(ARGV[2])
+if current_ttl < requested_ttl then
+    redis.call('PSETEX', KEYS[1], requested_ttl, ARGV[1])
+    return requested_ttl
+end
+return current_ttl
+`, []string{buildMultiKeyCooldownKey(channelId, keyIndex)}, reason, ttlMs).Int64()
+	if err != nil {
+		return 0, err
+	}
+	return int((result + 999) / 1000), nil
+}
+
 func SetMultiKeyCooldown(channelId int, keyIndex int, reason string, seconds int) error {
 	if !common.RedisEnabled || channelId <= 0 || keyIndex < 0 {
 		return nil

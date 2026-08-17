@@ -88,6 +88,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	defer func() {
 		if newAPIError != nil {
+			if service.IsUpstreamRateLimitError(newAPIError) && newAPIError.RetryAfter > 0 {
+				retryAfterSeconds := int((newAPIError.RetryAfter + time.Second - 1) / time.Second)
+				if retryAfterSeconds < 1 {
+					retryAfterSeconds = 1
+				}
+				c.Header("Retry-After", fmt.Sprintf("%d", retryAfterSeconds))
+			}
 			logger.LogError(c, fmt.Sprintf("relay error: %s", newAPIError.Error()))
 			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
 			if !shouldWriteRelayErrorResponse(c) {
@@ -226,7 +233,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if channelErr != nil {
 			logger.LogError(c, channelErr.Error())
 			if overloadControl {
-				// Layer C 过载控制的终态错误（503 / 客户端断开）：直接采用，
+				// Layer C 过载控制的终态错误（429/503 / 客户端断开）：直接采用，
 				// 不用历史重试错误覆盖——系统整体过载对用户更有指导性。
 				newAPIError = channelErr
 			} else if lastRelayError != nil {
@@ -295,6 +302,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = service.NormalizeContentSafetyPolicyError(newAPIError)
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		newAPIError = service.NormalizeResponsesConversationStateError(newAPIError)
+		if cooldown := service.RecordChannelRateLimitCooldown(c, channel, newAPIError); cooldown > 0 {
+			logger.LogInfo(c, fmt.Sprintf("upstream rate limit cooldown set: channel=%d ttl=%ds", channel.Id, int((cooldown+time.Second-1)/time.Second)))
+		}
 		if service.IsContentSafetyPolicyError(newAPIError) {
 			result, auditErr := service.RecordContentSafetyPolicyViolation(c, relayInfo, newAPIError)
 			if auditErr != nil {

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -86,9 +87,16 @@ func ClaudeErrorWrapperLocal(err error, code string, statusCode int) *dto.Claude
 
 func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFail bool) (newApiErr *types.NewAPIError) {
 	newApiErr = types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
+	upstreamStatusCode := resp.StatusCode
+	retryAfter := ParseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
 	upstreamDiagnostics := buildUpstreamDiagnostics(resp, 0)
 	defer func() {
-		if newApiErr != nil && !upstreamDiagnostics.IsZero() {
+		if newApiErr == nil {
+			return
+		}
+		newApiErr.UpstreamStatusCode = upstreamStatusCode
+		newApiErr.RetryAfter = retryAfter
+		if !upstreamDiagnostics.IsZero() {
 			newApiErr.Upstream = upstreamDiagnostics
 		}
 	}()
@@ -138,6 +146,32 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 		newApiErr.Err = buildErrWithBody(newApiErr.Error())
 	}
 	return
+}
+
+// ParseRetryAfter 解析上游 Retry-After，支持秒数和 HTTP-date。
+func ParseRetryAfter(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
+		if seconds <= 0 {
+			return 0
+		}
+		return time.Duration(seconds) * time.Second
+	}
+	retryAt, err := http.ParseTime(value)
+	if err != nil {
+		return 0
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	retryAfter := retryAt.Sub(now)
+	if retryAfter <= 0 {
+		return 0
+	}
+	return retryAfter
 }
 
 func buildUpstreamDiagnostics(resp *http.Response, responseLength int64) *types.UpstreamDiagnostics {

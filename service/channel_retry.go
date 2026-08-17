@@ -153,7 +153,7 @@ func IsUpstreamRateLimitError(err *types.NewAPIError) bool {
 	if err == nil || types.IsSkipRetryError(err) {
 		return false
 	}
-	if err.StatusCode == http.StatusTooManyRequests {
+	if err.StatusCode == http.StatusTooManyRequests || err.UpstreamStatusCode == http.StatusTooManyRequests {
 		return true
 	}
 	lowerMessage := normalizeUpstreamErrorMessage(err)
