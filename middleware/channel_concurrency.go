@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -276,4 +277,54 @@ func QueryChannelConcurrency(channelID int) (int64, error) {
 		return atomic.LoadInt64(&counter.(*channelConcurrencyCounter).value), nil
 	}
 	return 0, nil
+}
+
+// QueryChannelConcurrencies 批量返回渠道当前在途并发数，供容量感知选渠计算压力。
+// Redis 模式使用一次 MGET，避免候选渠道逐个 GET；内存模式直接读取各原子计数器。
+func QueryChannelConcurrencies(channelIDs []int) (map[int]int64, error) {
+	result := make(map[int]int64, len(channelIDs))
+	if len(channelIDs) == 0 {
+		return result, nil
+	}
+
+	uniqueIDs := make([]int, 0, len(channelIDs))
+	seen := make(map[int]struct{}, len(channelIDs))
+	for _, channelID := range channelIDs {
+		if _, exists := seen[channelID]; exists {
+			continue
+		}
+		seen[channelID] = struct{}{}
+		uniqueIDs = append(uniqueIDs, channelID)
+		result[channelID] = 0
+	}
+
+	if common.RedisEnabled {
+		keys := make([]string, len(uniqueIDs))
+		for i, channelID := range uniqueIDs {
+			keys[i] = channelConcurrencyKey(channelID)
+		}
+		values, err := common.RDB.MGet(context.Background(), keys...).Result()
+		if err != nil {
+			return nil, err
+		}
+		for i, value := range values {
+			if value == nil {
+				continue
+			}
+			parsed, err := strconv.ParseInt(fmt.Sprint(value), 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			result[uniqueIDs[i]] = parsed
+		}
+		return result, nil
+	}
+
+	for _, channelID := range uniqueIDs {
+		key := channelConcurrencyKey(channelID)
+		if counter, ok := channelConcurrencyCounters.Load(key); ok {
+			result[channelID] = atomic.LoadInt64(&counter.(*channelConcurrencyCounter).value)
+		}
+	}
+	return result, nil
 }

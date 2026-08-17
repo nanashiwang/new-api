@@ -3,13 +3,17 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math/rand"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -19,8 +23,9 @@ import (
 
 // channel_concurrency_relay.go 是渠道并发控制（含 Layer C 有界过载处理）的编排层。
 //
-// 它包装 getChannel：选中渠道后尝试占用该渠道一个在途并发名额；若该渠道已满则自动换到
-// 其它未满的渠道（不消耗外层 RetryTimes，因为这不是转发失败）；当所有候选渠道都满时进入
+// 它先获取当前优先级下的全部候选渠道，按 inflight/maxConcurrency 的实时压力排序，
+// 再依次原子申请名额；若该渠道已满则自动换到其它未满渠道（不消耗外层 RetryTimes）。
+// 当所有候选渠道都满时进入
 // Layer C——有界等待容量释放：
 //   - 客户端断开：立即取消等待（不返回错误响应，客户端已走）；
 //   - 等待超时：返回 503 + Retry-After，指导客户端退避；
@@ -88,7 +93,7 @@ func selectChannelWithConcurrency(
 	}()
 
 	for {
-		channel, chErr := getChannel(c, info, retryParam)
+		candidates, selectGroup, chErr := getChannelCapacityCandidates(c, info, retryParam)
 
 		needWait := false
 		switch {
@@ -99,17 +104,33 @@ func selectChannelWithConcurrency(
 			}
 			// 有渠道，但都被并发占满排除了 → 进入等待。
 			needWait = true
-		case fullChannels[channel.Id]:
-			// getChannel 又返回了已知满的渠道（无其它候选，如指定渠道或单渠道场景）→ 等待其释放。
-			needWait = true
 		default:
-			maxConcurrency := middleware.ResolveChannelMaxConcurrency(channel)
-			release, acquired := middleware.AcquireChannelSlotWithMetric(channel.Id, maxConcurrency)
-			if acquired {
-				// 成功换到未满渠道：把本请求因“临时并发满”而排除的渠道恢复为可选，
-				// 避免临时排除退化成永久排除（否则它们在本请求后续（含外层失败重试）中一直被跳过，
-				// 即便早已空闲，会持续缩小可用渠道集）。removeChannelsFromExclusion 按集合精确移除，
-				// 不影响外层因真实失败而排除的渠道。
+			// 同优先级候选先按当前并发占比从低到高排列；并发占比相同则先随机打散，
+			// 避免所有实例同时命中固定 ID 最小的渠道。压力快照只负责排序，最终由 acquire 原子裁决。
+			candidates = rankChannelsByConcurrencyPressure(candidates)
+			for _, channel := range candidates {
+				maxConcurrency := middleware.ResolveChannelMaxConcurrency(channel)
+				release, acquired := middleware.AcquireChannelSlotWithMetric(channel.Id, maxConcurrency)
+				if !acquired {
+					fullChannels[channel.Id] = true
+					retryParam.ExcludeChannels = appendUniqueInt(retryParam.ExcludeChannels, channel.Id)
+					continue
+				}
+
+				// 只有原子申请容量成功后才正式写入渠道上下文，避免“先选死渠道再等待”的旧流程。
+				setupErr := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
+				if setupErr != nil {
+					release()
+					if !service.ShouldFallbackAfterSetupError(setupErr) {
+						return nil, nil, setupErr, false
+					}
+					retryParam.ExcludeChannels = appendUniqueInt(retryParam.ExcludeChannels, channel.Id)
+					continue
+				}
+				service.CommitChannelCandidateSelection(retryParam, selectGroup)
+				info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
+
+				// 临时满载排除只在本轮选渠期间生效，成功后恢复，避免影响后续真实失败重试。
 				if len(fullChannels) > 0 {
 					retryParam.ExcludeChannels = removeChannelsFromExclusion(retryParam.ExcludeChannels, fullChannels)
 				}
@@ -118,9 +139,8 @@ func selectChannelWithConcurrency(
 				}
 				return channel, release, nil, false
 			}
-			// 该渠道已满：标记并排除，换下一个候选（不消耗外层 RetryTimes）。
-			fullChannels[channel.Id] = true
-			retryParam.ExcludeChannels = appendUniqueInt(retryParam.ExcludeChannels, channel.Id)
+
+			// 当前优先级候选都满载或初始化失败，继续获取下一优先级/下一分组候选。
 			continue
 		}
 
@@ -162,6 +182,108 @@ func selectChannelWithConcurrency(
 			continue
 		}
 	}
+}
+
+// getChannelCapacityCandidates 获取当前重试层级的全部候选渠道，不提前固定单个渠道。
+// 指定渠道在首轮仍优先尝试；若其满载被临时排除，后续可按原有降级语义尝试其它渠道。
+func getChannelCapacityCandidates(
+	c *gin.Context,
+	info *relaycommon.RelayInfo,
+	retryParam *service.RetryParam,
+) ([]*model.Channel, string, *types.NewAPIError) {
+	if info.ChannelMeta == nil && retryParam.GetRetry() == 0 {
+		if _, specific := c.Get("specific_channel_id"); specific {
+			channelID := c.GetInt("channel_id")
+			if !containsChannelID(retryParam.ExcludeChannels, channelID) {
+				if selected, err := model.CacheGetChannel(channelID); err == nil && selected != nil &&
+					!service.IsChannelModelCircuitOpen(selected, retryParam.ModelName) {
+					return []*model.Channel{selected}, "", nil
+				}
+			}
+		}
+	}
+
+	channels, selectGroup, err := service.CacheGetSatisfiedChannelCandidates(retryParam)
+	if err != nil {
+		return nil, selectGroup, types.NewError(
+			fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（capacity）: %s", selectGroup, info.OriginModelName, err.Error()),
+			types.ErrorCodeGetChannelFailed,
+			types.ErrOptionWithSkipRetry(),
+		)
+	}
+	if len(channels) == 0 {
+		return nil, selectGroup, types.NewError(
+			fmt.Errorf("分组 %s 下模型 %s 的可用渠道不存在（capacity）", selectGroup, info.OriginModelName),
+			types.ErrorCodeGetChannelFailed,
+			types.ErrOptionWithSkipRetry(),
+		)
+	}
+	return channels, selectGroup, nil
+}
+
+type channelConcurrencyCandidate struct {
+	channel        *model.Channel
+	inflight       int64
+	maxConcurrency int
+}
+
+// rankChannelsByConcurrencyPressure 按 inflight/maxConcurrency 升序排列。
+// 查询失败时退化为随机顺序，原子 acquire 仍会保证不会突破并发上限。
+func rankChannelsByConcurrencyPressure(channels []*model.Channel) []*model.Channel {
+	if len(channels) <= 1 {
+		return channels
+	}
+
+	ranked := append([]*model.Channel(nil), channels...)
+	rand.Shuffle(len(ranked), func(i, j int) {
+		ranked[i], ranked[j] = ranked[j], ranked[i]
+	})
+
+	channelIDs := make([]int, 0, len(ranked))
+	for _, channel := range ranked {
+		channelIDs = append(channelIDs, channel.Id)
+	}
+	inflightByChannel, err := middleware.QueryChannelConcurrencies(channelIDs)
+	if err != nil {
+		return ranked
+	}
+
+	candidates := make([]channelConcurrencyCandidate, 0, len(ranked))
+	for _, channel := range ranked {
+		candidates = append(candidates, channelConcurrencyCandidate{
+			channel:        channel,
+			inflight:       inflightByChannel[channel.Id],
+			maxConcurrency: middleware.ResolveChannelMaxConcurrency(channel),
+		})
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return concurrencyPressureLess(candidates[i], candidates[j])
+	})
+	for i, candidate := range candidates {
+		ranked[i] = candidate.channel
+	}
+	return ranked
+}
+
+func concurrencyPressureLess(left, right channelConcurrencyCandidate) bool {
+	leftMax := left.maxConcurrency
+	if leftMax <= 0 {
+		leftMax = 1
+	}
+	rightMax := right.maxConcurrency
+	if rightMax <= 0 {
+		rightMax = 1
+	}
+	return left.inflight*int64(rightMax) < right.inflight*int64(leftMax)
+}
+
+func containsChannelID(ids []int, target int) bool {
+	for _, id := range ids {
+		if id == target {
+			return true
+		}
+	}
+	return false
 }
 
 // buildChannelOverload503 构造过载 503 错误，并设置 Retry-After 响应头指导客户端退避重试。

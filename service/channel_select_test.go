@@ -172,3 +172,58 @@ func TestCacheGetRandomSatisfiedChannel_NoMemoryCacheFallsBackAfterFilter(t *tes
 		t.Fatalf("expected lower-priority channel 2, got %#v", got)
 	}
 }
+
+func TestCacheGetSatisfiedChannelCandidatesReturnsAllSamePriority(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	originDB, originLogDB := model.DB, model.LOG_DB
+	originMemoryCacheEnabled := common.MemoryCacheEnabled
+	model.DB, model.LOG_DB = db, db
+	common.MemoryCacheEnabled = false
+	t.Cleanup(func() {
+		model.DB, model.LOG_DB = originDB, originLogDB
+		common.MemoryCacheEnabled = originMemoryCacheEnabled
+	})
+	if err := db.AutoMigrate(&model.Channel{}, &model.Ability{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	high, low := int64(10), int64(1)
+	channels := []model.Channel{
+		{Id: 1, Name: "high-a", Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled, Priority: &high},
+		{Id: 2, Name: "high-b", Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled, Priority: &high},
+		{Id: 3, Name: "low", Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled, Priority: &low},
+	}
+	if err := db.Create(&channels).Error; err != nil {
+		t.Fatalf("seed channels: %v", err)
+	}
+	abilities := []model.Ability{
+		{Group: "default", Model: "gpt-5.6-sol", ChannelId: 1, Enabled: true, Priority: &high, Weight: 100},
+		{Group: "default", Model: "gpt-5.6-sol", ChannelId: 2, Enabled: true, Priority: &high, Weight: 100},
+		{Group: "default", Model: "gpt-5.6-sol", ChannelId: 3, Enabled: true, Priority: &low, Weight: 100},
+	}
+	if err := db.Create(&abilities).Error; err != nil {
+		t.Fatalf("seed abilities: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	got, group, err := CacheGetSatisfiedChannelCandidates(&RetryParam{
+		Ctx:        ctx,
+		TokenGroup: "default",
+		ModelName:  "gpt-5.6-sol",
+		Retry:      common.GetPointer(0),
+	})
+	if err != nil {
+		t.Fatalf("get candidates: %v", err)
+	}
+	if group != "default" {
+		t.Fatalf("expected group default, got %s", group)
+	}
+	if len(got) != 2 || got[0].Id != 1 || got[1].Id != 2 {
+		t.Fatalf("expected same-priority candidates [1,2], got %#v", got)
+	}
+}

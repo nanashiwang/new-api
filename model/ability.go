@@ -176,6 +176,89 @@ func GetChannel(group string, modelName string, retry int, allowedChannels []int
 	return channel, nil
 }
 
+// GetSatisfiedChannels 返回当前重试层级下、同一目标优先级的全部候选渠道。
+// 它与 GetChannel 使用相同的模型归一化、白名单、排除列表和过滤器语义，
+// 但不做随机选择，供上层按实时容量压力进行排序和原子准入。
+func GetSatisfiedChannels(group string, modelName string, retry int, allowedChannels []int, excludeChannels []int, filters ...ChannelFilter) ([]*Channel, error) {
+	abilities, err := getFilteredAbilities(group, modelName, allowedChannels, excludeChannels)
+	normalizedModel := ratio_setting.FormatMatchingModelName(modelName)
+	if (err != nil || len(abilities) == 0) && normalizedModel != "" && normalizedModel != modelName {
+		abilities, err = getFilteredAbilities(group, normalizedModel, allowedChannels, excludeChannels)
+	}
+	if err != nil || len(abilities) == 0 {
+		return nil, err
+	}
+
+	channelIDs := make([]int, 0, len(abilities))
+	seenChannelIDs := make(map[int]struct{}, len(abilities))
+	for _, ability := range abilities {
+		if _, exists := seenChannelIDs[ability.ChannelId]; exists {
+			continue
+		}
+		seenChannelIDs[ability.ChannelId] = struct{}{}
+		channelIDs = append(channelIDs, ability.ChannelId)
+	}
+	var loadedChannels []*Channel
+	if err := DB.Where("id IN ?", channelIDs).Find(&loadedChannels).Error; err != nil {
+		return nil, err
+	}
+	channelByID := make(map[int]*Channel, len(loadedChannels))
+	for _, channel := range loadedChannels {
+		channelByID[channel.Id] = channel
+	}
+
+	eligibleAbilities := make([]Ability, 0, len(abilities))
+	for _, ability := range abilities {
+		channel, exists := channelByID[ability.ChannelId]
+		if !exists {
+			return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", ability.ChannelId)
+		}
+		pass := true
+		for _, filter := range filters {
+			if !filter(channel) {
+				pass = false
+				break
+			}
+		}
+		if pass {
+			eligibleAbilities = append(eligibleAbilities, ability)
+		}
+	}
+	if len(eligibleAbilities) == 0 {
+		return nil, nil
+	}
+
+	priorities := make([]int64, 0)
+	seenPriorities := make(map[int64]struct{})
+	for _, ability := range eligibleAbilities {
+		priority := abilityPriority(ability)
+		if _, exists := seenPriorities[priority]; exists {
+			continue
+		}
+		seenPriorities[priority] = struct{}{}
+		priorities = append(priorities, priority)
+	}
+	sort.Slice(priorities, func(i, j int) bool { return priorities[i] > priorities[j] })
+	if retry >= len(priorities) {
+		retry = len(priorities) - 1
+	}
+	targetPriority := priorities[retry]
+
+	channels := make([]*Channel, 0, len(eligibleAbilities))
+	selectedChannelIDs := make(map[int]struct{}, len(eligibleAbilities))
+	for _, ability := range eligibleAbilities {
+		if abilityPriority(ability) != targetPriority {
+			continue
+		}
+		if _, exists := selectedChannelIDs[ability.ChannelId]; exists {
+			continue
+		}
+		selectedChannelIDs[ability.ChannelId] = struct{}{}
+		channels = append(channels, channelByID[ability.ChannelId])
+	}
+	return channels, nil
+}
+
 func abilityPriority(ability Ability) int64 {
 	if ability.Priority == nil {
 		return 0

@@ -445,7 +445,11 @@ func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
 func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (*model.Channel, *types.NewAPIError) {
 	if info.ChannelMeta == nil {
 		channelID := c.GetInt("channel_id")
-		if selected, err := model.CacheGetChannel(channelID); err == nil && selected != nil {
+		if containsChannelID(retryParam.ExcludeChannels, channelID) {
+			// 首轮预选渠道可能因容量满载被临时排除；此时必须进入重新选渠路径，
+			// 不能继续反复返回 Context 中同一个渠道。
+			info.ChannelMeta = &relaycommon.ChannelMeta{}
+		} else if selected, err := model.CacheGetChannel(channelID); err == nil && selected != nil {
 			if service.IsChannelModelCircuitOpen(selected, retryParam.ModelName) {
 				retryParam.ExcludeChannels = appendUniqueInt(retryParam.ExcludeChannels, channelID)
 				info.ChannelMeta = &relaycommon.ChannelMeta{}

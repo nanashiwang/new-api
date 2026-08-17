@@ -159,7 +159,13 @@ func Distribute() func(c *gin.Context) {
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
 		c.Next()
 		if selectedChannel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
-			service.RecordChannelAffinity(c, selectedChannel.Id)
+			// relay 层可能因容量压力改选了其它渠道，应记录最终实际使用的渠道，
+			// 不能继续使用进入 controller 前预选的 selectedChannel。
+			actualChannelID := common.GetContextKeyInt(c, constant.ContextKeyChannelId)
+			if actualChannelID <= 0 {
+				actualChannelID = selectedChannel.Id
+			}
+			service.RecordChannelAffinity(c, actualChannelID)
 		}
 	}
 }

@@ -297,3 +297,45 @@ func TestGetChannelDB_MapsCodexAutoReviewToRoutingModel(t *testing.T) {
 		t.Fatalf("expected codex channel 1, got %d", got.Id)
 	}
 }
+
+func TestGetSatisfiedChannelCandidates_ReturnsSamePriorityCandidates(t *testing.T) {
+	originMemoryCacheEnabled := common.MemoryCacheEnabled
+	originGroupMap := group2model2channels
+	originChannels := channelsIDM
+	common.MemoryCacheEnabled = true
+
+	high := int64(10)
+	low := int64(1)
+	weight := uint(100)
+	group2model2channels = map[string]map[string][]int{
+		"default": {
+			"gpt-5.4": {1, 2, 3},
+		},
+	}
+	channelsIDM = map[int]*Channel{
+		1: {Id: 1, Name: "high-a", Weight: &weight, Priority: &high},
+		2: {Id: 2, Name: "high-b", Weight: &weight, Priority: &high},
+		3: {Id: 3, Name: "low", Weight: &weight, Priority: &low},
+	}
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = originMemoryCacheEnabled
+		group2model2channels = originGroupMap
+		channelsIDM = originChannels
+	})
+
+	candidates, err := GetSatisfiedChannelCandidates("default", "gpt-5.4", 0, nil, nil)
+	if err != nil {
+		t.Fatalf("get candidates: %v", err)
+	}
+	if len(candidates) != 2 || candidates[0].Id != 1 || candidates[1].Id != 2 {
+		t.Fatalf("expected high-priority channels [1,2], got %#v", candidates)
+	}
+
+	candidates, err = GetSatisfiedChannelCandidates("default", "gpt-5.4", 0, nil, []int{1, 2})
+	if err != nil {
+		t.Fatalf("get fallback candidates: %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].Id != 3 {
+		t.Fatalf("expected lower-priority channel 3 after exclusions, got %#v", candidates)
+	}
+}

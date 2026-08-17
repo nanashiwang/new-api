@@ -193,3 +193,27 @@ func TestChannelConcurrencyMetricsSnapshot(t *testing.T) {
 	// 记录等待时长后，平均值应可计算且非负（具体值受其它测试累加影响）。
 	assert.GreaterOrEqual(t, snap.AvgWaitMs, int64(0))
 }
+
+func TestQueryChannelConcurrenciesMemoryBatch(t *testing.T) {
+	forceMemoryMode(t)
+	const channelA = 990201
+	const channelB = 990202
+
+	releaseA1, ok := TryAcquireChannelSlot(channelA, 5)
+	require.True(t, ok)
+	releaseA2, ok := TryAcquireChannelSlot(channelA, 5)
+	require.True(t, ok)
+	releaseB, ok := TryAcquireChannelSlot(channelB, 5)
+	require.True(t, ok)
+	t.Cleanup(func() {
+		releaseA1()
+		releaseA2()
+		releaseB()
+	})
+
+	got, err := QueryChannelConcurrencies([]int{channelA, channelB, channelA, 990203})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), got[channelA])
+	assert.Equal(t, int64(1), got[channelB])
+	assert.Equal(t, int64(0), got[990203])
+}

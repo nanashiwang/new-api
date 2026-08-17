@@ -172,22 +172,7 @@ func cacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 	var err error
 	selectGroup := param.TokenGroup
 	userGroup := common.GetContextKeyString(param.Ctx, constant.ContextKeyUserGroup)
-
-	// Build client restriction filter
-	clientFilter := buildClientFilter(param.Ctx)
-	var filters []model.ChannelFilter
-	if clientFilter != nil {
-		filters = append(filters, clientFilter)
-	}
-	filters = append(filters, func(ch *model.Channel) bool {
-		return !IsChannelUnavailableForRequestContext(param.Ctx, ch) &&
-			!IsChannelModelCircuitOpen(ch, param.ModelName)
-	})
-	if IsCodexAutoReviewRequestModel(param.ModelName) {
-		filters = append(filters, func(ch *model.Channel) bool {
-			return ch != nil && constant.IsCodexAutoReviewCompatibleChannelType(ch.Type)
-		})
-	}
+	filters := buildChannelSelectionFilters(param)
 
 	if param.TokenGroup == "auto" {
 		if len(setting.GetAutoGroups()) == 0 {
@@ -262,6 +247,126 @@ func cacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 		}
 	}
 	return channel, selectGroup, nil
+}
+
+// CacheGetSatisfiedChannelCandidates 返回当前分组与重试优先级下的全部候选渠道，
+// 不在这里随机选中单个渠道，供 controller 按实时容量压力排序后执行原子准入。
+func CacheGetSatisfiedChannelCandidates(param *RetryParam) ([]*model.Channel, string, error) {
+	if param == nil {
+		return nil, "", errors.New("retry param is nil")
+	}
+
+	selectGroup := param.TokenGroup
+	userGroup := common.GetContextKeyString(param.Ctx, constant.ContextKeyUserGroup)
+	filters := buildChannelSelectionFilters(param)
+
+	if param.TokenGroup != "auto" {
+		channels, err := model.GetSatisfiedChannelCandidates(
+			param.TokenGroup,
+			param.ModelName,
+			param.GetRetry(),
+			param.AllowedChannels,
+			param.ExcludeChannels,
+			filters...,
+		)
+		return channels, selectGroup, err
+	}
+
+	if len(setting.GetAutoGroups()) == 0 {
+		return nil, selectGroup, errors.New("auto groups is not enabled")
+	}
+	autoGroups := GetUserAutoGroup(userGroup)
+	startGroupIndex := 0
+	if lastGroupIndex, exists := common.GetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex); exists {
+		if idx, ok := lastGroupIndex.(int); ok {
+			startGroupIndex = idx
+		}
+	}
+
+	for i := startGroupIndex; i < len(autoGroups); i++ {
+		autoGroup := autoGroups[i]
+		priorityRetry := param.GetRetry()
+		if i > startGroupIndex {
+			priorityRetry = 0
+		}
+		logger.LogDebug(param.Ctx, "Auto selecting capacity candidates: group=%s, priorityRetry=%d", autoGroup, priorityRetry)
+
+		channels, err := model.GetSatisfiedChannelCandidates(
+			autoGroup,
+			param.ModelName,
+			priorityRetry,
+			param.AllowedChannels,
+			param.ExcludeChannels,
+			filters...,
+		)
+		if err != nil {
+			return nil, autoGroup, err
+		}
+		if len(channels) == 0 {
+			continue
+		}
+
+		return channels, autoGroup, nil
+	}
+
+	return nil, selectGroup, nil
+}
+
+// CommitChannelCandidateSelection 在候选渠道完成原子容量申请并成功写入上下文后，
+// 提交 auto 分组的选择状态。候选读取阶段不提前修改这些状态，避免所有渠道满载等待时
+// 把 auto 分组索引推进到末尾，导致后续轮询无法重新探测容量。
+func CommitChannelCandidateSelection(param *RetryParam, selectGroup string) {
+	if param == nil || param.TokenGroup != "auto" || selectGroup == "" {
+		return
+	}
+	autoGroups := GetUserAutoGroup(common.GetContextKeyString(param.Ctx, constant.ContextKeyUserGroup))
+	selectedIndex := -1
+	for i, group := range autoGroups {
+		if group == selectGroup {
+			selectedIndex = i
+			break
+		}
+	}
+	if selectedIndex < 0 {
+		return
+	}
+
+	startGroupIndex := 0
+	if lastGroupIndex, exists := common.GetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex); exists {
+		if idx, ok := lastGroupIndex.(int); ok {
+			startGroupIndex = idx
+		}
+	}
+	priorityRetry := param.GetRetry()
+	if selectedIndex > startGroupIndex {
+		priorityRetry = 0
+	}
+
+	common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroup, selectGroup)
+	if common.GetContextKeyBool(param.Ctx, constant.ContextKeyTokenCrossGroupRetry) && priorityRetry >= common.RetryTimes {
+		common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex, selectedIndex+1)
+		param.SetRetry(0)
+		param.ResetRetryNextTry()
+		return
+	}
+	common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex, selectedIndex)
+}
+
+func buildChannelSelectionFilters(param *RetryParam) []model.ChannelFilter {
+	filters := make([]model.ChannelFilter, 0, 3)
+	if clientFilter := buildClientFilter(param.Ctx); clientFilter != nil {
+		filters = append(filters, clientFilter)
+	}
+	filters = append(filters, func(ch *model.Channel) bool {
+		return !IsChannelUnavailableForRequestContext(param.Ctx, ch) &&
+			!IsChannelModelCircuitOpen(ch, param.ModelName)
+	})
+	if IsCodexAutoReviewRequestModel(param.ModelName) {
+		filters = append(filters, func(ch *model.Channel) bool {
+			return ch != nil && constant.IsCodexAutoReviewCompatibleChannelType(ch.Type)
+		})
+	}
+	return filters
 }
 
 // buildClientFilter creates a ChannelFilter that checks client restriction settings.

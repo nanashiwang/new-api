@@ -247,6 +247,84 @@ func GetRandomSatisfiedChannel(group string, model string, retry int, allowedCha
 	return nil, errors.New("channel not found")
 }
 
+// GetSatisfiedChannelCandidates 返回当前重试层级下、同一目标优先级的全部候选渠道。
+// 开启内存缓存时直接从渠道缓存读取；关闭时回退数据库实现。
+func GetSatisfiedChannelCandidates(group string, modelName string, retry int, allowedChannels []int, excludeChannels []int, filters ...ChannelFilter) ([]*Channel, error) {
+	if !common.MemoryCacheEnabled {
+		return GetSatisfiedChannels(group, modelName, retry, allowedChannels, excludeChannels, filters...)
+	}
+
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+
+	allowedSet := make(map[int]bool, len(allowedChannels))
+	for _, id := range allowedChannels {
+		allowedSet[id] = true
+	}
+	excludeSet := make(map[int]bool, len(excludeChannels))
+	for _, id := range excludeChannels {
+		excludeSet[id] = true
+	}
+
+	channelIDs := group2model2channels[group][modelName]
+	if len(channelIDs) == 0 {
+		normalizedModel := ratio_setting.FormatMatchingModelName(modelName)
+		channelIDs = group2model2channels[group][normalizedModel]
+	}
+	if len(channelIDs) == 0 {
+		return nil, nil
+	}
+
+	filteredChannels := make([]*Channel, 0, len(channelIDs))
+	for _, channelID := range channelIDs {
+		if len(allowedSet) > 0 && !allowedSet[channelID] {
+			continue
+		}
+		if excludeSet[channelID] {
+			continue
+		}
+		channel, ok := channelsIDM[channelID]
+		if !ok || channel == nil {
+			continue
+		}
+		pass := true
+		for _, filter := range filters {
+			if !filter(channel) {
+				pass = false
+				break
+			}
+		}
+		if pass {
+			filteredChannels = append(filteredChannels, channel)
+		}
+	}
+	if len(filteredChannels) == 0 {
+		return nil, nil
+	}
+
+	uniquePriorities := make(map[int64]struct{})
+	for _, channel := range filteredChannels {
+		uniquePriorities[channel.GetPriority()] = struct{}{}
+	}
+	priorities := make([]int64, 0, len(uniquePriorities))
+	for priority := range uniquePriorities {
+		priorities = append(priorities, priority)
+	}
+	sort.Slice(priorities, func(i, j int) bool { return priorities[i] > priorities[j] })
+	if retry >= len(priorities) {
+		retry = len(priorities) - 1
+	}
+	targetPriority := priorities[retry]
+
+	candidates := make([]*Channel, 0, len(filteredChannels))
+	for _, channel := range filteredChannels {
+		if channel.GetPriority() == targetPriority {
+			candidates = append(candidates, channel)
+		}
+	}
+	return candidates, nil
+}
+
 func CacheGetChannel(id int) (*Channel, error) {
 	if !common.MemoryCacheEnabled {
 		return GetChannelById(id, true)

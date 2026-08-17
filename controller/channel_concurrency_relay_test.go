@@ -3,6 +3,9 @@ package controller
 import (
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/middleware"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
@@ -39,5 +42,49 @@ func TestBuildClientCanceledError(t *testing.T) {
 	if assert.NotNil(t, apiErr) {
 		assert.True(t, types.IsSkipRetryError(apiErr), "客户端断开不应重试")
 		assert.Equal(t, "client canceled while waiting for channel capacity", apiErr.Error())
+	}
+}
+
+func TestConcurrencyPressureLessUsesNormalizedLoad(t *testing.T) {
+	left := channelConcurrencyCandidate{
+		channel:        &model.Channel{Id: 1},
+		inflight:       1,
+		maxConcurrency: 2,
+	}
+	right := channelConcurrencyCandidate{
+		channel:        &model.Channel{Id: 2},
+		inflight:       2,
+		maxConcurrency: 10,
+	}
+
+	assert.False(t, concurrencyPressureLess(left, right), "50% 负载不应排在 20% 负载之前")
+	assert.True(t, concurrencyPressureLess(right, left), "20% 负载应优先于 50% 负载")
+}
+
+func TestRankChannelsByConcurrencyPressurePrefersLowerNormalizedLoad(t *testing.T) {
+	originalRedisEnabled := common.RedisEnabled
+	common.RedisEnabled = false
+	t.Cleanup(func() { common.RedisEnabled = originalRedisEnabled })
+
+	settingA := `{"max_concurrency":2}`
+	settingB := `{"max_concurrency":10}`
+	channelA := &model.Channel{Id: 991001, Setting: &settingA}
+	channelB := &model.Channel{Id: 991002, Setting: &settingB}
+
+	releaseA, ok := middleware.TryAcquireChannelSlot(channelA.Id, 2)
+	assert.True(t, ok)
+	releaseB1, ok := middleware.TryAcquireChannelSlot(channelB.Id, 10)
+	assert.True(t, ok)
+	releaseB2, ok := middleware.TryAcquireChannelSlot(channelB.Id, 10)
+	assert.True(t, ok)
+	t.Cleanup(func() {
+		releaseA()
+		releaseB1()
+		releaseB2()
+	})
+
+	ranked := rankChannelsByConcurrencyPressure([]*model.Channel{channelA, channelB})
+	if assert.Len(t, ranked, 2) {
+		assert.Equal(t, channelB.Id, ranked[0].Id, "20% 负载渠道应优先于 50% 负载渠道")
 	}
 }
