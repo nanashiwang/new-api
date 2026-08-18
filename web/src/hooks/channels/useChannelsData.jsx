@@ -54,6 +54,18 @@ const EMPTY_CHANNEL_CONCURRENCY_SNAPSHOT = {
   byChannelId: {},
 };
 
+const buildChannelTypeCounts = (typeCounts = {}, vendorCounts = {}) => {
+  const displayTypeTotal = Object.values(typeCounts).reduce(
+    (acc, value) => acc + Number(value || 0),
+    0,
+  );
+  const totalChannels = Number(vendorCounts?.all);
+  return {
+    ...typeCounts,
+    all: Number.isFinite(totalChannels) ? totalChannels : displayTypeTotal,
+  };
+};
+
 export const useChannelsData = () => {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -93,8 +105,8 @@ export const useChannelsData = () => {
   const [activeTypeKey, setActiveTypeKey] = useState('all');
   const [typeCounts, setTypeCounts] = useState({});
 
-  // Vendor facet states. This is deliberately independent from channel type:
-  // an OpenAI-compatible transport can still carry Xiaomi MiMo models.
+  // Vendor overrides are rendered in the same top-level navigation as channel
+  // types, while Channel.Type remains unchanged for relay behavior.
   const [activeVendorKey, setActiveVendorKey] = useState('all');
   const [vendorCounts, setVendorCounts] = useState({});
 
@@ -498,11 +510,7 @@ export const useChannelsData = () => {
     if (success) {
       const { items, total, type_counts, vendor_counts } = data;
       if (type_counts) {
-        const sumAll = Object.values(type_counts).reduce(
-          (acc, v) => acc + v,
-          0,
-        );
-        setTypeCounts({ ...type_counts, all: sumAll });
+        setTypeCounts(buildChannelTypeCounts(type_counts, vendor_counts));
       }
       if (vendor_counts) {
         setVendorCounts(vendor_counts);
@@ -563,11 +571,7 @@ export const useChannelsData = () => {
           type_counts = {},
           vendor_counts = {},
         } = data;
-        const sumAll = Object.values(type_counts).reduce(
-          (acc, v) => acc + v,
-          0,
-        );
-        setTypeCounts({ ...type_counts, all: sumAll });
+        setTypeCounts(buildChannelTypeCounts(type_counts, vendor_counts));
         setVendorCounts(vendor_counts);
         setChannelFormat(items, enableTagMode);
         setChannelCount(total);
