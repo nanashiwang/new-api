@@ -266,7 +266,7 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
 	if common.DebugEnabled {
-		println("upstream response body:", string(responseBody))
+		println("upstream response body:", openAIDebugResponseBodyForLog(responseBody))
 	}
 	// Unmarshal to simpleResponse
 	if info.ChannelType == constant.ChannelTypeOpenRouter && info.ChannelOtherSettings.IsOpenRouterEnterprise() {
@@ -365,6 +365,14 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 
 	return &simpleResponse.Usage, nil
+}
+
+func openAIDebugResponseBodyForLog(responseBody []byte) string {
+	const maxDebugResponseBodyBytes = 8 * 1024
+	if len(responseBody) > maxDebugResponseBodyBytes {
+		return fmt.Sprintf("<response omitted: %d bytes>", len(responseBody))
+	}
+	return string(responseBody)
 }
 
 func streamTTSResponse(c *gin.Context, resp *http.Response) {

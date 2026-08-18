@@ -188,6 +188,9 @@ func buildChannelStyleTestExecution(channel *model.Channel, modelName, endpointT
 	if streamOverride != nil {
 		isStream = *streamOverride
 	}
+	if forceNonStreamMiMoTTSTest(channel, modelName) {
+		isStream = false
+	}
 	if strings.HasPrefix(requestPath, "/v1/responses/compact") {
 		modelName = ratio_setting.WithCompactModelSuffix(modelName)
 	}
@@ -694,7 +697,7 @@ func testChannel(channel *model.Channel, testUserID int, testModel string, endpo
 		Group:            info.UsingGroup,
 		Other:            other,
 	})
-	common.SysLog(fmt.Sprintf("testing channel #%d, response: \n%s", channel.Id, string(respBody)))
+	common.SysLog(fmt.Sprintf("testing channel #%d, response: \n%s", channel.Id, channelTestResponseForLog(testModel, respBody)))
 	return testResult{
 		context:      c,
 		localErr:     nil,
@@ -923,6 +926,9 @@ func buildChannelTestFailureResponse(result testResult, consumedTime float64) gi
 
 func buildTestRequest(model string, endpointType string, channel *model.Channel, isStream bool) dto.Request {
 	testResponsesInput := json.RawMessage(`[{"role":"user","content":"hi"}]`)
+	if request, ok := buildMiMoTTSTestRequest(model, endpointType, channel, isStream); ok {
+		return request
+	}
 
 	// 根据端点类型构建不同的测试请求
 	if endpointType != "" {
