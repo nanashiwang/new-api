@@ -276,6 +276,17 @@ func executeChannelStyleTest(
 	relayInfo.IsChannelTest = options.isChannelTest
 	relayInfo.InitChannelMeta(c)
 
+	// 渠道测试使用的是内部构造请求，HTTP Body 可能为空。
+	// 在模型映射前保存原始请求，供阶梯计费表达式读取 param()。
+	err = attachTestBillingRequestInput(relayInfo, request)
+	if err != nil {
+		result.context = c
+		result.info = relayInfo
+		result.localErr = err
+		result.newAPIError = types.NewError(err, types.ErrorCodeModelPriceError)
+		return
+	}
+
 	err = helper.ModelMappedHelper(c, relayInfo, request)
 	if err != nil {
 		result.context = c

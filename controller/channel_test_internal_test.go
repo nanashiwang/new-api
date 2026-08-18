@@ -11,7 +11,24 @@ import (
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
+
+func TestAttachTestBillingRequestInputUsesStructuredRequest(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		RequestHeaders: map[string]string{"Content-Type": "application/json"},
+	}
+	request := &dto.GeneralOpenAIRequest{
+		Model:  "deepseek-v4-flash",
+		Stream: true,
+	}
+
+	err := attachTestBillingRequestInput(info, request)
+	require.NoError(t, err)
+	require.NotNil(t, info.BillingRequestInput)
+	require.Equal(t, "deepseek-v4-flash", gjson.GetBytes(info.BillingRequestInput.Body, "model").String())
+	require.True(t, gjson.GetBytes(info.BillingRequestInput.Body, "stream").Bool())
+}
 
 func TestSettleTestQuotaUsesTieredBilling(t *testing.T) {
 	info := &relaycommon.RelayInfo{

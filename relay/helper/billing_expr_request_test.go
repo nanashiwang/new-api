@@ -36,6 +36,19 @@ func TestResolveIncomingBillingExprRequestInput(t *testing.T) {
 	require.Equal(t, "application/json", input.Headers["Content-Type"])
 }
 
+func TestResolveIncomingBillingExprRequestInputWithNilBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/channel/test/1", nil)
+	ctx.Request.Body = nil
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	input, err := ResolveIncomingBillingExprRequestInput(ctx, &relaycommon.RelayInfo{})
+	require.NoError(t, err)
+	require.Empty(t, input.Body)
+}
+
 func TestBuildBillingExprRequestInputFromRequest(t *testing.T) {
 	request := &dto.GeneralOpenAIRequest{
 		Model:  "gemini-3.1-pro-preview",
