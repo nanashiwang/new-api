@@ -14,6 +14,7 @@
 | WebChat / 本地网关               | [OpenClaw](./NAN_CLIENT_OPENCLAW.md)                     | 按模型选择     | OpenAI 带 `/v1`，Claude 不带 |
 | 一键导入配置                     | [CC Switch 和聊天入口](./NAN_CLIENT_CCSWITCH.md)         | 按工具选择     | 平台自动生成                 |
 | AI 生图                          | [AI 生图](./NAN_IMAGE_GENERATION.md)                     | 按图像模型选择 | 平台、技能包或 API           |
+| MiMo 语音模型                    | [MiMo 语音](./NAN_MIMO_AUDIO.md)                         | 按模型选择     | `https://cn.meta-api.vip/v1` |
 | 程序直接调用                     | [模型请求样例](./NAN_API_EXAMPLES.md)                    | 按模型选择     | 按协议选择                   |
 
 ## 2. 最容易填错的地方
@@ -78,6 +79,7 @@ npm --version
 - [OpenClaw 配置教程](./NAN_CLIENT_OPENCLAW.md)
 - [CC Switch 与聊天入口配置](./NAN_CLIENT_CCSWITCH.md)
 - [AI 生图：平台、技能包与 API](./NAN_IMAGE_GENERATION.md)
+- [MiMo V2.5 语音模型调用指南](./NAN_MIMO_AUDIO.md)
 - [各厂商模型请求样例](./NAN_API_EXAMPLES.md)
 
 ## 7. 原始飞书链接备查

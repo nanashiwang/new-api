@@ -11,6 +11,7 @@
 | [日志与排查](#3-日志与排查)           | 用日志定位报错和扣费                           |
 | [客户端接入](./NAN_CLIENTS.md)        | Codex、Claude Code、Gemini、OpenCode、OpenClaw |
 | [AI 生图](./NAN_IMAGE_GENERATION.md)  | 平台工作台、本地技能包、API 生图               |
+| [MiMo 语音](./NAN_MIMO_AUDIO.md)     | TTS、音色设计、音色克隆、ASR                   |
 | [模型请求样例](./NAN_API_EXAMPLES.md) | 各厂商协议、模型名和可复制请求                 |
 | [常见报错](./NAN_TROUBLESHOOTING.md)  | 按错误文本排查                                 |
 | [管理员操作](#4-管理员操作)           | 日常运营入口                                   |
