@@ -18,10 +18,41 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { BILLING_PRICING_VARS } from '../constants/billing.constants.js';
+import { formatModelPricingUnitPrice } from './modelPricingCurrency.js';
 
 const numberOrZero = (value) => {
   const numeric = Number(value || 0);
   return Number.isFinite(numeric) ? numeric : 0;
+};
+
+export const buildFirstTierGroupPriceItems = ({
+  tiers,
+  effectiveBillingRatio,
+  displayPrice,
+  t = (value) => value,
+}) => {
+  const firstTier = Array.isArray(tiers) ? tiers[0] : null;
+  if (!firstTier) {
+    return { firstTier: null, items: [] };
+  }
+
+  const numericRatio = Number(effectiveBillingRatio);
+  const safeRatio = Number.isFinite(numericRatio) ? numericRatio : 1;
+  const items = BILLING_PRICING_VARS.map((variable) => {
+    const unitPriceUSD = numberOrZero(firstTier[variable.field]);
+    if (unitPriceUSD === 0) return null;
+    return {
+      key: `tiered-${variable.key}`,
+      label: t(variable.label),
+      value: formatModelPricingUnitPrice(
+        unitPriceUSD * safeRatio,
+        displayPrice,
+      ),
+      suffix: ' / 1M Tokens',
+    };
+  }).filter(Boolean);
+
+  return { firstTier, items };
 };
 
 const hasTierPrice = (tier, key) => {
