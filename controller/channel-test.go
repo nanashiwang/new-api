@@ -734,7 +734,10 @@ func buildTestLogOther(c *gin.Context, info *relaycommon.RelayInfo, priceData ty
 	other := service.GenerateTextOtherInfo(c, info, priceData.ModelRatio, priceData.GroupRatioInfo.GroupRatio, priceData.CompletionRatio,
 		usage.PromptTokensDetails.CachedTokens, priceData.CacheRatio, priceData.ModelPrice, priceData.GroupRatioInfo.GroupSpecialRatio)
 	if tieredResult != nil {
-		service.InjectTieredBillingInfo(other, info, tieredResult)
+		isClaudeUsageSemantic := usage.UsageSemantic == "anthropic" || info.GetFinalRequestRelayFormat() == types.RelayFormatClaude
+		usedVars := billingexpr.UsedVars(info.TieredBillingSnapshot.ExprString)
+		tieredParams := service.BuildTieredTokenParams(usage, isClaudeUsageSemantic, usedVars)
+		service.InjectTieredBillingInfo(other, info, tieredResult, &tieredParams)
 	}
 	return other
 }

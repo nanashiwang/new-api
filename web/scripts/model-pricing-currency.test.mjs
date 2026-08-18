@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  formatModelPricingUnitPrice,
   resolveModelPricingCurrency,
   resolveModelPricingRate,
   resolveModelPricingSymbol,
@@ -94,5 +95,18 @@ assert.equal(resolveModelPricingSymbol('CUSTOM', 'G'), 'G');
 assert.equal(resolveModelPricingSymbol('CUSTOM', ''), '¤');
 assert.equal(resolveModelPricingSymbol('CNY'), '¥');
 assert.equal(resolveModelPricingSymbol('USD'), '$');
+
+const packageDisplayPrice = () => '';
+packageDisplayPrice.toAmount = (usdAmount) => usdAmount * 6.4;
+packageDisplayPrice.currencySymbol = '¥';
+assert.equal(formatModelPricingUnitPrice(2.5, packageDisplayPrice), '¥16.0000');
+
+const customDisplayPrice = () => '';
+customDisplayPrice.toAmount = (usdAmount) => usdAmount * 12.5;
+customDisplayPrice.currencySymbol = '⚡️';
+assert.equal(
+  formatModelPricingUnitPrice(0.1, customDisplayPrice, 6),
+  '⚡️1.250000',
+);
 
 console.log('model pricing currency tests passed');

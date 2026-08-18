@@ -21,6 +21,10 @@ import i18next from 'i18next';
 import { Modal, Tag, Typography, Avatar } from '@douyinfe/semi-ui';
 import { copy, showSuccess } from './utils';
 import { isMiMoModel } from './modelVendor';
+import {
+  buildTieredBillingBreakdown,
+  resolveTieredLogParams,
+} from './tieredBillingDisplay';
 import { MOBILE_BREAKPOINT } from '../hooks/common/useIsMobile';
 import {
   BILLING_PRICING_VARS,
@@ -2322,6 +2326,11 @@ export function renderTieredModelPrice(opts) {
     expr_b64: exprB64,
     matched_tier: matchedTier,
     group_ratio: groupRatio,
+    user_group_ratio: userGroupRatio,
+    time_ratio: timeRatioValue,
+    tiered_cost_usd: tieredCostUSD,
+    tiered_settled_usd: tieredSettledUSD,
+    quota,
     cache_tokens: cacheTokens = 0,
     cache_creation_tokens: cacheCreationTokens = 0,
     cache_creation_tokens_5m: cacheCreationTokens5m = 0,
@@ -2336,9 +2345,61 @@ export function renderTieredModelPrice(opts) {
 
   const tier = tiers.find((t) => t.label === matchedTier) || tiers[0];
   const { symbol, rate } = getCurrencyConfig();
-  const gr = groupRatio || 1;
+  const { ratio: effectiveGroupRatio, label: groupRatioLabel } =
+    getEffectiveRatio(groupRatio, userGroupRatio);
+  const groupMultiplier = Number.isFinite(Number(effectiveGroupRatio))
+    ? Number(effectiveGroupRatio)
+    : 1;
+  const timeMultiplier =
+    Number.isFinite(Number(timeRatioValue)) && Number(timeRatioValue) > 0
+      ? Number(timeRatioValue)
+      : 1;
+  const params = resolveTieredLogParams(
+    {
+      ...opts,
+      prompt_tokens: inputTokens,
+      completion_tokens: completionTokens,
+      cache_tokens: cacheTokens,
+      cache_creation_tokens: cacheCreationTokens,
+      cache_creation_tokens_5m: cacheCreationTokens5m,
+      cache_creation_tokens_1h: cacheCreationTokens1h,
+    },
+    tier,
+  );
+  const breakdown = buildTieredBillingBreakdown(tier, params);
+  const costBeforeGroupUSD = Number.isFinite(Number(tieredCostUSD))
+    ? Number(tieredCostUSD)
+    : breakdown.subtotalUSD;
+  const settledUSD = Number.isFinite(Number(tieredSettledUSD))
+    ? Number(tieredSettledUSD)
+    : costBeforeGroupUSD * groupMultiplier * timeMultiplier;
+  const conditionMultiplier =
+    breakdown.subtotalUSD !== 0
+      ? costBeforeGroupUSD / breakdown.subtotalUSD
+      : 1;
+  const hasConditionMultiplier =
+    Number.isFinite(conditionMultiplier) &&
+    Math.abs(conditionMultiplier - 1) > 0.000000001;
+  const formulaBaseUSD =
+    breakdown.subtotalUSD !== 0
+      ? breakdown.subtotalUSD
+      : costBeforeGroupUSD;
 
   const priceLines = BILLING_PRICING_VARS.map((v) => [v.field, v.label]);
+  const calculationLines = breakdown.items.map(
+    (item) =>
+      `${i18next.t(item.shortLabel)}：${item.tokens} / 1M tokens × ${symbol}${formatBillingDisplayPrice(
+        item.unitPriceUSD,
+        rate,
+      )} = ${symbol}${formatBillingDisplayPrice(item.amountUSD, rate)}`,
+  );
+  const multiplierParts = [
+    hasConditionMultiplier
+      ? `${i18next.t('条件乘数')} ${formatRatioValue(conditionMultiplier)}x`
+      : null,
+    `${groupRatioLabel} ${groupMultiplier}x`,
+    timeMultiplier !== 1 ? `${i18next.t('时间倍率')} ${timeMultiplier}x` : null,
+  ].filter(Boolean);
 
   const lines = [
     buildBillingText('命中档位：{{tier}}', { tier: matchedTier || tier.label }),
@@ -2347,6 +2408,13 @@ export function renderTieredModelPrice(opts) {
       .map(([field, label]) =>
         buildBillingPriceText(`${label}：{{symbol}}{{price}} / 1M tokens`, { symbol, usdAmount: tier[field], rate }),
       ),
+    ...calculationLines,
+    `${symbol}${formatBillingDisplayPrice(formulaBaseUSD, rate)} × ${multiplierParts.join(
+      ' × ',
+    )} = ${symbol}${formatBillingDisplayPrice(settledUSD, rate)}`,
+    Number.isFinite(Number(quota))
+      ? `${i18next.t('扣费')}：${renderQuota(Number(quota), 6)}`
+      : null,
   ];
 
   return renderBillingArticle(lines);

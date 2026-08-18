@@ -351,7 +351,7 @@ func GenerateMjOtherInfo(relayInfo *relaycommon.RelayInfo, priceData types.Price
 // InjectTieredBillingInfo overlays tiered billing fields onto an existing
 // module-specific other map. Call this after GenerateTextOtherInfo /
 // GenerateClaudeOtherInfo / etc. when the request used tiered_expr billing.
-func InjectTieredBillingInfo(other map[string]interface{}, relayInfo *relaycommon.RelayInfo, result *billingexpr.TieredResult) {
+func InjectTieredBillingInfo(other map[string]interface{}, relayInfo *relaycommon.RelayInfo, result *billingexpr.TieredResult, params *billingexpr.TokenParams) {
 	if relayInfo == nil || other == nil {
 		return
 	}
@@ -361,8 +361,28 @@ func InjectTieredBillingInfo(other map[string]interface{}, relayInfo *relaycommo
 	}
 	other["billing_mode"] = "tiered_expr"
 	other["expr_b64"] = base64.StdEncoding.EncodeToString([]byte(snap.ExprString))
+	if params != nil {
+		other["tiered_params"] = map[string]interface{}{
+			"p":     params.P,
+			"c":     params.C,
+			"len":   params.Len,
+			"cr":    params.CR,
+			"cc":    params.CC,
+			"cc1h":  params.CC1h,
+			"img":   params.Img,
+			"img_o": params.ImgO,
+			"ai":    params.AI,
+			"ao":    params.AO,
+		}
+	}
 	if result != nil {
 		other["matched_tier"] = result.MatchedTier
+		other["tiered_quota_before_group"] = result.ActualQuotaBeforeGroup
+		other["tiered_quota_after_group"] = result.ActualQuotaAfterGroup
+		if snap.QuotaPerUnit > 0 {
+			other["tiered_cost_usd"] = result.ActualQuotaBeforeGroup / snap.QuotaPerUnit
+			other["tiered_settled_usd"] = float64(result.ActualQuotaAfterGroup) / snap.QuotaPerUnit
+		}
 	}
 	if snap.TimeRatio > 0 {
 		other["time_ratio"] = snap.TimeRatio

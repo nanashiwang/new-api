@@ -53,3 +53,19 @@ export const resolveModelPricingSymbol = (currency, customCurrencySymbol) => {
   if (currency === 'CUSTOM') return customCurrencySymbol || '¤';
   return '$';
 };
+
+export const formatModelPricingUnitPrice = (
+  usdAmount,
+  displayPrice,
+  digits = 4,
+) => {
+  const numericUSD = Number(usdAmount || 0);
+  const safeUSD = Number.isFinite(numericUSD) ? numericUSD : 0;
+  const convertedAmount =
+    typeof displayPrice?.toAmount === 'function'
+      ? Number(displayPrice.toAmount(safeUSD))
+      : safeUSD;
+  const safeAmount = Number.isFinite(convertedAmount) ? convertedAmount : 0;
+  const symbol = displayPrice?.currencySymbol || '$';
+  return `${symbol}${safeAmount.toFixed(digits)}`;
+};

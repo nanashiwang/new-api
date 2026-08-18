@@ -283,6 +283,7 @@ const PricingCardView = ({
                               t,
                               priceData.usedGroupRatio,
                               priceData.timeRatioInfo,
+                              displayPrice,
                             )
                           : formatPriceInfo(priceData, t, siteDisplayType)}
                       </div>

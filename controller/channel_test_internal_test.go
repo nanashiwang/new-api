@@ -56,6 +56,7 @@ func TestBuildTestLogOtherInjectsTieredInfo(t *testing.T) {
 		GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
 	}
 	usage := &dto.Usage{
+		PromptTokens: 100,
 		PromptTokensDetails: dto.InputTokenDetails{
 			CachedTokens: 12,
 		},
@@ -68,6 +69,10 @@ func TestBuildTestLogOtherInjectsTieredInfo(t *testing.T) {
 	require.Equal(t, "tiered_expr", other["billing_mode"])
 	require.Equal(t, "base", other["matched_tier"])
 	require.NotEmpty(t, other["expr_b64"])
+	tieredParams, ok := other["tiered_params"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, float64(100), tieredParams["p"])
+	require.Equal(t, float64(12), tieredParams["cr"])
 }
 
 func TestResolveChannelTestUserIDUsesRequestUser(t *testing.T) {
