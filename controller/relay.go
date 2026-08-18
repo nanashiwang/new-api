@@ -88,7 +88,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	defer func() {
 		if newAPIError != nil {
-			if service.IsUpstreamRateLimitError(newAPIError) && newAPIError.RetryAfter > 0 {
+			if newAPIError.RetryAfter > 0 {
 				retryAfterSeconds := int((newAPIError.RetryAfter + time.Second - 1) / time.Second)
 				if retryAfterSeconds < 1 {
 					retryAfterSeconds = 1
@@ -638,6 +638,30 @@ func RelayMidjourney(c *gin.Context) {
 		return
 	}
 
+	var releaseSlot func()
+	if middleware.ChannelConcurrencyEnabled() && midjourneyModeUsesUpstream(relayInfo.RelayMode) {
+		var capacityErr *types.NewAPIError
+		var fixedChannelHandled bool
+		releaseSlot, capacityErr, fixedChannelHandled = acquireMidjourneyBoundChannelCapacity(c, relayInfo)
+		if !fixedChannelHandled {
+			retryParam := &service.RetryParam{
+				Ctx:             c,
+				TokenGroup:      relayInfo.TokenGroup,
+				ModelName:       relayInfo.OriginModelName,
+				AllowedChannels: middleware.GetAllowedTokenChannelIDs(c),
+				Retry:           common.GetPointer(0),
+			}
+			_, releaseSlot, capacityErr, _ = selectChannelWithConcurrency(c, relayInfo, retryParam)
+		}
+		if capacityErr != nil {
+			respondMidjourneyCapacityError(c, capacityErr)
+			return
+		}
+		if releaseSlot != nil {
+			defer releaseSlot()
+		}
+	}
+
 	var mjErr *dto.MidjourneyResponse
 	switch relayInfo.RelayMode {
 	case relayconstant.RelayModeMidjourneyNotify:
@@ -667,6 +691,100 @@ func RelayMidjourney(c *gin.Context) {
 		channelId := c.GetInt("channel_id")
 		logger.LogError(c, fmt.Sprintf("relay error (channel #%d, status code %d): %s", channelId, statusCode, fmt.Sprintf("%s %s", mjErr.Description, mjErr.Result)))
 	}
+}
+
+func midjourneyModeUsesUpstream(relayMode int) bool {
+	switch relayMode {
+	case relayconstant.RelayModeMidjourneyNotify,
+		relayconstant.RelayModeMidjourneyTaskFetch,
+		relayconstant.RelayModeMidjourneyTaskFetchByCondition:
+		return false
+	default:
+		return true
+	}
+}
+
+func acquireMidjourneyBoundChannelCapacity(c *gin.Context, info *relaycommon.RelayInfo) (func(), *types.NewAPIError, bool) {
+	if info == nil {
+		return nil, nil, false
+	}
+	if info.RelayMode == relayconstant.RelayModeMidjourneyTaskImageSeed {
+		release, apiErr := acquireMidjourneyTaskChannelCapacity(c, info)
+		return release, apiErr, true
+	}
+
+	switch info.RelayMode {
+	case relayconstant.RelayModeMidjourneyAction,
+		relayconstant.RelayModeMidjourneyChange,
+		relayconstant.RelayModeMidjourneySimpleChange,
+		relayconstant.RelayModeMidjourneyModal,
+		relayconstant.RelayModeMidjourneyVideo:
+	default:
+		return nil, nil, false
+	}
+
+	var request dto.MidjourneyRequest
+	if err := common.UnmarshalBodyReusable(c, &request); err != nil {
+		// relay 层会按原有协议返回参数错误；此时不会访问上游，不应消费 RPM。
+		return nil, nil, true
+	}
+	taskID := strings.TrimSpace(request.TaskId)
+	if taskID == "" && info.RelayMode == relayconstant.RelayModeMidjourneySimpleChange {
+		if params := service.ConvertSimpleChangeParams(request.Content); params != nil {
+			taskID = strings.TrimSpace(params.TaskId)
+		}
+	}
+	if taskID == "" {
+		// action 等请求也可能完全由上游 customId 处理，此时仍使用正常选渠。
+		return nil, nil, false
+	}
+
+	originTask := model.GetByMJId(info.UserId, taskID)
+	if originTask == nil {
+		// relay 层会返回 task_not_found；没有实际上游请求。
+		return nil, nil, true
+	}
+	channel, err := model.GetChannelById(originTask.ChannelId, true)
+	if err != nil || channel == nil || channel.Status != common.ChannelStatusEnabled {
+		// relay 层保留原有错误格式；没有实际上游请求。
+		return nil, nil, true
+	}
+	if setupErr := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName); setupErr != nil {
+		return nil, setupErr, true
+	}
+	release, apiErr := acquireFixedChannelCapacityWithWait(c, channel)
+	return release, apiErr, true
+}
+
+func acquireMidjourneyTaskChannelCapacity(c *gin.Context, info *relaycommon.RelayInfo) (func(), *types.NewAPIError) {
+	originTask := model.GetByMJId(c.GetInt("id"), c.Param("id"))
+	if originTask == nil {
+		return nil, nil
+	}
+	channel, err := model.GetChannelById(originTask.ChannelId, true)
+	if err != nil || channel == nil || channel.Status != common.ChannelStatusEnabled {
+		return nil, nil
+	}
+	if setupErr := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName); setupErr != nil {
+		return nil, setupErr
+	}
+	return acquireFixedChannelCapacityWithWait(c, channel)
+}
+
+func respondMidjourneyCapacityError(c *gin.Context, apiErr *types.NewAPIError) {
+	statusCode := http.StatusServiceUnavailable
+	if apiErr != nil && apiErr.StatusCode > 0 {
+		statusCode = apiErr.StatusCode
+	}
+	description := "channel capacity unavailable"
+	if apiErr != nil {
+		description = apiErr.Error()
+	}
+	c.JSON(statusCode, gin.H{
+		"description": description,
+		"type":        "new_api_error",
+		"code":        30,
+	})
 }
 
 func RelayNotImplemented(c *gin.Context) {
@@ -746,52 +864,67 @@ func RelayTask(c *gin.Context) {
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
 		var channel *model.Channel
+		var releaseSlot func()
+		var channelErr *types.NewAPIError
+		overloadControl := false
 
 		if lockedCh, ok := relayInfo.LockedChannel.(*model.Channel); ok && lockedCh != nil {
 			channel = lockedCh
-			if retryParam.GetRetry() > 0 {
-				if setupErr := middleware.SetupContextForSelectedChannel(c, channel, relayInfo.OriginModelName); setupErr != nil {
-					taskErr = service.TaskErrorWrapperLocal(setupErr.Err, "setup_locked_channel_failed", http.StatusInternalServerError)
-					break
-				}
+			if setupErr := middleware.SetupContextForSelectedChannel(c, channel, relayInfo.OriginModelName); setupErr != nil {
+				channelErr = setupErr
+			} else {
+				releaseSlot, channelErr = acquireFixedChannelCapacityWithWait(c, channel)
+				overloadControl = channelErr != nil
 			}
 		} else {
-			var channelErr *types.NewAPIError
-			channel, channelErr = getChannel(c, relayInfo, retryParam)
-			if channelErr != nil {
-				logger.LogError(c, channelErr.Error())
-				if lastTaskRelayErr != nil {
-					// 保留原始上游错误，让用户能看到真正的失败原因
-					taskErr = lastTaskRelayErr
-				} else {
-					taskErr = service.TaskErrorWrapperLocal(channelErr.Err, "get_channel_failed", http.StatusInternalServerError)
-				}
-				break
-			}
+			channel, releaseSlot, channelErr, overloadControl = selectChannelWithConcurrency(c, relayInfo, retryParam)
 		}
-		lastTaskChannel = channel
-
-		addUsedChannel(c, channel.Id)
-		bodyStorage, bodyErr := common.GetBodyStorage(c)
-		if bodyErr != nil {
-			if common.IsRequestBodyTooLargeError(bodyErr) || errors.Is(bodyErr, common.ErrRequestBodyTooLarge) {
-				taskErr = service.TaskErrorWrapperLocal(bodyErr, "read_request_body_failed", http.StatusRequestEntityTooLarge)
+		if channelErr != nil {
+			logger.LogError(c, channelErr.Error())
+			if overloadControl || lastTaskRelayErr == nil {
+				taskErr = service.TaskErrorFromAPIError(channelErr)
 			} else {
-				taskErr = service.TaskErrorWrapperLocal(bodyErr, "read_request_body_failed", http.StatusBadRequest)
+				taskErr = lastTaskRelayErr
 			}
 			break
 		}
-		c.Request.Body = io.NopCloser(bodyStorage)
+		lastTaskChannel = channel
 
-		result, taskErr = relay.RelayTaskSubmit(c, relayInfo)
+		breakLoop := false
+		func() {
+			if releaseSlot != nil {
+				defer releaseSlot()
+			}
+			addUsedChannel(c, channel.Id)
+			bodyStorage, bodyErr := common.GetBodyStorage(c)
+			if bodyErr != nil {
+				if common.IsRequestBodyTooLargeError(bodyErr) || errors.Is(bodyErr, common.ErrRequestBodyTooLarge) {
+					taskErr = service.TaskErrorWrapperLocal(bodyErr, "read_request_body_failed", http.StatusRequestEntityTooLarge)
+				} else {
+					taskErr = service.TaskErrorWrapperLocal(bodyErr, "read_request_body_failed", http.StatusBadRequest)
+				}
+				breakLoop = true
+				return
+			}
+			c.Request.Body = io.NopCloser(bodyStorage)
+			result, taskErr = relay.RelayTaskSubmit(c, relayInfo)
+		}()
+		if breakLoop {
+			break
+		}
 		if taskErr == nil {
 			break
 		}
 
 		lastTaskRelayErr = taskErr
-
 		if !taskErr.LocalError {
 			apiErr := types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode)
+			apiErr.UpstreamStatusCode = taskErr.UpstreamStatusCode
+			apiErr.RetryAfter = taskErr.RetryAfter
+			if cooldown := service.RecordChannelRateLimitCooldown(c, channel, apiErr); cooldown > 0 {
+				taskErr.RetryAfter = apiErr.RetryAfter
+				logger.LogInfo(c, fmt.Sprintf("task upstream rate limit cooldown set: channel=%d ttl=%ds", channel.Id, int((cooldown+time.Second-1)/time.Second)))
+			}
 			logCRSMemoryPressureShortCircuit(c, channel, apiErr)
 			processChannelError(c,
 				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
@@ -800,8 +933,7 @@ func RelayTask(c *gin.Context) {
 			service.RecordUserScopedCircuitFailure(c, channel, apiErr)
 		}
 
-		retryParam.ExcludeChannels = append(retryParam.ExcludeChannels, channel.Id)
-
+		retryParam.ExcludeChannels = appendUniqueInt(retryParam.ExcludeChannels, channel.Id)
 		if !shouldRetryTaskRelay(c, channel.Id, taskErr, common.RetryTimes-retryParam.GetRetry()) {
 			break
 		}
@@ -857,6 +989,13 @@ func RelayTask(c *gin.Context) {
 
 // respondTaskError 统一输出 Task 错误响应（含 429 限流提示改写）
 func respondTaskError(c *gin.Context, taskErr *dto.TaskError) {
+	if taskErr.RetryAfter > 0 {
+		retryAfterSeconds := int((taskErr.RetryAfter + time.Second - 1) / time.Second)
+		if retryAfterSeconds < 1 {
+			retryAfterSeconds = 1
+		}
+		c.Header("Retry-After", fmt.Sprintf("%d", retryAfterSeconds))
+	}
 	if taskErr.StatusCode == http.StatusTooManyRequests {
 		taskErr.Message = "当前分组上游负载已饱和，请稍后再试"
 	}

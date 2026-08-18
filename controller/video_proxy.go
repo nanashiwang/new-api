@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 )
@@ -87,10 +89,18 @@ func VideoProxy(c *gin.Context) {
 			videoProxyError(c, http.StatusInternalServerError, "server_error", "API key not stored for task")
 			return
 		}
-		videoURL, err = getGeminiVideoURL(channel, task, apiKey)
+		videoURL, err = getGeminiVideoURL(c, channel, task, apiKey)
 		if err != nil {
 			logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to resolve Gemini video URL for task %s: %s", taskID, err.Error()))
-			videoProxyError(c, http.StatusBadGateway, "server_error", "Failed to resolve Gemini video URL")
+			var apiErr *types.NewAPIError
+			if errors.As(err, &apiErr) {
+				if apiErr.RetryAfter > 0 {
+					c.Header("Retry-After", fmt.Sprintf("%d", int((apiErr.RetryAfter+time.Second-1)/time.Second)))
+				}
+				videoProxyError(c, apiErr.StatusCode, "server_error", apiErr.Error())
+			} else {
+				videoProxyError(c, http.StatusBadGateway, "server_error", "Failed to resolve Gemini video URL")
+			}
 			return
 		}
 		req.Header.Set("x-goog-api-key", apiKey)
@@ -109,6 +119,19 @@ func VideoProxy(c *gin.Context) {
 		return
 	}
 
+	var releaseSlot func()
+	if channel.Type == constant.ChannelTypeGemini || channel.Type == constant.ChannelTypeOpenAI || channel.Type == constant.ChannelTypeSora {
+		var capacityErr *types.NewAPIError
+		releaseSlot, capacityErr = acquireFixedChannelCapacityWithWait(c, channel)
+		if capacityErr != nil {
+			videoProxyError(c, capacityErr.StatusCode, "server_error", capacityErr.Error())
+			return
+		}
+		if releaseSlot != nil {
+			defer releaseSlot()
+		}
+	}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to fetch video from %s: %s", videoURL, err.Error()))
@@ -119,6 +142,21 @@ func VideoProxy(c *gin.Context) {
 
 	if resp.StatusCode != http.StatusOK {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Upstream returned status %d for %s", resp.StatusCode, videoURL))
+		if resp.StatusCode == http.StatusTooManyRequests {
+			apiErr := types.NewOpenAIError(
+				fmt.Errorf("video content upstream rate limited"),
+				types.ErrorCodeBadResponseStatusCode,
+				resp.StatusCode,
+			)
+			apiErr.UpstreamStatusCode = resp.StatusCode
+			apiErr.RetryAfter = service.ParseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
+			service.RecordChannelRateLimitCooldown(c, channel, apiErr)
+			if apiErr.RetryAfter > 0 {
+				c.Header("Retry-After", fmt.Sprintf("%d", int((apiErr.RetryAfter+time.Second-1)/time.Second)))
+			}
+			videoProxyError(c, http.StatusTooManyRequests, "server_error", apiErr.Error())
+			return
+		}
 		videoProxyError(c, http.StatusBadGateway, "server_error",
 			fmt.Sprintf("Upstream service returned status %d", resp.StatusCode))
 		return

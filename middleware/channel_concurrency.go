@@ -3,6 +3,8 @@ package middleware
 import (
 	"context"
 	"fmt"
+	"math/rand"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -314,6 +316,44 @@ func ResolveChannelRpmLimit(channel *model.Channel) int {
 	return setting.NormalizedDefaultRpmLimit()
 }
 
+// AcquireChannelCapacityForChannel 使用渠道级配置申请一次完整容量（并发 + RPM）。
+// 关闭容量控制时返回成功的空操作，便于固定渠道、后台轮询等调用方统一接入。
+func AcquireChannelCapacityForChannel(channel *model.Channel, requestID string) ChannelAdmissionResult {
+	if !ChannelConcurrencyEnabled() {
+		return ChannelAdmissionResult{Release: func() {}, Acquired: true}
+	}
+	if channel == nil || channel.Id <= 0 {
+		return ChannelAdmissionResult{Reason: ChannelAdmissionBackendUnavailable, RetryAfter: channelCapacityBackendRetry}
+	}
+	setting := operation_setting.GetChannelConcurrencySetting()
+	return AcquireChannelCapacityWithMetric(
+		channel.Id,
+		ResolveChannelMaxConcurrency(channel),
+		ResolveChannelRpmLimit(channel),
+		time.Duration(setting.NormalizedRpmWindowSeconds())*time.Second,
+		requestID,
+	)
+}
+
+// AcquireChannelRpmForChannel 只消费一次 RPM，不额外占用并发 Lease。
+// 用于同一上游调用生命周期内的兼容重试或第二次 HTTP 请求。
+func AcquireChannelRpmForChannel(channel *model.Channel, requestID string) ChannelAdmissionResult {
+	if !ChannelConcurrencyEnabled() {
+		return ChannelAdmissionResult{Release: func() {}, Acquired: true}
+	}
+	if channel == nil || channel.Id <= 0 {
+		return ChannelAdmissionResult{Reason: ChannelAdmissionBackendUnavailable, RetryAfter: channelCapacityBackendRetry}
+	}
+	setting := operation_setting.GetChannelConcurrencySetting()
+	return AcquireChannelCapacityWithMetric(
+		channel.Id,
+		0,
+		ResolveChannelRpmLimit(channel),
+		time.Duration(setting.NormalizedRpmWindowSeconds())*time.Second,
+		requestID,
+	)
+}
+
 // ChannelAdmissionRejectReason 表示渠道容量准入失败原因。
 type ChannelAdmissionRejectReason string
 
@@ -336,6 +376,76 @@ type ChannelAdmissionResult struct {
 type ChannelCapacityUsage struct {
 	Inflight int64
 	RpmUsed  int64
+}
+
+type channelCapacityCandidate struct {
+	channel        *model.Channel
+	inflight       int64
+	maxConcurrency int
+	rpmUsed        int64
+	rpmLimit       int
+}
+
+// RankChannelsByCapacityPressure 按 max(并发使用率, RPM 使用率) 升序排列渠道。
+// 查询失败时退化为随机顺序，最终仍由原子准入保证不会超发。
+func RankChannelsByCapacityPressure(channels []*model.Channel) []*model.Channel {
+	if len(channels) <= 1 {
+		return channels
+	}
+
+	ranked := append([]*model.Channel(nil), channels...)
+	rand.Shuffle(len(ranked), func(i, j int) {
+		ranked[i], ranked[j] = ranked[j], ranked[i]
+	})
+
+	channelIDs := make([]int, 0, len(ranked))
+	for _, channel := range ranked {
+		channelIDs = append(channelIDs, channel.Id)
+	}
+	rpmWindow := time.Duration(operation_setting.GetChannelConcurrencySetting().NormalizedRpmWindowSeconds()) * time.Second
+	usageByChannel, err := QueryChannelCapacityUsages(channelIDs, rpmWindow)
+	if err != nil {
+		return ranked
+	}
+
+	candidates := make([]channelCapacityCandidate, 0, len(ranked))
+	for _, channel := range ranked {
+		usage := usageByChannel[channel.Id]
+		candidates = append(candidates, channelCapacityCandidate{
+			channel:        channel,
+			inflight:       usage.Inflight,
+			maxConcurrency: ResolveChannelMaxConcurrency(channel),
+			rpmUsed:        usage.RpmUsed,
+			rpmLimit:       ResolveChannelRpmLimit(channel),
+		})
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return capacityPressureLess(candidates[i], candidates[j])
+	})
+	for i, candidate := range candidates {
+		ranked[i] = candidate.channel
+	}
+	return ranked
+}
+
+func capacityPressureLess(left, right channelCapacityCandidate) bool {
+	leftNumerator, leftDenominator := dominantCapacityPressure(left)
+	rightNumerator, rightDenominator := dominantCapacityPressure(right)
+	return leftNumerator*rightDenominator < rightNumerator*leftDenominator
+}
+
+func dominantCapacityPressure(candidate channelCapacityCandidate) (int64, int64) {
+	numerator := int64(0)
+	denominator := int64(1)
+	if candidate.maxConcurrency > 0 {
+		numerator = candidate.inflight
+		denominator = int64(candidate.maxConcurrency)
+	}
+	if candidate.rpmLimit > 0 && candidate.rpmUsed*denominator > numerator*int64(candidate.rpmLimit) {
+		numerator = candidate.rpmUsed
+		denominator = int64(candidate.rpmLimit)
+	}
+	return numerator, denominator
 }
 
 // TryAcquireChannelCapacity 原子申请渠道容量。RPM 名额在成功准入时消费，Release 只释放

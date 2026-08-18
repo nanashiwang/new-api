@@ -315,3 +315,29 @@ func TestTryAcquireChannelCapacityRedisFailureIsClosed(t *testing.T) {
 	assert.Equal(t, ChannelAdmissionBackendUnavailable, result.Reason)
 	assert.Equal(t, time.Second, result.RetryAfter)
 }
+
+func TestCapacityPressureLessUsesHighestDimension(t *testing.T) {
+	left := channelCapacityCandidate{
+		channel:        &model.Channel{Id: 1},
+		inflight:       1,
+		maxConcurrency: 10,
+		rpmUsed:        9,
+		rpmLimit:       10,
+	}
+	right := channelCapacityCandidate{
+		channel:        &model.Channel{Id: 2},
+		inflight:       2,
+		maxConcurrency: 10,
+		rpmUsed:        3,
+		rpmLimit:       10,
+	}
+
+	assert.False(t, capacityPressureLess(left, right), "90% RPM 压力不应排在 30% 压力之前")
+	assert.True(t, capacityPressureLess(right, left), "30% 压力应优先于 90% RPM 压力")
+}
+
+func TestCapacityPressureIgnoresUnlimitedRpm(t *testing.T) {
+	left := channelCapacityCandidate{inflight: 1, maxConcurrency: 10, rpmUsed: 1000, rpmLimit: 0}
+	right := channelCapacityCandidate{inflight: 2, maxConcurrency: 10, rpmUsed: 0, rpmLimit: 10}
+	assert.True(t, capacityPressureLess(left, right), "RPM 不限时只比较并发压力")
+}

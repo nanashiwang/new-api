@@ -135,6 +135,10 @@ func main() {
 		}
 		return a
 	}
+	service.AcquireTaskPollingChannelCapacityFunc = func(channel *model.Channel, requestID string) (func(), bool) {
+		admission := middleware.AcquireChannelCapacityForChannel(channel, requestID)
+		return admission.Release, admission.Acquired
+	}
 
 	if common.IsMasterNode && constant.UpdateTask {
 		gopool.Go(func() {

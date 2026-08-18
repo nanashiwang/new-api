@@ -216,34 +216,41 @@ func DoMidjourneyHttpRequest(c *gin.Context, timeout time.Duration, fullRequestU
 		return MidjourneyErrorWithStatusCodeWrapper(constant.MjErrorUnknown, "do_request_failed", http.StatusInternalServerError), nullBytes, err
 	}
 	statusCode := resp.StatusCode
+	retryAfter := ParseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
+	wrapUpstreamError := func(code int, desc string) *dto.MidjourneyResponseWithStatusCode {
+		wrapped := MidjourneyErrorWithStatusCodeWrapper(code, desc, statusCode)
+		wrapped.UpstreamStatusCode = statusCode
+		wrapped.RetryAfter = retryAfter
+		return wrapped
+	}
 	//if statusCode != 200  {
 	//	return MidjourneyErrorWithStatusCodeWrapper(constant.MjErrorUnknown, "bad_response_status_code", statusCode), nullBytes, nil
 	//}
 	err = req.Body.Close()
 	if err != nil {
-		return MidjourneyErrorWithStatusCodeWrapper(constant.MjErrorUnknown, "close_request_body_failed", statusCode), nullBytes, err
+		return wrapUpstreamError(constant.MjErrorUnknown, "close_request_body_failed"), nullBytes, err
 	}
 	err = c.Request.Body.Close()
 	if err != nil {
-		return MidjourneyErrorWithStatusCodeWrapper(constant.MjErrorUnknown, "close_request_body_failed", statusCode), nullBytes, err
+		return wrapUpstreamError(constant.MjErrorUnknown, "close_request_body_failed"), nullBytes, err
 	}
 	var midjResponse dto.MidjourneyResponse
 	var midjourneyUploadsResponse dto.MidjourneyUploadResponse
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return MidjourneyErrorWithStatusCodeWrapper(constant.MjErrorUnknown, "read_response_body_failed", statusCode), nullBytes, err
+		return wrapUpstreamError(constant.MjErrorUnknown, "read_response_body_failed"), nullBytes, err
 	}
 	CloseResponseBodyGracefully(resp)
 	respStr := string(responseBody)
 	log.Printf("respStr: %s", respStr)
 	if respStr == "" {
-		return MidjourneyErrorWithStatusCodeWrapper(constant.MjErrorUnknown, "empty_response_body", statusCode), responseBody, nil
+		return wrapUpstreamError(constant.MjErrorUnknown, "empty_response_body"), responseBody, nil
 	} else {
 		err = common.Unmarshal(responseBody, &midjResponse)
 		if err != nil {
 			err2 := common.Unmarshal(responseBody, &midjourneyUploadsResponse)
 			if err2 != nil {
-				return MidjourneyErrorWithStatusCodeWrapper(constant.MjErrorUnknown, "unmarshal_response_body_failed", statusCode), responseBody, err
+				return wrapUpstreamError(constant.MjErrorUnknown, "unmarshal_response_body_failed"), responseBody, err
 			}
 		}
 	}
@@ -252,7 +259,9 @@ func DoMidjourneyHttpRequest(c *gin.Context, timeout time.Duration, fullRequestU
 	//	c.Writer.Header().Set(k, v[0])
 	//}
 	return &dto.MidjourneyResponseWithStatusCode{
-		StatusCode: statusCode,
-		Response:   midjResponse,
+		StatusCode:         statusCode,
+		UpstreamStatusCode: statusCode,
+		RetryAfter:         retryAfter,
+		Response:           midjResponse,
 	}, responseBody, nil
 }

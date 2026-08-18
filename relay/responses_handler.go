@@ -86,6 +86,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	strippedStreamOptions := false
 	conversationStateRecovery := responsesConversationStateRecovery{}
 	var httpResp *http.Response
+	requestAttempt := 0
 	for {
 		var requestBody io.Reader
 		if passThrough {
@@ -164,6 +165,12 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 			requestBody = bytes.NewBuffer(jsonData)
 		}
 
+		if requestAttempt > 0 {
+			if capacityErr := acquireAdditionalChannelRequestRpm(c, info); capacityErr != nil {
+				return capacityErr
+			}
+		}
+		requestAttempt++
 		resp, err := adaptor.DoRequest(c, info, requestBody)
 		if err != nil {
 			return types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)

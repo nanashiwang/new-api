@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
@@ -72,30 +73,23 @@ func TestBuildClientCanceledError(t *testing.T) {
 	}
 }
 
-func TestCapacityPressureLessUsesHighestDimension(t *testing.T) {
-	left := channelCapacityCandidate{
-		channel:        &model.Channel{Id: 1},
-		inflight:       1,
-		maxConcurrency: 10,
-		rpmUsed:        9,
-		rpmLimit:       10,
+func TestMidjourneyModeUsesUpstream(t *testing.T) {
+	tests := []struct {
+		name      string
+		relayMode int
+		want      bool
+	}{
+		{name: "通知只更新本地", relayMode: relayconstant.RelayModeMidjourneyNotify, want: false},
+		{name: "单任务查询读取本地", relayMode: relayconstant.RelayModeMidjourneyTaskFetch, want: false},
+		{name: "条件查询读取本地", relayMode: relayconstant.RelayModeMidjourneyTaskFetchByCondition, want: false},
+		{name: "任务提交访问上游", relayMode: relayconstant.RelayModeMidjourneyImagine, want: true},
+		{name: "图片种子访问上游", relayMode: relayconstant.RelayModeMidjourneyTaskImageSeed, want: true},
 	}
-	right := channelCapacityCandidate{
-		channel:        &model.Channel{Id: 2},
-		inflight:       2,
-		maxConcurrency: 10,
-		rpmUsed:        3,
-		rpmLimit:       10,
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, midjourneyModeUsesUpstream(tt.relayMode))
+		})
 	}
-
-	assert.False(t, capacityPressureLess(left, right), "90% RPM 压力不应排在 30% 压力之前")
-	assert.True(t, capacityPressureLess(right, left), "30% 压力应优先于 90% RPM 压力")
-}
-
-func TestCapacityPressureIgnoresUnlimitedRpm(t *testing.T) {
-	left := channelCapacityCandidate{inflight: 1, maxConcurrency: 10, rpmUsed: 1000, rpmLimit: 0}
-	right := channelCapacityCandidate{inflight: 2, maxConcurrency: 10, rpmUsed: 0, rpmLimit: 10}
-	assert.True(t, capacityPressureLess(left, right), "RPM 不限时只比较并发压力")
 }
 
 func TestRankChannelsByCapacityPressurePrefersLowerNormalizedLoad(t *testing.T) {
@@ -120,7 +114,7 @@ func TestRankChannelsByCapacityPressurePrefersLowerNormalizedLoad(t *testing.T) 
 		releaseB2()
 	})
 
-	ranked := rankChannelsByCapacityPressure([]*model.Channel{channelA, channelB})
+	ranked := middleware.RankChannelsByCapacityPressure([]*model.Channel{channelA, channelB})
 	if assert.Len(t, ranked, 2) {
 		assert.Equal(t, channelB.Id, ranked[0].Id, "20% 负载渠道应优先于 50% 负载渠道")
 	}
@@ -153,8 +147,42 @@ func TestRankChannelsByCapacityPressureIncludesRpm(t *testing.T) {
 		admission.Release()
 	}
 
-	ranked := rankChannelsByCapacityPressure([]*model.Channel{channelA, channelB})
+	ranked := middleware.RankChannelsByCapacityPressure([]*model.Channel{channelA, channelB})
 	if assert.Len(t, ranked, 2) {
 		assert.Equal(t, channelB.Id, ranked[0].Id, "20% RPM 压力渠道应优先于 80% RPM 压力渠道")
+	}
+}
+
+func TestAcquireFixedChannelCapacityWithWaitRpmLimitedReturns429(t *testing.T) {
+	originalRedisEnabled := common.RedisEnabled
+	common.RedisEnabled = false
+	t.Cleanup(func() { common.RedisEnabled = originalRedisEnabled })
+	t.Setenv("CHANNEL_CONCURRENCY_ENABLED", "")
+	t.Setenv("CHANNEL_RPM_WINDOW_SECONDS", "")
+
+	setting := operation_setting.GetChannelConcurrencySetting()
+	original := *setting
+	setting.Enabled = true
+	setting.RpmWindowSeconds = 60
+	setting.WaitTimeoutMs = 1
+	setting.PollIntervalMs = 1
+	t.Cleanup(func() { *setting = original })
+
+	channelSetting := `{"max_concurrency":10,"rpm_limit":1}`
+	channel := &model.Channel{Id: 991021, Setting: &channelSetting}
+	first := middleware.TryAcquireChannelCapacity(channel.Id, 10, 1, time.Minute, "first")
+	if !assert.True(t, first.Acquired) {
+		return
+	}
+	first.Release()
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+	release, apiErr := acquireFixedChannelCapacityWithWait(ctx, channel)
+	assert.Nil(t, release)
+	if assert.NotNil(t, apiErr) {
+		assert.Equal(t, http.StatusTooManyRequests, apiErr.StatusCode)
+		assert.NotEmpty(t, recorder.Header().Get("Retry-After"))
 	}
 }

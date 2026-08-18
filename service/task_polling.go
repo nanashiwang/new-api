@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
 
 	"github.com/samber/lo"
 )
@@ -34,6 +35,42 @@ type TaskPollingAdaptor interface {
 // GetTaskAdaptorFunc 由 main 包注入，用于获取指定平台的任务适配器。
 // 打破 service -> relay -> relay/channel -> service 的循环依赖。
 var GetTaskAdaptorFunc func(platform constant.TaskPlatform) TaskPollingAdaptor
+
+// AcquireTaskPollingChannelCapacityFunc 由 main 包注入，复用渠道容量原子准入器，
+// 避免 service -> middleware 的循环依赖。未注入时保持旧行为（直接放行）。
+var AcquireTaskPollingChannelCapacityFunc func(channel *model.Channel, requestID string) (release func(), acquired bool)
+
+func acquireTaskPollingChannelCapacity(ctx context.Context, channel *model.Channel, requestKind string) (func(), bool) {
+	if channel == nil || IsChannelRateLimitCoolingDown(channel) {
+		return nil, false
+	}
+	if AcquireTaskPollingChannelCapacityFunc == nil {
+		return nil, true
+	}
+	release, acquired := AcquireTaskPollingChannelCapacityFunc(
+		channel,
+		fmt.Sprintf("task-poll:%s:%d:%d", requestKind, channel.Id, time.Now().UnixNano()),
+	)
+	if !acquired {
+		logger.LogDebug(ctx, fmt.Sprintf("skip %s polling for channel #%d: capacity unavailable", requestKind, channel.Id))
+	}
+	return release, acquired
+}
+
+func recordTaskPollingRateLimit(ctx context.Context, channel *model.Channel, resp *http.Response) {
+	if channel == nil || resp == nil || resp.StatusCode != http.StatusTooManyRequests {
+		return
+	}
+	apiErr := types.NewOpenAIError(
+		fmt.Errorf("task polling upstream rate limited"),
+		types.ErrorCodeBadResponseStatusCode,
+		resp.StatusCode,
+	)
+	apiErr.UpstreamStatusCode = resp.StatusCode
+	apiErr.RetryAfter = ParseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
+	cooldown := RecordChannelRateLimitCooldown(nil, channel, apiErr)
+	logger.LogInfo(ctx, fmt.Sprintf("task polling rate limit cooldown set: channel=%d ttl=%ds", channel.Id, int((cooldown+time.Second-1)/time.Second)))
+}
 
 // sweepTimedOutTasks 在主轮询之前独立清理超时任务。
 // 每次最多处理 100 条，剩余的下个周期继续处理。
@@ -191,6 +228,14 @@ func updateSunoTasks(ctx context.Context, channelId int, taskIds []string, taskM
 	if adaptor == nil {
 		return errors.New("adaptor not found")
 	}
+	releaseSlot, acquired := acquireTaskPollingChannelCapacity(ctx, ch, "suno")
+	if !acquired {
+		return nil
+	}
+	if releaseSlot != nil {
+		defer releaseSlot()
+	}
+
 	proxy := ch.GetSetting().Proxy
 	resp, err := adaptor.FetchTask(*ch.BaseURL, ch.Key, map[string]any{
 		"ids": taskIds,
@@ -199,11 +244,12 @@ func updateSunoTasks(ctx context.Context, channelId int, taskIds []string, taskM
 		common.SysLog(fmt.Sprintf("Get Task Do req error: %v", err))
 		return err
 	}
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		recordTaskPollingRateLimit(ctx, ch, resp)
 		logger.LogError(ctx, fmt.Sprintf("Get Task status code: %d", resp.StatusCode))
 		return fmt.Errorf("Get Task status code: %d", resp.StatusCode)
 	}
-	defer resp.Body.Close()
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		common.SysLog(fmt.Sprintf("Get Suno Task parse body error: %v", err))
@@ -357,6 +403,14 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	if privateData.Key != "" {
 		key = privateData.Key
 	}
+	releaseSlot, acquired := acquireTaskPollingChannelCapacity(ctx, ch, "video")
+	if !acquired {
+		return nil
+	}
+	if releaseSlot != nil {
+		defer releaseSlot()
+	}
+
 	resp, err := adaptor.FetchTask(baseURL, key, map[string]any{
 		"task_id": task.GetUpstreamTaskID(),
 		"action":  task.Action,
@@ -365,6 +419,10 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		return fmt.Errorf("fetchTask failed for task %s: %w", taskId, err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		recordTaskPollingRateLimit(ctx, ch, resp)
+		return fmt.Errorf("fetchTask returned status %d for task %s", resp.StatusCode, taskId)
+	}
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("readAll failed for task %s: %w", taskId, err)

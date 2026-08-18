@@ -21,6 +21,7 @@ import (
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 )
@@ -123,6 +124,41 @@ func RelayMidjourneyNotify(c *gin.Context) *dto.MidjourneyResponse {
 	return nil
 }
 
+func applyMidjourneyRateLimitMetadata(c *gin.Context, result *dto.MidjourneyResponseWithStatusCode) {
+	if c == nil || result == nil || result.UpstreamStatusCode != http.StatusTooManyRequests {
+		return
+	}
+	description := strings.TrimSpace(result.Response.Description)
+	if description == "" {
+		description = "midjourney upstream rate limited"
+	}
+	// controller 通过 Code=30 统一映射为 429；即使上游响应体使用其它错误码，
+	// 也必须以真实 HTTP 429 为准。
+	result.Response.Code = 30
+	apiErr := types.NewOpenAIError(
+		fmt.Errorf("%s", description),
+		types.ErrorCodeBadResponseStatusCode,
+		result.StatusCode,
+	)
+	apiErr.UpstreamStatusCode = result.UpstreamStatusCode
+	apiErr.RetryAfter = result.RetryAfter
+
+	channelID := common.GetContextKeyInt(c, constant.ContextKeyChannelId)
+	if channelID > 0 {
+		if channel, err := model.CacheGetChannel(channelID); err == nil && channel != nil {
+			service.RecordChannelRateLimitCooldown(c, channel, apiErr)
+		}
+	}
+	result.RetryAfter = apiErr.RetryAfter
+	if result.RetryAfter > 0 {
+		seconds := int((result.RetryAfter + time.Second - 1) / time.Second)
+		if seconds < 1 {
+			seconds = 1
+		}
+		c.Header("Retry-After", strconv.Itoa(seconds))
+	}
+}
+
 func coverMidjourneyTaskDto(c *gin.Context, originTask *model.Midjourney) (midjourneyTask dto.MidjourneyDto) {
 	midjourneyTask.MjId = originTask.MjId
 	midjourneyTask.Progress = originTask.Progress
@@ -206,6 +242,7 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 	baseURL := c.GetString("base_url")
 	fullRequestURL := fmt.Sprintf("%s%s", baseURL, requestURL)
 	mjResp, _, err := service.DoMidjourneyHttpRequest(c, time.Second*60, fullRequestURL)
+	applyMidjourneyRateLimitMetadata(c, mjResp)
 	if err != nil {
 		return &mjResp.Response
 	}
@@ -296,6 +333,7 @@ func RelayMidjourneyTaskImageSeed(c *gin.Context) *dto.MidjourneyResponse {
 	requestURL := getMjRequestPath(c.Request.URL.String())
 	fullRequestURL := fmt.Sprintf("%s%s", channel.GetBaseURL(), requestURL)
 	midjResponseWithStatus, _, err := service.DoMidjourneyHttpRequest(c, time.Second*30, fullRequestURL)
+	applyMidjourneyRateLimitMetadata(c, midjResponseWithStatus)
 	if err != nil {
 		return &midjResponseWithStatus.Response
 	}
@@ -512,6 +550,7 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 	}
 
 	midjResponseWithStatus, responseBody, err := service.DoMidjourneyHttpRequest(c, time.Second*60, fullRequestURL)
+	applyMidjourneyRateLimitMetadata(c, midjResponseWithStatus)
 	if err != nil {
 		return &midjResponseWithStatus.Response
 	}

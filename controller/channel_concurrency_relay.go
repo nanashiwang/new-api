@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/rand"
 	"net/http"
-	"sort"
 	"strconv"
 	"time"
 
@@ -110,7 +108,7 @@ func selectChannelWithConcurrency(
 		default:
 			// 同优先级候选按 max(并发占比, RPM 占比) 从低到高排列；压力相同时随机打散，
 			// 避免所有实例同时命中固定渠道。快照只负责排序，最终由原子准入裁决。
-			candidates = rankChannelsByCapacityPressure(candidates)
+			candidates = middleware.RankChannelsByCapacityPressure(candidates)
 			for _, channel := range candidates {
 				maxConcurrency := middleware.ResolveChannelMaxConcurrency(channel)
 				rpmLimit := middleware.ResolveChannelRpmLimit(channel)
@@ -205,6 +203,84 @@ func selectChannelWithConcurrency(
 	}
 }
 
+// acquireFixedChannelCapacityWithWait 为必须锁定渠道的请求申请容量，例如任务 remix。
+func acquireFixedChannelCapacityWithWait(c *gin.Context, channel *model.Channel) (func(), *types.NewAPIError) {
+	if channel == nil {
+		return nil, types.NewError(errors.New("channel is nil"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+	}
+	if !middleware.ChannelConcurrencyEnabled() {
+		return nil, nil
+	}
+	if remaining := service.ChannelRateLimitCooldownRemaining(channel.Id); remaining > 0 {
+		return nil, buildChannelCapacityError(c, http.StatusTooManyRequests, "channel is cooling down after upstream rate limit", remaining)
+	}
+
+	setting := operation_setting.GetChannelConcurrencySetting()
+	deadline := time.Now().Add(time.Duration(setting.NormalizedWaitTimeoutMs()) * time.Millisecond)
+	pollInterval := time.Duration(setting.NormalizedPollIntervalMs()) * time.Millisecond
+	rpmWindow := time.Duration(setting.NormalizedRpmWindowSeconds()) * time.Second
+	maxQueueLen := setting.NormalizedMaxQueueLength()
+	maxConcurrency := middleware.ResolveChannelMaxConcurrency(channel)
+	rpmLimit := middleware.ResolveChannelRpmLimit(channel)
+	var summary channelCapacityBlockSummary
+	inWaitQueue := false
+	var waitStart time.Time
+	defer func() {
+		if inWaitQueue {
+			middleware.LeaveChannelWaitQueue()
+			middleware.RecordChannelWaitDuration(time.Since(waitStart))
+		}
+	}()
+
+	for {
+		admission := middleware.AcquireChannelCapacityWithMetric(
+			channel.Id, maxConcurrency, rpmLimit, rpmWindow, c.GetString(common.RequestIdKey),
+		)
+		if admission.Acquired {
+			if inWaitQueue {
+				middleware.RecordChannelWaitAcquired()
+			}
+			return admission.Release, nil
+		}
+		if admission.Reason == middleware.ChannelAdmissionBackendUnavailable {
+			return nil, buildChannelCapacityError(c, http.StatusServiceUnavailable, "channel capacity backend unavailable", admission.RetryAfter)
+		}
+		summary.Record(admission)
+
+		remaining := time.Until(deadline)
+		if remaining <= 0 || (summary.OnlyRpmLimited() && summary.RetryAfter > remaining) {
+			middleware.RecordChannelWaitTimeout()
+			return nil, buildBlockedChannelCapacityError(c, setting, summary, "fixed channel reached capacity limit")
+		}
+		if !inWaitQueue {
+			if !middleware.EnterChannelWaitQueue(maxQueueLen) {
+				middleware.RecordChannelQueueReject()
+				return nil, buildBlockedChannelCapacityError(c, setting, summary, "channel capacity wait queue is full")
+			}
+			inWaitQueue = true
+			waitStart = time.Now()
+			middleware.RecordChannelWaitEnter()
+		}
+
+		wait := pollInterval
+		if summary.OnlyRpmLimited() && summary.RetryAfter > 0 {
+			wait = summary.RetryAfter
+		}
+		if wait > remaining {
+			wait = remaining
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-c.Request.Context().Done():
+			timer.Stop()
+			middleware.RecordChannelWaitCancel()
+			return nil, buildClientCanceledError()
+		case <-timer.C:
+			summary = channelCapacityBlockSummary{}
+		}
+	}
+}
+
 // getChannelCapacityCandidates 获取当前重试层级的全部候选渠道，不提前固定单个渠道。
 // 指定渠道在首轮仍优先尝试；若其满载被临时排除，后续可按原有降级语义尝试其它渠道。
 func getChannelCapacityCandidates(
@@ -241,79 +317,6 @@ func getChannelCapacityCandidates(
 		)
 	}
 	return channels, selectGroup, nil
-}
-
-type channelCapacityCandidate struct {
-	channel        *model.Channel
-	inflight       int64
-	maxConcurrency int
-	rpmUsed        int64
-	rpmLimit       int
-}
-
-// rankChannelsByCapacityPressure 按 max(inflight/maxConcurrency, rpmUsed/rpmLimit) 升序排列。
-// 查询失败时退化为随机顺序，最终原子准入仍会保证不突破任何容量上限。
-func rankChannelsByCapacityPressure(channels []*model.Channel) []*model.Channel {
-	if len(channels) <= 1 {
-		return channels
-	}
-
-	ranked := append([]*model.Channel(nil), channels...)
-	rand.Shuffle(len(ranked), func(i, j int) {
-		ranked[i], ranked[j] = ranked[j], ranked[i]
-	})
-
-	channelIDs := make([]int, 0, len(ranked))
-	for _, channel := range ranked {
-		channelIDs = append(channelIDs, channel.Id)
-	}
-	setting := operation_setting.GetChannelConcurrencySetting()
-	rpmWindow := time.Duration(setting.NormalizedRpmWindowSeconds()) * time.Second
-	usageByChannel, err := middleware.QueryChannelCapacityUsages(channelIDs, rpmWindow)
-	if err != nil {
-		return ranked
-	}
-
-	candidates := make([]channelCapacityCandidate, 0, len(ranked))
-	for _, channel := range ranked {
-		usage := usageByChannel[channel.Id]
-		candidates = append(candidates, channelCapacityCandidate{
-			channel:        channel,
-			inflight:       usage.Inflight,
-			maxConcurrency: middleware.ResolveChannelMaxConcurrency(channel),
-			rpmUsed:        usage.RpmUsed,
-			rpmLimit:       middleware.ResolveChannelRpmLimit(channel),
-		})
-	}
-	sort.SliceStable(candidates, func(i, j int) bool {
-		return capacityPressureLess(candidates[i], candidates[j])
-	})
-	for i, candidate := range candidates {
-		ranked[i] = candidate.channel
-	}
-	return ranked
-}
-
-func capacityPressureLess(left, right channelCapacityCandidate) bool {
-	leftNumerator, leftDenominator := dominantCapacityPressure(left)
-	rightNumerator, rightDenominator := dominantCapacityPressure(right)
-	return leftNumerator*rightDenominator < rightNumerator*leftDenominator
-}
-
-// dominantCapacityPressure 返回候选渠道较高压力维度的分数，以分数形式避免浮点误差。
-// 对应上限为 0 时该维度不限制、压力按 0 处理。
-func dominantCapacityPressure(candidate channelCapacityCandidate) (int64, int64) {
-	numerator := int64(0)
-	denominator := int64(1)
-	if candidate.maxConcurrency > 0 {
-		numerator = candidate.inflight
-		denominator = int64(candidate.maxConcurrency)
-	}
-	if candidate.rpmLimit > 0 && candidate.rpmUsed*denominator > numerator*int64(candidate.rpmLimit) {
-		numerator = candidate.rpmUsed
-		denominator = int64(candidate.rpmLimit)
-	}
-	return numerator, denominator
 }
 
 func containsChannelID(ids []int, target int) bool {

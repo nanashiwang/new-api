@@ -1,5 +1,7 @@
 package dto
 
+import "time"
+
 //type SimpleMjRequest struct {
 //	Prompt   string `json:"prompt"`
 //	CustomId string `json:"customId"`
@@ -40,8 +42,10 @@ type MidjourneyUploadResponse struct {
 }
 
 type MidjourneyResponseWithStatusCode struct {
-	StatusCode int `json:"statusCode"`
-	Response   MidjourneyResponse
+	StatusCode         int           `json:"statusCode"`
+	UpstreamStatusCode int           `json:"-"`
+	RetryAfter         time.Duration `json:"-"`
+	Response           MidjourneyResponse
 }
 
 type MidjourneyDto struct {

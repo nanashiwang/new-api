@@ -165,6 +165,7 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 	clientWantsStream := info.IsStream
 	var httpResp *http.Response
 	var upstreamIsStream bool
+	requestAttempt := 0
 	for {
 		requestTemplate := responsesReq
 		if retriedWithoutPreviousResponseID && fallbackResponsesReq != nil {
@@ -208,6 +209,12 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 			}
 		}
 
+		if requestAttempt > 0 {
+			if capacityErr := acquireAdditionalChannelRequestRpm(c, info); capacityErr != nil {
+				return nil, capacityErr
+			}
+		}
+		requestAttempt++
 		resp, err := adaptor.DoRequest(c, info, bytes.NewBuffer(jsonData))
 		if err != nil {
 			return nil, types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)

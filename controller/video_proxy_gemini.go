@@ -3,16 +3,22 @@ package controller
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay"
+	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/types"
+
+	"github.com/gin-gonic/gin"
 )
 
-func getGeminiVideoURL(channel *model.Channel, task *model.Task, apiKey string) (string, error) {
+func getGeminiVideoURL(c *gin.Context, channel *model.Channel, task *model.Task, apiKey string) (string, error) {
 	if channel == nil || task == nil {
 		return "", fmt.Errorf("invalid channel or task")
 	}
@@ -35,6 +41,14 @@ func getGeminiVideoURL(channel *model.Channel, task *model.Task, apiKey string) 
 		return "", fmt.Errorf("api key not available for task")
 	}
 
+	releaseSlot, capacityErr := acquireFixedChannelCapacityWithWait(c, channel)
+	if capacityErr != nil {
+		return "", capacityErr
+	}
+	if releaseSlot != nil {
+		defer releaseSlot()
+	}
+
 	proxy := channel.GetSetting().Proxy
 	resp, err := adaptor.FetchTask(baseURL, apiKey, map[string]any{
 		"task_id": task.GetUpstreamTaskID(),
@@ -44,6 +58,20 @@ func getGeminiVideoURL(channel *model.Channel, task *model.Task, apiKey string) 
 		return "", fmt.Errorf("fetch task failed: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusTooManyRequests {
+			apiErr := types.NewOpenAIError(
+				fmt.Errorf("gemini video lookup upstream rate limited"),
+				types.ErrorCodeBadResponseStatusCode,
+				resp.StatusCode,
+			)
+			apiErr.UpstreamStatusCode = resp.StatusCode
+			apiErr.RetryAfter = service.ParseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
+			service.RecordChannelRateLimitCooldown(c, channel, apiErr)
+			return "", apiErr
+		}
+		return "", fmt.Errorf("fetch task returned status %d", resp.StatusCode)
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

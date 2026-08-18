@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -116,4 +117,16 @@ func TestRelayErrorHandlerPreservesRateLimitMetadataAfterMapping(t *testing.T) {
 	require.Equal(t, http.StatusTooManyRequests, apiErr.UpstreamStatusCode)
 	require.Equal(t, 7*time.Second, apiErr.RetryAfter)
 	require.True(t, IsUpstreamRateLimitError(apiErr))
+}
+
+func TestTaskErrorFromAPIErrorPreservesRateLimitMetadata(t *testing.T) {
+	apiErr := types.NewOpenAIError(errors.New("rate limited"), types.ErrorCodeBadResponseStatusCode, http.StatusServiceUnavailable)
+	apiErr.UpstreamStatusCode = http.StatusTooManyRequests
+	apiErr.RetryAfter = 7 * time.Second
+
+	taskErr := TaskErrorFromAPIError(apiErr)
+	require.NotNil(t, taskErr)
+	require.Equal(t, http.StatusServiceUnavailable, taskErr.StatusCode)
+	require.Equal(t, http.StatusTooManyRequests, taskErr.UpstreamStatusCode)
+	require.Equal(t, 7*time.Second, taskErr.RetryAfter)
 }

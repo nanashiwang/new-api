@@ -2,10 +2,12 @@ package relay
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -18,6 +20,8 @@ import (
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 )
@@ -70,7 +74,7 @@ func continueResponsesStream(c *gin.Context, info *relaycommon.RelayInfo, origin
 	}
 
 	originalChannelID := info.ChannelId
-	channel, ok := selectResponsesAutoContinueChannel(c, info, originalChannelID)
+	channel, releaseSlot, ok := selectResponsesAutoContinueChannel(c, info, originalChannelID)
 	if !ok {
 		logger.LogInfo(c, fmt.Sprintf("responses auto-continue skipped: no fallback channel, original_channel=%d", originalChannelID))
 		return nil, false
@@ -83,8 +87,19 @@ func continueResponsesStream(c *gin.Context, info *relaycommon.RelayInfo, origin
 	appendResponsesAutoContinueChannel(c, channel.Id)
 	logger.LogInfo(c, fmt.Sprintf("responses auto-continue started: from_channel=%d to_channel=%d end_reason=%s", originalChannelID, channel.Id, streamCtx.EndReason))
 
-	usage, err := requestResponsesContinuation(c, info, continueReq)
+	usage, err := func() (*dto.Usage, error) {
+		if releaseSlot != nil {
+			defer releaseSlot()
+		}
+		return requestResponsesContinuation(c, info, continueReq)
+	}()
 	if err != nil {
+		var apiErr *types.NewAPIError
+		if errors.As(err, &apiErr) {
+			if cooldown := service.RecordChannelRateLimitCooldown(c, channel, apiErr); cooldown > 0 {
+				logger.LogInfo(c, fmt.Sprintf("responses auto-continue rate limit cooldown set: channel=%d ttl=%ds", channel.Id, int((cooldown+time.Second-1)/time.Second)))
+			}
+		}
 		logger.LogError(c, "responses auto-continue failed: "+err.Error())
 		return nil, false
 	}
@@ -110,9 +125,9 @@ func appendUniqueChannelID(ids []int, id int) []int {
 	return append(ids, id)
 }
 
-func selectResponsesAutoContinueChannel(c *gin.Context, info *relaycommon.RelayInfo, failedChannelID int) (*model.Channel, bool) {
+func selectResponsesAutoContinueChannel(c *gin.Context, info *relaycommon.RelayInfo, failedChannelID int) (*model.Channel, func(), bool) {
 	if c == nil || info == nil {
-		return nil, false
+		return nil, nil, false
 	}
 	excludeSets := [][]int{nil}
 	if failedChannelID > 0 {
@@ -120,15 +135,15 @@ func selectResponsesAutoContinueChannel(c *gin.Context, info *relaycommon.RelayI
 	}
 
 	for _, excludeChannels := range excludeSets {
-		channel, ok := selectResponsesAutoContinueChannelWithExclusion(c, info, excludeChannels)
+		channel, releaseSlot, ok := selectResponsesAutoContinueChannelWithExclusion(c, info, excludeChannels)
 		if ok {
-			return channel, true
+			return channel, releaseSlot, true
 		}
 	}
-	return nil, false
+	return nil, nil, false
 }
 
-func selectResponsesAutoContinueChannelWithExclusion(c *gin.Context, info *relaycommon.RelayInfo, excludeChannels []int) (*model.Channel, bool) {
+func selectResponsesAutoContinueChannelWithExclusion(c *gin.Context, info *relaycommon.RelayInfo, excludeChannels []int) (*model.Channel, func(), bool) {
 	retry := 0
 	retryParam := &service.RetryParam{
 		Ctx:             c,
@@ -139,27 +154,50 @@ func selectResponsesAutoContinueChannelWithExclusion(c *gin.Context, info *relay
 		Retry:           &retry,
 	}
 	for retryParam.GetRetry() <= common.RetryTimes {
-		channel, _, err := service.CacheGetRandomSatisfiedChannel(retryParam)
+		channels, selectGroup, err := service.CacheGetSatisfiedChannelCandidates(retryParam)
 		if err != nil {
-			return nil, false
+			return nil, nil, false
 		}
-		if channel == nil {
+		if len(channels) == 0 {
 			retryParam.IncreaseRetry()
 			continue
 		}
-		if setupErr := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName); setupErr != nil {
-			if !service.ShouldFallbackAfterSetupError(setupErr) {
-				logger.LogInfo(c, fmt.Sprintf("responses auto-continue channel setup failed: channel=%d err=%s", channel.Id, setupErr.Error()))
-				return nil, false
+
+		for _, channel := range middleware.RankChannelsByCapacityPressure(channels) {
+			var releaseSlot func()
+			if middleware.ChannelConcurrencyEnabled() {
+				setting := operation_setting.GetChannelConcurrencySetting()
+				admission := middleware.AcquireChannelCapacityWithMetric(
+					channel.Id,
+					middleware.ResolveChannelMaxConcurrency(channel),
+					middleware.ResolveChannelRpmLimit(channel),
+					time.Duration(setting.NormalizedRpmWindowSeconds())*time.Second,
+					c.GetString(common.RequestIdKey),
+				)
+				if !admission.Acquired {
+					retryParam.ExcludeChannels = appendUniqueChannelID(retryParam.ExcludeChannels, channel.Id)
+					continue
+				}
+				releaseSlot = admission.Release
 			}
-			retryParam.ExcludeChannels = appendUniqueChannelID(retryParam.ExcludeChannels, channel.Id)
-			retryParam.IncreaseRetry()
-			continue
+			if setupErr := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName); setupErr != nil {
+				if releaseSlot != nil {
+					releaseSlot()
+				}
+				if !service.ShouldFallbackAfterSetupError(setupErr) {
+					logger.LogInfo(c, fmt.Sprintf("responses auto-continue channel setup failed: channel=%d err=%s", channel.Id, setupErr.Error()))
+					return nil, nil, false
+				}
+				retryParam.ExcludeChannels = appendUniqueChannelID(retryParam.ExcludeChannels, channel.Id)
+				continue
+			}
+			service.CommitChannelCandidateSelection(retryParam, selectGroup)
+			info.InitChannelMeta(c)
+			return channel, releaseSlot, true
 		}
-		info.InitChannelMeta(c)
-		return channel, true
+		retryParam.IncreaseRetry()
 	}
-	return nil, false
+	return nil, nil, false
 }
 
 func requestResponsesContinuation(c *gin.Context, info *relaycommon.RelayInfo, req *dto.OpenAIResponsesRequest) (*dto.Usage, error) {
@@ -174,6 +212,11 @@ func requestResponsesContinuation(c *gin.Context, info *relaycommon.RelayInfo, r
 		requestBody, err := buildResponsesRequestBody(c, info, adaptor, req, strippedStreamOptions)
 		if err != nil {
 			return nil, err
+		}
+		if attempt > 0 {
+			if capacityErr := acquireAdditionalChannelRequestRpm(c, info); capacityErr != nil {
+				return nil, capacityErr
+			}
 		}
 		respAny, err := adaptor.DoRequest(c, info, requestBody)
 		if err != nil {
