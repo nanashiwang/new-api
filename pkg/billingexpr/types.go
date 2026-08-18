@@ -3,11 +3,13 @@ package billingexpr
 import (
 	"crypto/sha256"
 	"fmt"
+	"time"
 )
 
 type RequestInput struct {
-	Headers map[string]string
-	Body    []byte
+	Headers      map[string]string
+	Body         []byte
+	EvaluationAt time.Time
 }
 
 // TokenParams holds all token dimensions passed into an Expr evaluation.
@@ -59,6 +61,8 @@ type TieredResult struct {
 	ActualQuotaAfterGroup  int     `json:"actual_quota_after_group"`
 	MatchedTier            string  `json:"matched_tier"`
 	CrossedTier            bool    `json:"crossed_tier"`
+	SettlementFallback     bool    `json:"settlement_fallback,omitempty"`
+	SettlementError        string  `json:"settlement_error,omitempty"`
 }
 
 // ExprHashString returns the SHA-256 hex digest of an expression string.

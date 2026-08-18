@@ -325,11 +325,9 @@ func updatePricing() {
 			pricing.QuotaType = 0
 			applyPricingCacheSupport(&pricing, model)
 		}
-		if billingMode := billing_setting.GetBillingMode(model); billingMode == "tiered_expr" {
-			if expr, ok := billing_setting.GetBillingExpr(model); ok && expr != "" {
-				pricing.BillingMode = billingMode
-				pricing.BillingExpr = expr
-			}
+		if expr, ok := billing_setting.GetTieredExpr(model); ok {
+			pricing.BillingMode = billing_setting.BillingModeTieredExpr
+			pricing.BillingExpr = expr
 		}
 		pricingMap = append(pricingMap, pricing)
 	}

@@ -429,97 +429,97 @@ export default function UpstreamRatioSync(props) {
     }
     applyInFlightRef.current = true;
     try {
-    const currentRatios = {
-      ModelRatio: JSON.parse(props.options.ModelRatio || '{}'),
-      CompletionRatio: JSON.parse(props.options.CompletionRatio || '{}'),
-      CacheRatio: JSON.parse(props.options.CacheRatio || '{}'),
-      CreateCacheRatio: JSON.parse(props.options.CreateCacheRatio || '{}'),
-      ImageRatio: JSON.parse(props.options.ImageRatio || '{}'),
-      AudioRatio: JSON.parse(props.options.AudioRatio || '{}'),
-      AudioCompletionRatio: JSON.parse(
-        props.options.AudioCompletionRatio || '{}',
-      ),
-      ModelPrice: JSON.parse(props.options.ModelPrice || '{}'),
-      'billing_setting.billing_mode': JSON.parse(
-        props.options['billing_setting.billing_mode'] || '{}',
-      ),
-      'billing_setting.billing_expr': JSON.parse(
-        props.options['billing_setting.billing_expr'] || '{}',
-      ),
-    };
+      const currentRatios = {
+        ModelRatio: JSON.parse(props.options.ModelRatio || '{}'),
+        CompletionRatio: JSON.parse(props.options.CompletionRatio || '{}'),
+        CacheRatio: JSON.parse(props.options.CacheRatio || '{}'),
+        CreateCacheRatio: JSON.parse(props.options.CreateCacheRatio || '{}'),
+        ImageRatio: JSON.parse(props.options.ImageRatio || '{}'),
+        AudioRatio: JSON.parse(props.options.AudioRatio || '{}'),
+        AudioCompletionRatio: JSON.parse(
+          props.options.AudioCompletionRatio || '{}',
+        ),
+        ModelPrice: JSON.parse(props.options.ModelPrice || '{}'),
+        'billing_setting.billing_mode': JSON.parse(
+          props.options['billing_setting.billing_mode'] || '{}',
+        ),
+        'billing_setting.billing_expr': JSON.parse(
+          props.options['billing_setting.billing_expr'] || '{}',
+        ),
+      };
 
-    const conflicts = [];
+      const conflicts = [];
 
-    const getLocalBillingCategory = (model) => {
-      if (currentRatios.ModelPrice[model] !== undefined) return 'price';
-      if (
-        currentRatios.ModelRatio[model] !== undefined ||
-        currentRatios.CompletionRatio[model] !== undefined ||
-        currentRatios.CacheRatio[model] !== undefined ||
-        currentRatios.CreateCacheRatio[model] !== undefined ||
-        currentRatios.ImageRatio[model] !== undefined ||
-        currentRatios.AudioRatio[model] !== undefined ||
-        currentRatios.AudioCompletionRatio[model] !== undefined
-      )
-        return 'ratio';
-      return null;
-    };
+      const getLocalBillingCategory = (model) => {
+        if (currentRatios.ModelPrice[model] !== undefined) return 'price';
+        if (
+          currentRatios.ModelRatio[model] !== undefined ||
+          currentRatios.CompletionRatio[model] !== undefined ||
+          currentRatios.CacheRatio[model] !== undefined ||
+          currentRatios.CreateCacheRatio[model] !== undefined ||
+          currentRatios.ImageRatio[model] !== undefined ||
+          currentRatios.AudioRatio[model] !== undefined ||
+          currentRatios.AudioCompletionRatio[model] !== undefined
+        )
+          return 'ratio';
+        return null;
+      };
 
-    const findSourceChannel = (model, ratioType, value) => {
-      if (differences[model] && differences[model][ratioType]) {
-        const upMap = differences[model][ratioType].upstreams || {};
-        const entry = Object.entries(upMap).find(([_, v]) => v === value);
-        if (entry) return entry[0];
-      }
-      return t('未知');
-    };
-
-    Object.entries(resolutions).forEach(([model, ratios]) => {
-      const localCat = getLocalBillingCategory(model);
-      const newCat =
-        'model_price' in ratios
-          ? 'price'
-          : ratioSyncFields.some((rt) => rt in ratios)
-            ? 'ratio'
-            : 'tiered';
-
-      if (localCat && newCat !== 'tiered' && localCat !== newCat) {
-        const currentDesc =
-          localCat === 'price'
-            ? `${t('固定价格')} : ${currentRatios.ModelPrice[model]}`
-            : `${t('模型倍率')} : ${currentRatios.ModelRatio[model] ?? '-'}\n${t('补全倍率')} : ${currentRatios.CompletionRatio[model] ?? '-'}`;
-
-        let newDesc = '';
-        if (newCat === 'price') {
-          newDesc = `${t('固定价格')} : ${ratios['model_price']}`;
-        } else {
-          const newModelRatio = ratios['model_ratio'] ?? '-';
-          const newCompRatio = ratios['completion_ratio'] ?? '-';
-          newDesc = `${t('模型倍率')} : ${newModelRatio}\n${t('补全倍率')} : ${newCompRatio}`;
+      const findSourceChannel = (model, ratioType, value) => {
+        if (differences[model] && differences[model][ratioType]) {
+          const upMap = differences[model][ratioType].upstreams || {};
+          const entry = Object.entries(upMap).find(([_, v]) => v === value);
+          if (entry) return entry[0];
         }
+        return t('未知');
+      };
 
-        const channels = Object.entries(ratios)
-          .map(([rt, val]) => findSourceChannel(model, rt, val))
-          .filter((v, idx, arr) => arr.indexOf(v) === idx)
-          .join(', ');
+      Object.entries(resolutions).forEach(([model, ratios]) => {
+        const localCat = getLocalBillingCategory(model);
+        const newCat =
+          'model_price' in ratios
+            ? 'price'
+            : ratioSyncFields.some((rt) => rt in ratios)
+              ? 'ratio'
+              : 'tiered';
 
-        conflicts.push({
-          channel: channels,
-          model,
-          current: currentDesc,
-          newVal: newDesc,
-        });
+        if (localCat && newCat !== 'tiered' && localCat !== newCat) {
+          const currentDesc =
+            localCat === 'price'
+              ? `${t('固定价格')} : ${currentRatios.ModelPrice[model]}`
+              : `${t('模型倍率')} : ${currentRatios.ModelRatio[model] ?? '-'}\n${t('补全倍率')} : ${currentRatios.CompletionRatio[model] ?? '-'}`;
+
+          let newDesc = '';
+          if (newCat === 'price') {
+            newDesc = `${t('固定价格')} : ${ratios['model_price']}`;
+          } else {
+            const newModelRatio = ratios['model_ratio'] ?? '-';
+            const newCompRatio = ratios['completion_ratio'] ?? '-';
+            newDesc = `${t('模型倍率')} : ${newModelRatio}\n${t('补全倍率')} : ${newCompRatio}`;
+          }
+
+          const channels = Object.entries(ratios)
+            .map(([rt, val]) => findSourceChannel(model, rt, val))
+            .filter((v, idx, arr) => arr.indexOf(v) === idx)
+            .join(', ');
+
+          conflicts.push({
+            channel: channels,
+            model,
+            current: currentDesc,
+            newVal: newDesc,
+          });
+        }
+      });
+
+      if (conflicts.length > 0) {
+        setConflictItems(conflicts);
+        setConfirmVisible(true);
+        return;
       }
-    });
 
-    if (conflicts.length > 0) {
-      setConflictItems(conflicts);
-      setConfirmVisible(true);
-      return;
-    }
-
-    await performSync(currentRatios);
-  } finally {
+      await performSync(currentRatios);
+    } finally {
       applyInFlightRef.current = false;
     }
   };
@@ -575,10 +575,22 @@ export default function UpstreamRatioSync(props) {
       showInfo(t('正在同步价格，请稍候'));
       let success = false;
       try {
-        const updates = Object.entries(finalRatios).map(([key, value]) =>
+        const tieredBundle = {
+          billing_mode: finalRatios['billing_setting.billing_mode'],
+          billing_expr: finalRatios['billing_setting.billing_expr'],
+        };
+        const updates = Object.entries(finalRatios)
+          .filter(([key]) => !key.startsWith('billing_setting.billing_'))
+          .map(([key, value]) =>
+            API.put('/api/option/', {
+              key,
+              value: JSON.stringify(value, null, 2),
+            }),
+          );
+        updates.push(
           API.put('/api/option/', {
-            key,
-            value: JSON.stringify(value, null, 2),
+            key: 'billing_setting.tiered_bundle',
+            value: JSON.stringify(tieredBundle),
           }),
         );
 

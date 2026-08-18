@@ -190,8 +190,12 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 	timeRatio := timeRatioInfo.EffectiveRatio()
 
 	// Check if this model uses tiered_expr billing
-	if billing_setting.GetBillingMode(info.OriginModelName) == billing_setting.BillingModeTieredExpr {
-		return modelPriceHelperTiered(c, info, promptTokens, meta, groupRatioInfo, timeRatioInfo)
+	billingMode, exprStr := billing_setting.GetBillingConfig(info.OriginModelName)
+	if billingMode == billing_setting.BillingModeTieredExpr {
+		if exprStr == "" {
+			return types.PriceData{}, fmt.Errorf("model %s is configured as tiered_expr but has no billing expression", info.OriginModelName)
+		}
+		return modelPriceHelperTiered(c, info, exprStr, promptTokens, meta, groupRatioInfo, timeRatioInfo)
 	}
 
 	var preConsumedQuota int
@@ -353,22 +357,15 @@ func ContainPriceOrRatio(modelName string) bool {
 	if ok {
 		return true
 	}
-	if billing_setting.GetBillingMode(modelName) == billing_setting.BillingModeTieredExpr {
-		_, ok = billing_setting.GetBillingExpr(modelName)
-		return ok
-	}
-	return false
+	_, ok = billing_setting.GetTieredExpr(modelName)
+	return ok
 }
 
-func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, promptTokens int, meta *types.TokenCountMeta, groupRatioInfo types.GroupRatioInfo, timeRatioInfo types.TimeRatioInfo) (types.PriceData, error) {
-	exprStr, ok := billing_setting.GetBillingExpr(info.OriginModelName)
-	if !ok {
-		return types.PriceData{}, fmt.Errorf("model %s is configured as tiered_expr but has no billing expression", info.OriginModelName)
-	}
-
-	estimatedCompletionTokens := 0
-	if meta.MaxTokens != 0 {
-		estimatedCompletionTokens = meta.MaxTokens
+func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, exprStr string, promptTokens int, meta *types.TokenCountMeta, groupRatioInfo types.GroupRatioInfo, timeRatioInfo types.TimeRatioInfo) (types.PriceData, error) {
+	estimatedPromptTokens := common.Max(promptTokens, common.PreConsumedQuota)
+	estimatedCompletionTokens := common.Max(meta.MaxTokens, 0)
+	if estimatedCompletionTokens == 0 {
+		estimatedCompletionTokens = defaultConservativeCompletionTokens
 	}
 
 	requestInput, err := ResolveIncomingBillingExprRequestInput(c, info)
@@ -377,9 +374,9 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, promptT
 	}
 
 	rawCost, trace, err := billingexpr.RunExprWithRequest(exprStr, billingexpr.TokenParams{
-		P:   float64(promptTokens),
+		P:   float64(estimatedPromptTokens),
 		C:   float64(estimatedCompletionTokens),
-		Len: float64(promptTokens),
+		Len: float64(estimatedPromptTokens),
 	}, requestInput)
 	if err != nil {
 		return types.PriceData{}, fmt.Errorf("model %s tiered expr run failed: %w", info.OriginModelName, err)
@@ -387,7 +384,10 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, promptT
 
 	// Expression coefficients are $/1M tokens prices; convert to quota the same way per-call billing does.
 	quotaBeforeGroup := rawCost / 1_000_000 * common.QuotaPerUnit
-	preConsumedQuota := billingexpr.QuotaRound(quotaBeforeGroup * groupRatioInfo.GroupRatio * timeRatioInfo.EffectiveRatio())
+	preConsumedQuota, err := billingexpr.QuotaRoundChecked(quotaBeforeGroup * groupRatioInfo.GroupRatio * timeRatioInfo.EffectiveRatio())
+	if err != nil {
+		return types.PriceData{}, fmt.Errorf("model %s tiered pre-consume quota invalid: %w", info.OriginModelName, err)
+	}
 
 	freeModel := false
 	if !operation_setting.GetQuotaSetting().EnableFreeModelPreConsume {
@@ -408,7 +408,7 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, promptT
 		ExprString:                exprStr,
 		ExprHash:                  exprHash,
 		GroupRatio:                groupRatioInfo.GroupRatio,
-		EstimatedPromptTokens:     promptTokens,
+		EstimatedPromptTokens:     estimatedPromptTokens,
 		EstimatedCompletionTokens: estimatedCompletionTokens,
 		EstimatedQuotaBeforeGroup: quotaBeforeGroup,
 		EstimatedQuotaAfterGroup:  preConsumedQuota,
@@ -422,10 +422,11 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, promptT
 	info.BillingRequestInput = &requestInput
 
 	priceData := types.PriceData{
-		FreeModel:         freeModel,
-		GroupRatioInfo:    groupRatioInfo,
-		QuotaToPreConsume: preConsumedQuota,
-		TimeRatioInfo:     timeRatioInfo,
+		FreeModel:                     freeModel,
+		GroupRatioInfo:                groupRatioInfo,
+		QuotaToPreConsume:             preConsumedQuota,
+		ConservativeQuotaToPreConsume: preConsumedQuota,
+		TimeRatioInfo:                 timeRatioInfo,
 	}
 
 	if common.DebugEnabled {

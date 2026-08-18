@@ -348,8 +348,8 @@ export const getModelWarnings = (model, t) => {
 export const buildSummaryText = (model, t) => {
   const requestRuleSuffix =
     model.billingMode === 'tiered_expr' && model.requestRuleExpr
-    ? `，${t('请求规则')}`
-    : '';
+      ? `，${t('请求规则')}`
+      : '';
   if (model.billingMode === 'tiered_expr') {
     const expr = model.billingExpr;
     if (!expr) return `${t('表达式计费')}${requestRuleSuffix}`;
@@ -736,8 +736,12 @@ export function useModelPricingEditorState({
       AudioRatio: parseOptionJSON(options.AudioRatio),
       AudioCompletionRatio: parseOptionJSON(options.AudioCompletionRatio),
       AudioDurationPrice: parseOptionJSON(options.AudioDurationPrice),
-      ModelBillingMode: parseOptionJSON(options['billing_setting.billing_mode']),
-      ModelBillingExpr: parseOptionJSON(options['billing_setting.billing_expr']),
+      ModelBillingMode: parseOptionJSON(
+        options['billing_setting.billing_mode'],
+      ),
+      ModelBillingExpr: parseOptionJSON(
+        options['billing_setting.billing_expr'],
+      ),
     };
 
     const names = collectModelNames(candidateModelNames, sourceMaps);
@@ -1135,8 +1139,8 @@ export function useModelPricingEditorState({
       };
 
       const tieredOutput = {
-        'billing_setting.billing_mode': {},
-        'billing_setting.billing_expr': {},
+        billing_mode: {},
+        billing_expr: {},
       };
 
       for (const model of models) {
@@ -1146,8 +1150,8 @@ export function useModelPricingEditorState({
             model.requestRuleExpr,
           );
           if (finalBillingExpr) {
-            tieredOutput['billing_setting.billing_mode'][model.name] = 'tiered_expr';
-            tieredOutput['billing_setting.billing_expr'][model.name] = finalBillingExpr;
+            tieredOutput.billing_mode[model.name] = 'tiered_expr';
+            tieredOutput.billing_expr[model.name] = finalBillingExpr;
           }
         }
         // Always serialize ratio/price values for all models, including tiered_expr.
@@ -1173,12 +1177,10 @@ export function useModelPricingEditorState({
             value: JSON.stringify(value, null, 2),
           }),
         ),
-        ...Object.entries(tieredOutput).map(([key, value]) =>
-          API.put('/api/option/', {
-            key,
-            value: JSON.stringify(value, null, 2),
-          }),
-        ),
+        API.put('/api/option/', {
+          key: 'billing_setting.tiered_bundle',
+          value: JSON.stringify(tieredOutput),
+        }),
       ];
 
       const results = await Promise.all(requestQueue);

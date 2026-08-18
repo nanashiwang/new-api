@@ -62,6 +62,37 @@ func TestModelPriceHelperTieredUsesPreloadedRequestInput(t *testing.T) {
 	require.Equal(t, common.QuotaPerUnit, info.TieredBillingSnapshot.QuotaPerUnit)
 }
 
+func TestModelPriceHelperTieredReservesDefaultCompletionWhenUnset(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	saved := billing_setting.TieredBundle{
+		BillingMode: billing_setting.GetBillingModeCopy(),
+		BillingExpr: billing_setting.GetBillingExprCopy(),
+	}
+	t.Cleanup(func() { billing_setting.ReplaceBundle(saved) })
+	billing_setting.ReplaceBundle(billing_setting.TieredBundle{
+		BillingMode: map[string]string{"tiered-reserve-model": billing_setting.BillingModeTieredExpr},
+		BillingExpr: map[string]string{"tiered-reserve-model": `tier("base", c * 10)`},
+	})
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Set("group", "default")
+	priceData, err := ModelPriceHelper(ctx, &relaycommon.RelayInfo{
+		OriginModelName: "tiered-reserve-model",
+		UsingGroup:      "default",
+		UserGroup:       "default",
+	}, 0, &types.TokenCountMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := defaultConservativeCompletionTokens * 10 * int(common.QuotaPerUnit) / 1_000_000
+	if priceData.QuotaToPreConsume != want {
+		t.Fatalf("QuotaToPreConsume = %d, want %d", priceData.QuotaToPreConsume, want)
+	}
+	if priceData.ConservativeQuotaToPreConsume != want {
+		t.Fatalf("ConservativeQuotaToPreConsume = %d, want %d", priceData.ConservativeQuotaToPreConsume, want)
+	}
+}
+
 func TestModelPriceHelperUsesMiMoAudioDurationPrice(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	originalAudioDurationPrices := ratio_setting.AudioDurationPrice2JSONString()
