@@ -88,6 +88,21 @@ func CountChannelTypes(channels []*Channel) map[int64]int64 {
 	return counts
 }
 
+// CountChannelDisplayTypes returns the mutually exclusive categories shown in
+// the channel navigation. A recognized vendor override, currently Xiaomi MiMo,
+// is displayed as its own top-level category instead of under its transport
+// protocol (usually OpenAI-compatible).
+func CountChannelDisplayTypes(channels []*Channel) map[int64]int64 {
+	counts := make(map[int64]int64)
+	for _, channel := range channels {
+		if channel == nil || ChannelMatchesVendor(channel, ChannelVendorMiMo) {
+			continue
+		}
+		counts[int64(channel.Type)]++
+	}
+	return counts
+}
+
 func FilterChannelsByType(channels []*Channel, typeFilter int) []*Channel {
 	if typeFilter < 0 {
 		return channels
@@ -97,6 +112,27 @@ func FilterChannelsByType(channels []*Channel, typeFilter int) []*Channel {
 		if channel != nil && channel.Type == typeFilter {
 			filtered = append(filtered, channel)
 		}
+	}
+	return filtered
+}
+
+// FilterChannelsByDisplayType mirrors CountChannelDisplayTypes so vendor
+// overrides do not also appear in their underlying protocol tab. It never
+// changes Channel.Type, which remains the source of truth for relay behavior.
+func FilterChannelsByDisplayType(channels []*Channel, typeFilter int) []*Channel {
+	if typeFilter < 0 {
+		return channels
+	}
+
+	filtered := make([]*Channel, 0, len(channels))
+	for _, channel := range channels {
+		if channel == nil || channel.Type != typeFilter {
+			continue
+		}
+		if ChannelMatchesVendor(channel, ChannelVendorMiMo) {
+			continue
+		}
+		filtered = append(filtered, channel)
 	}
 	return filtered
 }

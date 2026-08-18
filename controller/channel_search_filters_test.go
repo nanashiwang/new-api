@@ -222,7 +222,41 @@ func TestGetAllChannels_VendorFacetFiltersBeforePagination(t *testing.T) {
 	require.EqualValues(t, 2, resp.Data.VendorCounts[model.ChannelVendorMiMo])
 	require.EqualValues(t, 3, resp.Data.VendorCounts[model.ChannelVendorAll])
 	require.EqualValues(t, 1, resp.Data.TypeCounts["1"])
-	require.EqualValues(t, 1, resp.Data.TypeCounts["14"])
+	require.Zero(t, resp.Data.TypeCounts["14"])
+}
+
+func TestGetAllChannels_DisplayTypeSeparatesMiMoFromOpenAI(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupChannelSearchControllerTestDB(t)
+	seedChannelVendorControllerTestData(t)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(
+		http.MethodGet,
+		"/api/channel/?type=1&p=1&page_size=20",
+		nil,
+	)
+
+	GetAllChannels(ctx)
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	var resp struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Items        []model.Channel  `json:"items"`
+			Total        int              `json:"total"`
+			TypeCounts   map[string]int64 `json:"type_counts"`
+			VendorCounts map[string]int64 `json:"vendor_counts"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &resp))
+	require.True(t, resp.Success)
+	require.Equal(t, 1, resp.Data.Total)
+	require.Len(t, resp.Data.Items, 1)
+	require.Equal(t, 102, resp.Data.Items[0].Id)
+	require.EqualValues(t, 1, resp.Data.TypeCounts["1"])
+	require.EqualValues(t, 2, resp.Data.VendorCounts[model.ChannelVendorMiMo])
 }
 
 func TestSearchChannels_VendorFacetExcludesEmbeddedNameFalsePositives(t *testing.T) {
@@ -253,6 +287,36 @@ func TestSearchChannels_VendorFacetExcludesEmbeddedNameFalsePositives(t *testing
 	require.Equal(t, 2, resp.Data.Total)
 	require.Len(t, resp.Data.Items, 2)
 	require.ElementsMatch(t, []int{101, 103}, []int{resp.Data.Items[0].Id, resp.Data.Items[1].Id})
+}
+
+func TestSearchChannels_DisplayTypeSeparatesMiMoFromOpenAI(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupChannelSearchControllerTestDB(t)
+	seedChannelVendorControllerTestData(t)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(
+		http.MethodGet,
+		"/api/channel/search?type=1&p=1&page_size=20",
+		nil,
+	)
+
+	SearchChannels(ctx)
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	var resp struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Items []model.Channel `json:"items"`
+			Total int             `json:"total"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &resp))
+	require.True(t, resp.Success)
+	require.Equal(t, 1, resp.Data.Total)
+	require.Len(t, resp.Data.Items, 1)
+	require.Equal(t, 102, resp.Data.Items[0].Id)
 }
 
 func TestGetAllChannels_TagModeCountsFilteredTags(t *testing.T) {
