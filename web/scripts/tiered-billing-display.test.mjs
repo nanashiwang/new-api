@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  buildFirstTierGroupPriceItems,
   buildTieredBillingBreakdown,
   resolveTieredLogParams,
 } from '../src/helpers/tieredBillingDisplay.js';
@@ -73,5 +74,65 @@ const claudeParams = resolveTieredLogParams(
 );
 assert.equal(claudeParams.p, 1200);
 assert.equal(claudeParams.len, 2030);
+
+const displayPrice = () => '';
+displayPrice.toAmount = (usdAmount) => usdAmount;
+displayPrice.currencySymbol = '¥';
+
+const firstTierPricing = buildFirstTierGroupPriceItems({
+  tiers: [
+    {
+      label: 'standard',
+      inputPrice: 2.5,
+      outputPrice: 15,
+      cacheReadPrice: 0.25,
+    },
+    {
+      label: 'long_context',
+      inputPrice: 5,
+      outputPrice: 22.5,
+      cacheReadPrice: 0.5,
+    },
+  ],
+  effectiveBillingRatio: 0.45,
+  displayPrice,
+});
+assert.equal(firstTierPricing.firstTier.label, 'standard');
+assert.deepEqual(firstTierPricing.items, [
+  {
+    key: 'tiered-p',
+    label: '输入价格',
+    value: '¥1.1250',
+    suffix: ' / 1M Tokens',
+  },
+  {
+    key: 'tiered-c',
+    label: '补全价格',
+    value: '¥6.7500',
+    suffix: ' / 1M Tokens',
+  },
+  {
+    key: 'tiered-cr',
+    label: '缓存读取价格',
+    value: '¥0.1125',
+    suffix: ' / 1M Tokens',
+  },
+]);
+
+const freeGroupPricing = buildFirstTierGroupPriceItems({
+  tiers: [{ label: 'base', inputPrice: 2.5 }],
+  effectiveBillingRatio: 0,
+  displayPrice,
+});
+assert.equal(freeGroupPricing.items[0].value, '¥0.0000');
+
+assert.deepEqual(
+  buildFirstTierGroupPriceItems({
+    tiers: [],
+    effectiveBillingRatio: 1,
+    displayPrice,
+  }),
+  { firstTier: null, items: [] },
+);
 
 console.log('tiered billing display tests passed');

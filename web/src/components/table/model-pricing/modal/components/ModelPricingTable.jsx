@@ -24,8 +24,11 @@ import {
   calculateModelPrice,
   formatTimeRatioValue,
   getModelPriceItems,
+  parseTiersFromExpr,
   shouldShowPricingTimeRatio,
 } from '../../../../../helpers';
+import { buildFirstTierGroupPriceItems } from '../../../../../helpers/tieredBillingDisplay';
+import { splitBillingExprAndRequestRules } from '../../../../../pages/Setting/Ratio/components/requestRuleExpr';
 
 const { Text } = Typography;
 
@@ -46,6 +49,12 @@ const ModelPricingTable = ({
     ? modelData.enable_groups
     : [];
   const autoChain = autoGroups.filter((g) => modelEnableGroups.includes(g));
+  const isDynamic = modelData?.billing_mode === 'tiered_expr';
+  const { billingExpr: baseBillingExpr } = splitBillingExprAndRequestRules(
+    modelData?.billing_expr || '',
+  );
+  const dynamicTiers = isDynamic ? parseTiersFromExpr(baseBillingExpr) : [];
+  const firstDynamicTier = dynamicTiers[0] || null;
   const renderGroupPriceTable = () => {
     // 仅展示模型可用的分组：模型 enable_groups 与用户可用分组的交集
 
@@ -72,6 +81,19 @@ const ModelPricingTable = ({
       // 获取分组倍率
       const groupRatioValue =
         groupRatio && groupRatio[group] !== undefined ? groupRatio[group] : 1;
+      const defaultPriceItems = getModelPriceItems(
+        priceData,
+        t,
+        siteDisplayType,
+      );
+      const firstTierPricing = isDynamic
+        ? buildFirstTierGroupPriceItems({
+            tiers: dynamicTiers,
+            effectiveBillingRatio: priceData.effectiveBillingRatio,
+            displayPrice,
+            t,
+          })
+        : null;
 
       return {
         key: group,
@@ -88,7 +110,10 @@ const ModelPricingTable = ({
                 : modelData?.quota_type === 2
                   ? `${t('按量计费')} / ${t('小时')}`
                   : '-',
-        priceItems: getModelPriceItems(priceData, t, siteDisplayType),
+        priceItems:
+          firstTierPricing?.items.length > 0
+            ? firstTierPricing.items
+            : defaultPriceItems,
       };
     });
 
@@ -105,8 +130,6 @@ const ModelPricingTable = ({
         ),
       },
     ];
-
-    const isDynamic = modelData?.billing_mode === 'tiered_expr';
 
     // 动态计费时始终显示倍率列，否则根据设置
     if (showRatio || isDynamic) {
@@ -157,7 +180,10 @@ const ModelPricingTable = ({
     });
 
     columns.push({
-      title: siteDisplayType === 'TOKENS' ? t('计费摘要') : t('价格摘要'),
+      title:
+        !isDynamic && siteDisplayType === 'TOKENS'
+          ? t('计费摘要')
+          : t('价格摘要'),
       dataIndex: 'priceItems',
       render: (items) => {
         if (items.length === 1 && items[0].isDynamic) {
@@ -211,7 +237,15 @@ const ModelPricingTable = ({
         <div>
           <Text className='text-lg font-medium'>{t('分组价格')}</Text>
           <div className='text-xs text-gray-600'>
-            {t('不同用户分组的价格信息')}
+            {isDynamic && firstDynamicTier ? (
+              <>
+                {t('动态计费')} · {t('档位')} 1：
+                {firstDynamicTier.label || t('默认')} ·{' '}
+                {t('见上方动态计费详情')}
+              </>
+            ) : (
+              t('不同用户分组的价格信息')
+            )}
           </div>
         </div>
       </div>
