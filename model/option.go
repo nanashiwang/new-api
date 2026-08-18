@@ -11,11 +11,13 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/performance_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"gorm.io/gorm"
 )
 
 type Option struct {
@@ -27,6 +29,11 @@ type Option struct {
 // They are persisted as separate legacy options, but must be validated and
 // published as one logical configuration inside a process.
 var inviteCommissionRateOptionMutex sync.Mutex
+
+// tieredBillingOptionMutex keeps persistence and runtime publication ordered.
+// Without it, two concurrent saves can commit in one order and publish in the
+// opposite order, leaving the process with a snapshot different from the DB.
+var tieredBillingOptionMutex sync.Mutex
 
 func AllOption() ([]*Option, error) {
 	var options []*Option
@@ -226,13 +233,61 @@ func InitOptionMap() {
 }
 
 func loadOptionsFromDatabase() {
+	tieredBillingOptionMutex.Lock()
 	options, _ := AllOption()
+	loadTieredBillingOptions(options)
+	tieredBillingOptionMutex.Unlock()
 	for _, option := range options {
+		if option.Key == "billing_setting.billing_mode" || option.Key == "billing_setting.billing_expr" {
+			continue
+		}
 		err := updateOptionMap(option.Key, option.Value)
 		if err != nil {
 			common.SysLog("failed to update option map: " + err.Error())
 		}
 	}
+}
+
+func loadTieredBillingOptions(options []*Option) {
+	modeBytes, err := common.Marshal(billing_setting.GetBillingModeCopy())
+	if err != nil {
+		common.SysLog("failed to serialize current tiered billing modes: " + err.Error())
+		return
+	}
+	exprBytes, err := common.Marshal(billing_setting.GetBillingExprCopy())
+	if err != nil {
+		common.SysLog("failed to serialize current tiered billing expressions: " + err.Error())
+		return
+	}
+	modeRaw := string(modeBytes)
+	exprRaw := string(exprBytes)
+	found := false
+	for _, option := range options {
+		switch option.Key {
+		case "billing_setting.billing_mode":
+			modeRaw = option.Value
+			found = true
+		case "billing_setting.billing_expr":
+			exprRaw = option.Value
+			found = true
+		}
+	}
+	if !found {
+		return
+	}
+	bundle, err := billing_setting.ParseAndValidateFields(modeRaw, exprRaw)
+	if err != nil {
+		common.SysLog("failed to load tiered billing options: " + err.Error())
+		return
+	}
+	common.OptionMapRWMutex.Lock()
+	if common.OptionMap == nil {
+		common.OptionMap = make(map[string]string)
+	}
+	common.OptionMap["billing_setting.billing_mode"] = modeRaw
+	common.OptionMap["billing_setting.billing_expr"] = exprRaw
+	common.OptionMapRWMutex.Unlock()
+	billing_setting.ReplaceBundle(bundle)
 }
 
 func SyncOptions(frequency int) {
@@ -244,6 +299,11 @@ func SyncOptions(frequency int) {
 }
 
 func UpdateOption(key string, value string) error {
+	isTieredBillingField := key == "billing_setting.billing_mode" || key == "billing_setting.billing_expr"
+	if isTieredBillingField {
+		tieredBillingOptionMutex.Lock()
+		defer tieredBillingOptionMutex.Unlock()
+	}
 	isInviteCommissionRate := isInviteCommissionRateOption(key)
 	if isInviteCommissionRate {
 		inviteCommissionRateOptionMutex.Lock()
@@ -254,6 +314,14 @@ func UpdateOption(key string, value string) error {
 	}
 	if err := validateInviteCommissionDailyCapOption(key, value); err != nil {
 		return err
+	}
+	if strings.HasPrefix(key, "billing_setting.") {
+		field := strings.TrimPrefix(key, "billing_setting.")
+		if field == billing_setting.BillingModeField || field == billing_setting.BillingExprField {
+			if err := billing_setting.ValidateFieldUpdate(field, value); err != nil {
+				return err
+			}
+		}
 	}
 	// Save to database first
 	option := Option{
@@ -275,6 +343,56 @@ func UpdateOption(key string, value string) error {
 		return updateOptionMapUnlocked(key, value)
 	}
 	return updateOptionMap(key, value)
+}
+
+func UpdateTieredBillingOptions(raw string) error {
+	tieredBillingOptionMutex.Lock()
+	defer tieredBillingOptionMutex.Unlock()
+
+	bundle, err := billing_setting.ParseAndValidateBundle(raw)
+	if err != nil {
+		return err
+	}
+	modeBytes, err := common.Marshal(bundle.BillingMode)
+	if err != nil {
+		return err
+	}
+	exprBytes, err := common.Marshal(bundle.BillingExpr)
+	if err != nil {
+		return err
+	}
+	modeRaw := string(modeBytes)
+	exprRaw := string(exprBytes)
+
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		for key, value := range map[string]string{
+			"billing_setting.billing_mode": modeRaw,
+			"billing_setting.billing_expr": exprRaw,
+		} {
+			option := Option{Key: key}
+			if err := tx.FirstOrCreate(&option, Option{Key: key}).Error; err != nil {
+				return err
+			}
+			option.Value = value
+			if err := tx.Save(&option).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	common.OptionMapRWMutex.Lock()
+	if common.OptionMap == nil {
+		common.OptionMap = make(map[string]string)
+	}
+	common.OptionMap["billing_setting.billing_mode"] = modeRaw
+	common.OptionMap["billing_setting.billing_expr"] = exprRaw
+	common.OptionMapRWMutex.Unlock()
+	billing_setting.ReplaceBundle(bundle)
+	return nil
 }
 
 func updateOptionMap(key string, value string) (err error) {
@@ -304,7 +422,10 @@ func updateOptionMapUnlocked(key string, value string) (err error) {
 	common.OptionMap[key] = value
 
 	// 检查是否是模型配置 - 使用更规范的方式处理
-	if handleConfigUpdate(key, value) {
+	if handled, configErr := handleConfigUpdate(key, value); handled {
+		if configErr != nil {
+			return configErr
+		}
 		return nil // 已由配置系统处理
 	}
 
@@ -721,10 +842,10 @@ func validateInviteCommissionDailyCapOption(key string, value string) error {
 }
 
 // handleConfigUpdate 处理分层配置更新，返回是否已处理
-func handleConfigUpdate(key, value string) bool {
+func handleConfigUpdate(key, value string) (bool, error) {
 	parts := strings.SplitN(key, ".", 2)
 	if len(parts) != 2 {
-		return false // 不是分层配置
+		return false, nil // 不是分层配置
 	}
 
 	configName := parts[0]
@@ -733,7 +854,10 @@ func handleConfigUpdate(key, value string) bool {
 	// 获取配置对象
 	cfg := config.GlobalConfig.Get(configName)
 	if cfg == nil {
-		return false // 未注册的配置
+		return false, nil // 未注册的配置
+	}
+	if configName == "billing_setting" {
+		return true, billing_setting.UpdateField(configKey, value)
 	}
 
 	// 更新配置
@@ -749,5 +873,5 @@ func handleConfigUpdate(key, value string) bool {
 		operation_setting.RebuildToolPriceIndex()
 	}
 
-	return true // 已处理
+	return true, nil // 已处理
 }

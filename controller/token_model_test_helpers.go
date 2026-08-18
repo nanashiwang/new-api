@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
@@ -47,6 +48,14 @@ func shouldAcceptUnsetRatioModel(userId int) bool {
 	return userSettings.AcceptUnsetRatioModel
 }
 
+func hasConfiguredModelPrice(modelName string) bool {
+	if _, _, exists := ratio_setting.GetModelRatioOrPrice(modelName); exists {
+		return true
+	}
+	_, exists := billing_setting.GetTieredExpr(modelName)
+	return exists
+}
+
 func filterVisibleModelsByRatio(models []string, acceptUnsetRatioModel bool) []string {
 	filtered := make([]string, 0, len(models))
 	seen := make(map[string]struct{}, len(models))
@@ -59,7 +68,7 @@ func filterVisibleModelsByRatio(models []string, acceptUnsetRatioModel bool) []s
 			continue
 		}
 		if !acceptUnsetRatioModel {
-			if _, _, exists := ratio_setting.GetModelRatioOrPrice(modelName); !exists {
+			if !hasConfiguredModelPrice(modelName) {
 				continue
 			}
 		}

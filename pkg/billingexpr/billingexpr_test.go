@@ -4,9 +4,48 @@ import (
 	"math"
 	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 )
+
+func TestRunExprRejectsNonFiniteAndNegativeResults(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		expr   string
+		params billingexpr.TokenParams
+	}{
+		{name: "infinite", expr: `1 / c`, params: billingexpr.TokenParams{}},
+		{name: "negative", expr: `p - c * 2`, params: billingexpr.TokenParams{P: 1, C: 1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, err := billingexpr.RunExpr(tc.expr, tc.params); err == nil {
+				t.Fatal("expected invalid billing result to be rejected")
+			}
+		})
+	}
+}
+
+func TestRunExprUsesFrozenEvaluationTime(t *testing.T) {
+	at := time.Date(2026, time.August, 18, 23, 59, 0, 0, time.UTC)
+	cost, _, err := billingexpr.RunExprWithRequest(
+		`hour("UTC") == 23 && minute("UTC") == 59 ? 2 : 1`,
+		billingexpr.TokenParams{},
+		billingexpr.RequestInput{EvaluationAt: at},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cost != 2 {
+		t.Fatalf("cost = %v, want 2", cost)
+	}
+}
+
+func TestQuotaRoundCheckedRejectsIntOverflow(t *testing.T) {
+	if _, err := billingexpr.QuotaRoundChecked(float64(math.MaxInt)); err == nil {
+		t.Fatal("expected int overflow boundary to be rejected")
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Claude-style: fixed tiers, input > 200K changes both input & output price

@@ -376,6 +376,12 @@ func InjectTieredBillingInfo(other map[string]interface{}, relayInfo *relaycommo
 		}
 	}
 	if result != nil {
+		if result.SettlementFallback {
+			other["tiered_settle_failed"] = true
+			other["tiered_settle_error"] = result.SettlementError
+			other["tiered_fallback_quota"] = result.ActualQuotaAfterGroup
+			return
+		}
 		other["matched_tier"] = result.MatchedTier
 		other["tiered_quota_before_group"] = result.ActualQuotaBeforeGroup
 		other["tiered_quota_after_group"] = result.ActualQuotaAfterGroup

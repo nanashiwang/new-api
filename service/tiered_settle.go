@@ -88,6 +88,51 @@ func BuildTieredTokenParams(usage *dto.Usage, isClaudeUsageSemantic bool, usedVa
 	}
 }
 
+func BuildTieredRealtimeTokenParams(usage *dto.RealtimeUsage, usedVars map[string]bool) billingexpr.TokenParams {
+	if usage == nil {
+		return billingexpr.TokenParams{}
+	}
+	p := float64(usage.InputTokens)
+	c := float64(usage.OutputTokens)
+	cr := float64(usage.InputTokenDetails.CachedTokens)
+	ai := float64(usage.InputTokenDetails.AudioTokens)
+	ao := float64(usage.OutputTokenDetails.AudioTokens)
+	img := float64(usage.InputTokenDetails.ImageTokens)
+	imgO := float64(usage.OutputTokenDetails.ImageTokens)
+
+	if usedVars["cr"] {
+		p -= cr
+	}
+	if usedVars["ai"] {
+		p -= ai
+	}
+	if usedVars["img"] {
+		p -= img
+	}
+	if usedVars["ao"] {
+		c -= ao
+	}
+	if usedVars["img_o"] {
+		c -= imgO
+	}
+	if p < 0 {
+		p = 0
+	}
+	if c < 0 {
+		c = 0
+	}
+	return billingexpr.TokenParams{
+		P:    p,
+		C:    c,
+		Len:  float64(usage.InputTokens),
+		CR:   cr,
+		Img:  img,
+		ImgO: imgO,
+		AI:   ai,
+		AO:   ao,
+	}
+}
+
 // TryTieredSettle checks if the request uses tiered_expr billing and, if so,
 // computes the actual quota using the frozen BillingSnapshot. Returns:
 //   - ok=true, quota, result  when tiered billing applies
@@ -109,7 +154,11 @@ func TryTieredSettle(relayInfo *relaycommon.RelayInfo, params billingexpr.TokenP
 		if quota <= 0 {
 			quota = snap.EstimatedQuotaAfterGroup
 		}
-		return true, quota, nil
+		return true, quota, &billingexpr.TieredResult{
+			ActualQuotaAfterGroup: quota,
+			SettlementFallback:    true,
+			SettlementError:       err.Error(),
+		}
 	}
 
 	return true, tr.ActualQuotaAfterGroup, &tr

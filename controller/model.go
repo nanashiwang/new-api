@@ -153,8 +153,7 @@ func ListModels(c *gin.Context, modelType int) {
 				continue
 			}
 			if !acceptUnsetRatioModel {
-				_, _, exist := ratio_setting.GetModelRatioOrPrice(allowModel)
-				if !exist {
+				if !hasConfiguredModelPrice(allowModel) {
 					continue
 				}
 			}
@@ -207,8 +206,7 @@ func ListModels(c *gin.Context, modelType int) {
 				continue
 			}
 			if !acceptUnsetRatioModel {
-				_, _, exist := ratio_setting.GetModelRatioOrPrice(modelName)
-				if !exist {
+				if !hasConfiguredModelPrice(modelName) {
 					continue
 				}
 			}

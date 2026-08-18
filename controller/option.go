@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/console_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -136,6 +137,20 @@ func UpdateOption(c *gin.Context) {
 		option.Value = common.Interface2String(option.Value.(int))
 	default:
 		option.Value = fmt.Sprintf("%v", option.Value)
+	}
+	if option.Key == billing_setting.TieredBundleOptionKey {
+		if err = model.UpdateTieredBillingOptions(option.Value.(string)); err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "",
+		})
+		return
 	}
 	if strings.HasPrefix(option.Key, "slow_ttft_setting.") {
 		if err = operation_setting.ValidateSlowTTFTOption(option.Key, option.Value.(string)); err != nil {

@@ -105,8 +105,8 @@ func TestTryTieredSettleFallsBackToFrozenPreConsumeOnExprError(t *testing.T) {
 	if quota != 321 {
 		t.Fatalf("quota = %d, want 321", quota)
 	}
-	if result != nil {
-		t.Fatalf("result = %#v, want nil", result)
+	if result == nil || !result.SettlementFallback || result.SettlementError == "" {
+		t.Fatalf("result = %#v, want audited fallback", result)
 	}
 }
 
@@ -406,8 +406,52 @@ func TestTryTieredSettle_ErrorFallbackToEstimatedQuotaAfterGroup(t *testing.T) {
 	if quota != 999 {
 		t.Fatalf("quota = %d, want 999", quota)
 	}
-	if result != nil {
-		t.Fatal("result should be nil on error fallback")
+	if result == nil || !result.SettlementFallback || result.SettlementError == "" {
+		t.Fatal("result should record the settlement fallback")
+	}
+}
+
+func TestBuildTieredRealtimeTokenParamsIncludesMediaAndLength(t *testing.T) {
+	usage := &dto.RealtimeUsage{
+		InputTokens:  100,
+		OutputTokens: 40,
+		InputTokenDetails: dto.InputTokenDetails{
+			CachedTokens: 10,
+			AudioTokens:  30,
+			ImageTokens:  5,
+		},
+		OutputTokenDetails: dto.OutputTokenDetails{
+			AudioTokens: 12,
+			ImageTokens: 3,
+		},
+	}
+	params := BuildTieredRealtimeTokenParams(usage, map[string]bool{
+		"cr": true, "ai": true, "img": true, "ao": true, "img_o": true,
+	})
+	if params.P != 55 || params.C != 25 || params.Len != 100 {
+		t.Fatalf("unexpected normalized realtime params: %#v", params)
+	}
+	if params.CR != 10 || params.AI != 30 || params.AO != 12 || params.Img != 5 || params.ImgO != 3 {
+		t.Fatalf("missing realtime detail params: %#v", params)
+	}
+}
+
+func TestInjectTieredBillingInfoRecordsSettlementFallback(t *testing.T) {
+	other := map[string]interface{}{}
+	relayInfo := &relaycommon.RelayInfo{TieredBillingSnapshot: &billingexpr.BillingSnapshot{
+		BillingMode: "tiered_expr",
+		ExprString:  `tier("base", p)`,
+	}}
+	InjectTieredBillingInfo(other, relayInfo, &billingexpr.TieredResult{
+		ActualQuotaAfterGroup: 123,
+		SettlementFallback:    true,
+		SettlementError:       "forced failure",
+	}, &billingexpr.TokenParams{P: 10, Len: 10})
+	if other["billing_mode"] != "tiered_expr" || other["tiered_settle_failed"] != true {
+		t.Fatalf("fallback audit fields missing: %#v", other)
+	}
+	if other["tiered_fallback_quota"] != 123 || other["tiered_settle_error"] != "forced failure" {
+		t.Fatalf("fallback details missing: %#v", other)
 	}
 }
 

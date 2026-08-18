@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -20,6 +21,23 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
+
+func TestFilterVisibleModelsByRatioIncludesTieredOnlyModel(t *testing.T) {
+	saved := billing_setting.TieredBundle{
+		BillingMode: billing_setting.GetBillingModeCopy(),
+		BillingExpr: billing_setting.GetBillingExprCopy(),
+	}
+	t.Cleanup(func() { billing_setting.ReplaceBundle(saved) })
+	billing_setting.ReplaceBundle(billing_setting.TieredBundle{
+		BillingMode: map[string]string{"tier-only-model": billing_setting.BillingModeTieredExpr},
+		BillingExpr: map[string]string{"tier-only-model": `tier("base", p * 2 + c * 8)`},
+	})
+
+	models := filterVisibleModelsByRatio([]string{"tier-only-model", "missing-price-model"}, false)
+	if len(models) != 1 || models[0] != "tier-only-model" {
+		t.Fatalf("unexpected filtered models: %#v", models)
+	}
+}
 
 func setupTokenModelHelperDB(t *testing.T) {
 	t.Helper()
