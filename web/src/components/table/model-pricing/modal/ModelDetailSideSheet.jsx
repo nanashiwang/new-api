@@ -103,6 +103,7 @@ const ModelDetailSideSheet = ({
                   <div style={{ padding: '0 24px' }}>
                     <DynamicPricingBreakdown
                       billingExpr={modelData.billing_expr}
+                      displayPrice={displayPrice}
                       t={t}
                     />
                   </div>

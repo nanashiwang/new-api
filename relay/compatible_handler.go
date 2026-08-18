@@ -256,7 +256,8 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 		tieredUsedVars = billingexpr.UsedVars(snap.ExprString)
 	}
 	var tieredResult *billingexpr.TieredResult
-	tieredOk, tieredQuota, tieredRes := service.TryTieredSettle(relayInfo, service.BuildTieredTokenParams(usage, isClaudeUsageSemantic, tieredUsedVars))
+	tieredParams := service.BuildTieredTokenParams(usage, isClaudeUsageSemantic, tieredUsedVars)
+	tieredOk, tieredQuota, tieredRes := service.TryTieredSettle(relayInfo, tieredParams)
 	if tieredOk {
 		tieredResult = tieredRes
 	}
@@ -507,7 +508,7 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 		other["audio_duration_price_per_hour"] = relayInfo.PriceData.AudioDurationPrice
 	}
 	if tieredResult != nil {
-		service.InjectTieredBillingInfo(other, relayInfo, tieredResult)
+		service.InjectTieredBillingInfo(other, relayInfo, tieredResult, &tieredParams)
 	}
 	quota, logContent, other = service.FinalizeConsumeLogAfterSettle(logContent, other, actualQuota, relayInfo, settleErr)
 	if totalTokens != 0 || toolResult.TotalQuota > 0 || relayInfo.PriceData.UseAudioDurationPrice {

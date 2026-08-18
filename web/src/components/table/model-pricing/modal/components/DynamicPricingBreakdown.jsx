@@ -20,7 +20,8 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import { Avatar, Tag, Table, Typography } from '@douyinfe/semi-ui';
 import { IconPriceTag } from '@douyinfe/semi-icons';
-import { parseTiersFromExpr, getCurrencyConfig } from '../../../../../helpers';
+import { parseTiersFromExpr } from '../../../../../helpers';
+import { formatModelPricingUnitPrice } from '../../../../../helpers/modelPricingCurrency';
 import { BILLING_PRICING_VARS } from '../../../../../constants';
 import {
   splitBillingExprAndRequestRules,
@@ -62,7 +63,6 @@ function formatConditionSummary(conditions, t) {
     .join(' && ');
 }
 
-
 function describeCondition(cond, t) {
   if (cond.source === SOURCE_TIME) {
     const fn = t(TIME_FUNC_LABELS[cond.timeFunc] || cond.timeFunc);
@@ -86,8 +86,12 @@ function describeGroup(group, t) {
   return parts.join(' && ');
 }
 
-export default function DynamicPricingBreakdown({ billingExpr, t }) {
-  const { symbol, rate } = getCurrencyConfig();
+export default function DynamicPricingBreakdown({
+  billingExpr,
+  displayPrice,
+  t,
+}) {
+  const symbol = displayPrice?.currencySymbol || '$';
   const { billingExpr: baseExpr, requestRuleExpr: ruleExpr } =
     splitBillingExprAndRequestRules(billingExpr || '');
 
@@ -133,7 +137,12 @@ export default function DynamicPricingBreakdown({ billingExpr, t }) {
       .map(([field, label]) => ({
         title: `${t(label)} (${symbol}/1M tokens)`,
         dataIndex: field,
-        render: (v) => v > 0 ? <Text strong>{`${symbol}${(v * rate).toFixed(4)}`}</Text> : '-',
+        render: (v) =>
+          v > 0 ? (
+            <Text strong>{formatModelPricingUnitPrice(v, displayPrice)}</Text>
+          ) : (
+            '-'
+          ),
       })),
   ];
 
