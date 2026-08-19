@@ -99,6 +99,16 @@ func responsesStreamErrorStatus(err types.OpenAIError) int {
 		strings.TrimSpace(fmt.Sprintf("%v", err.Code)),
 		strings.TrimSpace(err.Message),
 	}, " "))
+	for _, overloadSignal := range []string{
+		"service_unavailable_error",
+		"server_is_overloaded",
+		"servers are currently overloaded",
+		"system cpu overloaded",
+	} {
+		if strings.Contains(signal, overloadSignal) {
+			return http.StatusServiceUnavailable
+		}
+	}
 	for _, requestError := range []string{
 		"invalid_request",
 		"cyber_policy",

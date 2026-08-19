@@ -243,6 +243,13 @@ type ResponsesStreamHandlerOptions struct {
 	scheduleCooldown        func(string)
 }
 
+type bufferedResponsesStreamEvent struct {
+	response dto.ResponsesStreamResponse
+	data     string
+}
+
+const maxResponsesRetryPreludeBytes = 256 << 10
+
 func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response, opts *ResponsesStreamHandlerOptions) (*dto.Usage, *types.NewAPIError) {
 	if resp == nil || resp.Body == nil {
 		logger.LogError(c, "invalid response or response body")
@@ -261,6 +268,31 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 	responseCreatedAt := 0
 	hasNonTextOutput := false
 	failureForwarded := false
+	preludeCommitted := false
+	bufferedPreludeBytes := 0
+	bufferedPrelude := make([]bufferedResponsesStreamEvent, 0, 4)
+	flushBufferedPrelude := func() {
+		if len(bufferedPrelude) == 0 {
+			return
+		}
+		for _, event := range bufferedPrelude {
+			if shouldSendResponsesStreamData(event.response, opts) {
+				sendResponsesStreamData(c, event.response, event.data)
+				preludeCommitted = true
+			}
+		}
+		bufferedPrelude = bufferedPrelude[:0]
+		bufferedPreludeBytes = 0
+	}
+	bufferPrelude := func(streamResponse dto.ResponsesStreamResponse, data string) bool {
+		if bufferedPreludeBytes+len(data) > maxResponsesRetryPreludeBytes {
+			flushBufferedPrelude()
+			return false
+		}
+		bufferedPrelude = append(bufferedPrelude, bufferedResponsesStreamEvent{response: streamResponse, data: data})
+		bufferedPreludeBytes += len(data)
+		return true
+	}
 
 	helper.StreamScannerHandler(c, resp, info, func(data string) bool {
 
@@ -276,20 +308,9 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 			}
 			delayCompletedEvent := streamResponse.Type == "response.completed" && !explicitFailure
 			effectiveOutput := isEffectiveResponsesStreamOutput(streamResponse)
+			nonTextOutput := isNonTextResponsesStreamOutput(streamResponse)
 			if effectiveOutput {
 				info.SetFirstEffectiveOutputTime()
-			}
-			if !delayCompletedEvent {
-				if shouldSendResponsesStreamData(streamResponse, opts) {
-					sendResponsesStreamData(c, streamResponse, data)
-					failureForwarded = explicitFailure
-				}
-				if effectiveOutput {
-					hasEffectiveOutput = true
-				}
-				if isNonTextResponsesStreamOutput(streamResponse) {
-					hasNonTextOutput = true
-				}
 			}
 			if streamResponse.Response != nil {
 				if streamResponse.Response.ID != "" {
@@ -305,16 +326,44 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 			if delayCompletedEvent && effectiveOutput {
 				hasEffectiveOutput = true
 			}
-			if delayCompletedEvent && isNonTextResponsesStreamOutput(streamResponse) {
+			if delayCompletedEvent && nonTextOutput {
 				hasNonTextOutput = true
 			}
 			if explicitFailure {
 				terminalError = newResponsesStreamEventError(streamResponse)
+				canReroute := service.IsRetryableUpstreamOverloadError(terminalError) &&
+					!hasEffectiveOutput && !hasNonTextOutput && !preludeCommitted
+				if canReroute {
+					bufferedPrelude = bufferedPrelude[:0]
+					bufferedPreludeBytes = 0
+					return false
+				}
+				flushBufferedPrelude()
+				if shouldSendResponsesStreamData(streamResponse, opts) {
+					sendResponsesStreamData(c, streamResponse, data)
+					failureForwarded = true
+				}
 				terminalError = types.NewError(terminalError, terminalError.GetErrorCode(), types.ErrOptionWithSkipRetry())
 				if failureForwarded {
 					common.SetContextKey(c, constant.ContextKeyResponsesStreamErrorWritten, true)
 				}
 				return false
+			}
+			if !delayCompletedEvent {
+				shouldBuffer := !preludeCommitted && !hasEffectiveOutput && !hasNonTextOutput && !effectiveOutput && !nonTextOutput
+				if !shouldBuffer || !bufferPrelude(streamResponse, data) {
+					flushBufferedPrelude()
+					if shouldSendResponsesStreamData(streamResponse, opts) {
+						sendResponsesStreamData(c, streamResponse, data)
+						preludeCommitted = true
+					}
+				}
+				if effectiveOutput {
+					hasEffectiveOutput = true
+				}
+				if nonTextOutput {
+					hasNonTextOutput = true
+				}
 			}
 			switch streamResponse.Type {
 			case "response.completed":
@@ -347,11 +396,13 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 					if info != nil && info.StreamStatus != nil {
 						info.StreamStatus.RecordError(reason)
 					}
+					flushBufferedPrelude()
 					scheduleResponsesStreamCooldownWithOptions(c, opts, reason)
 					sendSyntheticResponsesFailed(c, info, usage, reason, responseID, responseModel, responseCreatedAt)
 					terminalError = types.NewOpenAIError(errors.New(reason), types.ErrorCodeBadResponseBody, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
 					return false
 				} else {
+					flushBufferedPrelude()
 					if shouldSendResponsesStreamData(streamResponse, opts) {
 						sendResponsesStreamData(c, streamResponse, data)
 					}
@@ -409,6 +460,7 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 
 	if !completed {
+		flushBufferedPrelude()
 		reason := service.ResponsesStreamMissingCompletedReason
 		if info != nil && info.StreamStatus != nil {
 			info.StreamStatus.RecordError(reason)

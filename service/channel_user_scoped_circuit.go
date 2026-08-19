@@ -90,6 +90,9 @@ func shouldRecordUserScopedCircuitFailure(c *gin.Context, channel *model.Channel
 	if c == nil || channel == nil || err == nil || types.IsSkipRetryError(err) {
 		return false
 	}
+	if IsRetryableUpstreamOverloadError(err) {
+		return false
+	}
 	if !operation_setting.ShouldUseUserScopedCircuitBreakerByStatusCode(err.StatusCode) {
 		return false
 	}

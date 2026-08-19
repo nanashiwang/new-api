@@ -107,6 +107,24 @@ func TestUserScopedCircuitBreakerIgnoresUnconfiguredStatusAndClearsOnSuccess(t *
 	}
 }
 
+func TestUserScopedCircuitBreakerIgnoresProviderOverload(t *testing.T) {
+	withUserScopedCircuitTestSettings(t)
+	tag := "shared-upstream"
+	channel := &model.Channel{Id: 1, Status: common.ChannelStatusEnabled, Tag: &tag}
+	ctx := newUserScopedCircuitTestContext(1001)
+	err := types.WithOpenAIError(types.OpenAIError{
+		Message: "Our servers are currently overloaded. Please try again later.",
+		Type:    "service_unavailable_error",
+		Code:    "server_is_overloaded",
+	}, http.StatusServiceUnavailable)
+
+	RecordUserScopedCircuitFailure(ctx, channel, err)
+	RecordUserScopedCircuitFailure(ctx, channel, err)
+	if IsUserScopedCircuitOpen(ctx, channel) {
+		t.Fatal("provider overload should reroute instead of opening a user-scoped circuit")
+	}
+}
+
 func TestUserScopedCircuitBreakerStatusSkipsAutomaticDisable(t *testing.T) {
 	withUserScopedCircuitTestSettings(t)
 	originAutoDisable := common.AutomaticDisableChannelEnabled
