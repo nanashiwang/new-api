@@ -137,6 +137,56 @@ func TestOaiResponsesStreamHandler_ResponseFailedReturnsOriginalErrorWithoutCool
 	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesStreamErrorWritten))
 }
 
+func TestOaiResponsesStreamHandler_EarlyOverloadIsRetryableBeforeOutput(t *testing.T) {
+	t.Parallel()
+	setResponsesStreamTestTimeout(t)
+
+	c, recorder := newResponsesStreamTestContext()
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gpt-5.6-luna"}}
+	body := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_overload","model":"gpt-5.6-luna"}}`,
+		`data: {"type":"error","error":{"type":"service_unavailable_error","code":"server_is_overloaded","message":"Our servers are currently overloaded. Please try again later."}}`,
+	}, "\n")
+	opts, cooldowns := newResponsesStreamCooldownCounter()
+
+	usage, err := OaiResponsesStreamHandlerWithOptions(c, info, newResponsesStreamHTTPResponse(body), opts)
+
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, err.StatusCode)
+	require.Equal(t, types.ErrorCode("server_is_overloaded"), err.GetErrorCode())
+	require.False(t, types.IsSkipRetryError(err))
+	require.Equal(t, 0, *cooldowns)
+	require.Empty(t, recorder.Body.String())
+	require.False(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesStreamErrorWritten))
+}
+
+func TestOaiResponsesStreamHandler_OverloadAfterOutputIsForwardedWithoutRetry(t *testing.T) {
+	t.Parallel()
+	setResponsesStreamTestTimeout(t)
+
+	c, recorder := newResponsesStreamTestContext()
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gpt-5.6-luna"}}
+	body := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_overload","model":"gpt-5.6-luna"}}`,
+		`data: {"type":"response.output_text.delta","delta":"hello"}`,
+		`data: {"type":"response.failed","response":{"id":"resp_overload","status":"failed","error":{"type":"service_unavailable_error","code":"server_is_overloaded","message":"Our servers are currently overloaded. Please try again later."}}}`,
+	}, "\n")
+	opts, cooldowns := newResponsesStreamCooldownCounter()
+
+	usage, err := OaiResponsesStreamHandlerWithOptions(c, info, newResponsesStreamHTTPResponse(body), opts)
+
+	require.Nil(t, usage)
+	require.Error(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, err.StatusCode)
+	require.True(t, types.IsSkipRetryError(err))
+	require.Equal(t, 0, *cooldowns)
+	require.Contains(t, recorder.Body.String(), "event: response.created")
+	require.Contains(t, recorder.Body.String(), "event: response.output_text.delta")
+	require.Contains(t, recorder.Body.String(), "event: response.failed")
+	require.True(t, common.GetContextKeyBool(c, constant.ContextKeyResponsesStreamErrorWritten))
+}
+
 func TestOaiResponsesStreamHandler_EventOnlyResponseFailedIsRecognized(t *testing.T) {
 	t.Parallel()
 	setResponsesStreamTestTimeout(t)

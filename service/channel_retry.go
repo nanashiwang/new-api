@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -25,6 +26,9 @@ func IsTemporaryUpstreamError(err *types.NewAPIError) bool {
 		return false
 	}
 	if types.IsChannelError(err) {
+		return true
+	}
+	if IsRetryableUpstreamOverloadError(err) {
 		return true
 	}
 	if IsQuotaRelatedError(err) || IsChannelModelMismatchError(err) {
@@ -66,6 +70,9 @@ func ShouldRetryChannelError(c *gin.Context, openaiErr *types.NewAPIError, retry
 	if _, ok := c.Get("specific_channel_id"); ok {
 		return false
 	}
+	if IsRetryableUpstreamOverloadError(openaiErr) {
+		return true
+	}
 	code := openaiErr.StatusCode
 	if code >= 200 && code < 300 {
 		return false
@@ -83,6 +90,25 @@ func ShouldRetryChannelError(c *gin.Context, openaiErr *types.NewAPIError, retry
 		return false
 	}
 	return operation_setting.ShouldRetryByStatusCode(code)
+}
+
+// IsRetryableUpstreamOverloadError identifies provider-side capacity failures
+// that are safe to reroute only before any response content reaches the client.
+func IsRetryableUpstreamOverloadError(err *types.NewAPIError) bool {
+	if err == nil || types.IsSkipRetryError(err) {
+		return false
+	}
+	oaiErr := err.ToOpenAIError()
+	signal := strings.ToLower(strings.Join([]string{
+		strings.TrimSpace(oaiErr.Type),
+		strings.TrimSpace(fmt.Sprintf("%v", oaiErr.Code)),
+		strings.TrimSpace(oaiErr.Message),
+		strings.TrimSpace(err.Error()),
+	}, " "))
+	return strings.Contains(signal, "service_unavailable_error") ||
+		strings.Contains(signal, "server_is_overloaded") ||
+		strings.Contains(signal, "servers are currently overloaded") ||
+		strings.Contains(signal, "system cpu overloaded")
 }
 
 func ApplyChannelFailureRetryExclusion(param *RetryParam, channel *model.Channel, err *types.NewAPIError) {

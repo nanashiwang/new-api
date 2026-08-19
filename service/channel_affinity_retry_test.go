@@ -1,6 +1,7 @@
 package service
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -59,6 +60,28 @@ func TestShouldSkipRetryAfterChannelAffinityFailure_TemporaryUpstreamErrorAllows
 
 	if ShouldSkipRetryAfterChannelAffinityFailure(ctx, err) {
 		t.Fatal("expected temporary upstream error to bypass affinity skip-retry")
+	}
+}
+
+func TestShouldSkipRetryAfterChannelAffinityFailure_OverloadAllowsRetry(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	setChannelAffinityContext(ctx, channelAffinityMeta{
+		CacheKey:   "test:rule:default:key",
+		TTLSeconds: 300,
+		RuleName:   "codex trace",
+		SkipRetry:  true,
+	})
+	MarkChannelAffinityUsed(ctx, "default", 123)
+
+	err := types.WithOpenAIError(types.OpenAIError{
+		Message: "system cpu overloaded",
+		Type:    "service_unavailable_error",
+		Code:    "server_is_overloaded",
+	}, http.StatusServiceUnavailable)
+
+	if ShouldSkipRetryAfterChannelAffinityFailure(ctx, err) {
+		t.Fatal("expected provider overload to bypass affinity retry suppression")
 	}
 }
 

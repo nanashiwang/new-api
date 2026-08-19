@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -58,6 +59,35 @@ func TestShouldRetryChannelError_GenericBadRequestRemainsNonRetryable(t *testing
 
 	if ShouldRetryChannelError(ctx, err, 1) {
 		t.Fatalf("did not expect generic 400 to be retryable")
+	}
+}
+
+func TestShouldRetryChannelError_UpstreamOverloadUsesAlternateChannel(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+
+	originalRanges := operation_setting.AutomaticRetryStatusCodeRanges
+	operation_setting.AutomaticRetryStatusCodeRanges = nil
+	t.Cleanup(func() {
+		operation_setting.AutomaticRetryStatusCodeRanges = originalRanges
+	})
+
+	err := types.WithOpenAIError(types.OpenAIError{
+		Message: "Our servers are currently overloaded. Please try again later.",
+		Type:    "service_unavailable_error",
+		Code:    "server_is_overloaded",
+	}, http.StatusServiceUnavailable)
+
+	if !ShouldRetryChannelError(ctx, err, 1) {
+		t.Fatal("expected provider overload to reroute independently of generic retry ranges")
+	}
+	if ShouldRetryChannelError(ctx, err, 0) {
+		t.Fatal("provider overload must respect the retry budget")
+	}
+
+	ctx.Set("specific_channel_id", 1367)
+	if ShouldRetryChannelError(ctx, err, 1) {
+		t.Fatal("provider overload must not reroute an explicitly pinned channel")
 	}
 }
 
