@@ -26,6 +26,7 @@ import {
   REDEMPTION_STATUS_MAP,
   REDEMPTION_ACTIONS,
 } from '../../../constants/redemption.constants';
+import { getRedemptionDisplayName } from './redemptionDisplay';
 
 /**
  * Check if redemption code is expired
@@ -95,6 +96,9 @@ export const getRedemptionsColumns = ({
     {
       title: t('名称'),
       dataIndex: 'name',
+      render: (text, record) => (
+        <div>{getRedemptionDisplayName({ ...record, name: text }, t)}</div>
+      ),
     },
     {
       title: t('状态'),
@@ -134,7 +138,9 @@ export const getRedemptionsColumns = ({
       dataIndex: 'quota',
       render: (text, record) => {
         if ((record?.benefit_type || 'quota') === 'subscription') {
-          return <div>{record?.plan_title || `#${record?.plan_id || '-'}`}</div>;
+          return (
+            <div>{record?.plan_title || `#${record?.plan_id || '-'}`}</div>
+          );
         }
         if ((record?.benefit_type || 'quota') === 'sellable_token') {
           return (
