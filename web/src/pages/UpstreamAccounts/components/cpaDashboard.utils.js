@@ -72,7 +72,7 @@ export const summarizeCPAAccounts = (accounts = [], now = Date.now()) => {
 
 export const filterCPAAccounts = (
   accounts = [],
-  { keyword = '', siteId = 0, state = '' } = {},
+  { keyword = '', siteId = 0, state = '', provider = '' } = {},
   now = Date.now(),
 ) => {
   const normalizedKeyword = String(keyword).trim().toLowerCase();
@@ -82,6 +82,13 @@ export const filterCPAAccounts = (
       return false;
     }
     if (state && getCPAAccountState(account, now) !== state) return false;
+    if (
+      provider &&
+      getCPAProviderName(account).toLowerCase() !==
+        String(provider).toLowerCase()
+    ) {
+      return false;
+    }
     if (!normalizedKeyword) return true;
     return [
       account?.label,
