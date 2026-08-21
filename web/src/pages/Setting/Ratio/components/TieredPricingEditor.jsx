@@ -35,6 +35,7 @@ import { IconCopy, IconDelete, IconPlus } from '@douyinfe/semi-icons';
 import { renderQuota } from '../../../../helpers/render';
 import { copy, showSuccess } from '../../../../helpers';
 import { BILLING_EXTRA_VARS, BILLING_CACHE_VAR_MAP, BILLING_CONDITION_VARS } from '../../../../constants';
+import { evalBillingExprLocally } from './billingExprEvaluator';
 import {
   createEmptyCondition,
   createEmptyTimeCondition,
@@ -965,28 +966,14 @@ function CacheTokenEstimatorInputs({
 // ---------------------------------------------------------------------------
 
 function evalExprLocally(exprStr, p, c, extraTokenValues) {
-  try {
-    let matchedTier = '';
-    const tierFn = (name, value) => {
-      matchedTier = name;
-      return value;
-    };
-    const cacheReadTokens = extraTokenValues.cacheReadTokens || 0;
-    const cacheCreateTokens = extraTokenValues.cacheCreateTokens || 0;
-    const cacheCreate1hTokens = extraTokenValues.cacheCreate1hTokens || 0;
-    const len = p + cacheReadTokens + cacheCreateTokens + cacheCreate1hTokens;
-    const env = { p, c, len, tier: tierFn, max: Math.max, min: Math.min, abs: Math.abs, ceil: Math.ceil, floor: Math.floor };
-    for (const field of EXTRA_ESTIMATOR_FIELDS) {
-      env[field.var] = extraTokenValues[field.stateKey] || 0;
-    }
-    const fn = new Function(
-      ...Object.keys(env),
-      `"use strict"; return (${exprStr});`,
-    );
-    return { cost: fn(...Object.values(env)), matchedTier, error: null };
-  } catch (e) {
-    return { cost: 0, matchedTier: '', error: e.message };
+  const evaluatorExtraValues = {};
+  for (const field of EXTRA_ESTIMATOR_FIELDS) {
+    evaluatorExtraValues[field.var] = extraTokenValues[field.stateKey] || 0;
   }
+  return evalBillingExprLocally(exprStr, p, c, {
+    ...extraTokenValues,
+    ...evaluatorExtraValues,
+  });
 }
 
 // ---------------------------------------------------------------------------
