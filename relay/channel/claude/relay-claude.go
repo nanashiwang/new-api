@@ -58,29 +58,33 @@ func mergeStringMessageContents(left, right string) string {
 	return strings.Trim(fmt.Sprintf("%s %s", left, right), "\"")
 }
 
+func functionParametersToClaudeInputSchema(parameters any) map[string]any {
+	params, _ := parameters.(map[string]any)
+	schema := make(map[string]any, len(params)+2)
+	for key, value := range params {
+		schema[key] = value
+	}
+	if schema["type"] == nil {
+		schema["type"] = "object"
+	}
+	if schema["properties"] == nil {
+		schema["properties"] = map[string]any{}
+	}
+	return schema
+}
+
 func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRequest) (*dto.ClaudeRequest, error) {
 	claudeTools := make([]any, 0, len(textRequest.Tools))
 
 	for _, tool := range textRequest.Tools {
-		if params, ok := tool.Function.Parameters.(map[string]any); ok {
-			claudeTool := dto.Tool{
-				Name:        tool.Function.Name,
-				Description: tool.Function.Description,
-			}
-			claudeTool.InputSchema = make(map[string]interface{})
-			if params["type"] != nil {
-				claudeTool.InputSchema["type"] = params["type"].(string)
-			}
-			claudeTool.InputSchema["properties"] = params["properties"]
-			claudeTool.InputSchema["required"] = params["required"]
-			for s, a := range params {
-				if s == "type" || s == "properties" || s == "required" {
-					continue
-				}
-				claudeTool.InputSchema[s] = a
-			}
-			claudeTools = append(claudeTools, &claudeTool)
+		if _, ok := tool.Function.Parameters.(map[string]any); !ok && tool.Type != "function" {
+			continue
 		}
+		claudeTools = append(claudeTools, &dto.Tool{
+			Name:        tool.Function.Name,
+			Description: tool.Function.Description,
+			InputSchema: functionParametersToClaudeInputSchema(tool.Function.Parameters),
+		})
 	}
 
 	// Web search tool
@@ -120,7 +124,9 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 		Temperature:   textRequest.Temperature,
 		TopK:          textRequest.TopK,
 		Stream:        textRequest.Stream,
-		Tools:         claudeTools,
+	}
+	if len(claudeTools) > 0 {
+		claudeRequest.Tools = claudeTools
 	}
 	if textRequest.TopP != 0 {
 		claudeRequest.TopP = common.GetPointer(textRequest.TopP)
