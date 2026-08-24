@@ -5541,5 +5541,20 @@
   "兑换风险复查": "Réviser les risques des codes",
   "确认封禁该用户？": "Désactiver cet utilisateur ?",
   "该操作会立即停用账户，请确认已核对创建人和兑换码记录。": "Cette action désactive immédiatement le compte. Vérifiez les créateurs et les codes.",
-  "保存兑换码限制": "Enregistrer les limites des codes"
+  "保存兑换码限制": "Enregistrer les limites des codes",
+  "单个兑换码最低额度": "Quota minimum par code",
+  "0 代表不限制；管理员不受该限制": "0 signifie illimité ; les administrateurs sont exemptés",
+  "最多保留未使用兑换码": "Maximum de codes inutilisés",
+  "0 代表不限制；按北京时间自然日统计": "0 signifie illimité ; calculé selon le jour de Pékin",
+  "触发复查的不同创建人数": "Créateurs distincts déclenchant la révision",
+  "纳入复查的小额码上限": "Seuil des petits codes à réviser",
+  "兑换码限制必须是非负整数": "Les limites doivent être des entiers non négatifs",
+  "人工复查不同创建人数必须为 0 或至少 2": "Le seuil de créateurs doit être 0 ou au moins 2",
+  "人工复查小额上限不能低于单个兑换码最低额度": "Le seuil des petits codes ne peut pas être inférieur au minimum",
+  "确认保存宽松的兑换码策略？": "Enregistrer une politique de codes assouplie ?",
+  "当前配置包含 0，将关闭对应限制或风控，请确认风险可接受。": "Cette configuration contient 0 et désactive une limite ou un contrôle. Confirmez le risque.",
+  "今日已创建": "Créés aujourd'hui",
+  "今日已转赠": "Transférés aujourd'hui",
+  "当前未使用": "Actuellement inutilisés",
+  "北京时间重置": "Réinitialisation heure de Pékin"
 }

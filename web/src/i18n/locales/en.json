@@ -5450,5 +5450,20 @@
   "兑换风险复查": "Review redemption risks",
   "确认封禁该用户？": "Disable this user?",
   "该操作会立即停用账户，请确认已核对创建人和兑换码记录。": "This immediately disables the account. Confirm that creator and code records were reviewed.",
-  "保存兑换码限制": "Save redemption code limits"
+  "保存兑换码限制": "Save redemption code limits",
+  "单个兑换码最低额度": "Minimum quota per code",
+  "0 代表不限制；管理员不受该限制": "0 means unlimited; administrators are exempt",
+  "最多保留未使用兑换码": "Maximum unused codes",
+  "0 代表不限制；按北京时间自然日统计": "0 means unlimited; measured by Beijing calendar day",
+  "触发复查的不同创建人数": "Distinct creators triggering review",
+  "纳入复查的小额码上限": "Small-code threshold for review",
+  "兑换码限制必须是非负整数": "Redemption limits must be non-negative integers",
+  "人工复查不同创建人数必须为 0 或至少 2": "Distinct creator review threshold must be 0 or at least 2",
+  "人工复查小额上限不能低于单个兑换码最低额度": "Small-code review threshold cannot be below the minimum code quota",
+  "确认保存宽松的兑换码策略？": "Save a relaxed redemption policy?",
+  "当前配置包含 0，将关闭对应限制或风控，请确认风险可接受。": "This configuration contains 0 and disables a corresponding limit or risk control. Confirm the risk is acceptable.",
+  "今日已创建": "Created today",
+  "今日已转赠": "Transferred today",
+  "当前未使用": "Currently unused",
+  "北京时间重置": "Resets at Beijing time"
 }

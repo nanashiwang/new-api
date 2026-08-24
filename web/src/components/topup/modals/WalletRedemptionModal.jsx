@@ -62,14 +62,17 @@ const WalletRedemptionModal = ({
 }) => {
   const currencyConfig = getCurrencyConfig();
   const isTokenDisplay = currencyConfig.type === 'TOKENS';
-  const minimumQuota = isAdmin ? 1 : 10 * getQuotaPerUnit();
   const [amount, setAmount] = useState(0);
   const [creating, setCreating] = useState(false);
   const [loadingList, setLoadingList] = useState(false);
   const [redemptions, setRedemptions] = useState([]);
   const [createdCode, setCreatedCode] = useState('');
   const [uncertainRequest, setUncertainRequest] = useState(false);
+  const [usageSummary, setUsageSummary] = useState(null);
   const pendingRequestRef = useRef(null);
+  const minimumQuota = isAdmin
+    ? 1
+    : Number(usageSummary?.minimum_quota || 10 * getQuotaPerUnit());
 
   const maxAmount = isTokenDisplay
     ? Number(transferableQuota || 0)
@@ -99,9 +102,21 @@ const WalletRedemptionModal = ({
     }
   };
 
+  const loadUsageSummary = async () => {
+    try {
+      const response = await API.get('/api/user/redemptions/self/summary');
+      if (response.data?.success) {
+        setUsageSummary(response.data?.data || null);
+      }
+    } catch {
+      setUsageSummary(null);
+    }
+  };
+
   useEffect(() => {
     if (visible) {
       loadRedemptions();
+      loadUsageSummary();
     }
   }, [visible]);
 
@@ -170,6 +185,7 @@ const WalletRedemptionModal = ({
         Number(data.remaining_quota || 0),
         Number(data.remaining_transferable_quota || 0),
       );
+      await loadUsageSummary();
       showSuccess(t('创建成功'));
     } catch {
       // 请求可能已经在服务端成功，保留同一个 request_id，让重试只返回
@@ -261,6 +277,40 @@ const WalletRedemptionModal = ({
             </Text>
           )}
         </div>
+
+        {usageSummary && (
+          <div className='grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4'>
+            <div className='rounded-lg border border-slate-200 p-3'>
+              <Text type='tertiary'>{t('今日已创建')}</Text>
+              <div className='mt-1 text-lg font-semibold'>
+                {usageSummary.daily_created_count} /{' '}
+                {usageSummary.daily_create_limit || t('不限')}
+              </div>
+            </div>
+            <div className='rounded-lg border border-slate-200 p-3'>
+              <Text type='tertiary'>{t('今日已转赠')}</Text>
+              <div className='mt-1 text-lg font-semibold'>
+                {renderQuota(usageSummary.daily_created_quota || 0)} /{' '}
+                {usageSummary.daily_quota_limit
+                  ? renderQuota(usageSummary.daily_quota_limit)
+                  : t('不限')}
+              </div>
+            </div>
+            <div className='rounded-lg border border-slate-200 p-3'>
+              <Text type='tertiary'>{t('当前未使用')}</Text>
+              <div className='mt-1 text-lg font-semibold'>
+                {usageSummary.active_count} /{' '}
+                {usageSummary.active_limit || t('不限')}
+              </div>
+            </div>
+            <div className='rounded-lg border border-slate-200 p-3'>
+              <Text type='tertiary'>{t('北京时间重置')}</Text>
+              <div className='mt-1 text-lg font-semibold'>
+                {timestamp2string(usageSummary.reset_at)}
+              </div>
+            </div>
+          </div>
+        )}
 
         {createdCode && (
           <div className='rounded-lg border border-green-200 bg-green-50 p-3'>

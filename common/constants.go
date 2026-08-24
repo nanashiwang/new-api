@@ -129,6 +129,14 @@ var InviterCommissionDailyCap = 0
 // 0 表示不限制。
 var WalletRedemptionDailyCreateLimit = 100
 
+// WalletRedemptionMinimumQuota 普通用户单个钱包兑换码的最低“闪电”额度。
+// 0 表示不限制；管理员仍可创建更小额度。
+var WalletRedemptionMinimumQuota = 10
+
+// WalletRedemptionActiveLimit 单个用户最多同时保留的未使用钱包兑换码数量。
+// 0 表示不限制。
+var WalletRedemptionActiveLimit = 100
+
 // WalletRedemptionDailyQuotaLimit 普通用户单个自然日最多转赠的“闪电”额度。
 // 实际扣减时再按 QuotaPerUnit 换算，0 表示不限制。
 var WalletRedemptionDailyQuotaLimit = 5000

@@ -23,6 +23,15 @@ func GetRedemptionReviewCases(c *gin.Context) {
 	common.ApiSuccess(c, pageInfo)
 }
 
+func GetRedemptionReviewSummary(c *gin.Context) {
+	count, err := model.CountPendingRedemptionReviewCases()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"pending_count": count})
+}
+
 func ResolveRedemptionReviewCase(c *gin.Context) {
 	caseID, err := parsePositivePathID(c.Param("id"))
 	if err != nil {

@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -43,12 +44,14 @@ const (
 const (
 	RedemptionFundingSourceAdmin  = "admin"
 	RedemptionFundingSourceWallet = "wallet"
-
-	maxActiveWalletRedemptionsPerUser = 100
 )
 
 func MinimumWalletRedemptionQuota() int {
-	return int(10 * common.QuotaPerUnit)
+	quota, err := walletRedemptionQuotaFromUnits(common.WalletRedemptionMinimumQuota)
+	if err != nil {
+		return math.MaxInt
+	}
+	return quota
 }
 
 type RedemptionResult struct {
@@ -79,6 +82,17 @@ type WalletRedemptionCreationResult struct {
 	RemainingQuota             int                   `json:"remaining_quota"`
 	RemainingTransferableQuota int                   `json:"remaining_transferable_quota"`
 	Replayed                   bool                  `json:"replayed"`
+}
+
+type WalletRedemptionUsageSummary struct {
+	DailyCreatedCount int   `json:"daily_created_count"`
+	DailyCreatedQuota int   `json:"daily_created_quota"`
+	ActiveCount       int   `json:"active_count"`
+	DailyCreateLimit  int   `json:"daily_create_limit"`
+	DailyQuotaLimit   int   `json:"daily_quota_limit"`
+	ActiveLimit       int   `json:"active_limit"`
+	MinimumQuota      int   `json:"minimum_quota"`
+	ResetAt           int64 `json:"reset_at"`
 }
 
 type UserWalletRedemption struct {
@@ -232,7 +246,7 @@ func CreateWalletFundedRedemption(userID int, quota int, requestID string) (*Wal
 			Count(&activeCount).Error; err != nil {
 			return err
 		}
-		if activeCount >= maxActiveWalletRedemptionsPerUser {
+		if common.WalletRedemptionActiveLimit > 0 && activeCount >= int64(common.WalletRedemptionActiveLimit) {
 			return ErrRedemptionActiveLimit
 		}
 		if creator.Role < common.RoleAdminUser {
@@ -317,6 +331,60 @@ func CreateWalletFundedRedemption(userID int, quota int, requestID string) (*Wal
 		RemainingQuota:             remainingQuota,
 		RemainingTransferableQuota: remainingTransferableQuota,
 		Replayed:                   replayed,
+	}, nil
+}
+
+func GetWalletRedemptionUsageSummary(userID int) (*WalletRedemptionUsageSummary, error) {
+	if userID <= 0 {
+		return nil, errors.New("invalid user id")
+	}
+	var user User
+	if err := DB.Select("id", "role").First(&user, "id = ?", userID).Error; err != nil {
+		return nil, err
+	}
+	_, dayStart, dayEnd := walletRedemptionLocalDayRange(time.Now())
+	var daily struct {
+		Count int `gorm:"column:count"`
+		Quota int `gorm:"column:quota"`
+	}
+	if err := DB.Unscoped().Model(&Redemption{}).
+		Select("COUNT(*) AS count, COALESCE(SUM(quota), 0) AS quota").
+		Where("user_id = ? AND funding_source = ?", userID, RedemptionFundingSourceWallet).
+		Where("created_time >= ? AND created_time < ?", dayStart, dayEnd).
+		Scan(&daily).Error; err != nil {
+		return nil, err
+	}
+	var activeCount int64
+	if err := DB.Model(&Redemption{}).
+		Where("user_id = ? AND funding_source = ? AND status = ?", userID, RedemptionFundingSourceWallet, common.RedemptionCodeStatusEnabled).
+		Where("expired_time = 0 OR expired_time >= ?", common.GetTimestamp()).
+		Count(&activeCount).Error; err != nil {
+		return nil, err
+	}
+	dailyCreateLimit := common.WalletRedemptionDailyCreateLimit
+	dailyQuotaLimit := 0
+	minimumQuota := 1
+	if user.Role < common.RoleAdminUser {
+		minimumQuota = MinimumWalletRedemptionQuota()
+		if common.WalletRedemptionDailyQuotaLimit > 0 {
+			converted, err := walletRedemptionQuotaFromUnits(common.WalletRedemptionDailyQuotaLimit)
+			if err != nil {
+				return nil, err
+			}
+			dailyQuotaLimit = converted
+		}
+	} else {
+		dailyCreateLimit = 0
+	}
+	return &WalletRedemptionUsageSummary{
+		DailyCreatedCount: daily.Count,
+		DailyCreatedQuota: daily.Quota,
+		ActiveCount:       int(activeCount),
+		DailyCreateLimit:  dailyCreateLimit,
+		DailyQuotaLimit:   dailyQuotaLimit,
+		ActiveLimit:       common.WalletRedemptionActiveLimit,
+		MinimumQuota:      minimumQuota,
+		ResetAt:           dayEnd,
 	}, nil
 }
 
