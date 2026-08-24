@@ -152,6 +152,20 @@ func UpdateOption(c *gin.Context) {
 		})
 		return
 	}
+	if option.Key == model.WalletRedemptionPolicyBundleOptionKey {
+		before := model.GetWalletRedemptionPolicy()
+		if err = model.UpdateWalletRedemptionPolicyOptions(option.Value.(string)); err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+			return
+		}
+		after := model.GetWalletRedemptionPolicy()
+		model.RecordLogWithAdminInfo(c.GetInt("id"), model.LogTypeManage,
+			fmt.Sprintf("管理员更新兑换码策略：%+v -> %+v", before, after),
+			map[string]interface{}{"admin_id": c.GetInt("id"), "admin_username": c.GetString("username")},
+		)
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": ""})
+		return
+	}
 	if strings.HasPrefix(option.Key, "slow_ttft_setting.") {
 		if err = operation_setting.ValidateSlowTTFTOption(option.Key, option.Value.(string)); err != nil {
 			c.JSON(http.StatusOK, gin.H{

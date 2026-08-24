@@ -162,6 +162,8 @@ func InitOptionMap() {
 	common.OptionMap["InviterRechargeSecondLevelCommissionRate"] = strconv.FormatFloat(common.InviterRechargeSecondLevelCommissionRate, 'f', -1, 64)
 	common.OptionMap["InviterCommissionDailyCap"] = strconv.Itoa(common.InviterCommissionDailyCap)
 	common.OptionMap["WalletRedemptionDailyCreateLimit"] = strconv.Itoa(common.WalletRedemptionDailyCreateLimit)
+	common.OptionMap["WalletRedemptionMinimumQuota"] = strconv.Itoa(common.WalletRedemptionMinimumQuota)
+	common.OptionMap["WalletRedemptionActiveLimit"] = strconv.Itoa(common.WalletRedemptionActiveLimit)
 	common.OptionMap["WalletRedemptionDailyQuotaLimit"] = strconv.Itoa(common.WalletRedemptionDailyQuotaLimit)
 	common.OptionMap["WalletRedemptionReviewDistinctCreatorThreshold"] = strconv.Itoa(common.WalletRedemptionReviewDistinctCreatorThreshold)
 	common.OptionMap["WalletRedemptionReviewSmallQuotaLimit"] = strconv.Itoa(common.WalletRedemptionReviewSmallQuotaLimit)
@@ -308,6 +310,11 @@ func UpdateOption(key string, value string) error {
 		tieredBillingOptionMutex.Lock()
 		defer tieredBillingOptionMutex.Unlock()
 	}
+	isWalletRedemptionPolicy := isWalletRedemptionPolicyField(key)
+	if isWalletRedemptionPolicy {
+		walletRedemptionPolicyMutex.Lock()
+		defer walletRedemptionPolicyMutex.Unlock()
+	}
 	isInviteCommissionRate := isInviteCommissionRateOption(key)
 	if isInviteCommissionRate {
 		inviteCommissionRateOptionMutex.Lock()
@@ -346,7 +353,7 @@ func UpdateOption(key string, value string) error {
 		return err
 	}
 	// Update OptionMap
-	if isInviteCommissionRate {
+	if isInviteCommissionRate || isWalletRedemptionPolicy {
 		return updateOptionMapUnlocked(key, value)
 	}
 	return updateOptionMap(key, value)
@@ -403,6 +410,10 @@ func UpdateTieredBillingOptions(raw string) error {
 }
 
 func updateOptionMap(key string, value string) (err error) {
+	if isWalletRedemptionPolicyField(key) {
+		walletRedemptionPolicyMutex.Lock()
+		defer walletRedemptionPolicyMutex.Unlock()
+	}
 	if isInviteCommissionRateOption(key) {
 		inviteCommissionRateOptionMutex.Lock()
 		defer inviteCommissionRateOptionMutex.Unlock()
@@ -720,6 +731,10 @@ func updateOptionMapUnlocked(key string, value string) (err error) {
 		common.InviterCommissionDailyCap, _ = strconv.Atoi(value)
 	case "WalletRedemptionDailyCreateLimit":
 		common.WalletRedemptionDailyCreateLimit, _ = strconv.Atoi(value)
+	case "WalletRedemptionMinimumQuota":
+		common.WalletRedemptionMinimumQuota, _ = strconv.Atoi(value)
+	case "WalletRedemptionActiveLimit":
+		common.WalletRedemptionActiveLimit, _ = strconv.Atoi(value)
 	case "WalletRedemptionDailyQuotaLimit":
 		common.WalletRedemptionDailyQuotaLimit, _ = strconv.Atoi(value)
 	case "WalletRedemptionReviewDistinctCreatorThreshold":
@@ -860,20 +875,7 @@ func validateInviteCommissionDailyCapOption(key string, value string) error {
 }
 
 func validateWalletRedemptionPolicyOption(key string, value string) error {
-	switch key {
-	case "WalletRedemptionDailyCreateLimit", "WalletRedemptionDailyQuotaLimit",
-		"WalletRedemptionReviewDistinctCreatorThreshold", "WalletRedemptionReviewSmallQuotaLimit":
-		parsed, err := strconv.Atoi(strings.TrimSpace(value))
-		if err != nil || parsed < 0 {
-			return fmt.Errorf("%s must be a non-negative integer", key)
-		}
-		if parsed > 0 && (key == "WalletRedemptionDailyQuotaLimit" || key == "WalletRedemptionReviewSmallQuotaLimit") {
-			if _, err := walletRedemptionQuotaFromUnits(parsed); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return validateWalletRedemptionPolicyField(key, value)
 }
 
 // handleConfigUpdate 处理分层配置更新，返回是否已处理

@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import CardPro from '../../common/ui/CardPro';
 import RedemptionsTable from './RedemptionsTable';
 import RedemptionsActions from './RedemptionsActions';
@@ -28,11 +28,30 @@ import RedemptionReviewModal from './modals/RedemptionReviewModal';
 import { useRedemptionsData } from '../../../hooks/redemptions/useRedemptionsData';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 import { createCardProPagination } from '../../../helpers/utils';
+import { API } from '../../../helpers';
 
 const RedemptionsPage = () => {
   const redemptionsData = useRedemptionsData();
   const isMobile = useIsMobile();
   const [reviewVisible, setReviewVisible] = useState(false);
+  const [pendingReviewCount, setPendingReviewCount] = useState(0);
+
+  const refreshReviewCount = useCallback(async () => {
+    try {
+      const response = await API.get('/api/redemption/review-cases/summary');
+      if (response?.data?.success) {
+        setPendingReviewCount(Number(response.data?.data?.pending_count || 0));
+      }
+    } catch {
+      // The table remains usable even when the badge summary is unavailable.
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshReviewCount();
+    const timer = window.setInterval(refreshReviewCount, 60000);
+    return () => window.clearInterval(timer);
+  }, [refreshReviewCount]);
 
   const {
     // 编辑状态
@@ -75,6 +94,7 @@ const RedemptionsPage = () => {
         visible={reviewVisible}
         onCancel={() => setReviewVisible(false)}
         t={redemptionsData.t}
+        onResolved={refreshReviewCount}
       />
 
       <CardPro
@@ -95,6 +115,7 @@ const RedemptionsPage = () => {
               batchCopyRedemptions={batchCopyRedemptions}
               batchDeleteRedemptions={batchDeleteRedemptions}
               openReviewModal={() => setReviewVisible(true)}
+              pendingReviewCount={pendingReviewCount}
               t={t}
             />
 

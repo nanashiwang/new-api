@@ -5839,5 +5839,20 @@
   "兑换风险复查": "Kiểm tra rủi ro đổi mã",
   "确认封禁该用户？": "Vô hiệu hóa người dùng này?",
   "该操作会立即停用账户，请确认已核对创建人和兑换码记录。": "Thao tác sẽ vô hiệu hóa tài khoản ngay. Hãy xác nhận đã kiểm tra người tạo và mã.",
-  "保存兑换码限制": "Lưu giới hạn mã"
+  "保存兑换码限制": "Lưu giới hạn mã",
+  "单个兑换码最低额度": "Hạn mức tối thiểu mỗi mã",
+  "0 代表不限制；管理员不受该限制": "0 là không giới hạn; quản trị viên được miễn",
+  "最多保留未使用兑换码": "Số mã chưa dùng tối đa",
+  "0 代表不限制；按北京时间自然日统计": "0 là không giới hạn; tính theo ngày Bắc Kinh",
+  "触发复查的不同创建人数": "Số người tạo khác nhau để kích hoạt kiểm tra",
+  "纳入复查的小额码上限": "Ngưỡng mã nhỏ để kiểm tra",
+  "兑换码限制必须是非负整数": "Giới hạn mã phải là số nguyên không âm",
+  "人工复查不同创建人数必须为 0 或至少 2": "Ngưỡng người tạo phải là 0 hoặc ít nhất 2",
+  "人工复查小额上限不能低于单个兑换码最低额度": "Ngưỡng mã nhỏ không được thấp hơn mức tối thiểu",
+  "确认保存宽松的兑换码策略？": "Lưu chính sách mã nới lỏng?",
+  "当前配置包含 0，将关闭对应限制或风控，请确认风险可接受。": "Cấu hình có giá trị 0 và sẽ tắt giới hạn hoặc kiểm soát rủi ro tương ứng.",
+  "今日已创建": "Đã tạo hôm nay",
+  "今日已转赠": "Đã chuyển hôm nay",
+  "当前未使用": "Hiện chưa dùng",
+  "北京时间重置": "Đặt lại theo giờ Bắc Kinh"
 }

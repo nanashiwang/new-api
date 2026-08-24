@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Button } from '@douyinfe/semi-ui';
+import { Badge, Button } from '@douyinfe/semi-ui';
 
 const RedemptionsActions = ({
   selectedKeys,
@@ -27,6 +27,7 @@ const RedemptionsActions = ({
   batchCopyRedemptions,
   batchDeleteRedemptions,
   openReviewModal,
+  pendingReviewCount,
   t,
 }) => {
   // Add new redemption code
@@ -48,14 +49,16 @@ const RedemptionsActions = ({
         {t('添加兑换码')}
       </Button>
 
-      <Button
-        type='warning'
-        className='flex-1 md:flex-initial'
-        onClick={openReviewModal}
-        size='small'
-      >
-        {t('兑换风险复查')}
-      </Button>
+      <Badge count={pendingReviewCount} overflowCount={99} type='danger'>
+        <Button
+          type='warning'
+          className='flex-1 md:flex-initial'
+          onClick={openReviewModal}
+          size='small'
+        >
+          {t('兑换风险复查')}
+        </Button>
+      </Badge>
 
       <Button
         type='tertiary'

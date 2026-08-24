@@ -27,6 +27,10 @@ func setupWalletRedemptionControllerTest(t *testing.T) *model.User {
 	originalUsingMySQL := common.UsingMySQL
 	originalUsingPostgreSQL := common.UsingPostgreSQL
 	originalQuotaPerUnit := common.QuotaPerUnit
+	originalMinimumQuota := common.WalletRedemptionMinimumQuota
+	originalActiveLimit := common.WalletRedemptionActiveLimit
+	originalDailyCreateLimit := common.WalletRedemptionDailyCreateLimit
+	originalDailyQuotaLimit := common.WalletRedemptionDailyQuotaLimit
 	model.DB = db
 	model.LOG_DB = db
 	common.RedisEnabled = false
@@ -34,6 +38,10 @@ func setupWalletRedemptionControllerTest(t *testing.T) *model.User {
 	common.UsingMySQL = false
 	common.UsingPostgreSQL = false
 	common.QuotaPerUnit = 10
+	common.WalletRedemptionMinimumQuota = 10
+	common.WalletRedemptionActiveLimit = 100
+	common.WalletRedemptionDailyCreateLimit = 100
+	common.WalletRedemptionDailyQuotaLimit = 5000
 	t.Cleanup(func() {
 		model.DB = originalDB
 		model.LOG_DB = originalLogDB
@@ -42,6 +50,10 @@ func setupWalletRedemptionControllerTest(t *testing.T) *model.User {
 		common.UsingMySQL = originalUsingMySQL
 		common.UsingPostgreSQL = originalUsingPostgreSQL
 		common.QuotaPerUnit = originalQuotaPerUnit
+		common.WalletRedemptionMinimumQuota = originalMinimumQuota
+		common.WalletRedemptionActiveLimit = originalActiveLimit
+		common.WalletRedemptionDailyCreateLimit = originalDailyCreateLimit
+		common.WalletRedemptionDailyQuotaLimit = originalDailyQuotaLimit
 	})
 
 	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Redemption{}, &model.WalletTransferLock{}, &model.Log{}))
@@ -102,4 +114,20 @@ func TestSelfWalletRedemptionEndpoints_DeductAndReturnPrivacySafeView(t *testing
 	require.Equal(t, http.StatusOK, listRecorder.Code)
 	assert.NotContains(t, listRecorder.Body.String(), "used_user_id")
 	assert.Contains(t, listRecorder.Body.String(), createResponse.Data.Redemption.Key)
+
+	summaryRecorder := httptest.NewRecorder()
+	summaryContext, _ := gin.CreateTestContext(summaryRecorder)
+	summaryContext.Request = httptest.NewRequest(http.MethodGet, "/api/user/redemptions/self/summary", nil)
+	summaryContext.Set("id", user.Id)
+	GetSelfRedemptionUsageSummary(summaryContext)
+	require.Equal(t, http.StatusOK, summaryRecorder.Code)
+	var summaryResponse struct {
+		Success bool                               `json:"success"`
+		Data    model.WalletRedemptionUsageSummary `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(summaryRecorder.Body.Bytes(), &summaryResponse))
+	require.True(t, summaryResponse.Success)
+	assert.Equal(t, 1, summaryResponse.Data.DailyCreatedCount)
+	assert.Equal(t, 300, summaryResponse.Data.DailyCreatedQuota)
+	assert.Equal(t, 1, summaryResponse.Data.ActiveCount)
 }

@@ -37,6 +37,12 @@ const RateLimitSetting = () => {
     RedemptionRateLimitDurationSeconds: 600,
     RedemptionRateLimitSuccessCount: 0,
     RedemptionRateLimitFailureCount: 0,
+    WalletRedemptionDailyCreateLimit: 100,
+    WalletRedemptionMinimumQuota: 10,
+    WalletRedemptionActiveLimit: 100,
+    WalletRedemptionDailyQuotaLimit: 5000,
+    WalletRedemptionReviewDistinctCreatorThreshold: 3,
+    WalletRedemptionReviewSmallQuotaLimit: 100,
   });
 
   let [loading, setLoading] = useState(false);

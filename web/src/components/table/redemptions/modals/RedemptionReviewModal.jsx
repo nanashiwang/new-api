@@ -21,7 +21,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Input, Modal, Space, Table, Tag } from '@douyinfe/semi-ui';
 import { API, renderQuota, showError, showSuccess } from '../../../../helpers';
 
-const RedemptionReviewModal = ({ visible, onCancel, t }) => {
+const RedemptionReviewModal = ({ visible, onCancel, onResolved, t }) => {
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState([]);
   const [notes, setNotes] = useState({});
@@ -74,6 +74,7 @@ const RedemptionReviewModal = ({ visible, onCancel, t }) => {
       }
       setItems((current) => current.filter((item) => item.id !== record.id));
       setTotal((current) => Math.max(0, current - 1));
+      onResolved?.();
       if (items.length === 1 && page > 1) {
         setPage((current) => current - 1);
       }

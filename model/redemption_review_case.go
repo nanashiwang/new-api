@@ -201,6 +201,14 @@ func ListRedemptionReviewCases(status string, pageInfo *common.PageInfo) ([]*Red
 	return cases, total, nil
 }
 
+func CountPendingRedemptionReviewCases() (int64, error) {
+	var count int64
+	err := DB.Model(&RedemptionReviewCase{}).
+		Where("status = ?", RedemptionReviewStatusPending).
+		Count(&count).Error
+	return count, err
+}
+
 func GetRedemptionReviewCaseByID(id int) (*RedemptionReviewCase, error) {
 	if id <= 0 {
 		return nil, ErrRedemptionReviewCaseNotFound

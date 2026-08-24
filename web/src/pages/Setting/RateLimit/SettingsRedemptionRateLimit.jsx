@@ -23,6 +23,7 @@ import {
   Col,
   Form,
   InputNumber,
+  Modal,
   Row,
   Select,
   Spin,
@@ -36,6 +37,11 @@ import {
   showWarning,
 } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
+import {
+  REDEMPTION_LIMIT_DEFAULTS,
+  resolveRedemptionLimitInputs,
+  validateRedemptionPolicyInputs,
+} from './redemptionPolicy';
 
 const UNIT_SECONDS = { second: 1, minute: 60, hour: 3600 };
 
@@ -56,16 +62,7 @@ export default function RedemptionRateLimit(props) {
   const { t } = useTranslation();
 
   const [loading, setLoading] = useState(false);
-  const [inputs, setInputs] = useState({
-    RedemptionRateLimitEnabled: false,
-    RedemptionRateLimitDurationSeconds: 600,
-    RedemptionRateLimitSuccessCount: 0,
-    RedemptionRateLimitFailureCount: 0,
-    WalletRedemptionDailyCreateLimit: 100,
-    WalletRedemptionDailyQuotaLimit: 5000,
-    WalletRedemptionReviewDistinctCreatorThreshold: 3,
-    WalletRedemptionReviewSmallQuotaLimit: 100,
-  });
+  const [inputs, setInputs] = useState({ ...REDEMPTION_LIMIT_DEFAULTS });
   const [inputsRow, setInputsRow] = useState(inputs);
   const [unit, setUnit] = useState('minute');
   const [durationDisplay, setDurationDisplay] = useState(10);
@@ -93,46 +90,91 @@ export default function RedemptionRateLimit(props) {
   }
 
   function onSubmit() {
+    const validation = validateRedemptionPolicyInputs(inputs);
+    if (validation.errorKey) return showError(t(validation.errorKey));
+    const { minimumQuota, activeLimit, creatorThreshold, smallQuotaLimit } =
+      validation.values;
     const updateArray = compareObjects(inputs, inputsRow);
     if (!updateArray.length) return showWarning(t('你似乎并没有修改什么'));
-    const requestQueue = updateArray.map((item) =>
-      API.put('/api/option/', {
-        key: item.key,
-        value: String(inputs[item.key]),
-      }),
-    );
-    setLoading(true);
-    Promise.all(requestQueue)
-      .then((res) => {
-        if (requestQueue.length === 1) {
-          if (res.includes(undefined)) return;
-        } else if (requestQueue.length > 1) {
-          if (res.includes(undefined))
-            return showError(t('部分保存失败，请重试'));
-        }
-        for (let i = 0; i < res.length; i++) {
-          if (!res[i].data.success) {
-            return showError(res[i].data.message);
+    const policyKeys = new Set([
+      'WalletRedemptionDailyCreateLimit',
+      'WalletRedemptionMinimumQuota',
+      'WalletRedemptionActiveLimit',
+      'WalletRedemptionDailyQuotaLimit',
+      'WalletRedemptionReviewDistinctCreatorThreshold',
+      'WalletRedemptionReviewSmallQuotaLimit',
+    ]);
+    const requestFactories = updateArray
+      .filter((item) => !policyKeys.has(item.key))
+      .map(
+        (item) => () =>
+          API.put('/api/option/', {
+            key: item.key,
+            value: String(inputs[item.key]),
+          }),
+      );
+    if (updateArray.some((item) => policyKeys.has(item.key))) {
+      requestFactories.push(() =>
+        API.put('/api/option/', {
+          key: 'WalletRedemptionPolicyBundle',
+          value: JSON.stringify({
+            daily_create_limit: Number(inputs.WalletRedemptionDailyCreateLimit),
+            minimum_quota: minimumQuota,
+            active_limit: activeLimit,
+            daily_quota_limit: Number(inputs.WalletRedemptionDailyQuotaLimit),
+            review_distinct_creator_threshold: creatorThreshold,
+            review_small_quota_limit: smallQuotaLimit,
+          }),
+        }),
+      );
+    }
+    const save = () => {
+      const requestQueue = requestFactories.map((request) => request());
+      setLoading(true);
+      return Promise.all(requestQueue)
+        .then((res) => {
+          if (requestQueue.length === 1) {
+            if (res.includes(undefined)) return;
+          } else if (requestQueue.length > 1) {
+            if (res.includes(undefined))
+              return showError(t('部分保存失败，请重试'));
           }
-        }
-        showSuccess(t('保存成功'));
-        props.refresh();
-      })
-      .catch(() => {
-        showError(t('保存失败，请重试'));
-      })
-      .finally(() => {
-        setLoading(false);
+          for (let i = 0; i < res.length; i++) {
+            if (!res[i].data.success) {
+              return showError(res[i].data.message);
+            }
+          }
+          showSuccess(t('保存成功'));
+          props.refresh();
+        })
+        .catch(() => {
+          showError(t('保存失败，请重试'));
+        })
+        .finally(() => {
+          setLoading(false);
+        });
+    };
+    const policyChanged = updateArray.some((item) => policyKeys.has(item.key));
+    const disablesProtection =
+      Number(inputs.WalletRedemptionDailyCreateLimit) === 0 ||
+      minimumQuota === 0 ||
+      activeLimit === 0 ||
+      Number(inputs.WalletRedemptionDailyQuotaLimit) === 0 ||
+      creatorThreshold === 0 ||
+      smallQuotaLimit === 0;
+    if (policyChanged && disablesProtection) {
+      Modal.confirm({
+        title: t('确认保存宽松的兑换码策略？'),
+        content: t('当前配置包含 0，将关闭对应限制或风控，请确认风险可接受。'),
+        onOk: save,
       });
+      return;
+    }
+    save();
   }
 
   useEffect(() => {
-    const currentInputs = {};
-    for (let key in props.options) {
-      if (Object.keys(inputs).includes(key)) {
-        currentInputs[key] = props.options[key];
-      }
-    }
+    const currentInputs = resolveRedemptionLimitInputs(props.options);
     setInputs(currentInputs);
     setInputsRow(structuredClone(currentInputs));
     const nextUnit = pickDisplayUnit(
@@ -244,13 +286,13 @@ export default function RedemptionRateLimit(props) {
           </Form.Section>
           <Form.Section text={t('用户创建兑换码限制')}>
             <Row gutter={16}>
-              <Col xs={24} sm={12} md={6} lg={6} xl={6}>
+              <Col xs={24} sm={12} md={4} lg={4} xl={4}>
                 <Form.InputNumber
                   label={t('单日最多创建数量')}
                   step={1}
                   min={0}
                   suffix={t('个')}
-                  extraText={t('0 代表不限制；未使用兑换码总数仍最多 100 个')}
+                  extraText={t('0 代表不限制；按北京时间自然日统计')}
                   field={'WalletRedemptionDailyCreateLimit'}
                   onChange={(value) =>
                     setInputs({
@@ -260,13 +302,13 @@ export default function RedemptionRateLimit(props) {
                   }
                 />
               </Col>
-              <Col xs={24} sm={12} md={6} lg={6} xl={6}>
+              <Col xs={24} sm={12} md={4} lg={4} xl={4}>
                 <Form.InputNumber
                   label={t('单日最多转赠额度')}
                   step={1}
                   min={0}
                   suffix={t('闪电')}
-                  extraText={t('0 代表不限制；普通用户单个兑换码至少 10 闪电')}
+                  extraText={t('0 代表不限制；按北京时间自然日统计')}
                   field={'WalletRedemptionDailyQuotaLimit'}
                   onChange={(value) =>
                     setInputs({
@@ -276,9 +318,41 @@ export default function RedemptionRateLimit(props) {
                   }
                 />
               </Col>
-              <Col xs={24} sm={12} md={6} lg={6} xl={6}>
+              <Col xs={24} sm={12} md={4} lg={4} xl={4}>
                 <Form.InputNumber
-                  label={t('人工复查不同创建人数')}
+                  label={t('单个兑换码最低额度')}
+                  step={1}
+                  min={0}
+                  suffix={t('闪电')}
+                  extraText={t('0 代表不限制；管理员不受该限制')}
+                  field={'WalletRedemptionMinimumQuota'}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      WalletRedemptionMinimumQuota: String(value),
+                    })
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={4} lg={4} xl={4}>
+                <Form.InputNumber
+                  label={t('最多保留未使用兑换码')}
+                  step={1}
+                  min={0}
+                  suffix={t('个')}
+                  extraText={t('0 代表不限制')}
+                  field={'WalletRedemptionActiveLimit'}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      WalletRedemptionActiveLimit: String(value),
+                    })
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={4} lg={4} xl={4}>
+                <Form.InputNumber
+                  label={t('触发复查的不同创建人数')}
                   step={1}
                   min={0}
                   suffix={t('人')}
@@ -295,9 +369,9 @@ export default function RedemptionRateLimit(props) {
                   }
                 />
               </Col>
-              <Col xs={24} sm={12} md={6} lg={6} xl={6}>
+              <Col xs={24} sm={12} md={4} lg={4} xl={4}>
                 <Form.InputNumber
-                  label={t('人工复查小额上限')}
+                  label={t('纳入复查的小额码上限')}
                   step={1}
                   min={0}
                   suffix={t('闪电')}

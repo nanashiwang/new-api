@@ -230,7 +230,7 @@ func CreateSelfRedemption(c *gin.Context) {
 		case errors.Is(err, model.ErrRedemptionBatchUpdateUnsafe):
 			common.ApiErrorMsg(c, "当前余额采用批量更新模式，为避免余额不同步，暂不支持创建兑换码")
 		case errors.Is(err, model.ErrRedemptionActiveLimit):
-			common.ApiErrorMsg(c, "最多只能保留 100 个未使用兑换码")
+			common.ApiErrorMsg(c, fmt.Sprintf("最多只能保留 %d 个未使用兑换码", common.WalletRedemptionActiveLimit))
 		case errors.Is(err, model.ErrRedemptionDailyCreateLimit):
 			common.ApiErrorMsg(c, fmt.Sprintf("普通用户单日最多创建 %d 个兑换码", common.WalletRedemptionDailyCreateLimit))
 		case errors.Is(err, model.ErrRedemptionDailyQuotaLimit):
@@ -256,6 +256,15 @@ func GetSelfRedemptions(c *gin.Context) {
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(items)
 	common.ApiSuccess(c, pageInfo)
+}
+
+func GetSelfRedemptionUsageSummary(c *gin.Context) {
+	summary, err := model.GetWalletRedemptionUsageSummary(c.GetInt("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, summary)
 }
 
 func DeleteInvalidRedemption(c *gin.Context) {
