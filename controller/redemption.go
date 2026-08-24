@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -225,11 +226,15 @@ func CreateSelfRedemption(c *gin.Context) {
 		case errors.Is(err, model.ErrRedemptionInsufficientQuota):
 			common.ApiErrorMsg(c, "钱包余额不足")
 		case errors.Is(err, model.ErrRedemptionInsufficientTransferableQuota):
-			common.ApiErrorMsg(c, "可转赠额度不足；注册、签到、邀请赠送及管理员赠送额度不能创建兑换码")
+			common.ApiErrorMsg(c, "可转赠额度不足；其他用户兑换码转入的额度不能再次创建兑换码")
 		case errors.Is(err, model.ErrRedemptionBatchUpdateUnsafe):
 			common.ApiErrorMsg(c, "当前余额采用批量更新模式，为避免余额不同步，暂不支持创建兑换码")
 		case errors.Is(err, model.ErrRedemptionActiveLimit):
 			common.ApiErrorMsg(c, "最多只能保留 100 个未使用兑换码")
+		case errors.Is(err, model.ErrRedemptionDailyCreateLimit):
+			common.ApiErrorMsg(c, fmt.Sprintf("普通用户单日最多创建 %d 个兑换码", common.WalletRedemptionDailyCreateLimit))
+		case errors.Is(err, model.ErrRedemptionDailyQuotaLimit):
+			common.ApiErrorMsg(c, fmt.Sprintf("普通用户单日最多转赠 %d 闪电", common.WalletRedemptionDailyQuotaLimit))
 		case errors.Is(err, model.ErrRedemptionInvalidRequestID):
 			common.ApiErrorMsg(c, "请求标识无效，请刷新页面后重试")
 		default:

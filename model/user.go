@@ -1479,6 +1479,7 @@ func (user *User) TransferAffQuotaToQuota(quota int) error {
 	user.AffQuota -= quota
 	user.TransferableQuota = EffectiveTransferableQuota(user.Quota, user.TransferableQuota)
 	user.Quota += quota
+	user.TransferableQuota += quota
 
 	// 保存用户状态
 	if err := tx.Save(user).Error; err != nil {
@@ -1531,6 +1532,7 @@ func (user *User) InsertWithTx(tx *gorm.DB, inviterId int) error {
 	if user.InviterId != 0 {
 		user.Quota += decision.InviteeRewardQuota
 	}
+	user.TransferableQuota = user.Quota
 	user.RegisterSource = NormalizeUserRegisterSource(user.RegisterSource)
 
 	// 初始化用户设置
@@ -1655,6 +1657,9 @@ func (user *User) Edit(updatePassword bool) error {
 		return err
 	}
 	transferableQuota := EffectiveTransferableQuota(currentUser.Quota, currentUser.TransferableQuota)
+	if newUser.Quota > currentUser.Quota {
+		transferableQuota += newUser.Quota - currentUser.Quota
+	}
 	if transferableQuota > newUser.Quota {
 		transferableQuota = newUser.Quota
 	}

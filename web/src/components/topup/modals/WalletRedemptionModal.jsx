@@ -208,9 +208,7 @@ const WalletRedemptionModal = ({
         <div className='rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900'>
           <div>{t('创建兑换码会立即从钱包扣除对应额度')}</div>
           <div className='mt-1'>
-            {t(
-              '仅充值获得的额度可以创建兑换码；注册、签到、邀请及管理员赠送额度不可转赠',
-            )}
+            {t('余额均可创建兑换码；仅其他用户兑换码转入的额度不可再次转赠')}
           </div>
           <div className='mt-1'>
             {t('自己兑换自己的码只会返还额度，不会建立邀请关系或产生邀请奖励')}

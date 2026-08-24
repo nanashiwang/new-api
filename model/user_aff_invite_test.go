@@ -90,6 +90,7 @@ func TestUserInsertPersistsInviterAndRewards(t *testing.T) {
 	assert.Equal(t, inviter.Id, savedInvitee.InviterId)
 	assert.Len(t, savedInvitee.AffCode, UserAffCodeLength)
 	assert.Equal(t, 7, savedInvitee.Quota)
+	assert.Equal(t, 7, savedInvitee.TransferableQuota)
 
 	var savedInviter User
 	require.NoError(t, DB.First(&savedInviter, inviter.Id).Error)
@@ -151,6 +152,7 @@ func TestInviteBindingUsesGuaranteedSlotBeforeProbability(t *testing.T) {
 	require.NoError(t, DB.First(&savedInvitee, invitee.Id).Error)
 	assert.Equal(t, inviter.Id, savedInvitee.InviterId)
 	assert.Equal(t, 20, savedInvitee.Quota)
+	assert.Equal(t, 20, savedInvitee.TransferableQuota)
 
 	var savedInviter User
 	require.NoError(t, DB.First(&savedInviter, inviter.Id).Error)

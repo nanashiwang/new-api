@@ -263,6 +263,7 @@ func migrateDB() error {
 		&PasskeyCredential{},
 		&Option{},
 		&Redemption{},
+		&RedemptionReviewCase{},
 		&WalletTransferLock{},
 		&SellableTokenProduct{},
 		&SellableTokenOrder{},
@@ -339,6 +340,9 @@ func migrateDB() error {
 	if err := NormalizeMiMoVendorMetadata(); err != nil {
 		return fmt.Errorf("failed to normalize Xiaomi MiMo vendor metadata: %w", err)
 	}
+	if err := MigrateWalletRedemptionTransferPolicy(); err != nil {
+		return fmt.Errorf("failed to migrate wallet redemption transfer policy: %w", err)
+	}
 	return nil
 }
 
@@ -357,6 +361,7 @@ func migrateDBFast() error {
 		{&PasskeyCredential{}, "PasskeyCredential"},
 		{&Option{}, "Option"},
 		{&Redemption{}, "Redemption"},
+		{&RedemptionReviewCase{}, "RedemptionReviewCase"},
 		{&WalletTransferLock{}, "WalletTransferLock"},
 		{&SellableTokenProduct{}, "SellableTokenProduct"},
 		{&SellableTokenOrder{}, "SellableTokenOrder"},
@@ -450,6 +455,9 @@ func migrateDBFast() error {
 	}
 	if err := NormalizeMiMoVendorMetadata(); err != nil {
 		return fmt.Errorf("failed to normalize Xiaomi MiMo vendor metadata: %w", err)
+	}
+	if err := MigrateWalletRedemptionTransferPolicy(); err != nil {
+		return fmt.Errorf("failed to migrate wallet redemption transfer policy: %w", err)
 	}
 	common.SysLog("database migrated")
 	return nil

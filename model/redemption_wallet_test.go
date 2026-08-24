@@ -3,9 +3,11 @@ package model
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/glebarez/sqlite"
@@ -13,6 +15,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestWalletRedemptionLocalDayRangeUsesBeijingTime(t *testing.T) {
+	bizDate, start, end := walletRedemptionLocalDayRange(time.Date(2026, time.August, 24, 15, 59, 0, 0, time.UTC))
+	assert.Equal(t, "2026-08-24", bizDate)
+	assert.Equal(t, int64(24*60*60), end-start)
+	assert.Equal(t, "2026-08-24 00:00:00", time.Unix(start, 0).In(walletRedemptionLocation).Format("2006-01-02 15:04:05"))
+}
 
 func TestEnsureRedemptionColumnsSQLite_AddsWalletFundingColumnsWithLegacyDefault(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -43,16 +52,29 @@ func setupWalletRedemptionTest(t *testing.T) {
 	setupInviteCommissionSubscriptionTest(t)
 	originalQuotaPerUnit := common.QuotaPerUnit
 	originalBindingSettings := common.GetInviteBindingSettings()
+	originalDailyCreateLimit := common.WalletRedemptionDailyCreateLimit
+	originalDailyQuotaLimit := common.WalletRedemptionDailyQuotaLimit
+	originalReviewThreshold := common.WalletRedemptionReviewDistinctCreatorThreshold
+	originalReviewSmallLimit := common.WalletRedemptionReviewSmallQuotaLimit
 	common.QuotaPerUnit = 10
+	common.WalletRedemptionDailyCreateLimit = 100
+	common.WalletRedemptionDailyQuotaLimit = 5000
+	common.WalletRedemptionReviewDistinctCreatorThreshold = 3
+	common.WalletRedemptionReviewSmallQuotaLimit = 100
 	require.NoError(t, common.SetInviteBindingSettings(common.InviteBindingSettings{
 		Threshold:          0,
 		RateAfterThreshold: 100,
 	}))
 	t.Cleanup(func() {
 		common.QuotaPerUnit = originalQuotaPerUnit
+		common.WalletRedemptionDailyCreateLimit = originalDailyCreateLimit
+		common.WalletRedemptionDailyQuotaLimit = originalDailyQuotaLimit
+		common.WalletRedemptionReviewDistinctCreatorThreshold = originalReviewThreshold
+		common.WalletRedemptionReviewSmallQuotaLimit = originalReviewSmallLimit
 		_ = common.SetInviteBindingSettings(originalBindingSettings)
 	})
 	require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&Redemption{}).Error)
+	require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&RedemptionReviewCase{}).Error)
 }
 
 func setWalletQuota(t *testing.T, userID int, quota int) {
@@ -108,7 +130,7 @@ func TestCreateWalletFundedRedemption_DeductsQuotaAndReplaysIdempotently(t *test
 	assert.NotNil(t, redemptions[0].CreateRequestId)
 }
 
-func TestCreateWalletFundedRedemption_RejectsFreeAndTinyQuota(t *testing.T) {
+func TestCreateWalletFundedRedemption_RejectsNonTransferableAndTinyQuota(t *testing.T) {
 	setupWalletRedemptionTest(t)
 	creator := createInviteCommissionTestUser(t, "wallet_non_transferable", 0)
 	setNonTransferableWalletQuota(t, creator.Id, 1000)
@@ -124,6 +146,128 @@ func TestCreateWalletFundedRedemption_RejectsFreeAndTinyQuota(t *testing.T) {
 	require.NoError(t, DB.First(&refreshed, creator.Id).Error)
 	assert.Equal(t, 1000, refreshed.Quota)
 	assert.Equal(t, 1000, refreshed.TransferableQuota)
+}
+
+func TestCreateWalletFundedRedemption_EnforcesDailyLimits(t *testing.T) {
+	setupWalletRedemptionTest(t)
+	creator := createInviteCommissionTestUser(t, "wallet_daily_limits", 0)
+	setWalletQuota(t, creator.Id, 10_000)
+	common.WalletRedemptionDailyCreateLimit = 2
+	common.WalletRedemptionDailyQuotaLimit = 0
+
+	_, err := CreateWalletFundedRedemption(creator.Id, 100, "wallet-daily-count-001")
+	require.NoError(t, err)
+	_, err = CreateWalletFundedRedemption(creator.Id, 100, "wallet-daily-count-002")
+	require.NoError(t, err)
+	_, err = CreateWalletFundedRedemption(creator.Id, 100, "wallet-daily-count-003")
+	assert.ErrorIs(t, err, ErrRedemptionDailyCreateLimit)
+
+	common.WalletRedemptionDailyCreateLimit = 100
+	common.WalletRedemptionDailyQuotaLimit = 15
+	other := createInviteCommissionTestUser(t, "wallet_daily_quota", 0)
+	setWalletQuota(t, other.Id, 10_000)
+	_, err = CreateWalletFundedRedemption(other.Id, 100, "wallet-daily-quota-001")
+	require.NoError(t, err)
+	_, err = CreateWalletFundedRedemption(other.Id, 100, "wallet-daily-quota-002")
+	assert.ErrorIs(t, err, ErrRedemptionDailyQuotaLimit)
+}
+
+func TestCreateWalletFundedRedemption_DailyLimitIsAtomic(t *testing.T) {
+	setupWalletRedemptionTest(t)
+	creator := createInviteCommissionTestUser(t, "wallet_daily_atomic", 0)
+	setWalletQuota(t, creator.Id, 1000)
+	common.WalletRedemptionDailyCreateLimit = 1
+	common.WalletRedemptionDailyQuotaLimit = 0
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for index := 0; index < 2; index++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			_, err := CreateWalletFundedRedemption(creator.Id, 100, fmt.Sprintf("wallet-daily-atomic-%03d", index))
+			errs <- err
+		}(index)
+	}
+	wg.Wait()
+	close(errs)
+	succeeded, limited := 0, 0
+	for err := range errs {
+		if err == nil {
+			succeeded++
+		} else if errors.Is(err, ErrRedemptionDailyCreateLimit) {
+			limited++
+		} else {
+			t.Fatalf("unexpected create error: %v", err)
+		}
+	}
+	assert.Equal(t, 1, succeeded)
+	assert.Equal(t, 1, limited)
+}
+
+func TestWalletRedemption_OtherUserQuotaCannotBeTransferredAgain(t *testing.T) {
+	setupWalletRedemptionTest(t)
+	creator := createInviteCommissionTestUser(t, "wallet_one_hop_creator", 0)
+	recipient := createInviteCommissionTestUser(t, "wallet_one_hop_recipient", 0)
+	setWalletQuota(t, creator.Id, 1000)
+	setWalletQuota(t, recipient.Id, 0)
+
+	created, err := CreateWalletFundedRedemption(creator.Id, 300, "wallet-one-hop-001")
+	require.NoError(t, err)
+	_, err = RedeemWithResult(created.Redemption.Key, recipient.Id)
+	require.NoError(t, err)
+
+	var refreshed User
+	require.NoError(t, DB.First(&refreshed, recipient.Id).Error)
+	assert.Equal(t, 300, refreshed.Quota)
+	assert.Zero(t, EffectiveTransferableQuota(refreshed.Quota, refreshed.TransferableQuota))
+	_, err = CreateWalletFundedRedemption(recipient.Id, 100, "wallet-one-hop-recreate-001")
+	assert.ErrorIs(t, err, ErrRedemptionInsufficientTransferableQuota)
+}
+
+func TestWalletRedemption_MultipleSmallCreatorsCreateReviewCase(t *testing.T) {
+	setupWalletRedemptionTest(t)
+	recipient := createInviteCommissionTestUser(t, "wallet_review_recipient", 0)
+	setWalletQuota(t, recipient.Id, 0)
+	creatorIDs := make([]int, 0, 3)
+	for index := 0; index < 3; index++ {
+		creator := createInviteCommissionTestUser(t, fmt.Sprintf("wallet_review_creator_%d", index), 0)
+		creatorIDs = append(creatorIDs, creator.Id)
+		setWalletQuota(t, creator.Id, 1000)
+		created, err := CreateWalletFundedRedemption(creator.Id, 100, fmt.Sprintf("wallet-review-%03d", index))
+		require.NoError(t, err)
+		_, err = RedeemWithResult(created.Redemption.Key, recipient.Id)
+		require.NoError(t, err)
+	}
+
+	var review RedemptionReviewCase
+	require.NoError(t, DB.Where("user_id = ?", recipient.Id).First(&review).Error)
+	assert.Equal(t, RedemptionReviewStatusPending, review.Status)
+	assert.Equal(t, 3, review.DistinctCreatorCount)
+	assert.Equal(t, 3, review.SmallCodeCount)
+	assert.Equal(t, 300, review.TotalQuota)
+	for _, creatorID := range creatorIDs {
+		assert.Contains(t, review.CreatorIds, strconv.Itoa(creatorID))
+	}
+	resolved, err := ResolveRedemptionReviewCase(review.Id, 99, RedemptionReviewStatusDismissed, "normal gifts")
+	require.NoError(t, err)
+	assert.Equal(t, RedemptionReviewStatusDismissed, resolved.Status)
+
+	creator := createInviteCommissionTestUser(t, "wallet_review_creator_reopen", 0)
+	setWalletQuota(t, creator.Id, 1000)
+	created, err := CreateWalletFundedRedemption(creator.Id, 100, "wallet-review-reopen-001")
+	require.NoError(t, err)
+	_, err = RedeemWithResult(created.Redemption.Key, recipient.Id)
+	require.NoError(t, err)
+	disabledReview, disabled, err := ResolveRedemptionReviewCaseAction(
+		review.Id, 99, common.RoleRootUser, RedemptionReviewActionDisable, "confirmed abuse",
+	)
+	require.NoError(t, err)
+	assert.True(t, disabled)
+	assert.Equal(t, RedemptionReviewStatusDisabled, disabledReview.Status)
+	var disabledRecipient User
+	require.NoError(t, DB.First(&disabledRecipient, recipient.Id).Error)
+	assert.Equal(t, common.UserStatusDisabled, disabledRecipient.Status)
 }
 
 func TestCreateWalletFundedRedemption_AdminCanCreateBelowUserMinimum(t *testing.T) {

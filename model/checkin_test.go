@@ -80,3 +80,15 @@ func TestUserCheckinBlocksTooManyUsersFromSameRegisterIP(t *testing.T) {
 	_, err = UserCheckin(user2, "203.0.113.12")
 	require.ErrorContains(t, err, "当前注册来源今日签到账号过多")
 }
+
+func TestUserCheckinAddsTransferableQuota(t *testing.T) {
+	setupCheckinTestDB(t)
+	userID := createCheckinTestUser(t, "checkin_transferable", "198.51.100.20")
+
+	_, err := UserCheckin(userID, "203.0.113.20")
+	require.NoError(t, err)
+	var user User
+	require.NoError(t, DB.First(&user, userID).Error)
+	require.Equal(t, 100, user.Quota)
+	require.Equal(t, 100, user.TransferableQuota)
+}
