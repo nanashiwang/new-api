@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -26,6 +27,8 @@ var (
 	ErrRedemptionInsufficientTransferableQuota = errors.New("redemption.insufficient_transferable_quota")
 	ErrRedemptionBatchUpdateUnsafe             = errors.New("redemption.batch_update_unsafe")
 	ErrRedemptionActiveLimit                   = errors.New("redemption.active_limit")
+	ErrRedemptionDailyCreateLimit              = errors.New("redemption.daily_create_limit")
+	ErrRedemptionDailyQuotaLimit               = errors.New("redemption.daily_quota_limit")
 	ErrRedemptionInvalidRequestID              = errors.New("redemption.invalid_request_id")
 	ErrLegacyWalletRedemptionRestricted        = errors.New("legacy wallet redemption can only be redeemed by its creator")
 	ErrWalletFundedRedemptionImmutable         = errors.New("wallet-funded redemption is immutable")
@@ -222,7 +225,6 @@ func CreateWalletFundedRedemption(userID int, quota int, requestID string) (*Wal
 		if creator.Role < common.RoleAdminUser && quota < MinimumWalletRedemptionQuota() {
 			return ErrRedemptionBelowMinimum
 		}
-
 		var activeCount int64
 		if err := tx.Model(&Redemption{}).
 			Where("user_id = ? AND funding_source = ? AND status = ?", userID, RedemptionFundingSourceWallet, common.RedemptionCodeStatusEnabled).
@@ -232,6 +234,32 @@ func CreateWalletFundedRedemption(userID int, quota int, requestID string) (*Wal
 		}
 		if activeCount >= maxActiveWalletRedemptionsPerUser {
 			return ErrRedemptionActiveLimit
+		}
+		if creator.Role < common.RoleAdminUser {
+			_, dayStart, dayEnd := walletRedemptionLocalDayRange(time.Now())
+			var daily struct {
+				Count int64 `gorm:"column:count"`
+				Quota int64 `gorm:"column:quota"`
+			}
+			if err := tx.Unscoped().Model(&Redemption{}).
+				Select("COUNT(*) AS count, COALESCE(SUM(quota), 0) AS quota").
+				Where("user_id = ? AND funding_source = ?", userID, RedemptionFundingSourceWallet).
+				Where("created_time >= ? AND created_time < ?", dayStart, dayEnd).
+				Scan(&daily).Error; err != nil {
+				return err
+			}
+			if common.WalletRedemptionDailyCreateLimit > 0 && daily.Count >= int64(common.WalletRedemptionDailyCreateLimit) {
+				return ErrRedemptionDailyCreateLimit
+			}
+			if common.WalletRedemptionDailyQuotaLimit > 0 {
+				limit, err := walletRedemptionQuotaFromUnits(common.WalletRedemptionDailyQuotaLimit)
+				if err != nil {
+					return err
+				}
+				if daily.Quota+int64(quota) > int64(limit) {
+					return ErrRedemptionDailyQuotaLimit
+				}
+			}
 		}
 		if creator.Quota < quota {
 			return ErrRedemptionInsufficientQuota
@@ -543,12 +571,15 @@ func RedeemWithOptions(key string, userId int, renewTargetSubscriptionId int, pu
 			result.ProductId = product.Id
 			result.ProductName = product.Name
 		default:
-			// 管理员余额码属于赠送额度；钱包码只有创建者自兑时恢复
-			// 原可转赠属性。转赠给他人后变为最终消费额度，禁止同一笔
-			// 资金在小号之间循环创建兑换码并反复建立邀请链。
-			transferableQuota := 0
-			if redemption.FundingSource == RedemptionFundingSourceWallet && redemption.UserId == userId {
-				transferableQuota = redemption.TransferableQuota
+			// 所有普通发放来源都可以继续转赠；唯一例外是“其他用户创建的
+			// 钱包兑换码”。这类额度保持最终消费属性，阻断兑换码循环转赠。
+			transferableQuota := redemption.Quota
+			if redemption.FundingSource == RedemptionFundingSourceWallet {
+				if redemption.UserId == userId {
+					transferableQuota = redemption.TransferableQuota
+				} else {
+					transferableQuota = 0
+				}
 			}
 			if err := GrantUserQuotaTx(tx, userId, redemption.Quota, transferableQuota); err != nil {
 				return err
@@ -561,6 +592,9 @@ func RedeemWithOptions(key string, userId int, renewTargetSubscriptionId int, pu
 		redemption.Status = common.RedemptionCodeStatusUsed
 		redemption.UsedUserId = userId
 		if err := tx.Save(redemption).Error; err != nil {
+			return err
+		}
+		if err := recordWalletRedemptionReviewTx(tx, redemption, userId); err != nil {
 			return err
 		}
 		return nil

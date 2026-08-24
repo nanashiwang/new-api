@@ -161,6 +161,10 @@ func InitOptionMap() {
 	common.OptionMap["InviterRechargeCommissionRate"] = strconv.FormatFloat(common.InviterRechargeCommissionRate, 'f', -1, 64)
 	common.OptionMap["InviterRechargeSecondLevelCommissionRate"] = strconv.FormatFloat(common.InviterRechargeSecondLevelCommissionRate, 'f', -1, 64)
 	common.OptionMap["InviterCommissionDailyCap"] = strconv.Itoa(common.InviterCommissionDailyCap)
+	common.OptionMap["WalletRedemptionDailyCreateLimit"] = strconv.Itoa(common.WalletRedemptionDailyCreateLimit)
+	common.OptionMap["WalletRedemptionDailyQuotaLimit"] = strconv.Itoa(common.WalletRedemptionDailyQuotaLimit)
+	common.OptionMap["WalletRedemptionReviewDistinctCreatorThreshold"] = strconv.Itoa(common.WalletRedemptionReviewDistinctCreatorThreshold)
+	common.OptionMap["WalletRedemptionReviewSmallQuotaLimit"] = strconv.Itoa(common.WalletRedemptionReviewSmallQuotaLimit)
 	common.OptionMap["InvoiceServiceFeeRate"] = strconv.FormatFloat(common.InvoiceServiceFeeRate, 'f', -1, 64)
 	common.OptionMap["QuotaRemindThreshold"] = strconv.Itoa(common.QuotaRemindThreshold)
 	common.OptionMap["PreConsumedQuota"] = strconv.Itoa(common.PreConsumedQuota)
@@ -315,6 +319,9 @@ func UpdateOption(key string, value string) error {
 	if err := validateInviteCommissionDailyCapOption(key, value); err != nil {
 		return err
 	}
+	if err := validateWalletRedemptionPolicyOption(key, value); err != nil {
+		return err
+	}
 	if strings.HasPrefix(key, "billing_setting.") {
 		field := strings.TrimPrefix(key, "billing_setting.")
 		if field == billing_setting.BillingModeField || field == billing_setting.BillingExprField {
@@ -415,6 +422,9 @@ func updateOptionMapUnlocked(key string, value string) (err error) {
 		return err
 	}
 	if err = validateInviteCommissionDailyCapOption(key, value); err != nil {
+		return err
+	}
+	if err = validateWalletRedemptionPolicyOption(key, value); err != nil {
 		return err
 	}
 	common.OptionMapRWMutex.Lock()
@@ -708,6 +718,14 @@ func updateOptionMapUnlocked(key string, value string) (err error) {
 	case "InviterCommissionDailyCap":
 		// 单日上限单位为额度，0 表示不限制。
 		common.InviterCommissionDailyCap, _ = strconv.Atoi(value)
+	case "WalletRedemptionDailyCreateLimit":
+		common.WalletRedemptionDailyCreateLimit, _ = strconv.Atoi(value)
+	case "WalletRedemptionDailyQuotaLimit":
+		common.WalletRedemptionDailyQuotaLimit, _ = strconv.Atoi(value)
+	case "WalletRedemptionReviewDistinctCreatorThreshold":
+		common.WalletRedemptionReviewDistinctCreatorThreshold, _ = strconv.Atoi(value)
+	case "WalletRedemptionReviewSmallQuotaLimit":
+		common.WalletRedemptionReviewSmallQuotaLimit, _ = strconv.Atoi(value)
 	case "InvoiceServiceFeeRate":
 		// 发票手续费费率，使用小数表达（例如 0.01 表示 1%）。
 		common.InvoiceServiceFeeRate, _ = strconv.ParseFloat(value, 64)
@@ -837,6 +855,23 @@ func validateInviteCommissionDailyCapOption(key string, value string) error {
 	dailyCap, err := strconv.Atoi(strings.TrimSpace(value))
 	if err != nil || dailyCap < 0 {
 		return errors.New("invite commission daily cap must be a non-negative integer")
+	}
+	return nil
+}
+
+func validateWalletRedemptionPolicyOption(key string, value string) error {
+	switch key {
+	case "WalletRedemptionDailyCreateLimit", "WalletRedemptionDailyQuotaLimit",
+		"WalletRedemptionReviewDistinctCreatorThreshold", "WalletRedemptionReviewSmallQuotaLimit":
+		parsed, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || parsed < 0 {
+			return fmt.Errorf("%s must be a non-negative integer", key)
+		}
+		if parsed > 0 && (key == "WalletRedemptionDailyQuotaLimit" || key == "WalletRedemptionReviewSmallQuotaLimit") {
+			if _, err := walletRedemptionQuotaFromUnits(parsed); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

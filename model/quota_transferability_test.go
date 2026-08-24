@@ -227,11 +227,41 @@ func TestFreeAndReferralQuotaRemainNonTransferable(t *testing.T) {
 	var afterAdminGift User
 	require.NoError(t, DB.First(&afterAdminGift, user.Id).Error)
 	assert.Equal(t, 150, afterAdminGift.Quota)
-	assert.Equal(t, 50, afterAdminGift.TransferableQuota)
+	assert.Equal(t, 150, afterAdminGift.TransferableQuota)
 
 	require.NoError(t, afterAdminGift.TransferAffQuotaToQuota(100))
 	var afterReferralTransfer User
 	require.NoError(t, DB.First(&afterReferralTransfer, user.Id).Error)
 	assert.Equal(t, 250, afterReferralTransfer.Quota)
-	assert.Equal(t, 50, afterReferralTransfer.TransferableQuota)
+	assert.Equal(t, 250, afterReferralTransfer.TransferableQuota)
+}
+
+func TestMigrateWalletRedemptionTransferPolicyBackfillsNonCodeBalances(t *testing.T) {
+	setupInviteCommissionSubscriptionTest(t)
+	freeBalance := createInviteCommissionTestUser(t, "transfer_policy_free", 0)
+	recipient := createInviteCommissionTestUser(t, "transfer_policy_recipient", 0)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", freeBalance.Id).Updates(map[string]any{
+		"quota": 1000, "transferable_quota": 0,
+	}).Error)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", recipient.Id).Updates(map[string]any{
+		"quota": 500, "transferable_quota": 0,
+	}).Error)
+	require.NoError(t, DB.Create(&Redemption{
+		UserId: freeBalance.Id, UsedUserId: recipient.Id, Key: common.GetUUID(),
+		Status: common.RedemptionCodeStatusUsed, Name: "received wallet code",
+		BenefitType: RedemptionBenefitTypeQuota, Quota: 300,
+		FundingSource: RedemptionFundingSourceWallet, CreatedTime: common.GetTimestamp(), RedeemedTime: common.GetTimestamp(),
+	}).Error)
+
+	require.NoError(t, MigrateWalletRedemptionTransferPolicy())
+	var migratedFree, migratedRecipient User
+	require.NoError(t, DB.First(&migratedFree, freeBalance.Id).Error)
+	require.NoError(t, DB.First(&migratedRecipient, recipient.Id).Error)
+	assert.Equal(t, 1000, migratedFree.TransferableQuota)
+	assert.Equal(t, 200, migratedRecipient.TransferableQuota)
+
+	// The version marker makes repeated startup migrations idempotent.
+	require.NoError(t, MigrateWalletRedemptionTransferPolicy())
+	require.NoError(t, DB.First(&migratedRecipient, recipient.Id).Error)
+	assert.Equal(t, 200, migratedRecipient.TransferableQuota)
 }

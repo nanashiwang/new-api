@@ -169,7 +169,7 @@ func userCheckinWithTransaction(checkin *Checkin, userId int, quotaAwarded int) 
 		}
 
 		// 步骤2: 在事务中增加用户额度
-		if err := GrantUserQuotaTx(tx, userId, quotaAwarded, 0); err != nil {
+		if err := GrantUserQuotaTx(tx, userId, quotaAwarded, quotaAwarded); err != nil {
 			return errors.New("签到失败：更新额度出错")
 		}
 
@@ -196,7 +196,7 @@ func userCheckinWithoutTransaction(checkin *Checkin, userId int, quotaAwarded in
 
 	// 步骤2: 增加用户额度
 	// 使用 db=true 强制直接写入数据库，不使用批量更新
-	if err := GrantUserQuota(userId, quotaAwarded, 0); err != nil {
+	if err := GrantUserQuota(userId, quotaAwarded, quotaAwarded); err != nil {
 		// 如果增加额度失败，需要回滚签到记录
 		DB.Delete(checkin)
 		return nil, errors.New("签到失败：更新额度出错")

@@ -26,6 +26,7 @@ const RedemptionsActions = ({
   setShowEdit,
   batchCopyRedemptions,
   batchDeleteRedemptions,
+  openReviewModal,
   t,
 }) => {
   // Add new redemption code
@@ -45,6 +46,15 @@ const RedemptionsActions = ({
         size='small'
       >
         {t('添加兑换码')}
+      </Button>
+
+      <Button
+        type='warning'
+        className='flex-1 md:flex-initial'
+        onClick={openReviewModal}
+        size='small'
+      >
+        {t('兑换风险复查')}
       </Button>
 
       <Button

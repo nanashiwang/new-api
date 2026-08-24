@@ -17,13 +17,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
+import React, { useState } from 'react';
 import CardPro from '../../common/ui/CardPro';
 import RedemptionsTable from './RedemptionsTable';
 import RedemptionsActions from './RedemptionsActions';
 import RedemptionsFilters from './RedemptionsFilters';
 import RedemptionsDescription from './RedemptionsDescription';
 import EditRedemptionModal from './modals/EditRedemptionModal';
+import RedemptionReviewModal from './modals/RedemptionReviewModal';
 import { useRedemptionsData } from '../../../hooks/redemptions/useRedemptionsData';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 import { createCardProPagination } from '../../../helpers/utils';
@@ -31,6 +32,7 @@ import { createCardProPagination } from '../../../helpers/utils';
 const RedemptionsPage = () => {
   const redemptionsData = useRedemptionsData();
   const isMobile = useIsMobile();
+  const [reviewVisible, setReviewVisible] = useState(false);
 
   const {
     // 编辑状态
@@ -69,6 +71,11 @@ const RedemptionsPage = () => {
         visiable={showEdit}
         handleClose={closeEdit}
       />
+      <RedemptionReviewModal
+        visible={reviewVisible}
+        onCancel={() => setReviewVisible(false)}
+        t={redemptionsData.t}
+      />
 
       <CardPro
         type='type1'
@@ -87,6 +94,7 @@ const RedemptionsPage = () => {
               setShowEdit={setShowEdit}
               batchCopyRedemptions={batchCopyRedemptions}
               batchDeleteRedemptions={batchDeleteRedemptions}
+              openReviewModal={() => setReviewVisible(true)}
               t={t}
             />
 

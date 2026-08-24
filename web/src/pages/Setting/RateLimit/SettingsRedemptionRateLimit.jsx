@@ -61,6 +61,10 @@ export default function RedemptionRateLimit(props) {
     RedemptionRateLimitDurationSeconds: 600,
     RedemptionRateLimitSuccessCount: 0,
     RedemptionRateLimitFailureCount: 0,
+    WalletRedemptionDailyCreateLimit: 100,
+    WalletRedemptionDailyQuotaLimit: 5000,
+    WalletRedemptionReviewDistinctCreatorThreshold: 3,
+    WalletRedemptionReviewSmallQuotaLimit: 100,
   });
   const [inputsRow, setInputsRow] = useState(inputs);
   const [unit, setUnit] = useState('minute');
@@ -237,9 +241,80 @@ export default function RedemptionRateLimit(props) {
                 />
               </Col>
             </Row>
+          </Form.Section>
+          <Form.Section text={t('用户创建兑换码限制')}>
+            <Row gutter={16}>
+              <Col xs={24} sm={12} md={6} lg={6} xl={6}>
+                <Form.InputNumber
+                  label={t('单日最多创建数量')}
+                  step={1}
+                  min={0}
+                  suffix={t('个')}
+                  extraText={t('0 代表不限制；未使用兑换码总数仍最多 100 个')}
+                  field={'WalletRedemptionDailyCreateLimit'}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      WalletRedemptionDailyCreateLimit: String(value),
+                    })
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={6} lg={6} xl={6}>
+                <Form.InputNumber
+                  label={t('单日最多转赠额度')}
+                  step={1}
+                  min={0}
+                  suffix={t('闪电')}
+                  extraText={t('0 代表不限制；普通用户单个兑换码至少 10 闪电')}
+                  field={'WalletRedemptionDailyQuotaLimit'}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      WalletRedemptionDailyQuotaLimit: String(value),
+                    })
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={6} lg={6} xl={6}>
+                <Form.InputNumber
+                  label={t('人工复查不同创建人数')}
+                  step={1}
+                  min={0}
+                  suffix={t('人')}
+                  extraText={t(
+                    '同一用户单日达到该来源数后进入人工复查；0 关闭',
+                  )}
+                  field={'WalletRedemptionReviewDistinctCreatorThreshold'}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      WalletRedemptionReviewDistinctCreatorThreshold:
+                        String(value),
+                    })
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={6} lg={6} xl={6}>
+                <Form.InputNumber
+                  label={t('人工复查小额上限')}
+                  step={1}
+                  min={0}
+                  suffix={t('闪电')}
+                  extraText={t('只统计不高于该额度的钱包兑换码；0 关闭')}
+                  field={'WalletRedemptionReviewSmallQuotaLimit'}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      WalletRedemptionReviewSmallQuotaLimit: String(value),
+                    })
+                  }
+                />
+              </Col>
+            </Row>
             <Row>
               <Button size='default' onClick={onSubmit}>
-                {t('保存兑换码速率限制')}
+                {t('保存兑换码限制')}
               </Button>
             </Row>
           </Form.Section>

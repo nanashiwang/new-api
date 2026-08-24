@@ -2,12 +2,15 @@ package model
 
 import (
 	"errors"
+	"fmt"
 	"sort"
 
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+const walletRedemptionTransferPolicyMigrationKey = "WalletRedemptionTransferPolicyV2"
 
 // WalletTransferLock serializes every create, redeem, and reversal operation
 // for wallet-funded redemption codes owned by the same creator. A dedicated
@@ -35,10 +38,10 @@ func lockWalletTransferTx(tx *gorm.DB, userID int) error {
 	return query.First(&WalletTransferLock{}).Error
 }
 
-// EffectiveTransferableQuota returns the verified paid portion that is still
-// backed by the user's current wallet balance. The stored value may temporarily
-// exceed Quota after ordinary consumption; every grant and transfer operation
-// normalizes it before creating new transferable value.
+// EffectiveTransferableQuota returns the portion eligible to create another
+// wallet redemption code. Every balance source is eligible except quota
+// received from another user's wallet code. The stored value may temporarily
+// exceed Quota after ordinary consumption, so callers normalize it here.
 func EffectiveTransferableQuota(quota int, transferableQuota int) int {
 	if quota <= 0 || transferableQuota <= 0 {
 		return 0
@@ -87,6 +90,87 @@ func GrantUserQuotaTx(tx *gorm.DB, userID int, quota int, transferableQuota int)
 func GrantUserQuota(userID int, quota int, transferableQuota int) error {
 	return DB.Transaction(func(tx *gorm.DB) error {
 		return GrantUserQuotaTx(tx, userID, quota, transferableQuota)
+	})
+}
+
+// MigrateWalletRedemptionTransferPolicy converts the historical "only paid
+// top-ups are transferable" balance into the current policy: every existing
+// balance is transferable except the still-unspent portion that came from
+// another user's wallet redemption code. The migration is transactional and
+// versioned so multiple application instances cannot partially apply it.
+func MigrateWalletRedemptionTransferPolicy() error {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&Option{
+			Key: walletRedemptionTransferPolicyMigrationKey, Value: "pending",
+		}).Error; err != nil {
+			return err
+		}
+		var marker Option
+		lookup := tx.Where(commonKeyCol+" = ?", walletRedemptionTransferPolicyMigrationKey)
+		if !common.UsingSQLite {
+			lookup = lookup.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		lookup = lookup.First(&marker)
+		if lookup.Error != nil {
+			return lookup.Error
+		}
+		if marker.Value == "done" {
+			return nil
+		}
+
+		var users []*User
+		if err := tx.Unscoped().Select("id", "quota", "transferable_quota").Find(&users).Error; err != nil {
+			return err
+		}
+		type receivedQuotaRow struct {
+			UserId int `gorm:"column:user_id"`
+			Quota  int `gorm:"column:quota"`
+		}
+		var receivedRows []receivedQuotaRow
+		if err := tx.Unscoped().Model(&Redemption{}).
+			Select("used_user_id AS user_id, COALESCE(SUM(quota), 0) AS quota").
+			Where("funding_source = ? AND benefit_type = ? AND status = ?", RedemptionFundingSourceWallet, RedemptionBenefitTypeQuota, common.RedemptionCodeStatusUsed).
+			Where("used_user_id > 0 AND used_user_id <> user_id").
+			Group("used_user_id").Scan(&receivedRows).Error; err != nil {
+			return err
+		}
+		receivedByUser := make(map[int]int, len(receivedRows))
+		for _, row := range receivedRows {
+			receivedByUser[row.UserId] = row.Quota
+		}
+
+		for _, user := range users {
+			if user == nil {
+				continue
+			}
+			currentQuota := user.Quota
+			if currentQuota < 0 {
+				currentQuota = 0
+			}
+			oldEffective := EffectiveTransferableQuota(user.Quota, user.TransferableQuota)
+			oldBlocked := currentQuota - oldEffective
+			if oldBlocked < 0 {
+				oldBlocked = 0
+			}
+			blockedByReceivedCodes := receivedByUser[user.Id]
+			if blockedByReceivedCodes > oldBlocked {
+				blockedByReceivedCodes = oldBlocked
+			}
+			if blockedByReceivedCodes > currentQuota {
+				blockedByReceivedCodes = currentQuota
+			}
+			targetTransferable := currentQuota - blockedByReceivedCodes
+			if targetTransferable == user.TransferableQuota {
+				continue
+			}
+			if err := tx.Unscoped().Model(&User{}).Where("id = ?", user.Id).
+				UpdateColumn("transferable_quota", targetTransferable).Error; err != nil {
+				return fmt.Errorf("migrate transferable quota for user %d: %w", user.Id, err)
+			}
+		}
+
+		return tx.Model(&Option{}).Where(commonKeyCol+" = ?", walletRedemptionTransferPolicyMigrationKey).
+			Update("value", "done").Error
 	})
 }
 

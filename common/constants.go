@@ -125,6 +125,22 @@ var InviterRechargeSecondLevelCommissionRate = 0.0
 // 0 表示不限制；大于 0 时超出上限部分会被跳过或截断（见返佣风控逻辑）。
 var InviterCommissionDailyCap = 0
 
+// WalletRedemptionDailyCreateLimit 普通用户单个自然日最多创建的钱包兑换码数量。
+// 0 表示不限制。
+var WalletRedemptionDailyCreateLimit = 100
+
+// WalletRedemptionDailyQuotaLimit 普通用户单个自然日最多转赠的“闪电”额度。
+// 实际扣减时再按 QuotaPerUnit 换算，0 表示不限制。
+var WalletRedemptionDailyQuotaLimit = 5000
+
+// WalletRedemptionReviewDistinctCreatorThreshold 同一用户单日兑换小额钱包码时，
+// 达到多少个不同创建人后进入人工复查。0 表示关闭复查触发。
+var WalletRedemptionReviewDistinctCreatorThreshold = 3
+
+// WalletRedemptionReviewSmallQuotaLimit 触发人工复查时“小额兑换码”的最大闪电额度。
+// 0 表示关闭复查触发。
+var WalletRedemptionReviewSmallQuotaLimit = 100
+
 // InvoiceServiceFeeRate 发票申请手续费费率，按发票开票金额(元)计算。
 // 取值建议 [0,1]：0.01 表示 1%，0 表示不收取手续费。
 var InvoiceServiceFeeRate = 0.01
