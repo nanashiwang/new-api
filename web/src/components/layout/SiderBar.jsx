@@ -245,7 +245,7 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         to: '/playground',
       },
       {
-        text: t('AI 生图'),
+        text: t('元衡生图'),
         itemKey: 'imagePlayground',
         to: '/image-playground',
       },

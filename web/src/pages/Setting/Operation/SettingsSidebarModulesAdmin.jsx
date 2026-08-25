@@ -229,7 +229,7 @@ export default function SettingsSidebarModulesAdmin(props) {
         },
         {
           key: 'imagePlayground',
-          title: t('AI 生图'),
+          title: t('元衡生图'),
           description: t('图片生成工作台'),
         },
         { key: 'chat', title: t('聊天'), description: t('聊天会话管理') },
