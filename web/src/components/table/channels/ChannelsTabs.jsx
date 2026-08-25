@@ -21,16 +21,18 @@ import React from 'react';
 import { Tabs, TabPane, Tag, Typography } from '@douyinfe/semi-ui';
 import { CHANNEL_OPTIONS } from '../../../constants';
 import { getChannelIcon, getLobeHubIcon } from '../../../helpers';
+import {
+  CHANNEL_CATEGORY_ALL,
+  CHANNEL_CATEGORY_MIMO,
+  channelTypeCategoryKey,
+} from '../../../helpers/channelCategory';
 
 const ChannelsTabs = ({
   enableTagMode,
-  activeTypeKey,
-  setActiveTypeKey,
-  channelTypeCounts,
-  availableTypeKeys,
-  activeVendorKey,
-  setActiveVendorKey,
-  vendorCounts,
+  activeCategoryKey,
+  setActiveCategoryKey,
+  categoryCounts,
+  availableCategoryKeys,
   loadChannels,
   activePage,
   pageSize,
@@ -41,42 +43,31 @@ const ChannelsTabs = ({
   if (enableTagMode) return null;
 
   const handleTabChange = (key) => {
-    const isMiMo = key === 'vendor:mimo';
-    const nextTypeKey = isMiMo ? 'all' : key;
-    const nextVendorKey = isMiMo ? 'mimo' : 'all';
-    setActiveTypeKey(nextTypeKey);
-    setActiveVendorKey(nextVendorKey);
+    setActiveCategoryKey(key);
     setActivePage(1);
-    loadChannels(
-      1,
-      pageSize,
-      idSort,
-      enableTagMode,
-      nextTypeKey,
-      undefined,
-      nextVendorKey,
-    );
+    loadChannels(1, pageSize, idSort, enableTagMode, key);
   };
 
-  const mimoCount = Number(vendorCounts?.mimo || 0);
-  const showMiMo = mimoCount > 0 || activeVendorKey === 'mimo';
-  const activeTabKey =
-    activeVendorKey === 'mimo' ? 'vendor:mimo' : activeTypeKey;
-  const visibleTypeOptions = CHANNEL_OPTIONS.filter((opt) =>
-    availableTypeKeys.includes(String(opt.value)),
+  const mimoCategoryKey = CHANNEL_CATEGORY_MIMO;
+  const mimoCount = Number(categoryCounts?.[mimoCategoryKey] || 0);
+  const showMiMo = mimoCount > 0 || activeCategoryKey === mimoCategoryKey;
+  const visibleTypeOptions = CHANNEL_OPTIONS.filter(
+    (opt) =>
+      availableCategoryKeys.includes(channelTypeCategoryKey(opt.value)) ||
+      activeCategoryKey === channelTypeCategoryKey(opt.value),
   );
   const hasOpenAIType = visibleTypeOptions.some((option) => option.value === 1);
 
   const renderMiMoTab = () => (
     <TabPane
       key='vendor:mimo'
-      itemKey='vendor:mimo'
+      itemKey={mimoCategoryKey}
       tab={
         <span className='flex items-center gap-2'>
           {getLobeHubIcon("Xiaomi.color='#FF6900'", 16)}
-          小米 MiMo
+          {t('小米 MiMo')}
           <Tag
-            color={activeVendorKey === 'mimo' ? 'red' : 'grey'}
+            color={activeCategoryKey === mimoCategoryKey ? 'red' : 'grey'}
             shape='circle'
           >
             {mimoCount}
@@ -86,8 +77,8 @@ const ChannelsTabs = ({
     />
   );
   const typeTabs = visibleTypeOptions.flatMap((option) => {
-    const key = String(option.value);
-    const count = channelTypeCounts[option.value] || 0;
+    const key = channelTypeCategoryKey(option.value);
+    const count = categoryCounts[key] || 0;
     const tabs = [
       <TabPane
         key={key}
@@ -96,7 +87,10 @@ const ChannelsTabs = ({
           <span className='flex items-center gap-2'>
             {getChannelIcon(option.value)}
             {option.label}
-            <Tag color={activeTabKey === key ? 'red' : 'grey'} shape='circle'>
+            <Tag
+              color={activeCategoryKey === key ? 'red' : 'grey'}
+              shape='circle'
+            >
               {count}
             </Tag>
           </span>
@@ -112,24 +106,26 @@ const ChannelsTabs = ({
   return (
     <div className='mb-2 flex flex-col gap-1'>
       <Typography.Text type='tertiary' size='small'>
-        {t('类型')}
+        {t('渠道分类')}
       </Typography.Text>
       <Tabs
-        activeKey={activeTabKey}
+        activeKey={activeCategoryKey}
         type='card'
         collapsible
         onChange={handleTabChange}
       >
         <TabPane
-          itemKey='all'
+          itemKey={CHANNEL_CATEGORY_ALL}
           tab={
             <span className='flex items-center gap-2'>
               {t('全部')}
               <Tag
-                color={activeTypeKey === 'all' ? 'red' : 'grey'}
+                color={
+                  activeCategoryKey === CHANNEL_CATEGORY_ALL ? 'red' : 'grey'
+                }
                 shape='circle'
               >
-                {channelTypeCounts['all'] || 0}
+                {categoryCounts[CHANNEL_CATEGORY_ALL] || 0}
               </Tag>
             </span>
           }

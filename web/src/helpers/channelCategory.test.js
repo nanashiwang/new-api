@@ -18,27 +18,27 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { describe, expect, test } from 'bun:test';
-import { isMiMoModel } from './modelVendor';
+import {
+  buildChannelCategoryQuery,
+  CHANNEL_CATEGORY_ALL,
+  CHANNEL_CATEGORY_MIMO,
+  channelTypeCategoryKey,
+} from './channelCategory';
 
-describe('isMiMoModel', () => {
-  test.each([
-    'mimo-v2-flash',
-    'MiMo-VL-7B',
-    'xiaomi/mimo-v2-flash',
-    'vendor.xiaomi-mimo',
-  ])('recognizes %s as MiMo', (modelName) => {
-    expect(isMiMoModel(modelName)).toBe(true);
+describe('channel category query', () => {
+  test('keeps protocol and vendor categories independent', () => {
+    expect(channelTypeCategoryKey(1)).toBe('type:1');
+    expect(CHANNEL_CATEGORY_MIMO).toBe('vendor:mimo');
   });
 
-  test.each([
-    'mimosa',
-    'notmimo-model',
-    'xiaomi/other-model',
-    'qwen-tts',
-    'gpt-5.5',
-    '',
-    null,
-  ])('does not misclassify %s as MiMo', (modelName) => {
-    expect(isMiMoModel(modelName)).toBe(false);
+  test('only sends category outside tag mode', () => {
+    expect(buildChannelCategoryQuery(CHANNEL_CATEGORY_ALL, false)).toBe('');
+    expect(buildChannelCategoryQuery('type:1', false)).toBe(
+      '&category=type%3A1',
+    );
+    expect(buildChannelCategoryQuery(CHANNEL_CATEGORY_MIMO, false)).toBe(
+      '&category=vendor%3Amimo',
+    );
+    expect(buildChannelCategoryQuery(CHANNEL_CATEGORY_MIMO, true)).toBe('');
   });
 });

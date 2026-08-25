@@ -88,9 +88,9 @@ func hasModelNameSegment(modelName string, segments ...string) bool {
 }
 
 func getDefaultVendorName(modelName string) string {
-	// MiMo models are commonly published as mimo-* or under a xiaomi/* namespace.
-	// Segment matching avoids classifying unrelated names such as "mimosa".
-	if hasModelNameSegment(modelName, "mimo", "xiaomi") {
+	// MiMo models contain a standalone mimo segment. Requiring that segment
+	// avoids treating every model in a broad xiaomi namespace as MiMo.
+	if hasModelNameSegment(modelName, "mimo") {
 		return defaultMiMoVendorName
 	}
 

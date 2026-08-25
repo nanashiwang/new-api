@@ -18,17 +18,19 @@ func seedManualEnableMultiKeyChannel(t *testing.T, id int, tag string) *model.Ch
 
 	priority := int64(0)
 	weight := uint(10)
+	channelVendor := model.ChannelVendorMiMo
 	channel := &model.Channel{
-		Id:       id,
-		Name:     "recover-channel",
-		Key:      "key-1\nkey-2",
-		Type:     constant.ChannelTypeOpenAI,
-		Status:   common.ChannelStatusAutoDisabled,
-		Group:    "default",
-		Models:   "gpt-4o",
-		Tag:      common.GetPointer(tag),
-		Priority: &priority,
-		Weight:   &weight,
+		Id:            id,
+		Name:          "recover-channel",
+		Key:           "key-1\nkey-2",
+		Type:          constant.ChannelTypeOpenAI,
+		Status:        common.ChannelStatusAutoDisabled,
+		Group:         "default",
+		Models:        "gpt-4o",
+		ChannelVendor: &channelVendor,
+		Tag:           common.GetPointer(tag),
+		Priority:      &priority,
+		Weight:        &weight,
 		ChannelInfo: model.ChannelInfo{
 			IsMultiKey:                   true,
 			MultiKeySize:                 2,
@@ -82,6 +84,30 @@ func TestUpdateChannel_ManualEnableClearsTemporaryUnavailableState(t *testing.T)
 	require.Zero(t, channel.PendingDisableUntil)
 	require.Empty(t, channel.PendingDisableReason)
 	require.True(t, channel.EffectiveAvailable)
+	require.Equal(t, model.ChannelVendorMiMo, channel.GetChannelVendorSetting())
+}
+
+func TestUpdateChannel_UpdatesExplicitChannelVendor(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupChannelSearchControllerTestDB(t)
+	seedManualEnableMultiKeyChannel(t, 104, "vendor-setting")
+
+	body, err := common.Marshal(map[string]any{
+		"id":             104,
+		"channel_vendor": model.ChannelVendorProtocol,
+	})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPut, "/api/channel/", bytes.NewReader(body))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	UpdateChannel(ctx)
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	channel := loadChannelForAssertion(t, 104)
+	require.Equal(t, model.ChannelVendorProtocol, channel.GetChannelVendorSetting())
 }
 
 func TestEnableTagChannels_ManualEnableClearsTemporaryUnavailableState(t *testing.T) {

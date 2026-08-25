@@ -17,11 +17,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-const MIMO_MODEL_PATTERN = /(^|[/:._-])mimo($|[/:._-])/i;
+export const CHANNEL_CATEGORY_ALL = 'all';
+export const CHANNEL_CATEGORY_MIMO = 'vendor:mimo';
 
-// MiMo models contain a standalone mimo segment. This avoids classifying all
-// models in a broad xiaomi namespace as MiMo.
-export const isMiMoModel = (modelName) => {
-  const normalizedName = String(modelName ?? '').trim();
-  return MIMO_MODEL_PATTERN.test(normalizedName);
+export const channelTypeCategoryKey = (channelType) => `type:${channelType}`;
+
+export const buildChannelCategoryQuery = (categoryKey, enableTagMode) => {
+  if (enableTagMode || !categoryKey || categoryKey === CHANNEL_CATEGORY_ALL) {
+    return '';
+  }
+  return `&category=${encodeURIComponent(categoryKey)}`;
 };

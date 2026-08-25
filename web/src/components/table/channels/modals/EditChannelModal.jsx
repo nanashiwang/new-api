@@ -157,6 +157,7 @@ const EditChannelModal = (props) => {
   const originInputs = {
     name: '',
     type: 1,
+    channel_vendor: 'auto',
     key: '',
     openai_organization: '',
     max_input_tokens: 0,
@@ -934,6 +935,8 @@ const EditChannelModal = (props) => {
       ) {
         data.base_url = 'https://ark.cn-beijing.volces.com';
       }
+
+      data.channel_vendor = data.channel_vendor || 'auto';
 
       setInputs(data);
       if (formApiRef.current) {
@@ -2421,6 +2424,23 @@ const EditChannelModal = (props) => {
                       renderOptionItem={renderChannelOption}
                       onChange={(value) => handleInputChange('type', value)}
                       disabled={isIonetLocked}
+                    />
+
+                    <Form.Select
+                      field='channel_vendor'
+                      label={t('展示厂商')}
+                      optionList={[
+                        { label: t('自动识别'), value: 'auto' },
+                        { label: t('跟随渠道类型'), value: 'protocol' },
+                        { label: t('小米 MiMo'), value: 'mimo' },
+                      ]}
+                      style={{ width: '100%' }}
+                      onChange={(value) =>
+                        handleInputChange('channel_vendor', value)
+                      }
+                      extraText={t(
+                        '仅当全部模型属于同一已知厂商时才会自动归类，混合模型渠道仍按渠道类型展示。',
+                      )}
                     />
 
                     {inputs.type === 57 && (

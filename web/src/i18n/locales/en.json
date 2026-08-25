@@ -5465,5 +5465,11 @@
   "今日已创建": "Created today",
   "今日已转赠": "Transferred today",
   "当前未使用": "Currently unused",
-  "北京时间重置": "Resets at Beijing time"
+  "北京时间重置": "Resets at Beijing time",
+  "渠道分类": "Channel category",
+  "展示厂商": "Display vendor",
+  "自动识别": "Auto detect",
+  "跟随渠道类型": "Follow channel type",
+  "仅当全部模型属于同一已知厂商时才会自动归类，混合模型渠道仍按渠道类型展示。": "Automatic detection applies only when all models belong to the same known vendor. Mixed-model channels remain under their channel type.",
+  "小米 MiMo": "Xiaomi MiMo"
 }

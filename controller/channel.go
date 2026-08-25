@@ -95,6 +95,15 @@ func GetAllChannels(c *gin.Context) {
 	if !enableTagMode {
 		vendorFilter = model.NormalizeChannelVendorFilter(c.Query("vendor"))
 	}
+	category := model.ChannelCategory{Key: model.ChannelCategoryAll, Type: -1}
+	if !enableTagMode {
+		var categoryErr error
+		category, categoryErr = model.ParseChannelCategory(c.Query("category"))
+		if categoryErr != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无效的渠道分类"})
+			return
+		}
+	}
 
 	// Vendor facets intentionally ignore the active protocol type, just as
 	// protocol counts ignore the active protocol tab. Their intersection is
@@ -106,7 +115,8 @@ func GetAllChannels(c *gin.Context) {
 		return
 	}
 	vendorCounts := model.CountChannelVendors(facetChannels)
-	typeCounts := model.CountChannelDisplayTypes(facetChannels)
+	typeCounts := model.CountChannelTypes(facetChannels)
+	categoryCounts := model.CountChannelCategories(facetChannels)
 
 	var total int64
 
@@ -128,14 +138,13 @@ func GetAllChannels(c *gin.Context) {
 			channelData = append(channelData, tagChannels...)
 		}
 		total, _ = model.CountAllTagsWithFilters(statusFilter, typeFilter)
-	} else if vendorFilter != model.ChannelVendorAll || typeFilter >= 0 {
+	} else if vendorFilter != model.ChannelVendorAll || !category.IsAll() {
 		filteredChannels := facetChannels
+		filteredChannels = model.FilterChannelsByCategory(filteredChannels, category)
 		if vendorFilter != model.ChannelVendorAll {
 			filteredChannels = model.FilterChannelsByVendor(filteredChannels, vendorFilter)
-			filteredChannels = model.FilterChannelsByType(filteredChannels, typeFilter)
-		} else {
-			filteredChannels = model.FilterChannelsByDisplayType(filteredChannels, typeFilter)
 		}
+		filteredChannels = model.FilterChannelsByType(filteredChannels, typeFilter)
 		total = int64(len(filteredChannels))
 		startIdx := pageInfo.GetStartIdx()
 		if startIdx > len(filteredChannels) {
@@ -178,12 +187,13 @@ func GetAllChannels(c *gin.Context) {
 	}
 
 	common.ApiSuccess(c, gin.H{
-		"items":         channelData,
-		"total":         total,
-		"page":          pageInfo.GetPage(),
-		"page_size":     pageInfo.GetPageSize(),
-		"type_counts":   typeCounts,
-		"vendor_counts": vendorCounts,
+		"items":           channelData,
+		"total":           total,
+		"page":            pageInfo.GetPage(),
+		"page_size":       pageInfo.GetPageSize(),
+		"type_counts":     typeCounts,
+		"vendor_counts":   vendorCounts,
+		"category_counts": categoryCounts,
 	})
 	return
 }
@@ -420,6 +430,15 @@ func SearchChannels(c *gin.Context) {
 	if !enableTagMode {
 		vendorFilter = model.NormalizeChannelVendorFilter(c.Query("vendor"))
 	}
+	category := model.ChannelCategory{Key: model.ChannelCategoryAll, Type: -1}
+	if !enableTagMode {
+		var categoryErr error
+		category, categoryErr = model.ParseChannelCategory(c.Query("category"))
+		if categoryErr != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无效的渠道分类"})
+			return
+		}
+	}
 
 	// Build both facets from the unpaginated search result so a vendor filter
 	// cannot produce incorrect totals or partially filtered pages.
@@ -432,7 +451,8 @@ func SearchChannels(c *gin.Context) {
 		return
 	}
 	vendorCounts := model.CountChannelVendors(facetChannels)
-	typeCounts := model.CountChannelDisplayTypes(facetChannels)
+	typeCounts := model.CountChannelTypes(facetChannels)
+	categoryCounts := model.CountChannelCategories(facetChannels)
 
 	if enableTagMode {
 		tags, err := model.SearchTagsWithFilters(keyword, group, modelKeyword, idSort, statusFilter, typeFilter)
@@ -453,12 +473,11 @@ func SearchChannels(c *gin.Context) {
 		}
 	} else {
 		channelData = facetChannels
+		channelData = model.FilterChannelsByCategory(channelData, category)
 		if vendorFilter != model.ChannelVendorAll {
 			channelData = model.FilterChannelsByVendor(channelData, vendorFilter)
-			channelData = model.FilterChannelsByType(channelData, typeFilter)
-		} else {
-			channelData = model.FilterChannelsByDisplayType(channelData, typeFilter)
 		}
+		channelData = model.FilterChannelsByType(channelData, typeFilter)
 	}
 
 	page, _ := strconv.Atoi(c.DefaultQuery("p", "1"))
@@ -491,10 +510,11 @@ func SearchChannels(c *gin.Context) {
 		"success": true,
 		"message": "",
 		"data": gin.H{
-			"items":         pagedData,
-			"total":         total,
-			"type_counts":   typeCounts,
-			"vendor_counts": vendorCounts,
+			"items":           pagedData,
+			"total":           total,
+			"type_counts":     typeCounts,
+			"vendor_counts":   vendorCounts,
+			"category_counts": categoryCounts,
 		},
 	})
 	return
@@ -587,6 +607,19 @@ func clientRestrictionValidationMessage(err error) string {
 
 // validateChannel 通用的渠道校验函数
 func validateChannel(channel *model.Channel, isAdd bool) error {
+	if channel == nil {
+		return fmt.Errorf("channel cannot be empty")
+	}
+	if channel.ChannelVendor != nil {
+		normalizedVendor := model.NormalizeChannelVendorSetting(*channel.ChannelVendor)
+		if !model.IsSupportedChannelVendorSetting(normalizedVendor) {
+			return fmt.Errorf("不支持的渠道展示厂商: %s", *channel.ChannelVendor)
+		}
+		channel.ChannelVendor = &normalizedVendor
+	} else if isAdd {
+		defaultVendor := model.ChannelVendorAuto
+		channel.ChannelVendor = &defaultVendor
+	}
 	// 校验 channel settings
 	if err := channel.ValidateSettings(); err != nil {
 		if msg := clientRestrictionValidationMessage(err); msg != "" {
@@ -597,7 +630,7 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 
 	// 如果是添加操作，检查 channel 和 key 是否为空
 	if isAdd {
-		if channel == nil || channel.Key == "" {
+		if channel.Key == "" {
 			return fmt.Errorf("channel cannot be empty")
 		}
 

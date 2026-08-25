@@ -24,6 +24,7 @@ func TestGetDefaultVendorNameDoesNotMisclassifyMiMoSubstrings(t *testing.T) {
 		"mimosa",
 		"notmimo-model",
 		"xiaomish-model",
+		"xiaomi/other-model",
 		"qwen-tts",
 		"",
 	} {
