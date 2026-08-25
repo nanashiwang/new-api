@@ -118,7 +118,7 @@ const DOCS = [
     key: 'image-generation',
     path: '/docs/image-generation',
     group: '能力',
-    title: 'AI 生图',
+    title: '元衡生图',
     description: '平台工作台、本地技能包与 API 请求三种使用方式',
     content: imageGenerationMarkdown,
   },

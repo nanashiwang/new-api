@@ -69,7 +69,7 @@ const ImagePlayground = () => {
           </div>
           <div className='flex-1'>
             <Typography.Title heading={4} className='!mb-2'>
-              {t('AI 生图')}
+              {t('元衡生图')}
             </Typography.Title>
             <Typography.Text type='secondary'>
               {loading
