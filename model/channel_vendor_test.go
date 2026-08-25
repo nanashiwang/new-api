@@ -9,21 +9,33 @@ import (
 
 func TestChannelMatchesVendor_MiMoBoundaryRules(t *testing.T) {
 	tests := []struct {
-		name   string
-		models string
-		match  bool
+		name         string
+		models       string
+		modelMapping string
+		setting      string
+		match        bool
 	}{
 		{name: "canonical prefix", models: "mimo-v2.5", match: true},
 		{name: "xiaomi namespace", models: "xiaomi/mimo-v2.5-pro", match: true},
-		{name: "mixed model set", models: "gpt-4o, vendor.xiaomi-mimo ,claude-3", match: true},
+		{name: "mapped alias", models: "tts-alias", modelMapping: `{"tts-alias":"mimo-v2.5-tts"}`, match: true},
+		{name: "mixed model set remains protocol", models: "gpt-4o,vendor.xiaomi-mimo,claude-3", match: false},
+		{name: "explicit MiMo overrides model inference", models: "gpt-4o", setting: ChannelVendorMiMo, match: true},
+		{name: "protocol override disables inference", models: "mimo-v2.5", setting: ChannelVendorProtocol, match: false},
 		{name: "mimosa is unrelated", models: "mimosa", match: false},
 		{name: "embedded mimo is unrelated", models: "notmimo-model", match: false},
+		{name: "xiaomi namespace without mimo is unrelated", models: "xiaomi/other-model", match: false},
 		{name: "empty model set", models: "", match: false},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			channel := &Channel{Models: test.models, Type: 1}
+			if test.modelMapping != "" {
+				channel.ModelMapping = &test.modelMapping
+			}
+			if test.setting != "" {
+				channel.ChannelVendor = &test.setting
+			}
 			require.Equal(t, test.match, ChannelMatchesVendor(channel, ChannelVendorMiMo))
 		})
 	}
@@ -50,25 +62,33 @@ func TestCountAndFilterChannelsByVendor_DeduplicatesMultiModelChannels(t *testin
 	require.EqualValues(t, 1, typeCounts[2])
 }
 
-func TestDisplayTypesSeparateMiMoFromOpenAI(t *testing.T) {
+func TestChannelCategoriesSeparateVendorFromProtocol(t *testing.T) {
+	protocolSetting := ChannelVendorProtocol
+	explicitMiMo := ChannelVendorMiMo
 	channels := []*Channel{
 		{Id: 1, Type: constant.ChannelTypeOpenAI, Models: "mimo-v2.5"},
 		{Id: 2, Type: constant.ChannelTypeOpenAI, Models: "gpt-4o"},
-		{Id: 3, Type: constant.ChannelTypeAnthropic, Models: "claude-opus-4-6"},
-		{Id: 4, Type: constant.ChannelTypeAnthropic, Models: "xiaomi/mimo-v2.5"},
+		{Id: 3, Type: constant.ChannelTypeOpenAI, Models: "mimo-v2.5", ChannelVendor: &protocolSetting},
+		{Id: 4, Type: constant.ChannelTypeAnthropic, Models: "claude-opus-4-6", ChannelVendor: &explicitMiMo},
 	}
 
-	counts := CountChannelDisplayTypes(channels)
-	require.EqualValues(t, 1, counts[constant.ChannelTypeOpenAI])
-	require.EqualValues(t, 1, counts[constant.ChannelTypeAnthropic])
+	counts := CountChannelCategories(channels)
+	require.EqualValues(t, 4, counts[ChannelCategoryAll])
+	require.EqualValues(t, 2, counts[ChannelCategoryTypePrefix+"1"])
+	require.EqualValues(t, 2, counts[ChannelCategoryVendorPrefix+ChannelVendorMiMo])
 
-	filtered := FilterChannelsByDisplayType(channels, constant.ChannelTypeOpenAI)
-	require.Len(t, filtered, 1)
-	require.Equal(t, 2, filtered[0].Id)
+	openAICategory, err := ParseChannelCategory("type:1")
+	require.NoError(t, err)
+	filtered := FilterChannelsByCategory(channels, openAICategory)
+	require.Equal(t, []int{2, 3}, []int{filtered[0].Id, filtered[1].Id})
 
-	filtered = FilterChannelsByDisplayType(channels, constant.ChannelTypeAnthropic)
-	require.Len(t, filtered, 1)
-	require.Equal(t, 3, filtered[0].Id)
+	mimoCategory, err := ParseChannelCategory("vendor:mimo")
+	require.NoError(t, err)
+	filtered = FilterChannelsByCategory(channels, mimoCategory)
+	require.Equal(t, []int{1, 4}, []int{filtered[0].Id, filtered[1].Id})
 
-	require.Len(t, FilterChannelsByDisplayType(channels, -1), 4)
+	_, err = ParseChannelCategory("type:invalid")
+	require.Error(t, err)
+	_, err = ParseChannelCategory("vendor:unknown")
+	require.Error(t, err)
 }

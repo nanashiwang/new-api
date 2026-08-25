@@ -52,7 +52,7 @@ const ChannelsActions = ({
   getFormValues,
   loadChannels,
   searchChannels,
-  activeTypeKey,
+  activeCategoryKey,
   activePage,
   pageSize,
   setActivePage,
@@ -253,7 +253,7 @@ const ChannelsActions = ({
                 } else {
                   searchChannels(
                     enableTagMode,
-                    activeTypeKey,
+                    activeCategoryKey,
                     statusFilter,
                     activePage,
                     pageSize,
@@ -310,7 +310,7 @@ const ChannelsActions = ({
                   pageSize,
                   idSort,
                   enableTagMode,
-                  activeTypeKey,
+                  activeCategoryKey,
                   v,
                 );
               }}

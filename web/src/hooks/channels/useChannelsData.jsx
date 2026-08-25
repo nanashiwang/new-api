@@ -46,24 +46,16 @@ import {
 } from '../../components/table/channels/tagTestUtils';
 import { Modal, Button, Checkbox } from '@douyinfe/semi-ui';
 import { openCodexUsageModal } from '../../components/table/channels/modals/CodexUsageModal';
+import {
+  buildChannelCategoryQuery,
+  CHANNEL_CATEGORY_ALL,
+} from '../../helpers/channelCategory';
 
 const EMPTY_CHANNEL_CONCURRENCY_SNAPSHOT = {
   loaded: false,
   enabled: false,
   defaultMaxConcurrency: 100,
   byChannelId: {},
-};
-
-const buildChannelTypeCounts = (typeCounts = {}, vendorCounts = {}) => {
-  const displayTypeTotal = Object.values(typeCounts).reduce(
-    (acc, value) => acc + Number(value || 0),
-    0,
-  );
-  const totalChannels = Number(vendorCounts?.all);
-  return {
-    ...typeCounts,
-    all: Number.isFinite(totalChannels) ? totalChannels : displayTypeTotal,
-  };
 };
 
 export const useChannelsData = () => {
@@ -101,14 +93,12 @@ export const useChannelsData = () => {
     localStorage.getItem('channel-status-filter') || 'all',
   );
 
-  // Type tabs states
-  const [activeTypeKey, setActiveTypeKey] = useState('all');
-  const [typeCounts, setTypeCounts] = useState({});
-
-  // Vendor overrides are rendered in the same top-level navigation as channel
-  // types, while Channel.Type remains unchanged for relay behavior.
-  const [activeVendorKey, setActiveVendorKey] = useState('all');
-  const [vendorCounts, setVendorCounts] = useState({});
+  // Display categories are independent from Channel.Type, which remains the
+  // relay protocol used by API clients and provider adapters.
+  const [activeCategoryKey, setActiveCategoryKey] = useState(
+    CHANNEL_CATEGORY_ALL,
+  );
+  const [categoryCounts, setCategoryCounts] = useState({});
 
   // Model test states
   const [showModelTestModal, setShowModelTestModal] = useState(false);
@@ -470,9 +460,8 @@ export const useChannelsData = () => {
     pageSize,
     idSort,
     enableTagMode,
-    typeKey = activeTypeKey,
+    categoryKey = activeCategoryKey,
     statusF,
-    vendorKey = activeVendorKey,
   ) => {
     if (statusF === undefined) statusF = statusFilter;
 
@@ -480,26 +469,24 @@ export const useChannelsData = () => {
     if (searchKeyword !== '' || searchGroup !== '' || searchModel !== '') {
       await searchChannels(
         enableTagMode,
-        typeKey,
+        categoryKey,
         statusF,
         page,
         pageSize,
         idSort,
-        vendorKey,
       );
       return;
     }
 
     const reqId = ++requestCounter.current;
     setLoading(true);
-    const typeParam = typeKey !== 'all' ? `&type=${typeKey}` : '';
     const statusParam = statusF !== 'all' ? `&status=${statusF}` : '';
-    const vendorParam =
-      !enableTagMode && vendorKey !== 'all'
-        ? `&vendor=${encodeURIComponent(vendorKey)}`
-        : '';
+    const categoryParam = buildChannelCategoryQuery(
+      categoryKey,
+      enableTagMode,
+    );
     const res = await API.get(
-      `/api/channel/?p=${page}&page_size=${pageSize}&id_sort=${idSort}&tag_mode=${enableTagMode}${typeParam}${statusParam}${vendorParam}`,
+      `/api/channel/?p=${page}&page_size=${pageSize}&id_sort=${idSort}&tag_mode=${enableTagMode}${statusParam}${categoryParam}`,
     );
 
     if (res === undefined || reqId !== requestCounter.current) {
@@ -508,12 +495,9 @@ export const useChannelsData = () => {
 
     const { success, message, data } = res.data;
     if (success) {
-      const { items, total, type_counts, vendor_counts } = data;
-      if (type_counts) {
-        setTypeCounts(buildChannelTypeCounts(type_counts, vendor_counts));
-      }
-      if (vendor_counts) {
-        setVendorCounts(vendor_counts);
+      const { items, total, category_counts } = data;
+      if (category_counts) {
+        setCategoryCounts(category_counts);
       }
       setChannelFormat(items, enableTagMode);
       setChannelCount(total);
@@ -526,12 +510,11 @@ export const useChannelsData = () => {
   // Search channels
   const searchChannels = async (
     enableTagMode,
-    typeKey = activeTypeKey,
+    categoryKey = activeCategoryKey,
     statusF = statusFilter,
     page = 1,
     pageSz = pageSize,
     sortFlag = idSort,
-    vendorKey = activeVendorKey,
   ) => {
     const { searchKeyword, searchGroup, searchModel } = getFormValues();
     const reqId = ++requestCounter.current;
@@ -544,35 +527,27 @@ export const useChannelsData = () => {
           pageSz,
           sortFlag,
           enableTagMode,
-          typeKey,
+          categoryKey,
           statusF,
-          vendorKey,
         );
         return;
       }
 
-      const typeParam = typeKey !== 'all' ? `&type=${typeKey}` : '';
       const statusParam = statusF !== 'all' ? `&status=${statusF}` : '';
-      const vendorParam =
-        !enableTagMode && vendorKey !== 'all'
-          ? `&vendor=${encodeURIComponent(vendorKey)}`
-          : '';
+      const categoryParam = buildChannelCategoryQuery(
+        categoryKey,
+        enableTagMode,
+      );
       const res = await API.get(
-        `/api/channel/search?keyword=${searchKeyword}&group=${searchGroup}&model=${searchModel}&id_sort=${sortFlag}&tag_mode=${enableTagMode}&p=${page}&page_size=${pageSz}${typeParam}${statusParam}${vendorParam}`,
+        `/api/channel/search?keyword=${searchKeyword}&group=${searchGroup}&model=${searchModel}&id_sort=${sortFlag}&tag_mode=${enableTagMode}&p=${page}&page_size=${pageSz}${statusParam}${categoryParam}`,
       );
       if (reqId !== requestCounter.current) {
         return;
       }
       const { success, message, data } = res.data;
       if (success) {
-        const {
-          items = [],
-          total = 0,
-          type_counts = {},
-          vendor_counts = {},
-        } = data;
-        setTypeCounts(buildChannelTypeCounts(type_counts, vendor_counts));
-        setVendorCounts(vendor_counts);
+        const { items = [], total = 0, category_counts = {} } = data;
+        setCategoryCounts(category_counts);
         setChannelFormat(items, enableTagMode);
         setChannelCount(total);
         setActivePage(page);
@@ -596,7 +571,7 @@ export const useChannelsData = () => {
     } else {
       channelsRequest = searchChannels(
         enableTagMode,
-        activeTypeKey,
+        activeCategoryKey,
         statusFilter,
         page,
         pageSize,
@@ -700,7 +675,7 @@ export const useChannelsData = () => {
     } else {
       searchChannels(
         enableTagMode,
-        activeTypeKey,
+        activeCategoryKey,
         statusFilter,
         page,
         pageSize,
@@ -723,7 +698,7 @@ export const useChannelsData = () => {
     } else {
       searchChannels(
         enableTagMode,
-        activeTypeKey,
+        activeCategoryKey,
         statusFilter,
         1,
         size,
@@ -1551,31 +1526,13 @@ export const useChannelsData = () => {
     refresh,
   });
 
-  // Type counts
-  const channelTypeCounts = useMemo(() => {
-    if (Object.keys(typeCounts).length > 0) return typeCounts;
-    const counts = { all: channels.length };
-    channels.forEach((channel) => {
-      const collect = (ch) => {
-        const type = ch.type;
-        counts[type] = (counts[type] || 0) + 1;
-      };
-      if (channel.children !== undefined) {
-        channel.children.forEach(collect);
-      } else {
-        collect(channel);
-      }
-    });
-    return counts;
-  }, [typeCounts, channels]);
-
-  const availableTypeKeys = useMemo(() => {
-    const keys = ['all'];
-    Object.entries(channelTypeCounts).forEach(([k, v]) => {
-      if (k !== 'all' && v > 0) keys.push(String(k));
+  const availableCategoryKeys = useMemo(() => {
+    const keys = [CHANNEL_CATEGORY_ALL];
+    Object.entries(categoryCounts).forEach(([k, v]) => {
+      if (k !== CHANNEL_CATEGORY_ALL && v > 0) keys.push(String(k));
     });
     return keys;
-  }, [channelTypeCounts]);
+  }, [categoryCounts]);
 
   return {
     // 基础状态s
@@ -1616,17 +1573,11 @@ export const useChannelsData = () => {
     setShowColumnSelector,
     COLUMN_KEYS,
 
-    // Type tab states
-    activeTypeKey,
-    setActiveTypeKey,
-    typeCounts,
-    channelTypeCounts,
-    availableTypeKeys,
-
-    // Vendor facet states
-    activeVendorKey,
-    setActiveVendorKey,
-    vendorCounts,
+    // Display category states
+    activeCategoryKey,
+    setActiveCategoryKey,
+    categoryCounts,
+    availableCategoryKeys,
 
     // Model test states
     showModelTestModal,
