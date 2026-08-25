@@ -56,7 +56,14 @@ func setupTopupCallbackTestDB(t *testing.T) {
 		operation_setting.EpayKey = originEpayKey
 	})
 
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.TopUp{}, &model.PaymentRiskCase{}, &model.SubscriptionOrder{}))
+	require.NoError(t, db.AutoMigrate(
+		&model.User{},
+		&model.TopUp{},
+		&model.PaymentRiskCase{},
+		&model.SubscriptionOrder{},
+		&model.BenefitChangeRecord{},
+		&model.Log{},
+	))
 }
 
 func createTopupCallbackTestUser(t *testing.T, username string) *model.User {

@@ -806,6 +806,10 @@ func buildTopUpInvoiceItemTx(tx *gorm.DB, userID int, orderType string, orderID 
 	if actualOrderType != orderType {
 		return nil, errors.New("订单类型不匹配")
 	}
+	paymentMoney, ok := topup.CNYPaymentAmount()
+	if !ok {
+		return nil, ErrInvoiceOrderUnavailable
+	}
 	return &InvoiceRequestItem{
 		UserId:        userID,
 		OrderType:     orderType,
@@ -813,7 +817,7 @@ func buildTopUpInvoiceItemTx(tx *gorm.DB, userID int, orderType string, orderID 
 		TradeNo:       topup.TradeNo,
 		PaymentMethod: topup.PaymentMethod,
 		Amount:        topup.Amount,
-		Money:         topup.Money,
+		Money:         paymentMoney,
 		CreateTime:    topup.CreateTime,
 		CompleteTime:  topup.CompleteTime,
 	}, nil
@@ -907,18 +911,24 @@ func listEligibleInvoiceTopUpRecords(tx *gorm.DB, userID int) ([]*PaymentRecord,
 
 	records := make([]*PaymentRecord, 0, len(topups))
 	for _, topup := range topups {
+		paymentMoney, ok := topup.CNYPaymentAmount()
+		if !ok {
+			continue
+		}
 		records = append(records, &PaymentRecord{
-			Id:            topup.Id,
-			RecordType:    PaymentRecordTypeTopUp,
-			UserId:        topup.UserId,
-			TradeNo:       topup.TradeNo,
-			PaymentMethod: topup.PaymentMethod,
-			Amount:        topup.Amount,
-			Money:         topup.Money,
-			Status:        topup.Status,
-			CreateTime:    topup.CreateTime,
-			CompleteTime:  topup.CompleteTime,
-			OrderType:     resolveTopUpPaymentOrderType(topup),
+			Id:                 topup.Id,
+			RecordType:         PaymentRecordTypeTopUp,
+			UserId:             topup.UserId,
+			TradeNo:            topup.TradeNo,
+			PaymentMethod:      topup.PaymentMethod,
+			Amount:             topup.Amount,
+			Money:              paymentMoney,
+			Currency:           "CNY",
+			PaymentAmountKnown: true,
+			Status:             topup.Status,
+			CreateTime:         topup.CreateTime,
+			CompleteTime:       topup.CompleteTime,
+			OrderType:          resolveTopUpPaymentOrderType(topup),
 		})
 	}
 	return records, nil

@@ -8,8 +8,9 @@ import (
 )
 
 type PaymentRecordStatsItem struct {
-	Money      float64 `json:"money"`
-	OrderCount int64   `json:"order_count"`
+	Money      float64            `json:"money"`
+	Amounts    map[string]float64 `json:"amounts"`
+	OrderCount int64              `json:"order_count"`
 }
 
 type PaymentRecordStats struct {
@@ -19,19 +20,25 @@ type PaymentRecordStats struct {
 }
 
 type PaymentRecordRanking struct {
-	UserId         int     `json:"user_id"`
-	Username       string  `json:"username"`
-	DisplayName    string  `json:"display_name,omitempty"`
-	Money          float64 `json:"money"`
-	OrderCount     int64   `json:"order_count"`
-	SuccessMoney   float64 `json:"success_money"`
-	PendingMoney   float64 `json:"pending_money"`
-	ExpiredMoney   float64 `json:"expired_money"`
-	CancelledMoney float64 `json:"cancelled_money"`
+	UserId           int                `json:"user_id"`
+	Username         string             `json:"username"`
+	DisplayName      string             `json:"display_name,omitempty"`
+	Money            float64            `json:"money"`
+	Amounts          map[string]float64 `json:"amounts"`
+	OrderCount       int64              `json:"order_count"`
+	SuccessMoney     float64            `json:"success_money"`
+	SuccessAmounts   map[string]float64 `json:"success_amounts"`
+	PendingMoney     float64            `json:"pending_money"`
+	PendingAmounts   map[string]float64 `json:"pending_amounts"`
+	ExpiredMoney     float64            `json:"expired_money"`
+	ExpiredAmounts   map[string]float64 `json:"expired_amounts"`
+	CancelledMoney   float64            `json:"cancelled_money"`
+	CancelledAmounts map[string]float64 `json:"cancelled_amounts"`
 }
 
 type paymentRecordAggregateRow struct {
 	MetricKey  string  `gorm:"column:metric_key"`
+	Currency   string  `gorm:"column:currency"`
 	Money      float64 `gorm:"column:money"`
 	OrderCount int64   `gorm:"column:order_count"`
 }
@@ -45,6 +52,7 @@ type paymentRecordRankingRow struct {
 	UserId         int     `gorm:"column:user_id"`
 	Username       string  `gorm:"column:username"`
 	DisplayName    string  `gorm:"column:display_name"`
+	Currency       string  `gorm:"column:currency"`
 	Money          float64 `gorm:"column:money"`
 	OrderCount     int64   `gorm:"column:order_count"`
 	SuccessMoney   float64 `gorm:"column:success_money"`
@@ -55,18 +63,28 @@ type paymentRecordRankingRow struct {
 
 func newPaymentRecordStats() PaymentRecordStats {
 	return PaymentRecordStats{
+		Totals: PaymentRecordStatsItem{Amounts: map[string]float64{}},
 		Statuses: map[string]PaymentRecordStatsItem{
-			common.TopUpStatusSuccess:    {},
-			common.TopUpStatusPending:    {},
-			common.TopUpStatusExpired:    {},
-			PaymentRecordStatusCancelled: {},
+			common.TopUpStatusSuccess:    {Amounts: map[string]float64{}},
+			common.TopUpStatusPending:    {Amounts: map[string]float64{}},
+			common.TopUpStatusExpired:    {Amounts: map[string]float64{}},
+			PaymentRecordStatusCancelled: {Amounts: map[string]float64{}},
 		},
 		PaymentMethods: map[string]PaymentRecordStatsItem{},
 	}
 }
 
 func mergePaymentRecordStatsItem(current PaymentRecordStatsItem, delta paymentRecordAggregateRow) PaymentRecordStatsItem {
-	current.Money += delta.Money
+	if current.Amounts == nil {
+		current.Amounts = map[string]float64{}
+	}
+	currency := NormalizePaymentCurrency(delta.Currency)
+	if currency != "" {
+		current.Amounts[currency] += delta.Money
+		if currency == "CNY" {
+			current.Money += delta.Money
+		}
+	}
 	current.OrderCount += delta.OrderCount
 	return current
 }
@@ -84,8 +102,7 @@ func GetPaymentRecordStats(params PaymentRecordSearchParams) (PaymentRecordStats
 	}
 	for _, row := range append(topupStatusRows, walletStatusRows...) {
 		stats.Statuses[row.MetricKey] = mergePaymentRecordStatsItem(stats.Statuses[row.MetricKey], row)
-		stats.Totals.Money += row.Money
-		stats.Totals.OrderCount += row.OrderCount
+		stats.Totals = mergePaymentRecordStatsItem(stats.Totals, row)
 	}
 
 	topupMethodRows, err := queryTopUpPaymentRecordAggregateRows(params, "top_ups.payment_method", "top_ups.payment_method")
@@ -125,7 +142,12 @@ func GetPaymentRecordRankings(params PaymentRecordSearchParams, limit int) ([]Pa
 		entry, ok := merged[row.UserId]
 		if !ok {
 			entry = &PaymentRecordRanking{
-				UserId: row.UserId,
+				UserId:           row.UserId,
+				Amounts:          map[string]float64{},
+				SuccessAmounts:   map[string]float64{},
+				PendingAmounts:   map[string]float64{},
+				ExpiredAmounts:   map[string]float64{},
+				CancelledAmounts: map[string]float64{},
 			}
 			merged[row.UserId] = entry
 		}
@@ -135,12 +157,22 @@ func GetPaymentRecordRankings(params PaymentRecordSearchParams, limit int) ([]Pa
 		if entry.DisplayName == "" {
 			entry.DisplayName = row.DisplayName
 		}
-		entry.Money += row.Money
 		entry.OrderCount += row.OrderCount
-		entry.SuccessMoney += row.SuccessMoney
-		entry.PendingMoney += row.PendingMoney
-		entry.ExpiredMoney += row.ExpiredMoney
-		entry.CancelledMoney += row.CancelledMoney
+		currency := NormalizePaymentCurrency(row.Currency)
+		if currency != "" {
+			entry.Amounts[currency] += row.Money
+			entry.SuccessAmounts[currency] += row.SuccessMoney
+			entry.PendingAmounts[currency] += row.PendingMoney
+			entry.ExpiredAmounts[currency] += row.ExpiredMoney
+			entry.CancelledAmounts[currency] += row.CancelledMoney
+			if currency == "CNY" {
+				entry.Money += row.Money
+				entry.SuccessMoney += row.SuccessMoney
+				entry.PendingMoney += row.PendingMoney
+				entry.ExpiredMoney += row.ExpiredMoney
+				entry.CancelledMoney += row.CancelledMoney
+			}
+		}
 	}
 
 	for _, row := range topupRows {
@@ -200,6 +232,40 @@ func applyPaymentDashboardTopUpRiskFilter(query *gorm.DB) *gorm.DB {
 	)
 }
 
+func stripeTopUpSQLCondition() string {
+	return "(LOWER(COALESCE(top_ups.payment_provider, '')) = 'stripe' OR " +
+		"(COALESCE(top_ups.payment_provider, '') = '' AND LOWER(COALESCE(top_ups.payment_method, '')) = 'stripe'))"
+}
+
+func topUpEffectivePaymentMoneyExpr() string {
+	return "CASE " +
+		"WHEN top_ups.presentment_money > 0 AND LENGTH(TRIM(COALESCE(top_ups.presentment_currency, ''))) = 3 THEN top_ups.presentment_money " +
+		"WHEN top_ups.paid_money > 0 THEN top_ups.paid_money " +
+		"WHEN NOT " + stripeTopUpSQLCondition() + " AND top_ups.money > 0 THEN top_ups.money " +
+		"ELSE 0 END"
+}
+
+func topUpEffectivePaymentCurrencyExpr() string {
+	return "CASE " +
+		"WHEN top_ups.presentment_money > 0 AND LENGTH(TRIM(COALESCE(top_ups.presentment_currency, ''))) = 3 THEN UPPER(TRIM(top_ups.presentment_currency)) " +
+		"WHEN top_ups.paid_money > 0 AND LENGTH(TRIM(COALESCE(top_ups.paid_currency, ''))) = 3 THEN UPPER(TRIM(top_ups.paid_currency)) " +
+		"WHEN top_ups.paid_money > 0 AND NOT " + stripeTopUpSQLCondition() + " THEN 'CNY' " +
+		"WHEN NOT " + stripeTopUpSQLCondition() + " AND top_ups.money > 0 THEN 'CNY' " +
+		"ELSE '' END"
+}
+
+func topUpCNYPaymentMoneyExpr() string {
+	return "CASE " +
+		"WHEN top_ups.presentment_money > 0 AND UPPER(TRIM(COALESCE(top_ups.presentment_currency, ''))) IN ('CNY', 'RMB') THEN top_ups.presentment_money " +
+		"WHEN top_ups.presentment_money > 0 THEN 0 " +
+		"WHEN top_ups.paid_money > 0 AND UPPER(TRIM(COALESCE(top_ups.paid_currency, ''))) IN ('CNY', 'RMB') THEN top_ups.paid_money " +
+		"WHEN top_ups.paid_money > 0 AND TRIM(COALESCE(top_ups.paid_currency, '')) <> '' THEN 0 " +
+		"WHEN top_ups.paid_money > 0 AND " + stripeTopUpSQLCondition() + " THEN 0 " +
+		"WHEN top_ups.paid_money > 0 THEN top_ups.paid_money " +
+		"WHEN NOT " + stripeTopUpSQLCondition() + " AND top_ups.money > 0 THEN top_ups.money " +
+		"ELSE 0 END"
+}
+
 func queryTopUpPaymentRecordAggregateRows(params PaymentRecordSearchParams, keyExpr string, groupExpr string) ([]paymentRecordAggregateRow, error) {
 	rows := make([]paymentRecordAggregateRow, 0)
 	query := paymentRecordTopUpAggregateQuery()
@@ -207,9 +273,11 @@ func queryTopUpPaymentRecordAggregateRows(params PaymentRecordSearchParams, keyE
 	if err != nil {
 		return nil, err
 	}
+	moneyExpr := topUpEffectivePaymentMoneyExpr()
+	currencyExpr := topUpEffectivePaymentCurrencyExpr()
 	if err := query.
-		Select(keyExpr + " AS metric_key, COALESCE(SUM(top_ups.money), 0) AS money, COUNT(*) AS order_count").
-		Group(groupExpr).
+		Select(keyExpr + " AS metric_key, " + currencyExpr + " AS currency, COALESCE(SUM(" + moneyExpr + "), 0) AS money, COUNT(*) AS order_count").
+		Group(groupExpr + ", " + currencyExpr).
 		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -225,7 +293,7 @@ func querySellableTokenPaymentStatusRows(params PaymentRecordSearchParams) ([]pa
 		return nil, err
 	}
 	if err := query.
-		Select(statusExpr + " AS metric_key, 0 AS money, COUNT(*) AS order_count").
+		Select(statusExpr + " AS metric_key, 'CNY' AS currency, 0 AS money, COUNT(*) AS order_count").
 		Group(statusExpr).
 		Scan(&rows).Error; err != nil {
 		return nil, err
@@ -251,6 +319,7 @@ func querySellableTokenPaymentMethodRows(params PaymentRecordSearchParams) ([]pa
 	}
 	rows = append(rows, paymentRecordAggregateRow{
 		MetricKey:  PaymentMethodWallet,
+		Currency:   "CNY",
 		Money:      0,
 		OrderCount: total.OrderCount,
 	})
@@ -264,16 +333,19 @@ func queryTopUpPaymentRecordRankingRows(params PaymentRecordSearchParams) ([]pay
 	if err != nil {
 		return nil, err
 	}
+	moneyExpr := topUpEffectivePaymentMoneyExpr()
+	currencyExpr := topUpEffectivePaymentCurrencyExpr()
 	if err := query.
 		Select(
 			"top_ups.user_id AS user_id, users.username AS username, users.display_name AS display_name, " +
-				"COALESCE(SUM(top_ups.money), 0) AS money, COUNT(*) AS order_count, " +
-				"COALESCE(SUM(CASE WHEN top_ups.status = '" + common.TopUpStatusSuccess + "' THEN top_ups.money ELSE 0 END), 0) AS success_money, " +
-				"COALESCE(SUM(CASE WHEN top_ups.status = '" + common.TopUpStatusPending + "' THEN top_ups.money ELSE 0 END), 0) AS pending_money, " +
-				"COALESCE(SUM(CASE WHEN top_ups.status = '" + common.TopUpStatusExpired + "' THEN top_ups.money ELSE 0 END), 0) AS expired_money, " +
-				"COALESCE(SUM(CASE WHEN top_ups.status = '" + PaymentRecordStatusCancelled + "' THEN top_ups.money ELSE 0 END), 0) AS cancelled_money",
+				currencyExpr + " AS currency, " +
+				"COALESCE(SUM(" + moneyExpr + "), 0) AS money, COUNT(*) AS order_count, " +
+				"COALESCE(SUM(CASE WHEN top_ups.status = '" + common.TopUpStatusSuccess + "' THEN " + moneyExpr + " ELSE 0 END), 0) AS success_money, " +
+				"COALESCE(SUM(CASE WHEN top_ups.status = '" + common.TopUpStatusPending + "' THEN " + moneyExpr + " ELSE 0 END), 0) AS pending_money, " +
+				"COALESCE(SUM(CASE WHEN top_ups.status = '" + common.TopUpStatusExpired + "' THEN " + moneyExpr + " ELSE 0 END), 0) AS expired_money, " +
+				"COALESCE(SUM(CASE WHEN top_ups.status = '" + PaymentRecordStatusCancelled + "' THEN " + moneyExpr + " ELSE 0 END), 0) AS cancelled_money",
 		).
-		Group("top_ups.user_id, users.username, users.display_name").
+		Group("top_ups.user_id, users.username, users.display_name, " + currencyExpr).
 		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -290,7 +362,7 @@ func querySellableTokenPaymentRankingRows(params PaymentRecordSearchParams) ([]p
 	if err := query.
 		Select(
 			"sellable_token_orders.user_id AS user_id, users.username AS username, users.display_name AS display_name, " +
-				"0 AS money, COUNT(*) AS order_count, 0 AS success_money, 0 AS pending_money, 0 AS expired_money, 0 AS cancelled_money",
+				"'CNY' AS currency, 0 AS money, COUNT(*) AS order_count, 0 AS success_money, 0 AS pending_money, 0 AS expired_money, 0 AS cancelled_money",
 		).
 		Group("sellable_token_orders.user_id, users.username, users.display_name").
 		Scan(&rows).Error; err != nil {

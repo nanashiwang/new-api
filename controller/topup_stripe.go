@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -44,6 +45,34 @@ type StripePayRequest struct {
 }
 
 type StripeAdaptor struct {
+}
+
+type stripeCheckoutResult struct {
+	URL      string
+	Money    float64
+	Currency string
+}
+
+type stripeCheckoutSessionEvent struct {
+	Customer          any    `json:"customer"`
+	ClientReferenceID string `json:"client_reference_id"`
+	Status            string `json:"status"`
+	PaymentStatus     string `json:"payment_status"`
+	AmountTotal       int64  `json:"amount_total"`
+	AmountSubtotal    int64  `json:"amount_subtotal"`
+	Currency          string `json:"currency"`
+	TotalDetails      *struct {
+		AmountDiscount int64 `json:"amount_discount"`
+	} `json:"total_details"`
+	CurrencyConversion *struct {
+		AmountSubtotal int64  `json:"amount_subtotal"`
+		AmountTotal    int64  `json:"amount_total"`
+		SourceCurrency string `json:"source_currency"`
+	} `json:"currency_conversion"`
+	PresentmentDetails *struct {
+		PresentmentAmount   int64  `json:"presentment_amount"`
+		PresentmentCurrency string `json:"presentment_currency"`
+	} `json:"presentment_details"`
 }
 
 func (*StripeAdaptor) RequestAmount(c *gin.Context, req *StripePayRequest) {
@@ -97,11 +126,14 @@ func (*StripeAdaptor) RequestPay(c *gin.Context, req *StripePayRequest) {
 	reference := fmt.Sprintf("new-api-ref-%d-%d-%s", user.Id, time.Now().UnixMilli(), randstr.String(4))
 	referenceId := "ref_" + common.Sha1([]byte(reference))
 
-	payLink, err := genStripeLink(referenceId, user.StripeCustomer, user.Email, req.Amount, req.SuccessURL, req.CancelURL)
+	checkout, err := genStripeLink(referenceId, user.StripeCustomer, user.Email, req.Amount, req.SuccessURL, req.CancelURL)
 	if err != nil {
 		log.Println("获取Stripe Checkout支付链接失败", err)
 		c.JSON(200, gin.H{"message": "error", "data": "拉起支付失败"})
 		return
+	}
+	if checkout.Money > 0 {
+		paidMoney = checkout.Money
 	}
 
 	topUp := &model.TopUp{
@@ -109,6 +141,7 @@ func (*StripeAdaptor) RequestPay(c *gin.Context, req *StripePayRequest) {
 		Amount:          req.Amount,
 		Money:           chargedMoney,
 		PaidMoney:       paidMoney,
+		PaidCurrency:    checkout.Currency,
 		TradeNo:         referenceId,
 		PaymentMethod:   PaymentMethodStripe,
 		PaymentProvider: model.PaymentProviderStripe,
@@ -123,7 +156,7 @@ func (*StripeAdaptor) RequestPay(c *gin.Context, req *StripePayRequest) {
 	c.JSON(200, gin.H{
 		"message": "success",
 		"data": gin.H{
-			"pay_link": payLink,
+			"pay_link": checkout.URL,
 		},
 	})
 }
@@ -173,86 +206,132 @@ func StripeWebhook(c *gin.Context) {
 		return
 	}
 
+	var processingErr error
 	switch event.Type {
-	case stripe.EventTypeCheckoutSessionCompleted:
-		sessionCompleted(event, c.ClientIP())
+	case stripe.EventTypeCheckoutSessionCompleted, stripe.EventTypeCheckoutSessionAsyncPaymentSucceeded:
+		processingErr = sessionCompleted(event, c.ClientIP())
 	case stripe.EventTypeCheckoutSessionExpired:
 		sessionExpired(event)
 	default:
 		log.Printf("不支持的Stripe Webhook事件类型: %s\n", event.Type)
 	}
+	if processingErr != nil {
+		log.Printf("Stripe Webhook处理失败: event=%s err=%v\n", event.ID, processingErr)
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
 
 	c.Status(http.StatusOK)
 }
 
-func sessionCompleted(event stripe.Event, callerIp string) {
-	customerId := event.GetObjectValue("customer")
-	referenceId := event.GetObjectValue("client_reference_id")
-	status := event.GetObjectValue("status")
-	if "complete" != status {
-		log.Println("错误的Stripe Checkout完成状态:", status, ",", referenceId)
-		return
+func sessionCompleted(event stripe.Event, callerIp string) error {
+	if event.Data == nil || len(event.Data.Raw) == 0 {
+		return errors.New("Stripe Checkout完成事件缺少支付数据")
 	}
+	checkout := stripeCheckoutSessionEvent{}
+	if err := common.Unmarshal(event.Data.Raw, &checkout); err != nil {
+		log.Println("解析Stripe Checkout完成事件失败:", err)
+		return err
+	}
+	referenceId := strings.TrimSpace(checkout.ClientReferenceID)
+	if checkout.Status != "complete" || checkout.PaymentStatus != "paid" {
+		log.Println("错误的Stripe Checkout支付状态:", checkout.Status, checkout.PaymentStatus, ",", referenceId)
+		return nil
+	}
+	if referenceId == "" {
+		log.Println("Stripe Checkout完成事件未提供支付单号")
+		return nil
+	}
+
+	paymentDetails, err := stripePaymentDetailsFromCheckout(checkout)
+	if err != nil {
+		log.Println("Stripe Checkout完成事件金额或币种无效:", checkout.AmountTotal, checkout.Currency, ",", referenceId)
+		return err
+	}
+	paidAmount := paymentDetails.PaidMoney
+	paidCurrency := paymentDetails.PaidCurrency
+	subtotalAmount := stripeSettlementSubtotalFromCheckout(checkout, paidCurrency)
+	discountAmount := float64(0)
+	discountCurrency := paidCurrency
+	if checkout.TotalDetails != nil {
+		if checkout.CurrencyConversion != nil && checkout.PresentmentDetails == nil {
+			discountCurrency = model.NormalizePaymentCurrency(checkout.Currency)
+		}
+		discountAmount = stripeAmountFromMinorUnits(checkout.TotalDetails.AmountDiscount, discountCurrency)
+	}
+	customerId := stripeCheckoutCustomerID(checkout.Customer)
 
 	LockOrder(referenceId)
 	defer UnlockOrder(referenceId)
-	total, _ := strconv.ParseFloat(event.GetObjectValue("amount_total"), 64)
-	paidAmount := total / 100
 	payload := map[string]any{
-		"customer":     customerId,
-		"amount_total": event.GetObjectValue("amount_total"),
-		"currency":     strings.ToUpper(event.GetObjectValue("currency")),
-		"event_type":   string(event.Type),
+		"customer":             customerId,
+		"amount_total":         checkout.AmountTotal,
+		"amount_subtotal":      checkout.AmountSubtotal,
+		"amount_discount":      discountAmount,
+		"discount_currency":    discountCurrency,
+		"currency":             paidCurrency,
+		"presentment_amount":   paymentDetails.PresentmentMoney,
+		"presentment_currency": paymentDetails.PresentmentCurrency,
+		"event_type":           string(event.Type),
 	}
-	if subscriptionOrder := model.GetSubscriptionOrderByTradeNo(referenceId); subscriptionOrder != nil {
+	subscriptionOrder, lookupErr := model.GetSubscriptionOrderByTradeNoWithError(referenceId)
+	if lookupErr != nil && !errors.Is(lookupErr, model.ErrSubscriptionOrderNotFound) {
+		return lookupErr
+	}
+	if subscriptionOrder != nil {
 		validationInput := service.PaymentCallbackValidationInput{
-			TradeNo:         referenceId,
-			PaymentMethod:   PaymentMethodStripe,
-			PaymentProvider: model.PaymentProviderStripe,
-			ProviderAmount:  paidAmount,
-			Currency:        strings.ToUpper(event.GetObjectValue("currency")),
-			Source:          "subscription_stripe_webhook",
-			ProviderPayload: common.GetJsonString(payload),
+			TradeNo:          referenceId,
+			PaymentMethod:    PaymentMethodStripe,
+			PaymentProvider:  model.PaymentProviderStripe,
+			ProviderAmount:   paidAmount,
+			ProviderSubtotal: subtotalAmount,
+			Currency:         paidCurrency,
+			Source:           "subscription_stripe_webhook",
+			ProviderPayload:  common.GetJsonString(payload),
 		}
 		checkResult, err := service.ValidateSubscriptionCallback(validationInput)
 		if err != nil {
 			log.Println("stripe subscription validation failed:", err.Error(), referenceId)
-			return
+			if errors.Is(err, service.ErrPaymentCallbackRejected) {
+				return nil
+			}
+			return err
 		}
-		if checkResult.AlreadyCompleted {
-			return
+		if !checkResult.AlreadyCompleted {
+			if err := model.CompleteSubscriptionOrderWithPayment(referenceId, common.GetJsonString(payload), PaymentMethodStripe, model.PaymentProviderStripe); err != nil {
+				service.RecordSubscriptionProcessingRiskCase(validationInput, err)
+				log.Println("complete subscription order failed:", err.Error(), referenceId)
+				return err
+			}
 		}
-		if err := model.CompleteSubscriptionOrderWithPayment(referenceId, common.GetJsonString(payload), PaymentMethodStripe, model.PaymentProviderStripe); err != nil {
-			service.RecordSubscriptionProcessingRiskCase(validationInput, err)
-			log.Println("complete subscription order failed:", err.Error(), referenceId)
-		}
-		return
+		return nil
 	}
 
-	checkResult, err := service.ValidateTopUpCallback(service.PaymentCallbackValidationInput{
-		TradeNo:         referenceId,
-		PaymentMethod:   PaymentMethodStripe,
-		PaymentProvider: model.PaymentProviderStripe,
-		ProviderAmount:  paidAmount,
-		Currency:        strings.ToUpper(event.GetObjectValue("currency")),
-		Source:          "stripe_webhook",
-		ProviderPayload: common.GetJsonString(payload),
+	_, err = service.ValidateTopUpCallback(service.PaymentCallbackValidationInput{
+		TradeNo:                      referenceId,
+		PaymentMethod:                PaymentMethodStripe,
+		PaymentProvider:              model.PaymentProviderStripe,
+		ProviderAmount:               paidAmount,
+		ProviderSubtotal:             subtotalAmount,
+		Currency:                     paidCurrency,
+		Source:                       "stripe_webhook",
+		ProviderPayload:              common.GetJsonString(payload),
+		AllowCompletedAmountBackfill: true,
 	})
 	if err != nil {
 		log.Println("stripe top-up validation failed:", err.Error(), referenceId)
-		return
+		if errors.Is(err, service.ErrPaymentCallbackRejected) {
+			return nil
+		}
+		return err
 	}
-	if checkResult.AlreadyCompleted {
-		return
-	}
-	err = model.Recharge(referenceId, customerId, callerIp, paidAmount)
-	if err != nil {
+	if err := model.RechargeWithPaymentDetails(referenceId, customerId, callerIp, paymentDetails); err != nil {
 		log.Println(err.Error(), referenceId)
-		return
+		return err
 	}
 
-	currency := strings.ToUpper(event.GetObjectValue("currency"))
-	log.Printf("收到款项：%s, %.2f(%s)", referenceId, total/100, currency)
+	log.Printf("收到款项：%s, %.2f(%s)", referenceId, paidAmount, paidCurrency)
+	return nil
 }
 
 func sessionExpired(event stripe.Event) {
@@ -309,9 +388,10 @@ func sessionExpired(event stripe.Event) {
 //   - cancelURL: custom URL to redirect when payment is canceled (empty for default)
 //
 // Returns the checkout session URL or an error if the session creation fails.
-func genStripeLink(referenceId string, customerId string, email string, amount int64, successURL string, cancelURL string) (string, error) {
+func genStripeLink(referenceId string, customerId string, email string, amount int64, successURL string, cancelURL string) (stripeCheckoutResult, error) {
+	checkout := stripeCheckoutResult{}
 	if !strings.HasPrefix(setting.StripeApiSecret, "sk_") && !strings.HasPrefix(setting.StripeApiSecret, "rk_") {
-		return "", fmt.Errorf("无效的Stripe API密钥")
+		return checkout, fmt.Errorf("无效的Stripe API密钥")
 	}
 
 	stripe.Key = setting.StripeApiSecret
@@ -350,10 +430,85 @@ func genStripeLink(referenceId string, customerId string, email string, amount i
 
 	result, err := session.New(params)
 	if err != nil {
-		return "", err
+		return checkout, err
 	}
 
-	return result.URL, nil
+	checkout.URL = result.URL
+	checkout.Currency = model.NormalizePaymentCurrency(string(result.Currency))
+	checkout.Money = stripeAmountFromMinorUnits(result.AmountTotal, checkout.Currency)
+	return checkout, nil
+}
+
+func stripeAmountFromMinorUnits(amount int64, currency string) float64 {
+	if amount <= 0 || model.NormalizePaymentCurrency(currency) == "" {
+		return 0
+	}
+	switch strings.ToUpper(currency) {
+	case "BIF", "CLP", "DJF", "GNF", "JPY", "KMF", "KRW", "MGA", "PYG", "RWF", "UGX", "VND", "VUV", "XAF", "XOF", "XPF":
+		return float64(amount)
+	case "BHD", "JOD", "KWD", "OMR", "TND":
+		return float64(amount) / 1000
+	default:
+		return float64(amount) / 100
+	}
+}
+
+func stripePaymentDetailsFromCheckout(checkout stripeCheckoutSessionEvent) (model.TopUpPaymentDetails, error) {
+	if checkout.PresentmentDetails == nil && checkout.CurrencyConversion != nil {
+		paidCurrency := model.NormalizePaymentCurrency(checkout.CurrencyConversion.SourceCurrency)
+		paidAmount := stripeAmountFromMinorUnits(checkout.CurrencyConversion.AmountTotal, paidCurrency)
+		presentmentCurrency := model.NormalizePaymentCurrency(checkout.Currency)
+		presentmentAmount := stripeAmountFromMinorUnits(checkout.AmountTotal, presentmentCurrency)
+		if paidAmount <= 0 || paidCurrency == "" || presentmentAmount <= 0 || presentmentCurrency == "" {
+			return model.TopUpPaymentDetails{}, fmt.Errorf("invalid legacy Stripe adaptive payment amount or currency")
+		}
+		return model.TopUpPaymentDetails{
+			PaidMoney:           paidAmount,
+			PaidCurrency:        paidCurrency,
+			PresentmentMoney:    presentmentAmount,
+			PresentmentCurrency: presentmentCurrency,
+		}, nil
+	}
+
+	paidCurrency := model.NormalizePaymentCurrency(checkout.Currency)
+	paidAmount := stripeAmountFromMinorUnits(checkout.AmountTotal, paidCurrency)
+	if paidAmount <= 0 || paidCurrency == "" {
+		return model.TopUpPaymentDetails{}, fmt.Errorf("invalid Stripe payment amount or currency")
+	}
+	details := model.TopUpPaymentDetails{
+		PaidMoney:    paidAmount,
+		PaidCurrency: paidCurrency,
+	}
+	if checkout.PresentmentDetails == nil {
+		return details, nil
+	}
+	presentmentCurrency := model.NormalizePaymentCurrency(checkout.PresentmentDetails.PresentmentCurrency)
+	presentmentAmount := stripeAmountFromMinorUnits(checkout.PresentmentDetails.PresentmentAmount, presentmentCurrency)
+	if presentmentAmount > 0 && presentmentCurrency != "" {
+		details.PresentmentMoney = presentmentAmount
+		details.PresentmentCurrency = presentmentCurrency
+	}
+	return details, nil
+}
+
+func stripeSettlementSubtotalFromCheckout(checkout stripeCheckoutSessionEvent, paidCurrency string) float64 {
+	if checkout.PresentmentDetails == nil && checkout.CurrencyConversion != nil {
+		sourceCurrency := model.NormalizePaymentCurrency(checkout.CurrencyConversion.SourceCurrency)
+		return stripeAmountFromMinorUnits(checkout.CurrencyConversion.AmountSubtotal, sourceCurrency)
+	}
+	return stripeAmountFromMinorUnits(checkout.AmountSubtotal, paidCurrency)
+}
+
+func stripeCheckoutCustomerID(customer any) string {
+	switch value := customer.(type) {
+	case string:
+		return strings.TrimSpace(value)
+	case map[string]any:
+		id, _ := value["id"].(string)
+		return strings.TrimSpace(id)
+	default:
+		return ""
+	}
 }
 
 func GetChargedAmount(count float64, user model.User) float64 {

@@ -22,14 +22,18 @@ func setupInvoiceTestDB(t *testing.T) {
 func createInvoiceTestSubscriptionTopUp(t *testing.T, userID int, tradeNo string, createTime int64) *TopUp {
 	t.Helper()
 	topup := &TopUp{
-		UserId:        userID,
-		Amount:        0,
-		Money:         88.8,
-		TradeNo:       tradeNo,
-		PaymentMethod: "stripe",
-		CreateTime:    createTime,
-		CompleteTime:  createTime + 10,
-		Status:        common.TopUpStatusSuccess,
+		UserId:              userID,
+		Amount:              0,
+		Money:               88.8,
+		PaidMoney:           10,
+		PaidCurrency:        "USD",
+		PresentmentMoney:    88.8,
+		PresentmentCurrency: "CNY",
+		TradeNo:             tradeNo,
+		PaymentMethod:       "stripe",
+		CreateTime:          createTime,
+		CompleteTime:        createTime + 10,
+		Status:              common.TopUpStatusSuccess,
 	}
 	require.NoError(t, topup.Insert())
 	return topup
@@ -574,4 +578,38 @@ func TestRejectInvoiceRequest_ManualTransferRefundsFeeAndReleasesFingerprintAtom
 	second, err := CreateInvoiceRequest(user.Id, input)
 	require.NoError(t, err)
 	require.NotEqual(t, request.Id, second.Id)
+}
+
+func TestInvoice_StripeUsesCNYPresentmentAndRejectsUSDOnlyOrder(t *testing.T) {
+	setupInvoiceTestDB(t)
+
+	user := createPaymentRecordTestUser(t, "invoice-stripe-currency")
+	cnyTopUp := &TopUp{
+		UserId: user.Id, Amount: 100, Money: 100,
+		PaidMoney: 3, PaidCurrency: "USD", PresentmentMoney: 20, PresentmentCurrency: "CNY",
+		TradeNo: "T-INVOICE-STRIPE-CNY", PaymentMethod: PaymentMethodStripe, PaymentProvider: PaymentProviderStripe,
+		CreateTime: 100, CompleteTime: 101, Status: common.TopUpStatusSuccess,
+	}
+	usdTopUp := &TopUp{
+		UserId: user.Id, Amount: 100, Money: 100,
+		PaidMoney: 3, PaidCurrency: "USD",
+		TradeNo: "T-INVOICE-STRIPE-USD", PaymentMethod: PaymentMethodStripe, PaymentProvider: PaymentProviderStripe,
+		CreateTime: 200, CompleteTime: 201, Status: common.TopUpStatusSuccess,
+	}
+	require.NoError(t, cnyTopUp.Insert())
+	require.NoError(t, usdTopUp.Insert())
+
+	records, total, err := GetEligibleInvoiceOrders(user.Id, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, records, 1)
+	require.Equal(t, cnyTopUp.Id, records[0].Id)
+	require.InDelta(t, 20.0, records[0].Money, 0.0001)
+
+	request, err := CreateInvoiceRequest(user.Id, createInvoiceRequestInput(PaymentRecordTypeTopUp, cnyTopUp.Id))
+	require.NoError(t, err)
+	require.InDelta(t, 20.0, request.TotalMoney, 0.0001)
+
+	_, err = CreateInvoiceRequest(user.Id, createInvoiceRequestInput(PaymentRecordTypeTopUp, usdTopUp.Id))
+	require.ErrorIs(t, err, ErrInvoiceOrderUnavailable)
 }

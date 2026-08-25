@@ -260,14 +260,25 @@ func (o *SubscriptionOrder) Update() error {
 }
 
 func GetSubscriptionOrderByTradeNo(tradeNo string) *SubscriptionOrder {
-	if tradeNo == "" {
+	order, err := GetSubscriptionOrderByTradeNoWithError(tradeNo)
+	if err != nil {
 		return nil
 	}
-	var order SubscriptionOrder
-	if err := DB.Where("trade_no = ?", tradeNo).First(&order).Error; err != nil {
-		return nil
+	return order
+}
+
+func GetSubscriptionOrderByTradeNoWithError(tradeNo string) (*SubscriptionOrder, error) {
+	if strings.TrimSpace(tradeNo) == "" {
+		return nil, ErrSubscriptionOrderNotFound
 	}
-	return &order
+	order := &SubscriptionOrder{}
+	if err := DB.Where("trade_no = ?", tradeNo).First(order).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrSubscriptionOrderNotFound
+		}
+		return nil, err
+	}
+	return order, nil
 }
 
 // 用户订阅实例

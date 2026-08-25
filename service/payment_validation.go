@@ -17,10 +17,13 @@ type PaymentCallbackValidationInput struct {
 	PaymentMethod         string
 	PaymentProvider       string
 	ProviderAmount        float64
+	ProviderSubtotal      float64
 	Currency              string
 	Source                string
 	ProviderPayload       string
 	ProviderPaymentMethod string
+	// AllowCompletedAmountBackfill is only for already verified provider events.
+	AllowCompletedAmountBackfill bool
 }
 
 type PaymentCallbackValidationResult struct {
@@ -33,9 +36,9 @@ func ValidateTopUpCallback(input PaymentCallbackValidationInput) (PaymentCallbac
 		return PaymentCallbackValidationResult{}, ErrPaymentCallbackRejected
 	}
 
-	topUp := model.GetTopUpByTradeNo(tradeNo)
-	if topUp == nil {
-		_, _ = model.UpsertPaymentRiskCase(model.PaymentRiskCaseUpsertInput{
+	topUp, lookupErr := model.GetTopUpByTradeNoWithError(tradeNo)
+	if errors.Is(lookupErr, model.ErrTopUpNotFound) {
+		_, riskErr := model.UpsertPaymentRiskCase(model.PaymentRiskCaseUpsertInput{
 			RecordType:      model.PaymentRiskRecordTypeTopUp,
 			TradeNo:         tradeNo,
 			Source:          strings.TrimSpace(input.Source),
@@ -44,36 +47,69 @@ func ValidateTopUpCallback(input PaymentCallbackValidationInput) (PaymentCallbac
 			Currency:        strings.TrimSpace(input.Currency),
 			ProviderPayload: strings.TrimSpace(input.ProviderPayload),
 		})
+		if riskErr != nil {
+			return PaymentCallbackValidationResult{}, riskErr
+		}
 		return PaymentCallbackValidationResult{}, ErrPaymentCallbackRejected
 	}
-	if topUp.Status == common.TopUpStatusSuccess {
-		return PaymentCallbackValidationResult{AlreadyCompleted: true}, nil
+	if lookupErr != nil {
+		return PaymentCallbackValidationResult{}, lookupErr
 	}
-	if topUp.Status != common.TopUpStatusPending {
-		recordTopUpRiskCase(topUp, input, model.PaymentRiskReasonOrderStatusInvalid, 0)
+	alreadyCompleted := topUp.Status == common.TopUpStatusSuccess
+	if !alreadyCompleted && topUp.Status != common.TopUpStatusPending {
+		if err := recordTopUpRiskCase(topUp, input, model.PaymentRiskReasonOrderStatusInvalid, 0); err != nil {
+			return PaymentCallbackValidationResult{}, err
+		}
 		return PaymentCallbackValidationResult{}, ErrPaymentCallbackRejected
 	}
 	if !model.PaymentProviderMatches(topUp.PaymentProvider, topUp.PaymentMethod, input.PaymentProvider, input.PaymentMethod) {
-		recordTopUpRiskCase(topUp, input, model.PaymentRiskReasonPaymentMethodMismatch, 0)
+		if err := recordTopUpRiskCase(topUp, input, model.PaymentRiskReasonPaymentMethodMismatch, 0); err != nil {
+			return PaymentCallbackValidationResult{}, err
+		}
 		return PaymentCallbackValidationResult{}, ErrPaymentCallbackRejected
 	}
 	expectedProvider := model.InferPaymentProvider(topUp.PaymentProvider, topUp.PaymentMethod)
 	if !paymentMethodMatchesForProvider(expectedProvider, topUp.PaymentMethod, input.PaymentMethod) {
-		recordTopUpRiskCase(topUp, input, model.PaymentRiskReasonPaymentMethodMismatch, 0)
+		if err := recordTopUpRiskCase(topUp, input, model.PaymentRiskReasonPaymentMethodMismatch, 0); err != nil {
+			return PaymentCallbackValidationResult{}, err
+		}
 		return PaymentCallbackValidationResult{}, ErrPaymentCallbackRejected
 	}
 
-	expectedMoney := topUp.Money
-	if expectedProvider == model.PaymentProviderStripe {
-		if group, err := model.GetUserGroup(topUp.UserId, true); err == nil {
-			expectedMoney = CalculateStripeTopUpPayMoney(float64(topUp.Amount), group)
+	expectedMoney := topUp.PaidMoney
+	if alreadyCompleted && expectedProvider == model.PaymentProviderStripe && input.AllowCompletedAmountBackfill {
+		// A signed replay is provider truth and can repair stale legacy snapshots;
+		// the completed-order path cannot grant quota again.
+		expectedMoney = input.ProviderAmount
+	} else if expectedMoney <= 0 && expectedProvider == model.PaymentProviderStripe {
+		group, err := model.GetUserGroup(topUp.UserId, true)
+		if err != nil {
+			return PaymentCallbackValidationResult{}, err
 		}
+		expectedMoney = CalculateStripeTopUpPayMoney(float64(topUp.Amount), group)
 	}
-	if input.ProviderAmount <= 0 || !paymentAmountsMatch(expectedMoney, input.ProviderAmount) {
-		recordTopUpRiskCase(topUp, input, model.PaymentRiskReasonAmountMismatch, expectedMoney)
+	if expectedMoney <= 0 {
+		expectedMoney = topUp.Money
+	}
+	comparisonMoney := input.ProviderAmount
+	if !alreadyCompleted && input.ProviderSubtotal > 0 {
+		comparisonMoney = input.ProviderSubtotal
+	}
+	if input.ProviderAmount <= 0 || comparisonMoney <= 0 || !paymentAmountsMatch(expectedMoney, comparisonMoney) {
+		if err := recordTopUpRiskCase(topUp, input, model.PaymentRiskReasonAmountMismatch, expectedMoney); err != nil {
+			return PaymentCallbackValidationResult{}, err
+		}
 		return PaymentCallbackValidationResult{}, ErrPaymentCallbackRejected
 	}
-	return PaymentCallbackValidationResult{}, nil
+	expectedCurrency := model.NormalizePaymentCurrency(topUp.PaidCurrency)
+	receivedCurrency := model.NormalizePaymentCurrency(input.Currency)
+	if expectedCurrency != "" && receivedCurrency != "" && expectedCurrency != receivedCurrency {
+		if err := recordTopUpRiskCase(topUp, input, model.PaymentRiskReasonAmountMismatch, expectedMoney); err != nil {
+			return PaymentCallbackValidationResult{}, err
+		}
+		return PaymentCallbackValidationResult{}, ErrPaymentCallbackRejected
+	}
+	return PaymentCallbackValidationResult{AlreadyCompleted: alreadyCompleted}, nil
 }
 
 func ValidateSubscriptionCallback(input PaymentCallbackValidationInput) (PaymentCallbackValidationResult, error) {
@@ -82,9 +118,9 @@ func ValidateSubscriptionCallback(input PaymentCallbackValidationInput) (Payment
 		return PaymentCallbackValidationResult{}, ErrPaymentCallbackRejected
 	}
 
-	order := model.GetSubscriptionOrderByTradeNo(tradeNo)
-	if order == nil {
-		_, _ = model.UpsertPaymentRiskCase(model.PaymentRiskCaseUpsertInput{
+	order, lookupErr := model.GetSubscriptionOrderByTradeNoWithError(tradeNo)
+	if errors.Is(lookupErr, model.ErrSubscriptionOrderNotFound) {
+		_, riskErr := model.UpsertPaymentRiskCase(model.PaymentRiskCaseUpsertInput{
 			RecordType:      model.PaymentRiskRecordTypeSubscription,
 			TradeNo:         tradeNo,
 			Source:          strings.TrimSpace(input.Source),
@@ -93,29 +129,41 @@ func ValidateSubscriptionCallback(input PaymentCallbackValidationInput) (Payment
 			Currency:        strings.TrimSpace(input.Currency),
 			ProviderPayload: strings.TrimSpace(input.ProviderPayload),
 		})
+		if riskErr != nil {
+			return PaymentCallbackValidationResult{}, riskErr
+		}
 		return PaymentCallbackValidationResult{}, ErrPaymentCallbackRejected
 	}
-	if order.Status == common.TopUpStatusSuccess {
-		return PaymentCallbackValidationResult{AlreadyCompleted: true}, nil
+	if lookupErr != nil {
+		return PaymentCallbackValidationResult{}, lookupErr
 	}
-	if order.Status != common.TopUpStatusPending {
-		recordSubscriptionRiskCase(order, input, model.PaymentRiskReasonOrderStatusInvalid)
+	alreadyCompleted := order.Status == common.TopUpStatusSuccess
+	if !alreadyCompleted && order.Status != common.TopUpStatusPending {
+		if err := recordSubscriptionRiskCase(order, input, model.PaymentRiskReasonOrderStatusInvalid); err != nil {
+			return PaymentCallbackValidationResult{}, err
+		}
 		return PaymentCallbackValidationResult{}, ErrPaymentCallbackRejected
 	}
 	if !model.PaymentProviderMatches(order.PaymentProvider, order.PaymentMethod, input.PaymentProvider, input.PaymentMethod) {
-		recordSubscriptionRiskCase(order, input, model.PaymentRiskReasonPaymentMethodMismatch)
+		if err := recordSubscriptionRiskCase(order, input, model.PaymentRiskReasonPaymentMethodMismatch); err != nil {
+			return PaymentCallbackValidationResult{}, err
+		}
 		return PaymentCallbackValidationResult{}, ErrPaymentCallbackRejected
 	}
 	expectedProvider := model.InferPaymentProvider(order.PaymentProvider, order.PaymentMethod)
 	if !paymentMethodMatchesForProvider(expectedProvider, order.PaymentMethod, input.PaymentMethod) {
-		recordSubscriptionRiskCase(order, input, model.PaymentRiskReasonPaymentMethodMismatch)
+		if err := recordSubscriptionRiskCase(order, input, model.PaymentRiskReasonPaymentMethodMismatch); err != nil {
+			return PaymentCallbackValidationResult{}, err
+		}
 		return PaymentCallbackValidationResult{}, ErrPaymentCallbackRejected
 	}
 	if input.ProviderAmount <= 0 || !paymentAmountsMatch(order.Money, input.ProviderAmount) {
-		recordSubscriptionRiskCase(order, input, model.PaymentRiskReasonAmountMismatch)
+		if err := recordSubscriptionRiskCase(order, input, model.PaymentRiskReasonAmountMismatch); err != nil {
+			return PaymentCallbackValidationResult{}, err
+		}
 		return PaymentCallbackValidationResult{}, ErrPaymentCallbackRejected
 	}
-	return PaymentCallbackValidationResult{}, nil
+	return PaymentCallbackValidationResult{AlreadyCompleted: alreadyCompleted}, nil
 }
 
 func paymentMethodMatches(expected string, actual string) bool {
@@ -150,14 +198,21 @@ func paymentAmountsMatch(expected float64, actual float64) bool {
 	return left.Equal(right)
 }
 
-func recordTopUpRiskCase(topUp *model.TopUp, input PaymentCallbackValidationInput, reason string, expectedMoney float64) {
+func recordTopUpRiskCase(topUp *model.TopUp, input PaymentCallbackValidationInput, reason string, expectedMoney float64) error {
 	if topUp == nil {
-		return
+		return nil
 	}
+	currency := model.NormalizePaymentCurrency(input.Currency)
+	settlementMoney, settlementCurrency, settlementKnown := topUp.SettlementPaymentAmount()
 	if expectedMoney <= 0 {
-		expectedMoney = topUp.Money
+		if settlementKnown {
+			expectedMoney = settlementMoney
+		}
 	}
-	_, _ = model.UpsertPaymentRiskCase(model.PaymentRiskCaseUpsertInput{
+	if currency == "" && settlementKnown {
+		currency = settlementCurrency
+	}
+	_, err := model.UpsertPaymentRiskCase(model.PaymentRiskCaseUpsertInput{
 		RecordType:            model.PaymentRiskRecordTypeTopUp,
 		TradeNo:               topUp.TradeNo,
 		UserId:                topUp.UserId,
@@ -166,23 +221,24 @@ func recordTopUpRiskCase(topUp *model.TopUp, input PaymentCallbackValidationInpu
 		ExpectedAmount:        topUp.Amount,
 		ExpectedMoney:         expectedMoney,
 		ReceivedMoney:         input.ProviderAmount,
-		Currency:              strings.TrimSpace(input.Currency),
+		Currency:              currency,
 		Source:                strings.TrimSpace(input.Source),
 		Reason:                reason,
 		OrderStatus:           topUp.Status,
 		ProviderPayload:       strings.TrimSpace(input.ProviderPayload),
 	})
+	return err
 }
 
-func recordSubscriptionRiskCase(order *model.SubscriptionOrder, input PaymentCallbackValidationInput, reason string) {
+func recordSubscriptionRiskCase(order *model.SubscriptionOrder, input PaymentCallbackValidationInput, reason string) error {
 	if order == nil {
-		return
+		return nil
 	}
 	payload := strings.TrimSpace(input.ProviderPayload)
 	if payload == "" {
 		payload = strings.TrimSpace(order.ProviderPayload)
 	}
-	_, _ = model.UpsertPaymentRiskCase(model.PaymentRiskCaseUpsertInput{
+	_, err := model.UpsertPaymentRiskCase(model.PaymentRiskCaseUpsertInput{
 		RecordType:            model.PaymentRiskRecordTypeSubscription,
 		TradeNo:               order.TradeNo,
 		UserId:                order.UserId,
@@ -196,6 +252,7 @@ func recordSubscriptionRiskCase(order *model.SubscriptionOrder, input PaymentCal
 		OrderStatus:           order.Status,
 		ProviderPayload:       payload,
 	})
+	return err
 }
 
 func RecordSubscriptionProcessingRiskCase(input PaymentCallbackValidationInput, processingErr error) {

@@ -326,3 +326,124 @@ func TestValidateSubscriptionCallback_AllowsMatchingAmount(t *testing.T) {
 		Count(&count).Error)
 	require.Zero(t, count)
 }
+
+func TestValidateTopUpCallback_UsesOrderPaymentSnapshotAfterConfigChange(t *testing.T) {
+	setupPaymentValidationTestDB(t)
+	withStripePriceConfig(t)
+
+	user := createPaymentValidationUser(t, "stripe-snapshot", "default")
+	topUp := createPaymentValidationTopUp(t, user.Id, "TOPUP-STRIPE-SNAPSHOT", model.PaymentMethodStripe, 100, 100)
+	require.NoError(t, model.DB.Model(topUp).Updates(map[string]any{
+		"payment_provider": model.PaymentProviderStripe,
+		"paid_money":       3,
+		"paid_currency":    "USD",
+	}).Error)
+	setting.StripeUnitPrice = 99
+
+	result, err := ValidateTopUpCallback(PaymentCallbackValidationInput{
+		TradeNo:         topUp.TradeNo,
+		PaymentMethod:   model.PaymentMethodStripe,
+		PaymentProvider: model.PaymentProviderStripe,
+		ProviderAmount:  3,
+		Currency:        "USD",
+		Source:          "stripe_webhook",
+	})
+	require.NoError(t, err)
+	require.False(t, result.AlreadyCompleted)
+}
+
+func TestValidateTopUpCallback_RejectsSnapshotCurrencyMismatch(t *testing.T) {
+	setupPaymentValidationTestDB(t)
+
+	user := createPaymentValidationUser(t, "stripe-currency-mismatch", "default")
+	topUp := createPaymentValidationTopUp(t, user.Id, "TOPUP-STRIPE-CURRENCY", model.PaymentMethodStripe, 100, 100)
+	require.NoError(t, model.DB.Model(topUp).Updates(map[string]any{
+		"payment_provider": model.PaymentProviderStripe,
+		"paid_money":       3,
+		"paid_currency":    "USD",
+	}).Error)
+
+	_, err := ValidateTopUpCallback(PaymentCallbackValidationInput{
+		TradeNo:         topUp.TradeNo,
+		PaymentMethod:   model.PaymentMethodStripe,
+		PaymentProvider: model.PaymentProviderStripe,
+		ProviderAmount:  3,
+		Currency:        "CNY",
+		Source:          "stripe_webhook",
+	})
+	require.ErrorIs(t, err, ErrPaymentCallbackRejected)
+}
+
+func TestValidateTopUpCallback_AllowsSignedStripeDiscountAgainstSubtotal(t *testing.T) {
+	setupPaymentValidationTestDB(t)
+
+	user := createPaymentValidationUser(t, "stripe-promotion", "default")
+	topUp := createPaymentValidationTopUp(t, user.Id, "TOPUP-STRIPE-PROMOTION", model.PaymentMethodStripe, 100, 100)
+	require.NoError(t, model.DB.Model(topUp).Updates(map[string]any{
+		"payment_provider": model.PaymentProviderStripe,
+		"paid_money":       3,
+		"paid_currency":    "USD",
+	}).Error)
+
+	result, err := ValidateTopUpCallback(PaymentCallbackValidationInput{
+		TradeNo:          topUp.TradeNo,
+		PaymentMethod:    model.PaymentMethodStripe,
+		PaymentProvider:  model.PaymentProviderStripe,
+		ProviderAmount:   2.4,
+		ProviderSubtotal: 3,
+		Currency:         "USD",
+		Source:           "stripe_webhook",
+	})
+	require.NoError(t, err)
+	require.False(t, result.AlreadyCompleted)
+
+	require.NoError(t, model.DB.Model(topUp).Updates(map[string]any{
+		"status":     common.TopUpStatusSuccess,
+		"paid_money": 2.4,
+	}).Error)
+	result, err = ValidateTopUpCallback(PaymentCallbackValidationInput{
+		TradeNo:          topUp.TradeNo,
+		PaymentMethod:    model.PaymentMethodStripe,
+		PaymentProvider:  model.PaymentProviderStripe,
+		ProviderAmount:   2.4,
+		ProviderSubtotal: 3,
+		Currency:         "USD",
+		Source:           "stripe_webhook",
+	})
+	require.NoError(t, err)
+	require.True(t, result.AlreadyCompleted)
+}
+
+func TestValidateTopUpCallback_AllowsTrustedLegacyCompletedStripeBackfill(t *testing.T) {
+	setupPaymentValidationTestDB(t)
+
+	user := createPaymentValidationUser(t, "stripe-legacy-backfill", "default")
+	topUp := createPaymentValidationTopUp(t, user.Id, "TOPUP-STRIPE-LEGACY-BACKFILL", model.PaymentMethodStripe, 100, 100)
+	require.NoError(t, model.DB.Model(topUp).Updates(map[string]any{
+		"payment_provider": model.PaymentProviderStripe,
+		"status":           common.TopUpStatusSuccess,
+		"paid_money":       20,
+	}).Error)
+
+	_, err := ValidateTopUpCallback(PaymentCallbackValidationInput{
+		TradeNo:         topUp.TradeNo,
+		PaymentMethod:   model.PaymentMethodStripe,
+		PaymentProvider: model.PaymentProviderStripe,
+		ProviderAmount:  3,
+		Currency:        "USD",
+		Source:          "untrusted_replay",
+	})
+	require.ErrorIs(t, err, ErrPaymentCallbackRejected)
+
+	result, err := ValidateTopUpCallback(PaymentCallbackValidationInput{
+		TradeNo:                      topUp.TradeNo,
+		PaymentMethod:                model.PaymentMethodStripe,
+		PaymentProvider:              model.PaymentProviderStripe,
+		ProviderAmount:               3,
+		Currency:                     "USD",
+		Source:                       "stripe_webhook",
+		AllowCompletedAmountBackfill: true,
+	})
+	require.NoError(t, err)
+	require.True(t, result.AlreadyCompleted)
+}

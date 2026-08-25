@@ -160,16 +160,23 @@ func RequestWaffoPancakePay(c *gin.Context) {
 	}
 
 	tradeNo := fmt.Sprintf("WAFFO_PANCAKE-%d-%d-%s", id, time.Now().UnixMilli(), randstr.String(6))
+	currency := strings.ToUpper(strings.TrimSpace(setting.WaffoPancakeCurrency))
+	if currency == "" {
+		currency = "USD"
+	}
 	topUp := &model.TopUp{
-		UserId:          id,
-		Amount:          normalizeWaffoPancakeTopUpAmount(req.Amount),
-		Money:           payMoney,
-		PaidMoney:       payMoney,
-		TradeNo:         tradeNo,
-		PaymentMethod:   model.PaymentMethodWaffoPancake,
-		PaymentProvider: model.PaymentProviderWaffoPancake,
-		CreateTime:      time.Now().Unix(),
-		Status:          common.TopUpStatusPending,
+		UserId:              id,
+		Amount:              normalizeWaffoPancakeTopUpAmount(req.Amount),
+		Money:               payMoney,
+		PaidMoney:           payMoney,
+		PaidCurrency:        currency,
+		PresentmentMoney:    payMoney,
+		PresentmentCurrency: currency,
+		TradeNo:             tradeNo,
+		PaymentMethod:       model.PaymentMethodWaffoPancake,
+		PaymentProvider:     model.PaymentProviderWaffoPancake,
+		CreateTime:          time.Now().Unix(),
+		Status:              common.TopUpStatusPending,
 	}
 	if err := topUp.Insert(); err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Waffo Pancake 创建充值订单失败 user_id=%d trade_no=%s amount=%d error=%q", id, tradeNo, req.Amount, err.Error()))
@@ -182,7 +189,7 @@ func RequestWaffoPancakePay(c *gin.Context) {
 		StoreID:     setting.WaffoPancakeStoreID,
 		ProductID:   setting.WaffoPancakeProductID,
 		ProductType: "onetime",
-		Currency:    strings.ToUpper(strings.TrimSpace(setting.WaffoPancakeCurrency)),
+		Currency:    currency,
 		PriceSnapshot: &service.WaffoPancakePriceSnapshot{
 			Amount:      formatWaffoPancakeAmount(payMoney),
 			TaxIncluded: false,

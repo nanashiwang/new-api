@@ -1200,12 +1200,13 @@ func GetUserInviteRechargeCommissions(userID int, startIdx int, pageSize int) ([
 		RechargeTotalMoney float64 `gorm:"column:recharge_total_money"`
 	}
 	var rows []inviteeRechargeRow
+	cnyPaymentMoneyExpr := topUpCNYPaymentMoneyExpr()
 	if err := DB.Table("invite_commission_ledgers AS ledgers").
 		Select(sourceUserExpression+` AS source_user_id,
 			users.created_at AS registered_at,
 			`+commissionLevelExpression+` AS commission_level,
 			COALESCE(SUM(ledgers.settled_quota), 0) AS recharge_total_quota,
-			COALESCE(SUM(CASE WHEN top_ups.paid_money > 0 THEN top_ups.paid_money ELSE top_ups.money END), 0) AS recharge_total_money`).
+				COALESCE(SUM(`+cnyPaymentMoneyExpr+`), 0) AS recharge_total_money`).
 		Joins("LEFT JOIN users ON users.id = "+sourceUserExpression).
 		Joins("LEFT JOIN top_ups ON top_ups.trade_no = ledgers.topup_trade_no").
 		Where("ledgers.inviter_user_id = ? AND ledgers.status = ?", userID, InviteCommissionStatusSettled).

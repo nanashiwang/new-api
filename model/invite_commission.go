@@ -106,7 +106,7 @@ func EnqueueInviteCommissionFromTopUp(topUp *TopUp) error {
 		// The row lock serializes payment reversal so a reversed order cannot be
 		// re-enqueued in the gap between validation and ledger creation.
 		dbTopUp := &TopUp{}
-		query := tx.Select("id", "user_id", "trade_no", "money", "paid_money", "payment_method", "payment_provider", "complete_time", "status")
+		query := tx.Select("id", "user_id", "trade_no", "money", "paid_money", "paid_currency", "presentment_money", "presentment_currency", "payment_method", "payment_provider", "complete_time", "status")
 		if !common.UsingSQLite {
 			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
 		}
@@ -117,15 +117,8 @@ func EnqueueInviteCommissionFromTopUp(topUp *TopUp) error {
 			return nil
 		}
 
-		paidMoney := dbTopUp.PaidMoney
-		if paidMoney <= 0 {
-			// 兼容升级前创建的订单；旧订单的 money 字段就是支付金额快照。
-			if InferPaymentProvider(dbTopUp.PaymentProvider, dbTopUp.PaymentMethod) == PaymentProviderStripe {
-				return nil
-			}
-			paidMoney = dbTopUp.Money
-		}
-		if paidMoney <= 0 || math.IsNaN(paidMoney) || math.IsInf(paidMoney, 0) {
+		paidMoney, ok := dbTopUp.CNYPaymentAmount()
+		if !ok {
 			return nil
 		}
 
@@ -578,7 +571,7 @@ func reconcilePendingInviteCommissionAmountTx(tx *gorm.DB, ledger *InviteCommiss
 	}
 
 	topUp := &TopUp{}
-	err := tx.Select("id", "money", "paid_money", "payment_method", "payment_provider", "status").
+	err := tx.Select("id", "money", "paid_money", "paid_currency", "presentment_money", "presentment_currency", "payment_method", "payment_provider", "status").
 		First(topUp, "trade_no = ?", ledger.TopupTradeNo).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return InviteCommissionRiskReasonPaymentSourceInvalid, nil
@@ -590,15 +583,8 @@ func reconcilePendingInviteCommissionAmountTx(tx *gorm.DB, ledger *InviteCommiss
 		return InviteCommissionRiskReasonPaymentSourceInvalid, nil
 	}
 
-	paidMoney := topUp.PaidMoney
-	if paidMoney <= 0 {
-		// 旧 Stripe 订单的 money 是到账额度基数，不是实付金额，无法安全反推时不予结算。
-		if InferPaymentProvider(topUp.PaymentProvider, topUp.PaymentMethod) == PaymentProviderStripe {
-			return InviteCommissionRiskReasonPaidMoneyMissing, nil
-		}
-		paidMoney = topUp.Money
-	}
-	if paidMoney <= 0 || math.IsNaN(paidMoney) || math.IsInf(paidMoney, 0) {
+	paidMoney, ok := topUp.CNYPaymentAmount()
+	if !ok {
 		return InviteCommissionRiskReasonPaidMoneyMissing, nil
 	}
 	if ledger.CommissionRate <= 0 || math.IsNaN(ledger.CommissionRate) || math.IsInf(ledger.CommissionRate, 0) {

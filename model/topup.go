@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -14,19 +15,31 @@ import (
 )
 
 type TopUp struct {
-	Id              int     `json:"id"`
-	UserId          int     `json:"user_id" gorm:"index"`
-	Amount          int64   `json:"amount"`
-	Money           float64 `json:"money"`
-	PaidMoney       float64 `json:"paid_money" gorm:"type:decimal(20,6);not null;default:0"`
-	TradeNo         string  `json:"trade_no" gorm:"unique;type:varchar(255);index"`
-	PaymentMethod   string  `json:"payment_method" gorm:"type:varchar(50)"`
-	PaymentProvider string  `json:"payment_provider" gorm:"type:varchar(50);default:''"`
-	CreateTime      int64   `json:"create_time"`
-	CompleteTime    int64   `json:"complete_time"`
-	Status          string  `json:"status"`
-	Username        string  `json:"username,omitempty" gorm:"column:username;->"`
-	DisplayName     string  `json:"display_name,omitempty" gorm:"column:display_name;->"`
+	Id     int   `json:"id"`
+	UserId int   `json:"user_id" gorm:"index"`
+	Amount int64 `json:"amount"`
+	// Money is the benefit/grant base and is not necessarily the cash paid.
+	Money float64 `json:"money"`
+	// PaidMoney is the provider settlement amount; PresentmentMoney is what the customer paid.
+	PaidMoney           float64 `json:"paid_money" gorm:"type:decimal(20,6);not null;default:0"`
+	PaidCurrency        string  `json:"paid_currency" gorm:"type:varchar(16);not null;default:''"`
+	PresentmentMoney    float64 `json:"presentment_money" gorm:"type:decimal(20,6);not null;default:0"`
+	PresentmentCurrency string  `json:"presentment_currency" gorm:"type:varchar(16);not null;default:''"`
+	TradeNo             string  `json:"trade_no" gorm:"unique;type:varchar(255);index"`
+	PaymentMethod       string  `json:"payment_method" gorm:"type:varchar(50)"`
+	PaymentProvider     string  `json:"payment_provider" gorm:"type:varchar(50);default:''"`
+	CreateTime          int64   `json:"create_time"`
+	CompleteTime        int64   `json:"complete_time"`
+	Status              string  `json:"status"`
+	Username            string  `json:"username,omitempty" gorm:"column:username;->"`
+	DisplayName         string  `json:"display_name,omitempty" gorm:"column:display_name;->"`
+}
+
+type TopUpPaymentDetails struct {
+	PaidMoney           float64
+	PaidCurrency        string
+	PresentmentMoney    float64
+	PresentmentCurrency string
 }
 
 const (
@@ -82,13 +95,25 @@ func GetTopUpById(id int) *TopUp {
 }
 
 func GetTopUpByTradeNo(tradeNo string) *TopUp {
-	var topUp *TopUp
-	var err error
-	err = DB.Where("trade_no = ?", tradeNo).First(&topUp).Error
+	topUp, err := GetTopUpByTradeNoWithError(tradeNo)
 	if err != nil {
 		return nil
 	}
 	return topUp
+}
+
+func GetTopUpByTradeNoWithError(tradeNo string) (*TopUp, error) {
+	if strings.TrimSpace(tradeNo) == "" {
+		return nil, ErrTopUpNotFound
+	}
+	topUp := &TopUp{}
+	if err := DB.Where("trade_no = ?", tradeNo).First(topUp).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrTopUpNotFound
+		}
+		return nil, err
+	}
+	return topUp, nil
 }
 
 func NormalizePaymentProvider(provider string) string {
@@ -97,6 +122,103 @@ func NormalizePaymentProvider(provider string) string {
 
 func NormalizePaymentMethod(method string) string {
 	return strings.ToLower(strings.TrimSpace(method))
+}
+
+func NormalizePaymentCurrency(currency string) string {
+	currency = strings.ToUpper(strings.TrimSpace(currency))
+	if currency == "RMB" {
+		return "CNY"
+	}
+	if len(currency) != 3 {
+		return ""
+	}
+	for _, char := range currency {
+		if char < 'A' || char > 'Z' {
+			return ""
+		}
+	}
+	return currency
+}
+
+func validPaymentMoney(money float64) bool {
+	return money > 0 && !math.IsNaN(money) && !math.IsInf(money, 0)
+}
+
+// SettlementPaymentAmount returns the provider settlement amount used for callback reconciliation.
+func (topUp *TopUp) SettlementPaymentAmount() (float64, string, bool) {
+	if topUp == nil {
+		return 0, "", false
+	}
+	if validPaymentMoney(topUp.PaidMoney) {
+		currency := NormalizePaymentCurrency(topUp.PaidCurrency)
+		if currency == "" {
+			if InferPaymentProvider(topUp.PaymentProvider, topUp.PaymentMethod) == PaymentProviderStripe {
+				return 0, "", false
+			}
+			currency = "CNY"
+		}
+		return topUp.PaidMoney, currency, true
+	}
+	if InferPaymentProvider(topUp.PaymentProvider, topUp.PaymentMethod) != PaymentProviderStripe && validPaymentMoney(topUp.Money) {
+		return topUp.Money, "CNY", true
+	}
+	return 0, "", false
+}
+
+// EffectivePaymentAmount returns the customer-facing amount without confusing it with granted quota.
+func (topUp *TopUp) EffectivePaymentAmount() (float64, string, bool) {
+	if topUp == nil {
+		return 0, "", false
+	}
+	if currency := NormalizePaymentCurrency(topUp.PresentmentCurrency); validPaymentMoney(topUp.PresentmentMoney) && currency != "" {
+		return topUp.PresentmentMoney, currency, true
+	}
+	return topUp.SettlementPaymentAmount()
+}
+
+// CNYPaymentAmount only returns amounts that are safe to use for invoices and CNY-denominated commissions.
+func (topUp *TopUp) CNYPaymentAmount() (float64, bool) {
+	if topUp == nil {
+		return 0, false
+	}
+	if validPaymentMoney(topUp.PresentmentMoney) {
+		if NormalizePaymentCurrency(topUp.PresentmentCurrency) == "CNY" {
+			return topUp.PresentmentMoney, true
+		}
+		return 0, false
+	}
+	if validPaymentMoney(topUp.PaidMoney) {
+		currency := NormalizePaymentCurrency(topUp.PaidCurrency)
+		if currency == "CNY" {
+			return topUp.PaidMoney, true
+		}
+		if currency != "" || InferPaymentProvider(topUp.PaymentProvider, topUp.PaymentMethod) == PaymentProviderStripe {
+			return 0, false
+		}
+		return topUp.PaidMoney, true
+	}
+	if InferPaymentProvider(topUp.PaymentProvider, topUp.PaymentMethod) != PaymentProviderStripe && validPaymentMoney(topUp.Money) {
+		return topUp.Money, true
+	}
+	return 0, false
+}
+
+func applyTopUpPaymentDetails(topUp *TopUp, details TopUpPaymentDetails) {
+	if topUp == nil {
+		return
+	}
+	if validPaymentMoney(details.PaidMoney) {
+		topUp.PaidMoney = details.PaidMoney
+		if currency := NormalizePaymentCurrency(details.PaidCurrency); currency != "" {
+			topUp.PaidCurrency = currency
+		}
+	}
+	if validPaymentMoney(details.PresentmentMoney) {
+		if currency := NormalizePaymentCurrency(details.PresentmentCurrency); currency != "" {
+			topUp.PresentmentMoney = details.PresentmentMoney
+			topUp.PresentmentCurrency = currency
+		}
+	}
 }
 
 // InferPaymentProvider keeps legacy pending orders usable after adding payment_provider.
@@ -164,6 +286,10 @@ func UpdatePendingTopUpStatus(tradeNo string, expectedPaymentProvider string, ta
 }
 
 func Recharge(referenceId string, customerId string, callerIp string, paidMoney float64) (err error) {
+	return RechargeWithPaymentDetails(referenceId, customerId, callerIp, TopUpPaymentDetails{PaidMoney: paidMoney})
+}
+
+func RechargeWithPaymentDetails(referenceId string, customerId string, callerIp string, details TopUpPaymentDetails) (err error) {
 	if referenceId == "" {
 		return errors.New("未提供支付单号")
 	}
@@ -191,9 +317,10 @@ func Recharge(referenceId string, customerId string, callerIp string, paidMoney 
 			return ErrPaymentMethodMismatch
 		}
 
+		applyTopUpPaymentDetails(topUp, details)
 		if topUp.Status == common.TopUpStatusSuccess {
 			alreadyCompleted = true
-			return nil
+			return tx.Save(topUp).Error
 		}
 		if topUp.Status != common.TopUpStatusPending {
 			return errors.New("充值订单状态错误")
@@ -205,9 +332,6 @@ func Recharge(referenceId string, customerId string, callerIp string, paidMoney 
 		if topUp.PaymentMethod == "" {
 			topUp.PaymentMethod = PaymentMethodStripe
 		}
-		if paidMoney > 0 {
-			topUp.PaidMoney = paidMoney
-		}
 		topUp.CompleteTime = common.GetTimestamp()
 		topUp.Status = common.TopUpStatusSuccess
 		err = tx.Save(topUp).Error
@@ -216,9 +340,11 @@ func Recharge(referenceId string, customerId string, callerIp string, paidMoney 
 		}
 
 		quota = topUp.Money * common.QuotaPerUnit
-		err = tx.Model(&User{}).Where("id = ?", topUp.UserId).Update("stripe_customer", customerId).Error
-		if err != nil {
-			return err
+		if customerId != "" {
+			err = tx.Model(&User{}).Where("id = ?", topUp.UserId).Update("stripe_customer", customerId).Error
+			if err != nil {
+				return err
+			}
 		}
 		if err := GrantUserQuotaTx(tx, topUp.UserId, int(quota), int(quota)); err != nil {
 			return err
@@ -242,7 +368,7 @@ func Recharge(referenceId string, customerId string, callerIp string, paidMoney 
 	}
 
 	RecordTopupLog(topUp.UserId,
-		fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%d", logger.FormatQuota(int(quota)), topUp.Amount),
+		fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%s", logger.FormatQuota(int(quota)), formatTopUpPaymentAmount(topUp)),
 		callerIp, topUp.PaymentMethod, "stripe", nil)
 	// 返佣采用 T+1 日批结算：
 	// 1) 此处只入返佣台账（pending），不直接发放；
@@ -252,6 +378,14 @@ func Recharge(referenceId string, customerId string, callerIp string, paidMoney 
 	}
 
 	return nil
+}
+
+func formatTopUpPaymentAmount(topUp *TopUp) string {
+	money, currency, known := topUp.EffectivePaymentAmount()
+	if !known {
+		return "未知"
+	}
+	return fmt.Sprintf("%.2f %s", money, currency)
 }
 
 func topUpBaseQuery(tx *gorm.DB, includeUser bool) *gorm.DB {

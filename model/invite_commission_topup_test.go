@@ -251,7 +251,7 @@ func TestEnqueueInviteCommissionFromTopUp_UsesPaidMoneyAndDatabaseOrder(t *testi
 	assert.EqualValues(t, 1, count)
 }
 
-func TestEnqueueInviteCommissionFromTopUp_StripeUsesPaidMoneyInsteadOfGrantedMoney(t *testing.T) {
+func TestEnqueueInviteCommissionFromTopUp_StripeUsesCNYPresentmentInsteadOfGrantedMoney(t *testing.T) {
 	setupInviteCommissionTopUpTest(t)
 
 	inviter := createInviteCommissionTestUser(t, "inviter_topup_stripe", 0)
@@ -259,6 +259,9 @@ func TestEnqueueInviteCommissionFromTopUp_StripeUsesPaidMoneyInsteadOfGrantedMon
 	topUp := createInviteCommissionTopUp(t, invitee.Id, "topup_stripe_001", 100, 100, 80, common.TopUpStatusSuccess)
 	topUp.PaymentMethod = PaymentMethodStripe
 	topUp.PaymentProvider = PaymentProviderStripe
+	topUp.PaidCurrency = "USD"
+	topUp.PresentmentMoney = 80
+	topUp.PresentmentCurrency = "CNY"
 	require.NoError(t, DB.Save(topUp).Error)
 
 	require.NoError(t, EnqueueInviteCommissionFromTopUp(topUp))
@@ -382,4 +385,22 @@ func TestSettleInviteCommission_SkipsLegacyStripeWithoutPaidMoney(t *testing.T) 
 	assert.Equal(t, InviteCommissionStatusSkipped, refreshedLedger.Status)
 	assert.Equal(t, InviteCommissionRiskReasonPaidMoneyMissing, refreshedLedger.RiskReason)
 	assert.Equal(t, 0, refreshedLedger.SettledQuota)
+}
+
+func TestEnqueueInviteCommissionFromTopUp_StripeUSDWithoutCNYPresentmentIsSkipped(t *testing.T) {
+	setupInviteCommissionTopUpTest(t)
+
+	inviter := createInviteCommissionTestUser(t, "inviter_stripe_usd", 0)
+	invitee := createInviteCommissionTestUser(t, "invitee_stripe_usd", inviter.Id)
+	topUp := createInviteCommissionTopUp(t, invitee.Id, "topup_stripe_usd_001", 100, 100, 3, common.TopUpStatusSuccess)
+	topUp.PaymentMethod = PaymentMethodStripe
+	topUp.PaymentProvider = PaymentProviderStripe
+	topUp.PaidCurrency = "USD"
+	require.NoError(t, DB.Save(topUp).Error)
+
+	require.NoError(t, EnqueueInviteCommissionFromTopUp(topUp))
+
+	var count int64
+	require.NoError(t, DB.Model(&InviteCommissionLedger{}).Where("topup_trade_no = ?", topUp.TradeNo).Count(&count).Error)
+	require.Zero(t, count)
 }

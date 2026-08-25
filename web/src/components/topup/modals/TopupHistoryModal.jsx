@@ -272,12 +272,31 @@ function formatMoney(value, currency = 'CNY') {
   const symbolMap = {
     CNY: '¥',
     RMB: '¥',
-    USD: '$',
+    USD: 'US$',
     EUR: '€',
     GBP: '£',
   };
   const symbol = symbolMap[upperCurrency] || '';
   return `${symbol}${amount.toFixed(2)}${upperCurrency && !symbol ? ` ${upperCurrency}` : ''}`;
+}
+
+function formatMoneyAmounts(amounts, fallbackMoney, fallbackCurrency = 'CNY') {
+  if (amounts && typeof amounts === 'object') {
+    const entries = Object.entries(amounts)
+      .map(([currency, value]) => [currency, Number(value)])
+      .filter(([, value]) => Number.isFinite(value) && Math.abs(value) > 1e-9)
+      .sort(([left], [right]) => {
+        const order = { CNY: 0, USD: 1, EUR: 2, GBP: 3 };
+        return (order[left] ?? 99) - (order[right] ?? 99);
+      });
+    if (entries.length > 0) {
+      return entries
+        .map(([currency, value]) => formatMoney(value, currency))
+        .join(' + ');
+    }
+    return '-';
+  }
+  return formatMoney(fallbackMoney, fallbackCurrency);
 }
 
 function formatAmountCents(cents) {
@@ -2768,7 +2787,27 @@ const TopupHistoryModal = ({
               <Text type='danger'>{renderQuota(record?.amount ?? 0)}</Text>
             );
           }
-          return <Text type='danger'>{formatMoney(money)}</Text>;
+          if (record?.payment_amount_known === false) {
+            return <Text type='tertiary'>-</Text>;
+          }
+          const currency = record?.currency || 'CNY';
+          const paidCurrency = record?.paid_currency || '';
+          const showSettlement =
+            Number(record?.paid_money || 0) > 0 &&
+            paidCurrency &&
+            (paidCurrency !== currency ||
+              Math.abs(Number(record.paid_money) - Number(money || 0)) > 1e-6);
+          return (
+            <div className='flex flex-col'>
+              <Text type='danger'>{formatMoney(money, currency)}</Text>
+              {showSettlement ? (
+                <Text type='tertiary' size='small'>
+                  {t('渠道结算')}：
+                  {formatMoney(record.paid_money, paidCurrency)}
+                </Text>
+              ) : null}
+            </div>
+          );
         },
       },
       {
@@ -2842,7 +2881,8 @@ const TopupHistoryModal = ({
                     display_name: record.display_name,
                     payment_method: record.payment_method,
                     expected_amount: record.amount,
-                    expected_money: record.money,
+                    expected_money: record.paid_money || record.money,
+                    currency: record.paid_currency || record.currency,
                     order_status: record.status,
                   })
                 }
@@ -2887,31 +2927,43 @@ const TopupHistoryModal = ({
       {
         key: 'total-money',
         label: '总支付金额',
-        value: formatMoney(totals.money),
+        value: formatMoneyAmounts(totals.amounts, totals.money),
         helper: `${t('总订单数')} ${formatCount(totals.order_count)}`,
       },
       {
         key: 'success-money',
         label: '成功支付金额',
-        value: formatMoney(statuses.success?.money),
+        value: formatMoneyAmounts(
+          statuses.success?.amounts,
+          statuses.success?.money,
+        ),
         helper: `${t('成功订单')} ${formatCount(statuses.success?.order_count)}`,
       },
       {
         key: 'pending-money',
         label: '待支付金额',
-        value: formatMoney(statuses.pending?.money),
+        value: formatMoneyAmounts(
+          statuses.pending?.amounts,
+          statuses.pending?.money,
+        ),
         helper: `${t('待支付订单')} ${formatCount(statuses.pending?.order_count)}`,
       },
       {
         key: 'expired-money',
         label: '失效金额',
-        value: formatMoney(statuses.expired?.money),
+        value: formatMoneyAmounts(
+          statuses.expired?.amounts,
+          statuses.expired?.money,
+        ),
         helper: `${t('失效订单')} ${formatCount(statuses.expired?.order_count)}`,
       },
       {
         key: 'cancelled-money',
         label: '已取消金额',
-        value: formatMoney(statuses.cancelled?.money),
+        value: formatMoneyAmounts(
+          statuses.cancelled?.amounts,
+          statuses.cancelled?.money,
+        ),
         helper: `${t('已取消订单')} ${formatCount(statuses.cancelled?.order_count)}`,
       },
     ];
@@ -2922,14 +2974,15 @@ const TopupHistoryModal = ({
       ([method, stats]) => ({
         method,
         money: Number(stats?.money || 0),
+        amounts: stats?.amounts,
         orderCount: Number(stats?.order_count || 0),
       }),
     );
     items.sort((left, right) => {
-      if (left.money !== right.money) {
-        return right.money - left.money;
+      if (left.orderCount !== right.orderCount) {
+        return right.orderCount - left.orderCount;
       }
-      return right.orderCount - left.orderCount;
+      return right.money - left.money;
     });
     return items;
   }, [dashboardData]);
@@ -2984,14 +3037,20 @@ const TopupHistoryModal = ({
         title: t('充值金额'),
         key: 'money',
         width: 120,
-        render: (_, record) => <Text strong>{formatMoney(record?.money)}</Text>,
+        render: (_, record) => (
+          <Text strong>
+            {formatMoneyAmounts(record?.amounts, record?.money)}
+          </Text>
+        ),
       },
       {
         title: t('成功金额'),
         key: 'success_money',
         width: 120,
         render: (_, record) => (
-          <Text type='success'>{formatMoney(record?.success_money)}</Text>
+          <Text type='success'>
+            {formatMoneyAmounts(record?.success_amounts, record?.success_money)}
+          </Text>
         ),
       },
       {
@@ -3005,7 +3064,9 @@ const TopupHistoryModal = ({
         key: 'pending_money',
         width: 120,
         render: (_, record) => (
-          <Text type='warning'>{formatMoney(record?.pending_money)}</Text>
+          <Text type='warning'>
+            {formatMoneyAmounts(record?.pending_amounts, record?.pending_money)}
+          </Text>
         ),
       },
     ],
@@ -4264,7 +4325,9 @@ const TopupHistoryModal = ({
                       {formatCount(item.orderCount)} {t('单')}
                     </Text>
                   </div>
-                  <Text strong>{formatMoney(item.money)}</Text>
+                  <Text strong>
+                    {formatMoneyAmounts(item.amounts, item.money)}
+                  </Text>
                 </div>
               ))}
             </div>

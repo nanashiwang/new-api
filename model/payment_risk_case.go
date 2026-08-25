@@ -297,6 +297,7 @@ func CreateManualPaymentRiskCase(recordType string, tradeNo string, note string)
 		PaymentMethod:   snapshot.PaymentMethod,
 		ExpectedAmount:  snapshot.ExpectedAmount,
 		ExpectedMoney:   snapshot.ExpectedMoney,
+		Currency:        snapshot.Currency,
 		OrderStatus:     snapshot.OrderStatus,
 		ProviderPayload: snapshot.ProviderPayload,
 		Source:          "manual_admin",
@@ -394,6 +395,7 @@ type paymentRiskSnapshot struct {
 	PaymentMethod   string
 	ExpectedAmount  int64
 	ExpectedMoney   float64
+	Currency        string
 	OrderStatus     string
 	ProviderPayload string
 }
@@ -423,13 +425,15 @@ func buildPaymentRiskSnapshot(recordType string, tradeNo string) (*paymentRiskSn
 	if topUp == nil {
 		return nil, ErrPaymentRiskCaseNotFound
 	}
+	expectedMoney, currency, _ := topUp.SettlementPaymentAmount()
 	return &paymentRiskSnapshot{
 		RecordType:     recordType,
 		TradeNo:        tradeNo,
 		UserId:         topUp.UserId,
 		PaymentMethod:  topUp.PaymentMethod,
 		ExpectedAmount: topUp.Amount,
-		ExpectedMoney:  topUp.Money,
+		ExpectedMoney:  expectedMoney,
+		Currency:       currency,
 		OrderStatus:    topUp.Status,
 	}, nil
 }

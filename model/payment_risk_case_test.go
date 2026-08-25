@@ -566,3 +566,23 @@ func TestResolvePaymentRiskCase_ReverseSubscriptionUsesCleanUserQueriesForUpgrad
 		assert.LessOrEqual(t, strings.Count(line, fmt.Sprintf("id = %d", user.Id)), 1, line)
 	}
 }
+
+func TestCreateManualPaymentRiskCase_UsesStripeSettlementSnapshot(t *testing.T) {
+	setupPaymentRiskCaseTestDB(t)
+
+	user := createPaymentRiskCaseTestUser(t, "stripe-risk-snapshot")
+	topUp := createPaymentRiskCaseTestTopUp(t, user.Id, "RISK-STRIPE-SNAPSHOT", common.TopUpStatusSuccess, 100, 100, PaymentMethodStripe)
+	require.NoError(t, DB.Model(topUp).Updates(map[string]any{
+		"payment_provider":     PaymentProviderStripe,
+		"paid_money":           3,
+		"paid_currency":        "USD",
+		"presentment_money":    20,
+		"presentment_currency": "CNY",
+	}).Error)
+
+	riskCase, err := CreateManualPaymentRiskCase(PaymentRiskRecordTypeTopUp, topUp.TradeNo, "review")
+	require.NoError(t, err)
+	require.InDelta(t, 3, riskCase.ExpectedMoney, 0.0001)
+	require.Equal(t, "USD", riskCase.Currency)
+	require.NotEqual(t, topUp.Money, riskCase.ExpectedMoney)
+}

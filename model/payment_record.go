@@ -18,24 +18,30 @@ const (
 )
 
 type PaymentRecord struct {
-	Id            int     `json:"id"`
-	RecordType    string  `json:"record_type"`
-	UserId        int     `json:"user_id"`
-	Username      string  `json:"username,omitempty"`
-	DisplayName   string  `json:"display_name,omitempty"`
-	TradeNo       string  `json:"trade_no,omitempty"`
-	PaymentMethod string  `json:"payment_method,omitempty"`
-	Amount        int64   `json:"amount"`
-	Money         float64 `json:"money"`
-	Status        string  `json:"status"`
-	CreateTime    int64   `json:"create_time"`
-	CompleteTime  int64   `json:"complete_time"`
-	ProductId     int     `json:"product_id,omitempty"`
-	ProductName   string  `json:"product_name,omitempty"`
-	OrderType     string  `json:"order_type,omitempty"`
-	RiskCaseId    int     `json:"risk_case_id,omitempty"`
-	RiskStatus    string  `json:"risk_status,omitempty"`
-	RiskReason    string  `json:"risk_reason,omitempty"`
+	Id                  int     `json:"id"`
+	RecordType          string  `json:"record_type"`
+	UserId              int     `json:"user_id"`
+	Username            string  `json:"username,omitempty"`
+	DisplayName         string  `json:"display_name,omitempty"`
+	TradeNo             string  `json:"trade_no,omitempty"`
+	PaymentMethod       string  `json:"payment_method,omitempty"`
+	Amount              int64   `json:"amount"`
+	Money               float64 `json:"money"`
+	Currency            string  `json:"currency,omitempty"`
+	PaymentAmountKnown  bool    `json:"payment_amount_known"`
+	PaidMoney           float64 `json:"paid_money,omitempty"`
+	PaidCurrency        string  `json:"paid_currency,omitempty"`
+	PresentmentMoney    float64 `json:"presentment_money,omitempty"`
+	PresentmentCurrency string  `json:"presentment_currency,omitempty"`
+	Status              string  `json:"status"`
+	CreateTime          int64   `json:"create_time"`
+	CompleteTime        int64   `json:"complete_time"`
+	ProductId           int     `json:"product_id,omitempty"`
+	ProductName         string  `json:"product_name,omitempty"`
+	OrderType           string  `json:"order_type,omitempty"`
+	RiskCaseId          int     `json:"risk_case_id,omitempty"`
+	RiskStatus          string  `json:"risk_status,omitempty"`
+	RiskReason          string  `json:"risk_reason,omitempty"`
 }
 
 type PaymentRecordSearchParams struct {
@@ -222,20 +228,27 @@ func listTopUpPaymentRecords(userId *int, params PaymentRecordSearchParams, limi
 
 	records := make([]*PaymentRecord, 0, len(topups))
 	for _, topup := range topups {
+		money, currency, known := topup.EffectivePaymentAmount()
 		records = append(records, &PaymentRecord{
-			Id:            topup.Id,
-			RecordType:    PaymentRecordTypeTopUp,
-			UserId:        topup.UserId,
-			Username:      topup.Username,
-			DisplayName:   topup.DisplayName,
-			TradeNo:       topup.TradeNo,
-			PaymentMethod: topup.PaymentMethod,
-			Amount:        topup.Amount,
-			Money:         topup.Money,
-			Status:        topup.Status,
-			CreateTime:    topup.CreateTime,
-			CompleteTime:  topup.CompleteTime,
-			OrderType:     resolveTopUpPaymentOrderType(topup),
+			Id:                  topup.Id,
+			RecordType:          PaymentRecordTypeTopUp,
+			UserId:              topup.UserId,
+			Username:            topup.Username,
+			DisplayName:         topup.DisplayName,
+			TradeNo:             topup.TradeNo,
+			PaymentMethod:       topup.PaymentMethod,
+			Amount:              topup.Amount,
+			Money:               money,
+			Currency:            currency,
+			PaymentAmountKnown:  known,
+			PaidMoney:           topup.PaidMoney,
+			PaidCurrency:        NormalizePaymentCurrency(topup.PaidCurrency),
+			PresentmentMoney:    topup.PresentmentMoney,
+			PresentmentCurrency: NormalizePaymentCurrency(topup.PresentmentCurrency),
+			Status:              topup.Status,
+			CreateTime:          topup.CreateTime,
+			CompleteTime:        topup.CompleteTime,
+			OrderType:           resolveTopUpPaymentOrderType(topup),
 		})
 	}
 	return records, nil

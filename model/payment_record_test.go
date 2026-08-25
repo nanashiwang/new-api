@@ -72,14 +72,18 @@ func createPaymentRecordTopUp(t *testing.T, userID int, tradeNo string, createTi
 func createPaymentRecordTopUpWithDetail(t *testing.T, userID int, tradeNo string, createTime int64, completeTime int64, status string, paymentMethod string, money float64) *TopUp {
 	t.Helper()
 	topup := &TopUp{
-		UserId:        userID,
-		Amount:        120,
-		Money:         money,
-		TradeNo:       tradeNo,
-		PaymentMethod: paymentMethod,
-		CreateTime:    createTime,
-		CompleteTime:  completeTime,
-		Status:        status,
+		UserId:              userID,
+		Amount:              120,
+		Money:               money,
+		PaidMoney:           money,
+		PaidCurrency:        "CNY",
+		PresentmentMoney:    money,
+		PresentmentCurrency: "CNY",
+		TradeNo:             tradeNo,
+		PaymentMethod:       paymentMethod,
+		CreateTime:          createTime,
+		CompleteTime:        completeTime,
+		Status:              status,
 	}
 	require.NoError(t, topup.Insert())
 	return topup
@@ -506,4 +510,101 @@ func TestGetPaymentRecordRankings_KeepConfirmedOrdersButExcludeOtherResolvedRisk
 	require.Equal(t, bob.Id, rankings[1].UserId)
 	require.InDelta(t, 50.0, rankings[1].Money, 0.0001)
 	require.Equal(t, int64(1), rankings[1].OrderCount)
+}
+
+func TestPaymentRecords_SeparatesGrantedSettlementAndPresentmentAmounts(t *testing.T) {
+	setupPaymentRecordTestDB(t)
+
+	user := createPaymentRecordTestUser(t, "stripe-presentment")
+	base := topUpUserQueryCutoff() + 100
+	topup := &TopUp{
+		UserId:              user.Id,
+		Amount:              100,
+		Money:               100,
+		PaidMoney:           3,
+		PaidCurrency:        "USD",
+		PresentmentMoney:    20,
+		PresentmentCurrency: "CNY",
+		TradeNo:             "T-STRIPE-PRESENTMENT",
+		PaymentMethod:       PaymentMethodStripe,
+		PaymentProvider:     PaymentProviderStripe,
+		CreateTime:          base,
+		CompleteTime:        base + 1,
+		Status:              common.TopUpStatusSuccess,
+	}
+	require.NoError(t, topup.Insert())
+
+	records, total, err := GetUserPaymentRecordsByParams(user.Id, PaymentRecordSearchParams{}, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, records, 1)
+	require.InDelta(t, 20.0, records[0].Money, 0.0001)
+	require.Equal(t, "CNY", records[0].Currency)
+	require.True(t, records[0].PaymentAmountKnown)
+	require.InDelta(t, 3.0, records[0].PaidMoney, 0.0001)
+	require.Equal(t, "USD", records[0].PaidCurrency)
+}
+
+func TestPaymentRecordStats_DoesNotMixCurrenciesOrGrantedQuota(t *testing.T) {
+	setupPaymentRecordTestDB(t)
+
+	user := createPaymentRecordTestUser(t, "mixed-currencies")
+	create := func(topup *TopUp) {
+		t.Helper()
+		require.NoError(t, topup.Insert())
+	}
+	create(&TopUp{
+		UserId: user.Id, Amount: 100, Money: 100,
+		PaidMoney: 3, PaidCurrency: "USD", PresentmentMoney: 20, PresentmentCurrency: "CNY",
+		TradeNo: "T-STRIPE-CNY", PaymentMethod: PaymentMethodStripe, PaymentProvider: PaymentProviderStripe,
+		CreateTime: 100, CompleteTime: 101, Status: common.TopUpStatusSuccess,
+	})
+	create(&TopUp{
+		UserId: user.Id, Amount: 100, Money: 100,
+		PaidMoney: 3, PaidCurrency: "USD",
+		TradeNo: "T-STRIPE-USD", PaymentMethod: PaymentMethodStripe, PaymentProvider: PaymentProviderStripe,
+		CreateTime: 200, CompleteTime: 201, Status: common.TopUpStatusSuccess,
+	})
+	create(&TopUp{
+		UserId: user.Id, Amount: 100, Money: 10,
+		PaidMoney: 10, PaidCurrency: "CNY", PresentmentMoney: 10, PresentmentCurrency: "CNY",
+		TradeNo: "T-ALIPAY-CNY", PaymentMethod: "alipay", PaymentProvider: PaymentProviderEpay,
+		CreateTime: 300, CompleteTime: 301, Status: common.TopUpStatusSuccess,
+	})
+
+	stats, err := GetPaymentRecordStats(PaymentRecordSearchParams{})
+	require.NoError(t, err)
+	require.InDelta(t, 30.0, stats.Totals.Money, 0.0001)
+	require.InDelta(t, 30.0, stats.Totals.Amounts["CNY"], 0.0001)
+	require.InDelta(t, 3.0, stats.Totals.Amounts["USD"], 0.0001)
+	require.NotEqual(t, 200.0, stats.Totals.Money)
+	require.InDelta(t, 20.0, stats.PaymentMethods[PaymentMethodStripe].Amounts["CNY"], 0.0001)
+	require.InDelta(t, 3.0, stats.PaymentMethods[PaymentMethodStripe].Amounts["USD"], 0.0001)
+	require.InDelta(t, 10.0, stats.PaymentMethods["alipay"].Amounts["CNY"], 0.0001)
+}
+
+func TestPaymentRecords_HistoricalStripeWithoutCurrencyIsUnknown(t *testing.T) {
+	setupPaymentRecordTestDB(t)
+
+	user := createPaymentRecordTestUser(t, "legacy-stripe")
+	base := topUpUserQueryCutoff() + 100
+	topup := &TopUp{
+		UserId: user.Id, Amount: 100, Money: 100, PaidMoney: 20, TradeNo: "T-LEGACY-STRIPE",
+		PaymentMethod: PaymentMethodStripe, PaymentProvider: PaymentProviderStripe,
+		CreateTime: base, CompleteTime: base + 1, Status: common.TopUpStatusSuccess,
+	}
+	require.NoError(t, topup.Insert())
+
+	records, _, err := GetUserPaymentRecordsByParams(user.Id, PaymentRecordSearchParams{}, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	require.False(t, records[0].PaymentAmountKnown)
+	require.Zero(t, records[0].Money)
+	require.Empty(t, records[0].Currency)
+
+	stats, err := GetPaymentRecordStats(PaymentRecordSearchParams{})
+	require.NoError(t, err)
+	require.Zero(t, stats.Totals.Money)
+	require.Empty(t, stats.Totals.Amounts)
+	require.Equal(t, int64(1), stats.Totals.OrderCount)
 }
