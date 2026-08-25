@@ -41,6 +41,7 @@ import {
   Space,
   Spin,
   Button,
+  Select,
   Typography,
   Checkbox,
   Banner,
@@ -62,6 +63,7 @@ import {
   copy,
   getChannelIcon,
   getModelCategories,
+  renderGroupOption,
   selectFilter,
 } from '../../../../helpers';
 import ModelSelectModal from './ModelSelectModal';
@@ -76,6 +78,11 @@ import ChannelKeyDisplay from '../../../common/ui/ChannelKeyDisplay';
 import { useSecureVerification } from '../../../../hooks/common/useSecureVerification';
 import { parseChannelConnectionString } from '../../../../helpers/token';
 import { createApiCalls } from '../../../../services/secureVerification';
+import {
+  buildTokenGroupVendorOptions,
+  filterTokenGroupsByVendor,
+  resolveTokenGroupVendor,
+} from '../../tokens/tokenGroupUtils';
 import {
   collectInvalidStatusCodeEntries,
   collectNewDisallowedStatusCodeRedirects,
@@ -223,6 +230,7 @@ const EditChannelModal = (props) => {
   const [originModelOptions, setOriginModelOptions] = useState([]);
   const [modelOptions, setModelOptions] = useState([]);
   const [groupOptions, setGroupOptions] = useState([]);
+  const [groupVendor, setGroupVendor] = useState('');
   const [basicModels, setBasicModels] = useState([]);
   const [fullModels, setFullModels] = useState([]);
   const [modelGroups, setModelGroups] = useState([]);
@@ -248,6 +256,43 @@ const EditChannelModal = (props) => {
   const [channelSearchValue, setChannelSearchValue] = useState('');
   const [useManualInput, setUseManualInput] = useState(false); // 是否使用手动输入模式
   const [keyMode, setKeyMode] = useState('append'); // 密钥模式：replace（覆盖）或 append（追加）
+
+  const orderedGroupOptions = useMemo(() => {
+    return [...groupOptions].sort((left, right) => {
+      if (left.value === 'auto') return -1;
+      if (right.value === 'auto') return 1;
+      return String(left.value).localeCompare(String(right.value), 'zh-Hans');
+    });
+  }, [groupOptions]);
+
+  const groupVendorOptions = useMemo(
+    () => buildTokenGroupVendorOptions(orderedGroupOptions, t('其他')),
+    [orderedGroupOptions, t],
+  );
+
+  const selectedGroupValues = useMemo(() => {
+    if (Array.isArray(inputs.groups)) return inputs.groups;
+    if (typeof inputs.groups === 'string') {
+      return inputs.groups
+        .split(',')
+        .map((group) => group.trim())
+        .filter(Boolean);
+    }
+    return [];
+  }, [inputs.groups]);
+
+  const visibleGroupOptions = useMemo(
+    () => filterTokenGroupsByVendor(orderedGroupOptions, groupVendor),
+    [orderedGroupOptions, groupVendor],
+  );
+
+  const visibleSelectedGroupValues = useMemo(
+    () =>
+      selectedGroupValues.filter(
+        (group) => resolveTokenGroupVendor(group) === groupVendor,
+      ),
+    [selectedGroupValues, groupVendor],
+  );
   const [isEnterpriseAccount, setIsEnterpriseAccount] = useState(false); // 是否为企业账户
   const [doubaoApiEditUnlocked, setDoubaoApiEditUnlocked] = useState(false); // 豆包渠道自定义 API 地址隐藏入口
   const redirectModelList = useMemo(() => {
@@ -938,6 +983,7 @@ const EditChannelModal = (props) => {
 
       data.channel_vendor = data.channel_vendor || 'auto';
 
+      setGroupVendor('');
       setInputs(data);
       if (formApiRef.current) {
         formApiRef.current.setValues(data);
@@ -1141,6 +1187,24 @@ const EditChannelModal = (props) => {
     }
   };
 
+  useEffect(() => {
+    if (groupVendorOptions.length === 0) {
+      setGroupVendor('');
+      return;
+    }
+
+    if (groupVendorOptions.some((option) => option.value === groupVendor)) {
+      return;
+    }
+
+    const firstSelectedVendor = selectedGroupValues
+      .map((group) => resolveTokenGroupVendor(group))
+      .find((vendor) =>
+        groupVendorOptions.some((option) => option.value === vendor),
+      );
+    setGroupVendor(firstSelectedVendor || groupVendorOptions[0].value);
+  }, [groupVendor, groupVendorOptions, selectedGroupValues]);
+
   const fetchModelGroups = async () => {
     try {
       const res = await API.get('/api/prefill_group?type=model');
@@ -1261,6 +1325,7 @@ const EditChannelModal = (props) => {
     fetchModels().then();
     fetchGroups().then();
     if (!isEdit) {
+      setGroupVendor('');
       setInputs(originInputs);
       if (formApiRef.current) {
         formApiRef.current.setValues(originInputs);
@@ -1295,6 +1360,7 @@ const EditChannelModal = (props) => {
           localStorage.getItem(ADVANCED_SETTINGS_EXPANDED_KEY) === 'true',
       );
       if (!isEdit) {
+        setGroupVendor('');
         try {
           navigator?.clipboard
             ?.readText?.()
@@ -3594,19 +3660,52 @@ const EditChannelModal = (props) => {
 
                     {advancedSettingsOpen && (
                       <>
-                        <Form.Select
-                      field='groups'
-                      label={t('分组')}
-                      placeholder={t('请选择可以使用该渠道的分组')}
-                      multiple
-                      allowAdditions
-                      additionLabel={t(
-                        '请在系统设置页面编辑分组倍率以添加新的分组：',
-                      )}
-                      optionList={groupOptions}
-                      style={{ width: '100%' }}
-                      onChange={(value) => handleInputChange('groups', value)}
-                    />
+                        <Form.Slot label={t('分组')}>
+                          <Space
+                            vertical
+                            align='start'
+                            spacing='tight'
+                            style={{ width: '100%' }}
+                          >
+                            <Select
+                              value={groupVendor}
+                              placeholder={t('先选择供应商')}
+                              optionList={groupVendorOptions}
+                              filter={selectFilter}
+                              onChange={setGroupVendor}
+                              style={{ width: '100%' }}
+                            />
+                            <Select
+                              value={visibleSelectedGroupValues}
+                              placeholder={
+                                groupVendor
+                                  ? t('请选择该供应商下的分组')
+                                  : t('先选择供应商')
+                              }
+                              multiple
+                              disabled={!groupVendor}
+                              allowAdditions
+                              additionLabel={t(
+                                '请在系统设置页面编辑分组倍率以添加新的分组：',
+                              )}
+                              optionList={visibleGroupOptions}
+                              filter={selectFilter}
+                              renderOptionItem={renderGroupOption}
+                              onChange={(value) => {
+                                const hiddenGroups = selectedGroupValues.filter(
+                                  (group) =>
+                                    resolveTokenGroupVendor(group) !==
+                                    groupVendor,
+                                );
+                                handleInputChange('groups', [
+                                  ...hiddenGroups,
+                                  ...value,
+                                ]);
+                              }}
+                              style={{ width: '100%' }}
+                            />
+                          </Space>
+                        </Form.Slot>
 
                     <Form.Input
                       field='tag'
