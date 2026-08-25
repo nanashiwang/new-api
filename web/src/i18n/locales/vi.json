@@ -5861,5 +5861,6 @@
   "自动识别": "Tự động nhận diện",
   "跟随渠道类型": "Theo loại kênh",
   "仅当全部模型属于同一已知厂商时才会自动归类，混合模型渠道仍按渠道类型展示。": "Chỉ tự động phân loại khi tất cả mô hình thuộc cùng một nhà cung cấp đã biết. Kênh có nhiều loại mô hình vẫn hiển thị theo loại kênh.",
-  "小米 MiMo": "Xiaomi MiMo"
+  "小米 MiMo": "Xiaomi MiMo",
+  "先选择供应商": "Chọn nhà cung cấp trước"
 }

@@ -82,6 +82,7 @@ import {
   buildTokenGroupVendorOptions,
   filterTokenGroupsByVendor,
   resolveTokenGroupVendor,
+  sortTokenGroupOptions,
 } from '../../tokens/tokenGroupUtils';
 import {
   collectInvalidStatusCodeEntries,
@@ -258,11 +259,7 @@ const EditChannelModal = (props) => {
   const [keyMode, setKeyMode] = useState('append'); // 密钥模式：replace（覆盖）或 append（追加）
 
   const orderedGroupOptions = useMemo(() => {
-    return [...groupOptions].sort((left, right) => {
-      if (left.value === 'auto') return -1;
-      if (right.value === 'auto') return 1;
-      return String(left.value).localeCompare(String(right.value), 'zh-Hans');
-    });
+    return sortTokenGroupOptions(groupOptions);
   }, [groupOptions]);
 
   const groupVendorOptions = useMemo(

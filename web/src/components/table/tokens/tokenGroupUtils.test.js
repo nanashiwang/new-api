@@ -27,6 +27,7 @@ import {
   formatTokenGroupSelectedLabel,
   resolveTokenGroupVendor,
   shouldClearTokenGroupForVendor,
+  sortTokenGroupOptions,
 } from './tokenGroupUtils.js';
 
 describe('tokenGroupUtils', () => {
@@ -64,6 +65,48 @@ describe('tokenGroupUtils', () => {
         { value: 'Claude', label: 'Claude · 1' },
         { value: TOKEN_GROUP_OTHER_VENDOR, label: '其他 · 1' },
       ],
+    );
+  });
+
+  test('sorts vendors and service tiers in a stable business order', () => {
+    const groups = [
+      { value: 'Claude · 特价（第三方）' },
+      { value: 'MiMo · 企业专属' },
+      { value: 'OpenAI · 优质（第三方）' },
+      { value: 'default' },
+      { value: 'OpenAI · 企业专属' },
+      { value: 'Claude · 优质' },
+      { value: 'OpenAI · 优质' },
+      { value: 'Deepseek · 标准（第三方）' },
+    ];
+
+    assert.deepEqual(
+      sortTokenGroupOptions(groups).map((group) => group.value),
+      [
+        'OpenAI · 企业专属',
+        'OpenAI · 优质',
+        'OpenAI · 优质（第三方）',
+        'Claude · 优质',
+        'Claude · 特价（第三方）',
+        'Deepseek · 标准（第三方）',
+        'MiMo · 企业专属',
+        'default',
+      ],
+    );
+  });
+
+  test('builds vendor options in the same fixed order', () => {
+    const groups = [
+      { value: 'MiMo · 优质' },
+      { value: 'Claude · 优质' },
+      { value: 'OpenAI · 优质' },
+      { value: 'default' },
+      { value: 'Gemini · 优质' },
+    ];
+
+    assert.deepEqual(
+      buildTokenGroupVendorOptions(groups, '其他').map((item) => item.value),
+      ['OpenAI', 'Claude', 'Gemini', 'MiMo', TOKEN_GROUP_OTHER_VENDOR],
     );
   });
 

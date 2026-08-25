@@ -2,6 +2,7 @@ package controller
 
 import (
 	"net/http"
+	"sort"
 
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
@@ -11,11 +12,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func GetGroups(c *gin.Context) {
-	groupNames := make([]string, 0)
-	for groupName := range ratio_setting.GetGroupRatioCopy() {
+func sortedGroupNames(groupRatios map[string]float64) []string {
+	groupNames := make([]string, 0, len(groupRatios))
+	for groupName := range groupRatios {
 		groupNames = append(groupNames, groupName)
 	}
+	sort.Strings(groupNames)
+	return groupNames
+}
+
+func GetGroups(c *gin.Context) {
+	groupNames := sortedGroupNames(ratio_setting.GetGroupRatioCopy())
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
