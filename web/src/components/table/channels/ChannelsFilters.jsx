@@ -18,8 +18,14 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Button, Form } from '@douyinfe/semi-ui';
+import { Button, Form, Select } from '@douyinfe/semi-ui';
 import { IconSearch } from '@douyinfe/semi-icons';
+import { selectFilter } from '../../../helpers';
+import {
+  buildTokenGroupVendorOptions,
+  filterTokenGroupsByVendor,
+  sortTokenGroupOptions,
+} from '../tokens/tokenGroupUtils';
 
 const ChannelsFilters = ({
   setEditingChannel,
@@ -36,6 +42,28 @@ const ChannelsFilters = ({
   searching,
   t,
 }) => {
+  const [groupVendor, setGroupVendor] = React.useState('');
+  const orderedGroupOptions = React.useMemo(
+    () => sortTokenGroupOptions(groupOptions),
+    [groupOptions],
+  );
+  const groupVendorOptions = React.useMemo(
+    () => buildTokenGroupVendorOptions(orderedGroupOptions, t('其他')),
+    [orderedGroupOptions, t],
+  );
+  const visibleGroupOptions = React.useMemo(
+    () => filterTokenGroupsByVendor(orderedGroupOptions, groupVendor),
+    [orderedGroupOptions, groupVendor],
+  );
+
+  const handleGroupVendorChange = (vendor) => {
+    const hadSelectedGroup = Boolean(formApi?.getValue('searchGroup'));
+    setGroupVendor(vendor || '');
+    if (!hadSelectedGroup) return;
+    formApi.setValue('searchGroup', null);
+    setTimeout(() => searchChannels(enableTagMode), 0);
+  };
+
   return (
     <div className='flex flex-col md:flex-row justify-between items-center gap-2 w-full'>
       <div className='flex gap-2 w-full md:w-auto order-2 md:order-1'>
@@ -85,7 +113,7 @@ const ChannelsFilters = ({
           stopValidateWithError={false}
           className='flex flex-col md:flex-row items-center gap-2 w-full'
         >
-          <div className='relative w-full md:w-64'>
+          <div className='relative w-full md:w-48'>
             <Form.Input
               size='small'
               field='searchKeyword'
@@ -95,7 +123,7 @@ const ChannelsFilters = ({
               pure
             />
           </div>
-          <div className='w-full md:w-48'>
+          <div className='w-full md:w-32'>
             <Form.Input
               size='small'
               field='searchModel'
@@ -106,16 +134,31 @@ const ChannelsFilters = ({
             />
           </div>
           <div className='w-full md:w-32'>
+            <Select
+              size='small'
+              value={groupVendor || undefined}
+              placeholder={t('全部供应商')}
+              optionList={groupVendorOptions}
+              className='w-full'
+              showClear
+              filter={selectFilter}
+              pure
+              onChange={handleGroupVendorChange}
+            />
+          </div>
+          <div className='w-full md:w-40'>
             <Form.Select
               size='small'
               field='searchGroup'
-              placeholder={t('选择分组')}
+              placeholder={groupVendor ? t('全部分组') : t('先选择供应商')}
               optionList={[
-                { label: t('选择分组'), value: null },
-                ...groupOptions,
+                { label: t('全部分组'), value: null },
+                ...visibleGroupOptions,
               ]}
               className='w-full'
               showClear
+              disabled={!groupVendor}
+              filter={selectFilter}
               pure
               onChange={() => {
                 // 延迟执行搜索，让表单值先更新
@@ -140,6 +183,7 @@ const ChannelsFilters = ({
             onClick={() => {
               if (formApi) {
                 formApi.reset();
+                setGroupVendor('');
                 // 重置后立即查询，使用setTimeout确保表单重置完成
                 setTimeout(() => {
                   refresh();

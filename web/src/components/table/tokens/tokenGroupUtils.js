@@ -19,6 +19,31 @@ For commercial licensing, please contact support@quantumnous.com
 
 export const TOKEN_GROUP_OTHER_VENDOR = '__other__';
 
+const TOKEN_GROUP_VENDOR_ORDER = [
+  'OpenAI',
+  'Claude',
+  'Anthropic',
+  'Gemini',
+  'Google',
+  'Grok',
+  'xAI',
+  'Kimi',
+  'Moonshot',
+  'DeepSeek',
+  'MiMo',
+];
+
+const TOKEN_GROUP_TIER_ORDER = ['企业专属', '优质', '标准', '特价', '限时福利'];
+
+const TOKEN_GROUP_OTHER_ORDER = [
+  'auto',
+  'default',
+  '官方渠道',
+  '第三方渠道',
+  '企业专属',
+  '分销商',
+];
+
 const CANONICAL_VENDOR_NAMES = new Map([
   ['openai', 'OpenAI'],
   ['claude', 'Claude'],
@@ -30,7 +55,24 @@ const CANONICAL_VENDOR_NAMES = new Map([
   ['kimi', 'Kimi'],
   ['moonshot', 'Moonshot'],
   ['deepseek', 'DeepSeek'],
+  ['mimo', 'MiMo'],
+  ['xiaomi', 'MiMo'],
 ]);
+
+const compareByKnownOrder = (left, right, orderedValues) => {
+  const leftIndex = orderedValues.indexOf(left);
+  const rightIndex = orderedValues.indexOf(right);
+  if (leftIndex >= 0 && rightIndex >= 0) return leftIndex - rightIndex;
+  if (leftIndex >= 0) return -1;
+  if (rightIndex >= 0) return 1;
+  return String(left).localeCompare(String(right), 'zh-Hans');
+};
+
+const resolveTokenGroupTier = (groupName) =>
+  TOKEN_GROUP_TIER_ORDER.find((tier) => String(groupName).includes(tier)) || '';
+
+const isThirdPartyGroup = (groupName) =>
+  /第三方|third[\s_-]*party/i.test(String(groupName));
 
 const normalizeVendorName = (value) => {
   const normalized = String(value || '').trim();
@@ -69,13 +111,55 @@ export const buildTokenGroupVendorOptions = (
     .sort(([leftVendor], [rightVendor]) => {
       if (leftVendor === TOKEN_GROUP_OTHER_VENDOR) return 1;
       if (rightVendor === TOKEN_GROUP_OTHER_VENDOR) return -1;
-      return 0;
+      return compareByKnownOrder(
+        leftVendor,
+        rightVendor,
+        TOKEN_GROUP_VENDOR_ORDER,
+      );
     })
     .map(([vendor, count]) => ({
       value: vendor,
       label: `${vendor === TOKEN_GROUP_OTHER_VENDOR ? otherLabel : vendor} · ${count}`,
     }));
 };
+
+export const sortTokenGroupOptions = (groups = []) =>
+  [...groups].sort((left, right) => {
+    const leftName = String(left?.value || left?.label || '').trim();
+    const rightName = String(right?.value || right?.label || '').trim();
+    const leftVendor = resolveTokenGroupVendor(leftName);
+    const rightVendor = resolveTokenGroupVendor(rightName);
+
+    const vendorOrder = compareByKnownOrder(
+      leftVendor,
+      rightVendor,
+      TOKEN_GROUP_VENDOR_ORDER,
+    );
+    if (vendorOrder !== 0) return vendorOrder;
+
+    if (leftVendor === TOKEN_GROUP_OTHER_VENDOR) {
+      const otherOrder = compareByKnownOrder(
+        leftName,
+        rightName,
+        TOKEN_GROUP_OTHER_ORDER,
+      );
+      if (otherOrder !== 0) return otherOrder;
+    } else {
+      const tierOrder = compareByKnownOrder(
+        resolveTokenGroupTier(leftName),
+        resolveTokenGroupTier(rightName),
+        TOKEN_GROUP_TIER_ORDER,
+      );
+      if (tierOrder !== 0) return tierOrder;
+
+      const sourceOrder =
+        Number(isThirdPartyGroup(leftName)) -
+        Number(isThirdPartyGroup(rightName));
+      if (sourceOrder !== 0) return sourceOrder;
+    }
+
+    return leftName.localeCompare(rightName, 'zh-Hans');
+  });
 
 export const filterTokenGroupsByVendor = (groups = [], vendor = '') => {
   if (!vendor) return [];
