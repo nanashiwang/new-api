@@ -21,9 +21,12 @@ import React from 'react';
 import { Button, Form, Select } from '@douyinfe/semi-ui';
 import { IconSearch } from '@douyinfe/semi-icons';
 import { selectFilter } from '../../../helpers';
+import { resolveChannelCategoryGroupVendor } from '../../../helpers/channelCategory';
 import {
+  TOKEN_GROUP_OTHER_VENDOR,
   buildTokenGroupVendorOptions,
   filterTokenGroupsByVendor,
+  resolveTokenGroupVendor,
   sortTokenGroupOptions,
 } from '../tokens/tokenGroupUtils';
 
@@ -40,6 +43,7 @@ const ChannelsFilters = ({
   groupOptions,
   loading,
   searching,
+  activeCategoryKey,
   t,
 }) => {
   const [groupVendor, setGroupVendor] = React.useState('');
@@ -51,10 +55,37 @@ const ChannelsFilters = ({
     () => buildTokenGroupVendorOptions(orderedGroupOptions, t('其他')),
     [orderedGroupOptions, t],
   );
-  const visibleGroupOptions = React.useMemo(
-    () => filterTokenGroupsByVendor(orderedGroupOptions, groupVendor),
-    [orderedGroupOptions, groupVendor],
+  const categoryGroupVendor = React.useMemo(
+    () =>
+      resolveChannelCategoryGroupVendor(
+        activeCategoryKey,
+        groupVendorOptions.map((option) => option.value),
+        enableTagMode,
+      ),
+    [activeCategoryKey, enableTagMode, groupVendorOptions],
   );
+  const visibleGroupOptions = React.useMemo(
+    () =>
+      filterTokenGroupsByVendor(orderedGroupOptions, groupVendor, true).map(
+        (option) => {
+          if (
+            groupVendor !== TOKEN_GROUP_OTHER_VENDOR &&
+            resolveTokenGroupVendor(option.value) === TOKEN_GROUP_OTHER_VENDOR
+          ) {
+            return {
+              ...option,
+              label: `${t('通用分组')} · ${option.label}`,
+            };
+          }
+          return option;
+        },
+      ),
+    [groupVendor, orderedGroupOptions, t],
+  );
+
+  React.useEffect(() => {
+    setGroupVendor(categoryGroupVendor || '');
+  }, [activeCategoryKey, categoryGroupVendor, enableTagMode]);
 
   const handleGroupVendorChange = (vendor) => {
     const hadSelectedGroup = Boolean(formApi?.getValue('searchGroup'));
@@ -183,7 +214,7 @@ const ChannelsFilters = ({
             onClick={() => {
               if (formApi) {
                 formApi.reset();
-                setGroupVendor('');
+                setGroupVendor(categoryGroupVendor || '');
                 // 重置后立即查询，使用setTimeout确保表单重置完成
                 setTimeout(() => {
                   refresh();

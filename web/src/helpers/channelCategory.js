@@ -22,6 +22,52 @@ export const CHANNEL_CATEGORY_MIMO = 'vendor:mimo';
 
 export const channelTypeCategoryKey = (channelType) => `type:${channelType}`;
 
+const CATEGORY_GROUP_VENDOR_CANDIDATES = new Map([
+  [CHANNEL_CATEGORY_MIMO, ['MiMo']],
+  [channelTypeCategoryKey(1), ['OpenAI']],
+  [channelTypeCategoryKey(3), ['OpenAI']],
+  [channelTypeCategoryKey(57), ['OpenAI']],
+  [channelTypeCategoryKey(14), ['Claude', 'Anthropic']],
+  [channelTypeCategoryKey(33), ['Claude', 'Anthropic']],
+  [channelTypeCategoryKey(43), ['DeepSeek']],
+  [channelTypeCategoryKey(24), ['Gemini', 'Google']],
+  [channelTypeCategoryKey(11), ['Gemini', 'Google']],
+  [channelTypeCategoryKey(25), ['Kimi', 'Moonshot']],
+  [channelTypeCategoryKey(48), ['Grok', 'xAI']],
+  [channelTypeCategoryKey(17), ['Qwen']],
+  [channelTypeCategoryKey(16), ['GLM']],
+  [channelTypeCategoryKey(26), ['GLM']],
+  [channelTypeCategoryKey(15), ['Baidu']],
+  [channelTypeCategoryKey(46), ['Baidu']],
+  [channelTypeCategoryKey(18), ['Spark']],
+  [channelTypeCategoryKey(23), ['Hunyuan']],
+  [channelTypeCategoryKey(31), ['Yi']],
+  [channelTypeCategoryKey(35), ['MiniMax']],
+  [channelTypeCategoryKey(34), ['Cohere']],
+  [channelTypeCategoryKey(38), ['Jina']],
+  [channelTypeCategoryKey(42), ['Mistral']],
+  [channelTypeCategoryKey(27), ['Perplexity']],
+  [channelTypeCategoryKey(19), ['360']],
+  [channelTypeCategoryKey(36), ['Suno']],
+  [channelTypeCategoryKey(49), ['Coze']],
+  [channelTypeCategoryKey(50), ['Kling']],
+  [channelTypeCategoryKey(51), ['Jimeng']],
+  [channelTypeCategoryKey(52), ['Vidu']],
+]);
+
+export const resolveChannelCategoryGroupVendor = (
+  categoryKey,
+  availableVendors = [],
+  enableTagMode = false,
+) => {
+  if (enableTagMode || !categoryKey || categoryKey === CHANNEL_CATEGORY_ALL) {
+    return '';
+  }
+  const availableVendorSet = new Set(availableVendors);
+  const candidates = CATEGORY_GROUP_VENDOR_CANDIDATES.get(categoryKey) || [];
+  return candidates.find((vendor) => availableVendorSet.has(vendor)) || '';
+};
+
 export const buildChannelCategoryQuery = (categoryKey, enableTagMode) => {
   if (enableTagMode || !categoryKey || categoryKey === CHANNEL_CATEGORY_ALL) {
     return '';

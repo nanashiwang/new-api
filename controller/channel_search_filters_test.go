@@ -145,6 +145,38 @@ func TestSearchChannels_TypeCountsIgnoreTypeFilter(t *testing.T) {
 	require.EqualValues(t, 1, resp.Data.TypeCounts["2"])
 }
 
+func TestSearchChannels_CategoryCountsIgnoreGroupFilter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupChannelSearchControllerTestDB(t)
+	seedChannelSearchControllerTestData(t)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(
+		http.MethodGet,
+		"/api/channel/search?group=default&status=enabled&p=1&page_size=20",
+		nil,
+	)
+
+	SearchChannels(ctx)
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	var resp struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Items          []model.Channel  `json:"items"`
+			Total          int              `json:"total"`
+			CategoryCounts map[string]int64 `json:"category_counts"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &resp))
+	require.True(t, resp.Success)
+	require.Equal(t, 2, resp.Data.Total)
+	require.Len(t, resp.Data.Items, 2)
+	require.EqualValues(t, 2, resp.Data.CategoryCounts["type:1"])
+	require.EqualValues(t, 1, resp.Data.CategoryCounts["type:2"])
+}
+
 func seedChannelVendorControllerTestData(t *testing.T) {
 	t.Helper()
 	priority := int64(0)

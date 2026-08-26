@@ -124,6 +124,22 @@ describe('tokenGroupUtils', () => {
     assert.deepEqual(filterTokenGroupsByVendor(groups, ''), []);
   });
 
+  test('optionally includes common groups after the selected vendor', () => {
+    const groups = sortTokenGroupOptions([
+      { value: '企业专属' },
+      { value: 'OpenAI · 优质' },
+      { value: 'Claude · 优质' },
+      { value: 'default' },
+    ]);
+
+    assert.deepEqual(
+      filterTokenGroupsByVendor(groups, 'OpenAI', true).map(
+        (group) => group.value,
+      ),
+      ['OpenAI · 优质', 'default', '企业专属'],
+    );
+  });
+
   test('clears only groups that do not belong to the newly selected vendor', () => {
     assert.equal(
       shouldClearTokenGroupForVendor('Claude · 优质', 'OpenAI'),

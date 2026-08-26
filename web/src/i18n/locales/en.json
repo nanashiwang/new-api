@@ -5473,5 +5473,6 @@
   "跟随渠道类型": "Follow channel type",
   "仅当全部模型属于同一已知厂商时才会自动归类，混合模型渠道仍按渠道类型展示。": "Automatic detection applies only when all models belong to the same known vendor. Mixed-model channels remain under their channel type.",
   "小米 MiMo": "Xiaomi MiMo",
-  "先选择供应商": "Select a vendor first"
+  "先选择供应商": "Select a vendor first",
+  "通用分组": "Common groups"
 }
