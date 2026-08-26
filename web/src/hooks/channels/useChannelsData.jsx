@@ -95,9 +95,8 @@ export const useChannelsData = () => {
 
   // Display categories are independent from Channel.Type, which remains the
   // relay protocol used by API clients and provider adapters.
-  const [activeCategoryKey, setActiveCategoryKey] = useState(
-    CHANNEL_CATEGORY_ALL,
-  );
+  const [activeCategoryKey, setActiveCategoryKey] =
+    useState(CHANNEL_CATEGORY_ALL);
   const [categoryCounts, setCategoryCounts] = useState({});
 
   // Model test states
@@ -481,10 +480,7 @@ export const useChannelsData = () => {
     const reqId = ++requestCounter.current;
     setLoading(true);
     const statusParam = statusF !== 'all' ? `&status=${statusF}` : '';
-    const categoryParam = buildChannelCategoryQuery(
-      categoryKey,
-      enableTagMode,
-    );
+    const categoryParam = buildChannelCategoryQuery(categoryKey, enableTagMode);
     const res = await API.get(
       `/api/channel/?p=${page}&page_size=${pageSize}&id_sort=${idSort}&tag_mode=${enableTagMode}${statusParam}${categoryParam}`,
     );
@@ -560,6 +556,33 @@ export const useChannelsData = () => {
         setLoading(false);
       }
     }
+  };
+
+  const runAfterClearingGroupFilter = (callback) => {
+    const selectedGroup = formApi?.getValue('searchGroup');
+    if (!selectedGroup) {
+      callback();
+      return;
+    }
+    formApi.setValue('searchGroup', null);
+    setTimeout(callback, 0);
+  };
+
+  const handleCategoryChange = (categoryKey) => {
+    setActiveCategoryKey(categoryKey);
+    setActivePage(1);
+    runAfterClearingGroupFilter(() =>
+      loadChannels(1, pageSize, idSort, enableTagMode, categoryKey),
+    );
+  };
+
+  const handleTagModeChange = (enabled) => {
+    localStorage.setItem('enable-tag-mode', enabled + '');
+    setEnableTagMode(enabled);
+    setActivePage(1);
+    runAfterClearingGroupFilter(() =>
+      loadChannels(1, pageSize, idSort, enabled, activeCategoryKey),
+    );
   };
 
   // Refresh
@@ -946,9 +969,7 @@ export const useChannelsData = () => {
         }
       } catch (error) {
         showError(
-          error?.response?.data?.message ||
-            error?.message ||
-            t('开启渠道失败'),
+          error?.response?.data?.message || error?.message || t('开启渠道失败'),
         );
       }
     }
@@ -1172,7 +1193,11 @@ export const useChannelsData = () => {
     const testKey = `${record.id}-${normalizedModel}`;
 
     if (shouldStopBatchTestingRef.current && isBatchTesting) {
-      return Promise.resolve({ success: false, skipped: true, channel: record });
+      return Promise.resolve({
+        success: false,
+        skipped: true,
+        channel: record,
+      });
     }
 
     if (trackModelState) {
@@ -1190,7 +1215,11 @@ export const useChannelsData = () => {
       const res = await API.get(url);
 
       if (shouldStopBatchTestingRef.current && isBatchTesting) {
-        return Promise.resolve({ success: false, skipped: true, channel: record });
+        return Promise.resolve({
+          success: false,
+          skipped: true,
+          channel: record,
+        });
       }
 
       const { success, message, time, error_code } = res.data;
@@ -1339,7 +1368,9 @@ export const useChannelsData = () => {
         .filter((result) => result.success)
         .map((result) => result.channel);
       const summary = buildTagTestSummary(
-        currentTagTestGroup?.tag || currentTagTestGroup?.key || currentTagTestGroup?.name,
+        currentTagTestGroup?.tag ||
+          currentTagTestGroup?.key ||
+          currentTagTestGroup?.name,
         successChannels.length,
         targets.length,
       );
@@ -1575,7 +1606,7 @@ export const useChannelsData = () => {
 
     // Display category states
     activeCategoryKey,
-    setActiveCategoryKey,
+    handleCategoryChange,
     categoryCounts,
     availableCategoryKeys,
 
@@ -1667,7 +1698,7 @@ export const useChannelsData = () => {
 
     // Setters
     setIdSort,
-    setEnableTagMode,
+    handleTagModeChange,
     setEnableBatchDelete,
     setStatusFilter,
     setCompactMode,

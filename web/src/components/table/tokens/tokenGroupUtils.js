@@ -31,6 +31,23 @@ const TOKEN_GROUP_VENDOR_ORDER = [
   'Moonshot',
   'DeepSeek',
   'MiMo',
+  'Qwen',
+  'GLM',
+  'Baidu',
+  'Spark',
+  'Hunyuan',
+  'Yi',
+  'MiniMax',
+  'Cohere',
+  'Jina',
+  'Mistral',
+  'Perplexity',
+  '360',
+  'Suno',
+  'Coze',
+  'Kling',
+  'Jimeng',
+  'Vidu',
 ];
 
 const TOKEN_GROUP_TIER_ORDER = ['企业专属', '优质', '标准', '特价', '限时福利'];
@@ -57,6 +74,35 @@ const CANONICAL_VENDOR_NAMES = new Map([
   ['deepseek', 'DeepSeek'],
   ['mimo', 'MiMo'],
   ['xiaomi', 'MiMo'],
+  ['qwen', 'Qwen'],
+  ['alibaba', 'Qwen'],
+  ['阿里巴巴', 'Qwen'],
+  ['阿里通义千问', 'Qwen'],
+  ['通义千问', 'Qwen'],
+  ['glm', 'GLM'],
+  ['zhipu', 'GLM'],
+  ['智谱', 'GLM'],
+  ['baidu', 'Baidu'],
+  ['百度', 'Baidu'],
+  ['spark', 'Spark'],
+  ['讯飞', 'Spark'],
+  ['hunyuan', 'Hunyuan'],
+  ['腾讯', 'Hunyuan'],
+  ['yi', 'Yi'],
+  ['零一万物', 'Yi'],
+  ['minimax', 'MiniMax'],
+  ['cohere', 'Cohere'],
+  ['jina', 'Jina'],
+  ['mistral', 'Mistral'],
+  ['perplexity', 'Perplexity'],
+  ['360', '360'],
+  ['suno', 'Suno'],
+  ['coze', 'Coze'],
+  ['kling', 'Kling'],
+  ['可灵', 'Kling'],
+  ['jimeng', 'Jimeng'],
+  ['即梦', 'Jimeng'],
+  ['vidu', 'Vidu'],
 ]);
 
 const compareByKnownOrder = (left, right, orderedValues) => {
@@ -161,11 +207,21 @@ export const sortTokenGroupOptions = (groups = []) =>
     return leftName.localeCompare(rightName, 'zh-Hans');
   });
 
-export const filterTokenGroupsByVendor = (groups = [], vendor = '') => {
+export const filterTokenGroupsByVendor = (
+  groups = [],
+  vendor = '',
+  includeCommonGroups = false,
+) => {
   if (!vendor) return [];
-  return groups.filter(
-    (group) => resolveTokenGroupVendor(group?.value) === vendor,
-  );
+  return groups.filter((group) => {
+    const groupVendor = resolveTokenGroupVendor(group?.value);
+    return (
+      groupVendor === vendor ||
+      (includeCommonGroups &&
+        vendor !== TOKEN_GROUP_OTHER_VENDOR &&
+        groupVendor === TOKEN_GROUP_OTHER_VENDOR)
+    );
+  });
 };
 
 export const shouldClearTokenGroupForVendor = (groupName, vendor) => {

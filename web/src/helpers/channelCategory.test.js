@@ -23,6 +23,7 @@ import {
   CHANNEL_CATEGORY_ALL,
   CHANNEL_CATEGORY_MIMO,
   channelTypeCategoryKey,
+  resolveChannelCategoryGroupVendor,
 } from './channelCategory';
 
 describe('channel category query', () => {
@@ -40,5 +41,32 @@ describe('channel category query', () => {
       '&category=vendor%3Amimo',
     );
     expect(buildChannelCategoryQuery(CHANNEL_CATEGORY_MIMO, true)).toBe('');
+  });
+
+  test('maps only explicit provider categories to configured group vendors', () => {
+    const vendors = ['OpenAI', 'Claude', 'Gemini', 'Kimi', 'Grok', 'MiMo'];
+    expect(resolveChannelCategoryGroupVendor('type:1', vendors)).toBe('OpenAI');
+    expect(resolveChannelCategoryGroupVendor('type:14', vendors)).toBe(
+      'Claude',
+    );
+    expect(resolveChannelCategoryGroupVendor('type:25', vendors)).toBe('Kimi');
+    expect(
+      resolveChannelCategoryGroupVendor(CHANNEL_CATEGORY_MIMO, vendors),
+    ).toBe('MiMo');
+    expect(resolveChannelCategoryGroupVendor('type:20', vendors)).toBe('');
+    expect(resolveChannelCategoryGroupVendor('type:8', vendors)).toBe('');
+  });
+
+  test('falls back safely for missing aliases, all categories, and tag mode', () => {
+    expect(resolveChannelCategoryGroupVendor('type:14', ['Anthropic'])).toBe(
+      'Anthropic',
+    );
+    expect(resolveChannelCategoryGroupVendor('type:43', ['OpenAI'])).toBe('');
+    expect(
+      resolveChannelCategoryGroupVendor(CHANNEL_CATEGORY_ALL, ['OpenAI']),
+    ).toBe('');
+    expect(resolveChannelCategoryGroupVendor('type:1', ['OpenAI'], true)).toBe(
+      '',
+    );
   });
 });

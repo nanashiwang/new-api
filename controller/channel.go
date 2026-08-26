@@ -440,9 +440,9 @@ func SearchChannels(c *gin.Context) {
 		}
 	}
 
-	// Build both facets from the unpaginated search result so a vendor filter
-	// cannot produce incorrect totals or partially filtered pages.
-	facetChannels, err := model.SearchChannelsWithFilters(keyword, group, modelKeyword, idSort, statusFilter, -1)
+	// Keep category facets independent from the concrete group selection so the
+	// administrator can always switch categories and clear the previous group.
+	facetChannels, err := model.SearchChannelsWithFilters(keyword, "", modelKeyword, idSort, statusFilter, -1)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -453,6 +453,17 @@ func SearchChannels(c *gin.Context) {
 	vendorCounts := model.CountChannelVendors(facetChannels)
 	typeCounts := model.CountChannelTypes(facetChannels)
 	categoryCounts := model.CountChannelCategories(facetChannels)
+	filteredChannels := facetChannels
+	if strings.TrimSpace(group) != "" && !strings.EqualFold(strings.TrimSpace(group), "null") {
+		filteredChannels, err = model.SearchChannelsWithFilters(keyword, group, modelKeyword, idSort, statusFilter, -1)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+	}
 
 	if enableTagMode {
 		tags, err := model.SearchTagsWithFilters(keyword, group, modelKeyword, idSort, statusFilter, typeFilter)
@@ -472,7 +483,7 @@ func SearchChannels(c *gin.Context) {
 			}
 		}
 	} else {
-		channelData = facetChannels
+		channelData = filteredChannels
 		channelData = model.FilterChannelsByCategory(channelData, category)
 		if vendorFilter != model.ChannelVendorAll {
 			channelData = model.FilterChannelsByVendor(channelData, vendorFilter)

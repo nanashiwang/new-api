@@ -30,22 +30,15 @@ import {
 const ChannelsTabs = ({
   enableTagMode,
   activeCategoryKey,
-  setActiveCategoryKey,
+  handleCategoryChange,
   categoryCounts,
   availableCategoryKeys,
-  loadChannels,
-  activePage,
-  pageSize,
-  idSort,
-  setActivePage,
   t,
 }) => {
   if (enableTagMode) return null;
 
   const handleTabChange = (key) => {
-    setActiveCategoryKey(key);
-    setActivePage(1);
-    loadChannels(1, pageSize, idSort, enableTagMode, key);
+    handleCategoryChange(key);
   };
 
   const mimoCategoryKey = CHANNEL_CATEGORY_MIMO;

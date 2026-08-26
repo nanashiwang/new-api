@@ -46,7 +46,7 @@ const ChannelsActions = ({
   setIdSort,
   setEnableBatchDelete,
   enableTagMode,
-  setEnableTagMode,
+  handleTagModeChange,
   statusFilter,
   setStatusFilter,
   getFormValues,
@@ -285,12 +285,7 @@ const ChannelsActions = ({
             <Switch
               size='small'
               checked={enableTagMode}
-              onChange={(v) => {
-                localStorage.setItem('enable-tag-mode', v + '');
-                setEnableTagMode(v);
-                setActivePage(1);
-                loadChannels(1, pageSize, idSort, v);
-              }}
+              onChange={handleTagModeChange}
             />
           </div>
 
