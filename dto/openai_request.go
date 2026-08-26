@@ -103,6 +103,8 @@ type GeneralOpenAIRequest struct {
 	ReturnImages           bool            `json:"return_images,omitempty"`
 	ReturnRelatedQuestions bool            `json:"return_related_questions,omitempty"`
 	SearchMode             string          `json:"search_mode,omitempty"`
+	// vLLM
+	ThinkingTokenBudget json.RawMessage `json:"thinking_token_budget,omitempty"`
 }
 
 type ChatToolProtocol string
