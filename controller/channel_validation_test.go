@@ -60,3 +60,55 @@ func TestValidateChannelPreservesLegacyEmptyGroupWhenEditing(t *testing.T) {
 		t.Fatalf("validateChannel() error = %v, want nil", err)
 	}
 }
+
+func TestPreserveChannelGroupWhenNewClientDidNotTouchIt(t *testing.T) {
+	touched := false
+	channel := &PatchChannel{
+		Channel:      model.Channel{Group: "default"},
+		GroupTouched: &touched,
+	}
+	origin := &model.Channel{Group: "OpenAI · 企业专属,OpenAI · 优质"}
+
+	preserveChannelGroupIfUntouched(channel, origin)
+
+	if channel.Group != origin.Group {
+		t.Fatalf("group = %q, want %q", channel.Group, origin.Group)
+	}
+}
+
+func TestPreserveChannelGroupAllowsExplicitChange(t *testing.T) {
+	touched := true
+	channel := &PatchChannel{
+		Channel:      model.Channel{Group: "default"},
+		GroupTouched: &touched,
+	}
+	origin := &model.Channel{Group: "OpenAI · 企业专属,OpenAI · 优质"}
+
+	preserveChannelGroupIfUntouched(channel, origin)
+
+	if channel.Group != "default" {
+		t.Fatalf("group = %q, want default", channel.Group)
+	}
+}
+
+func TestPreserveChannelGroupProtectsLegacyStaleForm(t *testing.T) {
+	channel := &PatchChannel{Channel: model.Channel{Group: "default"}}
+	origin := &model.Channel{Group: "OpenAI · 企业专属,OpenAI · 优质"}
+
+	preserveChannelGroupIfUntouched(channel, origin)
+
+	if channel.Group != origin.Group {
+		t.Fatalf("group = %q, want %q", channel.Group, origin.Group)
+	}
+}
+
+func TestPreserveChannelGroupKeepsCompatibleLegacyUpdates(t *testing.T) {
+	channel := &PatchChannel{Channel: model.Channel{Group: "Claude · 优质"}}
+	origin := &model.Channel{Group: "OpenAI · 优质"}
+
+	preserveChannelGroupIfUntouched(channel, origin)
+
+	if channel.Group != "Claude · 优质" {
+		t.Fatalf("group = %q, want Claude · 优质", channel.Group)
+	}
+}

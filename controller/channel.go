@@ -1086,6 +1086,27 @@ type PatchChannel struct {
 	model.Channel
 	MultiKeyMode *string `json:"multi_key_mode"`
 	KeyMode      *string `json:"key_mode"` // 多key模式下密钥覆盖或者追加
+	GroupTouched *bool   `json:"group_touched"`
+}
+
+func preserveChannelGroupIfUntouched(channel *PatchChannel, origin *model.Channel) {
+	if channel == nil || origin == nil {
+		return
+	}
+	if channel.GroupTouched != nil {
+		if !*channel.GroupTouched {
+			channel.Group = origin.Group
+		}
+		return
+	}
+
+	// 兼容部署前已打开的旧页面：旧表单会把未注册的分组字段误提交为 default。
+	// 仅拦截“原分组不是 default、请求却退化为 default”的特征，其他旧客户端更新保持兼容。
+	incomingGroup := strings.TrimSpace(channel.Group)
+	originGroup := strings.TrimSpace(origin.Group)
+	if incomingGroup == "default" && originGroup != "" && originGroup != "default" {
+		channel.Group = origin.Group
+	}
 }
 
 func applyChannelQuotaPolicyAnchor(channel *model.Channel, origin *model.Channel) {
@@ -1142,6 +1163,7 @@ func UpdateChannel(c *gin.Context) {
 
 	// Always copy the original ChannelInfo so that fields like IsMultiKey and MultiKeySize are retained.
 	channel.ChannelInfo = originChannel.ChannelInfo
+	preserveChannelGroupIfUntouched(&channel, originChannel)
 	applyChannelQuotaPolicyAnchor(&channel.Channel, originChannel)
 
 	// If the request explicitly specifies a new MultiKeyMode, apply it on top of the original info.
