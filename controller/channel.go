@@ -644,6 +644,9 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 		if channel.Key == "" {
 			return fmt.Errorf("channel cannot be empty")
 		}
+		if strings.TrimSpace(channel.Group) == "" {
+			return fmt.Errorf("请选择分组")
+		}
 
 		// 检查模型名称长度是否超过 255
 		for _, m := range channel.GetModels() {
