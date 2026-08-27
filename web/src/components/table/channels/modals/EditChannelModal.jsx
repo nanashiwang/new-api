@@ -89,6 +89,7 @@ import {
   collectNewDisallowedStatusCodeRedirects,
 } from './statusCodeRiskGuard';
 import {
+  areChannelGroupsEqual,
   mergeChannelFormValues,
   mergeChannelJsonObject,
   normalizeChannelGroups,
@@ -424,6 +425,7 @@ const EditChannelModal = (props) => {
   const formContainerRef = useRef(null);
   const doubaoApiClickCountRef = useRef(0);
   const initialModelsRef = useRef([]);
+  const initialGroupsRef = useRef([]);
   const initialModelMappingRef = useRef('');
   const initialStatusCodeMappingRef = useRef('');
 
@@ -790,6 +792,7 @@ const EditChannelModal = (props) => {
       } else {
         data.groups = data.group.split(',');
       }
+      initialGroupsRef.current = normalizeChannelGroups(data.groups);
       if (data.model_mapping !== '') {
         data.model_mapping = JSON.stringify(
           JSON.parse(data.model_mapping),
@@ -1384,6 +1387,7 @@ const EditChannelModal = (props) => {
   useEffect(() => {
     if (!isEdit) {
       initialModelsRef.current = [];
+      initialGroupsRef.current = [];
       initialModelMappingRef.current = '';
       initialStatusCodeMappingRef.current = '';
     }
@@ -2032,6 +2036,10 @@ const EditChannelModal = (props) => {
     let res;
     localInputs.auto_ban = localInputs.auto_ban ? 1 : 0;
     localInputs.models = localInputs.models.join(',');
+    localInputs.group_touched = !areChannelGroupsEqual(
+      localInputs.groups,
+      initialGroupsRef.current,
+    );
     localInputs.group = (localInputs.groups || []).join(',');
 
     let mode = 'single';

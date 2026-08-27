@@ -21,6 +21,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import {
+  areChannelGroupsEqual,
   mergeChannelFormValues,
   mergeChannelJsonObject,
   normalizeChannelGroups,
@@ -62,6 +63,20 @@ describe('channelFormUtils', () => {
         'Claude · 优质',
       ]),
       ['OpenAI · 优质', 'Claude · 优质'],
+    );
+  });
+
+  test('detects real group changes without treating order as a change', () => {
+    assert.equal(
+      areChannelGroupsEqual(
+        ['OpenAI · 优质', 'OpenAI · 企业专属'],
+        ['OpenAI · 企业专属', 'OpenAI · 优质'],
+      ),
+      true,
+    );
+    assert.equal(
+      areChannelGroupsEqual(['OpenAI · 优质'], ['OpenAI · 企业专属']),
+      false,
     );
   });
 

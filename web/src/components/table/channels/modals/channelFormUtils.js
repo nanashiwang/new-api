@@ -33,6 +33,15 @@ export const normalizeChannelGroups = (groups) => {
   );
 };
 
+export const areChannelGroupsEqual = (leftGroups, rightGroups) => {
+  const left = [...normalizeChannelGroups(leftGroups)].sort();
+  const right = [...normalizeChannelGroups(rightGroups)].sort();
+  return (
+    left.length === right.length &&
+    left.every((group, index) => group === right[index])
+  );
+};
+
 export const mergeChannelFormValues = (formValues = {}, inputs = {}) => ({
   ...formValues,
   ...inputs,
