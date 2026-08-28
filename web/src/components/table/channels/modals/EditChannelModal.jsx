@@ -89,6 +89,13 @@ import {
   collectNewDisallowedStatusCodeRedirects,
 } from './statusCodeRiskGuard';
 import {
+  areChannelGroupsEqual,
+  mergeChannelFormValues,
+  mergeChannelJsonObject,
+  normalizeChannelGroups,
+  parseChannelJsonObject,
+} from './channelFormUtils';
+import {
   IconSave,
   IconClose,
   IconServer,
@@ -176,7 +183,7 @@ const EditChannelModal = (props) => {
     models: [],
     auto_ban: 1,
     test_model: '',
-    groups: ['default'],
+    groups: [],
     priority: 0,
     weight: 0,
     tag: '',
@@ -418,6 +425,7 @@ const EditChannelModal = (props) => {
   const formContainerRef = useRef(null);
   const doubaoApiClickCountRef = useRef(0);
   const initialModelsRef = useRef([]);
+  const initialGroupsRef = useRef([]);
   const initialModelMappingRef = useRef('');
   const initialStatusCodeMappingRef = useRef('');
 
@@ -570,13 +578,16 @@ const EditChannelModal = (props) => {
       formApiRef.current.setValue(key, value);
     }
 
-    // 同步更新inputs状态
-    setInputs((prev) => ({ ...prev, [key]: value }));
-
-    // 生成setting JSON并更新
-    const newSettings = { ...channelSettings, [key]: value };
-    const settingsJson = JSON.stringify(newSettings);
-    handleInputChange('setting', settingsJson);
+    // 基于原始 setting 合并，避免编辑一个字段时删除当前前端不认识的配置。
+    setInputs((prev) => {
+      const settingsJson = JSON.stringify(
+        mergeChannelJsonObject(prev.setting, { [key]: value }),
+      );
+      if (formApiRef.current) {
+        formApiRef.current.setValue('setting', settingsJson);
+      }
+      return { ...prev, [key]: value, setting: settingsJson };
+    });
   };
 
   const handleChannelOtherSettingsChange = (key, value) => {
@@ -588,21 +599,16 @@ const EditChannelModal = (props) => {
       formApiRef.current.setValue(key, value);
     }
 
-    // 同步更新inputs状态
-    setInputs((prev) => ({ ...prev, [key]: value }));
-
-    // 需要更新settings，是一个json，例如{"azure_responses_version": "preview"}
-    let settings = {};
-    if (inputs.settings) {
-      try {
-        settings = JSON.parse(inputs.settings);
-      } catch (error) {
-        console.error('解析设置失败:', error);
+    // 基于原始 settings 合并，保留后端新增或当前页面尚未展示的字段。
+    setInputs((prev) => {
+      const settingsJson = JSON.stringify(
+        mergeChannelJsonObject(prev.settings, { [key]: value }),
+      );
+      if (formApiRef.current) {
+        formApiRef.current.setValue('settings', settingsJson);
       }
-    }
-    settings[key] = value;
-    const settingsJson = JSON.stringify(settings);
-    handleInputChange('settings', settingsJson);
+      return { ...prev, [key]: value, settings: settingsJson };
+    });
   };
 
   const applyClipboardConfig = (config) => {
@@ -771,6 +777,7 @@ const EditChannelModal = (props) => {
     setLoading(true);
     let res = await API.get(`/api/channel/${channelId}`);
     if (res === undefined) {
+      setLoading(false);
       return;
     }
     const { success, message, data } = res.data;
@@ -785,6 +792,7 @@ const EditChannelModal = (props) => {
       } else {
         data.groups = data.group.split(',');
       }
+      initialGroupsRef.current = normalizeChannelGroups(data.groups);
       if (data.model_mapping !== '') {
         data.model_mapping = JSON.stringify(
           JSON.parse(data.model_mapping),
@@ -983,7 +991,7 @@ const EditChannelModal = (props) => {
       setGroupVendor('');
       setInputs(data);
       if (formApiRef.current) {
-        formApiRef.current.setValues(data);
+        formApiRef.current.setValues(data, { isOverride: true });
       }
       if (data.auto_ban === 0) {
         setAutoBan(false);
@@ -1379,6 +1387,7 @@ const EditChannelModal = (props) => {
   useEffect(() => {
     if (!isEdit) {
       initialModelsRef.current = [];
+      initialGroupsRef.current = [];
       initialModelMappingRef.current = '';
       initialStatusCodeMappingRef.current = '';
     }
@@ -1635,8 +1644,11 @@ const EditChannelModal = (props) => {
   };
 
   const submit = async () => {
+    if (loading) {
+      return;
+    }
     const formValues = formApiRef.current ? formApiRef.current.getValues() : {};
-    let localInputs = { ...formValues };
+    let localInputs = mergeChannelFormValues(formValues, inputs);
 
     if (localInputs.type === 57) {
       if (batch) {
@@ -1751,6 +1763,11 @@ const EditChannelModal = (props) => {
       showInfo(t('请至少选择一个模型！'));
       return;
     }
+    localInputs.groups = normalizeChannelGroups(localInputs.groups);
+    if (localInputs.groups.length === 0) {
+      showInfo(t('请选择分组'));
+      return;
+    }
     if (
       localInputs.type === 45 &&
       (!localInputs.base_url || localInputs.base_url.trim() === '')
@@ -1856,8 +1873,20 @@ const EditChannelModal = (props) => {
       return;
     }
 
+    // 基于原始 setting 合并，避免无修改提交或编辑单个字段时丢失未知配置。
+    const originalChannelExtraSettings = parseChannelJsonObject(
+      localInputs.setting,
+    );
+    const originalQuotaPolicy =
+      originalChannelExtraSettings.quota_policy &&
+      typeof originalChannelExtraSettings.quota_policy === 'object' &&
+      !Array.isArray(originalChannelExtraSettings.quota_policy)
+        ? originalChannelExtraSettings.quota_policy
+        : {};
+
     // 生成渠道额外设置JSON
     const channelExtraSettings = {
+      ...originalChannelExtraSettings,
       force_format: localInputs.force_format || false,
       thinking_to_content: localInputs.thinking_to_content || false,
       proxy: localInputs.proxy || '',
@@ -1876,6 +1905,7 @@ const EditChannelModal = (props) => {
       crs_platform: localInputs.crs_platform || 'openai-responses',
       crs_auto_manage: localInputs.crs_auto_manage === true,
       quota_policy: {
+        ...originalQuotaPolicy,
         enabled: !!localInputs.quota_policy_enabled,
         period: localInputs.quota_policy_period || 'day',
         quota_limit: currencyAmountToQuota(
@@ -1887,14 +1917,7 @@ const EditChannelModal = (props) => {
     localInputs.setting = JSON.stringify(channelExtraSettings);
 
     // 处理 settings 字段（包括企业账户设置和字段透传控制）
-    let settings = {};
-    if (localInputs.settings) {
-      try {
-        settings = JSON.parse(localInputs.settings);
-      } catch (error) {
-        console.error('解析settings失败:', error);
-      }
-    }
+    let settings = parseChannelJsonObject(localInputs.settings);
 
     // type === 20: 设置企业账户标识，无论是true还是false都要传到后端
     if (localInputs.type === 20) {
@@ -2013,6 +2036,10 @@ const EditChannelModal = (props) => {
     let res;
     localInputs.auto_ban = localInputs.auto_ban ? 1 : 0;
     localInputs.models = localInputs.models.join(',');
+    localInputs.group_touched = !areChannelGroupsEqual(
+      localInputs.groups,
+      initialGroupsRef.current,
+    );
     localInputs.group = (localInputs.groups || []).join(',');
 
     let mode = 'single';
@@ -2372,6 +2399,8 @@ const EditChannelModal = (props) => {
             <Space>
               <Button
                 theme='solid'
+                loading={loading}
+                disabled={loading}
                 onClick={() => formApiRef.current?.submitForm()}
                 icon={<IconSave />}
               >
@@ -3752,7 +3781,10 @@ const EditChannelModal = (props) => {
                       label={t('是否自动禁用')}
                       checkedText={t('开')}
                       uncheckedText={t('关')}
-                      onChange={(value) => setAutoBan(value)}
+                      onChange={(value) => {
+                        setAutoBan(value);
+                        handleInputChange('auto_ban', value);
+                      }}
                       extraText={t(
                         '仅当自动禁用开启时有效，关闭后不会自动禁用该渠道',
                       )}
