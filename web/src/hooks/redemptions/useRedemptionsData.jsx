@@ -272,6 +272,75 @@ export const useRedemptionsData = () => {
     });
   };
 
+  // Batch manage selected administrator redemption codes.
+  const batchManageSelectedRedemptions = async (action) => {
+    if (selectedKeys.length === 0) {
+      showError(t('请至少选择一个兑换码！'));
+      return;
+    }
+    setLoading(true);
+    try {
+      const ids = selectedKeys.map((redemption) => redemption.id);
+      const res = await API.post('/api/redemption/manage/batch', {
+        ids,
+        action,
+      });
+      const { success, message, data } = res.data || {};
+      if (!success) {
+        showError(message || t('批量操作失败'));
+        return;
+      }
+      const successCount = Number(data?.success_count || 0);
+      const failedCount = Number(data?.failed_count || 0);
+      if (failedCount > 0) {
+        showSuccess(
+          t('批量操作完成: {{success}}个成功, {{failed}}个失败', {
+            success: successCount,
+            failed: failedCount,
+          }),
+        );
+      } else if (action === REDEMPTION_ACTIONS.DISABLE) {
+        showSuccess(
+          t('已批量禁用 {{count}} 个兑换码', { count: successCount }),
+        );
+      } else {
+        showSuccess(t('已删除 {{count}} 个兑换码', { count: successCount }));
+      }
+      setSelectedKeys([]);
+      await refresh();
+    } catch (error) {
+      showError(error?.message || t('批量操作失败'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const batchDisableSelectedRedemptions = () => {
+    if (selectedKeys.length === 0) {
+      showError(t('请至少选择一个兑换码！'));
+      return;
+    }
+    Modal.confirm({
+      title: t('批量禁用兑换码'),
+      content: t('仅未使用的管理员兑换码会被禁用，钱包兑换码不会被修改。'),
+      onOk: () => batchManageSelectedRedemptions(REDEMPTION_ACTIONS.DISABLE),
+    });
+  };
+
+  const batchDeleteSelectedRedemptions = () => {
+    if (selectedKeys.length === 0) {
+      showError(t('请至少选择一个兑换码！'));
+      return;
+    }
+    Modal.confirm({
+      title: t('批量删除兑换码'),
+      content: t(
+        '选中的管理员兑换码将被删除，钱包兑换码不会被修改，此操作不可撤销。',
+      ),
+      onOk: () => batchManageSelectedRedemptions(REDEMPTION_ACTIONS.DELETE),
+    });
+  };
+
   // 关闭编辑弹窗
   const closeEdit = () => {
     setShowEdit(false);
@@ -353,6 +422,8 @@ export const useRedemptionsData = () => {
     // Batch operations
     batchCopyRedemptions,
     batchDeleteRedemptions,
+    batchDisableSelectedRedemptions,
+    batchDeleteSelectedRedemptions,
 
     // 国际化 function
     t,

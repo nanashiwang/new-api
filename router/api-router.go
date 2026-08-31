@@ -417,6 +417,7 @@ func SetApiRouter(router *gin.Engine) {
 			redemptionRoute.POST("/review-cases/:id/resolve", controller.ResolveRedemptionReviewCase)
 			redemptionRoute.GET("/:id", controller.GetRedemption)
 			redemptionRoute.POST("/", controller.AddRedemption)
+			redemptionRoute.POST("/manage/batch", controller.ManageRedemptionBatch)
 			redemptionRoute.PUT("/", controller.UpdateRedemption)
 			redemptionRoute.DELETE("/invalid", controller.DeleteInvalidRedemption)
 			redemptionRoute.DELETE("/:id", controller.DeleteRedemption)

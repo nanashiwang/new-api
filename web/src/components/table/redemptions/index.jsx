@@ -66,6 +66,8 @@ const RedemptionsPage = () => {
     setShowEdit,
     batchCopyRedemptions,
     batchDeleteRedemptions,
+    batchDisableSelectedRedemptions,
+    batchDeleteSelectedRedemptions,
 
     // Filters state
     formInitValues,
@@ -114,6 +116,9 @@ const RedemptionsPage = () => {
               setShowEdit={setShowEdit}
               batchCopyRedemptions={batchCopyRedemptions}
               batchDeleteRedemptions={batchDeleteRedemptions}
+              batchDisableSelectedRedemptions={batchDisableSelectedRedemptions}
+              batchDeleteSelectedRedemptions={batchDeleteSelectedRedemptions}
+              loading={loading}
               openReviewModal={() => setReviewVisible(true)}
               pendingReviewCount={pendingReviewCount}
               t={t}

@@ -140,6 +140,25 @@ func DeleteRedemption(c *gin.Context) {
 	return
 }
 
+type redemptionBatchManageRequest struct {
+	Ids    []int  `json:"ids"`
+	Action string `json:"action"`
+}
+
+func ManageRedemptionBatch(c *gin.Context) {
+	request := redemptionBatchManageRequest{}
+	if err := c.ShouldBindJSON(&request); err != nil || len(request.Ids) == 0 {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	result, err := model.BatchManageRedemptions(request.Ids, request.Action)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, result)
+}
+
 func UpdateRedemption(c *gin.Context) {
 	statusOnly := c.Query("status_only")
 	redemption := model.Redemption{}

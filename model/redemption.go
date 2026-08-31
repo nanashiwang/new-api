@@ -884,6 +884,96 @@ func DeleteInvalidRedemptions() (int64, error) {
 	return result.RowsAffected, result.Error
 }
 
+type RedemptionBatchFailure struct {
+	Id      int    `json:"id"`
+	Message string `json:"message"`
+}
+
+type RedemptionBatchManageResult struct {
+	SuccessCount int                      `json:"success_count"`
+	FailedCount  int                      `json:"failed_count"`
+	Failures     []RedemptionBatchFailure `json:"failures,omitempty"`
+}
+
+// BatchManageRedemptions applies an administrator batch action to redemption
+// codes. Wallet-funded codes remain immutable, matching single-code actions.
+// Missing or ineligible rows are reported individually so one stale selection
+// cannot prevent the rest of the batch from being handled.
+func BatchManageRedemptions(ids []int, action string) (*RedemptionBatchManageResult, error) {
+	action = strings.ToLower(strings.TrimSpace(action))
+	if action != "disable" && action != "delete" {
+		return nil, errors.New("无效的兑换码批量操作")
+	}
+	if len(ids) == 0 {
+		return nil, errors.New("ids 不能为空")
+	}
+	if len(ids) > 1000 {
+		return nil, errors.New("单次最多操作1000个兑换码")
+	}
+	uniqueIDs := make([]int, 0, len(ids))
+	seen := make(map[int]struct{}, len(ids))
+	result := &RedemptionBatchManageResult{Failures: make([]RedemptionBatchFailure, 0)}
+	for _, id := range ids {
+		if id <= 0 {
+			result.Failures = append(result.Failures, RedemptionBatchFailure{Id: id, Message: "兑换码 ID 无效"})
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		uniqueIDs = append(uniqueIDs, id)
+	}
+	if len(uniqueIDs) == 0 {
+		result.FailedCount = len(result.Failures)
+		return result, nil
+	}
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		query := tx.Where("id IN ?", uniqueIDs)
+		if !common.UsingSQLite {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		var rows []Redemption
+		if err := query.Find(&rows).Error; err != nil {
+			return err
+		}
+		byID := make(map[int]*Redemption, len(rows))
+		for i := range rows {
+			byID[rows[i].Id] = &rows[i]
+		}
+		for _, id := range uniqueIDs {
+			redemption, exists := byID[id]
+			if !exists {
+				result.Failures = append(result.Failures, RedemptionBatchFailure{Id: id, Message: "兑换码不存在"})
+				continue
+			}
+			if redemption.FundingSource == RedemptionFundingSourceWallet {
+				result.Failures = append(result.Failures, RedemptionBatchFailure{Id: id, Message: ErrWalletFundedRedemptionImmutable.Error()})
+				continue
+			}
+			if action == "disable" {
+				if redemption.Status != common.RedemptionCodeStatusEnabled {
+					result.Failures = append(result.Failures, RedemptionBatchFailure{Id: id, Message: "仅未使用兑换码可以批量禁用"})
+					continue
+				}
+				if err := tx.Model(&Redemption{}).Where("id = ? AND status = ?", id, common.RedemptionCodeStatusEnabled).Update("status", common.RedemptionCodeStatusDisabled).Error; err != nil {
+					return err
+				}
+			} else if err := tx.Where("id = ?", id).Delete(&Redemption{}).Error; err != nil {
+				return err
+			}
+			result.SuccessCount++
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	result.FailedCount = len(result.Failures)
+	return result, nil
+}
+
 func normalizeRedemptionSubscriptionPurchaseQuantity(quantity int) int {
 	// 套餐兑换份数对外不允许出现 0 或负数，统一兜底为 1。
 	if quantity <= 0 {

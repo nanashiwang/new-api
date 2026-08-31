@@ -26,6 +26,9 @@ const RedemptionsActions = ({
   setShowEdit,
   batchCopyRedemptions,
   batchDeleteRedemptions,
+  batchDisableSelectedRedemptions,
+  batchDeleteSelectedRedemptions,
+  loading = false,
   openReviewModal,
   pendingReviewCount,
   t,
@@ -47,6 +50,28 @@ const RedemptionsActions = ({
         size='small'
       >
         {t('添加兑换码')}
+      </Button>
+
+      <Button
+        type='tertiary'
+        className='flex-1 md:flex-initial'
+        onClick={batchDisableSelectedRedemptions}
+        disabled={selectedKeys.length === 0 || loading}
+        loading={loading}
+        size='small'
+      >
+        {t('批量禁用')}
+      </Button>
+
+      <Button
+        type='danger'
+        className='flex-1 md:flex-initial'
+        onClick={batchDeleteSelectedRedemptions}
+        disabled={selectedKeys.length === 0 || loading}
+        loading={loading}
+        size='small'
+      >
+        {t('删除所选兑换码')}
       </Button>
 
       <Badge count={pendingReviewCount} overflowCount={99} type='danger'>
