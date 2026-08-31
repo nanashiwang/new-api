@@ -13,7 +13,7 @@ relay / billing / frontend / deployment items, ask the user those questions
 and wait. Ask for the facts. Do not tell the user to confirm a template.
 
 Before opening, refuse the same out-of-scope list as `.agents/github/ISSUE.md`
-(Coding Plan, reverse-engineered channels, third-party wrappers, Codex reverse-proxy
+(Coding Plan, reverse-engineered channels, Codex reverse-proxy
 compatibility, pass-through-only forwarding, third-party hosts, usage questions).
 Tell the user and do not open a PR.
 
@@ -46,7 +46,6 @@ accept it and **do not open a PR**.
 
 - Coding Plan
 - Reverse-engineered channels
-- Third-party API wrappers
 - Codex channel-type changes, or compatibility from exposing Codex as a general-purpose API
 - Codex API-specific protocol or behavior treated as standard OpenAI API behavior
 - Pass-through-only forwarding

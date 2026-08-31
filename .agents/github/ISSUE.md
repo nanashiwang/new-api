@@ -32,7 +32,6 @@ accept it, point them to the right place when there is one, and **do not file**.
 
 - Coding Plan
 - Reverse-engineered channels
-- Third-party API wrappers
 - Compatibility issues from exposing a Codex endpoint as a general-purpose API through a reverse proxy
 - Codex API-specific protocol or behavior treated as standard OpenAI API behavior (confirm with the channel or API provider)
 - Pass-through mode forwarding (pass-through forwards as-is; verify upstream yourself)
