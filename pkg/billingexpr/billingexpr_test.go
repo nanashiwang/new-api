@@ -199,6 +199,20 @@ func TestRequestProbeHelpers(t *testing.T) {
 	}
 }
 
+func TestRequestProbeNumericHelpersAcceptJSONIntegers(t *testing.T) {
+	cost, _, err := billingexpr.RunExprWithRequest(
+		`max(150000.0, (param("duration") == nil ? 1.0 : ceil(param("duration"))) * 110000.0)`,
+		billingexpr.TokenParams{},
+		billingexpr.RequestInput{Body: []byte(`{"duration":6}`)},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cost != 660000 {
+		t.Fatalf("cost = %v, want 660000", cost)
+	}
+}
+
 func TestHeaderProbeHelper(t *testing.T) {
 	cost, _, err := billingexpr.RunExprWithRequest(
 		`p * 0.5 + c * 1.0 * (has(header("anthropic-beta"), "fast-mode") ? 2 : 1)`,

@@ -419,7 +419,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		return fmt.Errorf("fetchTask failed for task %s: %w", taskId, err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		recordTaskPollingRateLimit(ctx, ch, resp)
 		return fmt.Errorf("fetchTask returned status %d for task %s", resp.StatusCode, taskId)
 	}

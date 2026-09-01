@@ -348,6 +348,45 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) types.
 	return priceData
 }
 
+// ModelPriceHelperTask applies expression-based pricing to asynchronous tasks
+// when configured. The expression can read request parameters such as
+// duration and resolution; other models retain the existing per-call behavior.
+func ModelPriceHelperTask(c *gin.Context, info *relaycommon.RelayInfo) (types.PriceData, error) {
+	if info == nil {
+		return types.PriceData{}, fmt.Errorf("relay info is nil")
+	}
+	exprStr, ok := billing_setting.GetTieredExpr(info.OriginModelName)
+	if !ok {
+		return ModelPriceHelperPerCall(c, info), nil
+	}
+	requestInput, err := ResolveIncomingBillingExprRequestInput(c, info)
+	if err != nil {
+		return types.PriceData{}, err
+	}
+	rawCost, _, err := billingexpr.RunExprWithRequest(exprStr, billingexpr.TokenParams{}, requestInput)
+	if err != nil {
+		return types.PriceData{}, fmt.Errorf("model %s tiered task expr run failed: %w", info.OriginModelName, err)
+	}
+	groupRatioInfo := HandleGroupRatio(c, info)
+	timeRatioInfo := ratio_setting.ResolveTimeRatio(info.OriginModelName, info.UsingGroup, info.UserGroup, info.StartTime)
+	quotaBeforeGroup := rawCost / 1_000_000 * common.QuotaPerUnit
+	quota, err := billingexpr.QuotaRoundChecked(quotaBeforeGroup * groupRatioInfo.GroupRatio * timeRatioInfo.EffectiveRatio())
+	if err != nil {
+		return types.PriceData{}, fmt.Errorf("model %s tiered task quota invalid: %w", info.OriginModelName, err)
+	}
+	priceData := types.PriceData{
+		Quota:                         quota,
+		QuotaToPreConsume:             quota,
+		ConservativeQuotaToPreConsume: quota,
+		GroupRatioInfo:                groupRatioInfo,
+		TimeRatioInfo:                 timeRatioInfo,
+		OtherRatios:                   map[string]float64{},
+	}
+	info.BillingRequestInput = &requestInput
+	info.PriceData = priceData
+	return priceData, nil
+}
+
 func ContainPriceOrRatio(modelName string) bool {
 	_, ok := ratio_setting.GetModelPrice(modelName, false)
 	if ok {

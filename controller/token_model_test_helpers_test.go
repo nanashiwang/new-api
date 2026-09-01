@@ -261,6 +261,20 @@ func TestResolveTestRequestPath_ImageGenerationModelUsesImagesEndpoint(t *testin
 	}
 }
 
+func TestResolveTestRequestPath_GrokVideoUsesVideosEndpoint(t *testing.T) {
+	requestPath, endpointType := resolveTestRequestPath(&model.Channel{Type: constant.ChannelTypeXai}, "grok-imagine-video", "")
+	if requestPath != "/v1/videos" {
+		t.Fatalf("unexpected request path: %s", requestPath)
+	}
+	if endpointType != string(constant.EndpointTypeOpenAIVideo) {
+		t.Fatalf("unexpected endpoint type: %s", endpointType)
+	}
+	request := buildTestRequest("grok-imagine-video", endpointType, &model.Channel{Type: constant.ChannelTypeXai}, false)
+	if _, ok := request.(*dto.OpenAIVideoRequest); !ok {
+		t.Fatalf("unexpected video test request type: %T", request)
+	}
+}
+
 func TestNormalizeTokenModelSupportedEndpointTypes_ImageGenerationUsesCanonicalEndpoint(t *testing.T) {
 	endpointTypes := normalizeTokenModelSupportedEndpointTypes("gpt-image-2", []constant.EndpointType{
 		constant.EndpointTypeOpenAI,

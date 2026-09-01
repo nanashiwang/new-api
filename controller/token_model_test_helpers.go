@@ -249,6 +249,8 @@ func collectTokenModelEndpointTypes(groups []string, models []string) (map[strin
 func normalizeTokenModelSupportedEndpointTypes(modelName string, supportedEndpointTypes []constant.EndpointType) []constant.EndpointType {
 	requestPath, _ := resolveTestRequestPath(nil, modelName, "")
 	switch requestPath {
+	case "/v1/videos":
+		return []constant.EndpointType{constant.EndpointTypeOpenAIVideo}
 	case "/v1/messages":
 		return []constant.EndpointType{constant.EndpointTypeAnthropic}
 	case "/v1/responses":

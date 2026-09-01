@@ -22,6 +22,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -972,7 +973,7 @@ func RelayTask(c *gin.Context) {
 			TimeRatioMatchedAt: relayInfo.PriceData.TimeRatioInfo.MatchedAt,
 			OtherRatios:        relayInfo.PriceData.OtherRatios,
 			OriginModelName:    relayInfo.OriginModelName,
-			PerCallBilling:     common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName),
+			PerCallBilling:     common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || billing_setting.GetBillingMode(relayInfo.OriginModelName) == billing_setting.BillingModeTieredExpr,
 		}
 		task.Quota = result.Quota
 		task.Data = result.TaskData

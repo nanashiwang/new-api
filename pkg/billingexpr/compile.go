@@ -2,7 +2,6 @@ package billingexpr
 
 import (
 	"fmt"
-	"math"
 	"strings"
 	"sync"
 
@@ -58,11 +57,11 @@ var compileEnvPrototypeV1 = map[string]interface{}{
 	"weekday": func(string) int { return 0 },
 	"month":   func(string) int { return 0 },
 	"day":     func(string) int { return 0 },
-	"max":     math.Max,
-	"min":     math.Min,
-	"abs":     math.Abs,
-	"ceil":    math.Ceil,
-	"floor":   math.Floor,
+	"max":     numericMax,
+	"min":     numericMin,
+	"abs":     numericAbs,
+	"ceil":    numericCeil,
+	"floor":   numericFloor,
 }
 
 func getCompileEnv(version int) map[string]interface{} {

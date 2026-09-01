@@ -97,11 +97,11 @@ func runProgram(prog *vm.Program, params TokenParams, request RequestInput) (flo
 		"weekday": func(tz string) int { return int(timeInZone(evaluationAt, tz).Weekday()) },
 		"month":   func(tz string) int { return int(timeInZone(evaluationAt, tz).Month()) },
 		"day":     func(tz string) int { return timeInZone(evaluationAt, tz).Day() },
-		"max":     math.Max,
-		"min":     math.Min,
-		"abs":     math.Abs,
-		"ceil":    math.Ceil,
-		"floor":   math.Floor,
+		"max":     numericMax,
+		"min":     numericMin,
+		"abs":     numericAbs,
+		"ceil":    numericCeil,
+		"floor":   numericFloor,
 	}
 
 	out, err := expr.Run(prog, env)

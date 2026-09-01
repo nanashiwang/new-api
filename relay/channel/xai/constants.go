@@ -8,6 +8,7 @@ var ModelList = []string{
 	"grok-4-fast-reasoning",
 	"grok-4-fast-non-reasoning",
 	"grok-4-0709",
+	"grok-4.6",
 	"grok-3-mini",
 	"grok-3",
 	"grok-2-vision-1212",
@@ -27,6 +28,7 @@ var ModelList = []string{
 	"grok-2-image-1212",
 	// video generation model
 	"grok-imagine-video",
+	"grok-imagine-video-1.5",
 }
 
 var ChannelName = "xai"

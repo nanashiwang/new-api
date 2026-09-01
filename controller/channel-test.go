@@ -22,6 +22,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/relay"
+	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -67,6 +68,13 @@ func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointTyp
 		return normalized
 	}
 	lowerModelName := strings.ToLower(strings.TrimSpace(modelName))
+	channelType := 0
+	if channel != nil {
+		channelType = channel.Type
+	}
+	if common.IsVideoGenerationModelForChannel(channelType, lowerModelName) {
+		return string(constant.EndpointTypeOpenAIVideo)
+	}
 	if common.IsImageGenerationModel(lowerModelName) ||
 		(channel != nil && channel.Type == constant.ChannelTypeVolcEngine && strings.Contains(lowerModelName, "seedream")) {
 		return string(constant.EndpointTypeImageGeneration)
@@ -120,6 +128,10 @@ func resolveTestRequestPath(channel *model.Channel, modelName, endpointType stri
 		return requestPath, endpointType
 	}
 
+	if channel != nil && common.IsVideoGenerationModelForChannel(channel.Type, modelName) {
+		return "/v1/videos", string(constant.EndpointTypeOpenAIVideo)
+	}
+
 	if strings.Contains(strings.ToLower(modelName), "rerank") {
 		requestPath = "/v1/rerank"
 	}
@@ -170,6 +182,8 @@ func shouldAutoStreamChannelTest(modelName string, requestPath string, endpointT
 	switch requestPath {
 	case "/v1/messages", "/v1/responses":
 		return true
+	case "/v1/videos":
+		return false
 	case "/v1/chat/completions":
 		return common.IsOpenAITextModel(modelName)
 	default:
@@ -222,6 +236,8 @@ func resolveRelayFormatForTest(requestPath string, endpointType string) types.Re
 			return types.RelayFormatRerank
 		case constant.EndpointTypeImageGeneration:
 			return types.RelayFormatOpenAIImage
+		case constant.EndpointTypeOpenAIVideo:
+			return types.RelayFormatTask
 		case constant.EndpointTypeEmbeddings:
 			return types.RelayFormatEmbedding
 		default:
@@ -234,6 +250,8 @@ func resolveRelayFormatForTest(requestPath string, endpointType string) types.Re
 		return types.RelayFormatEmbedding
 	case requestPath == "/v1/images/generations":
 		return types.RelayFormatOpenAIImage
+	case requestPath == "/v1/videos":
+		return types.RelayFormatTask
 	case requestPath == "/v1/messages":
 		return types.RelayFormatClaude
 	case strings.Contains(requestPath, "/v1beta/models"):
@@ -337,7 +355,24 @@ func executeChannelStyleTest(
 		billingStarted = true
 	}
 
+	var adaptor relaychannel.Adaptor
+	var taskAdaptor relaychannel.TaskAdaptor
+	isVideoTask := relayInfo.RelayMode == relayconstant.RelayModeVideoSubmit
 	apiType, _ := common.ChannelType2APIType(channel.Type)
+	if isVideoTask {
+		taskAdaptor = relay.GetTaskAdaptor(constant.TaskPlatform(strconv.Itoa(channel.Type)))
+		if taskAdaptor == nil {
+			err = fmt.Errorf("video task adaptor unavailable for channel type: %d", channel.Type)
+			result.context = c
+			result.info = relayInfo
+			result.localErr = err
+			result.newAPIError = types.NewError(err, types.ErrorCodeInvalidApiType)
+			return
+		}
+		taskAdaptor.Init(relayInfo)
+	} else {
+		adaptor = relay.GetAdaptor(apiType)
+	}
 	if relayInfo.RelayMode == relayconstant.RelayModeResponsesCompact &&
 		apiType != constant.APITypeOpenAI &&
 		apiType != constant.APITypeCodex {
@@ -348,8 +383,7 @@ func executeChannelStyleTest(
 		result.newAPIError = types.NewError(err, types.ErrorCodeInvalidApiType)
 		return
 	}
-	adaptor := relay.GetAdaptor(apiType)
-	if adaptor == nil {
+	if !isVideoTask && adaptor == nil {
 		err = fmt.Errorf("invalid api type: %d, adaptor is nil", apiType)
 		result.context = c
 		result.info = relayInfo
@@ -359,7 +393,9 @@ func executeChannelStyleTest(
 	}
 
 	common.SysLog(fmt.Sprintf("testing channel %d with model %s , info %+v ", channel.Id, testModel, relayInfo.ToString()))
-	adaptor.Init(relayInfo)
+	if adaptor != nil {
+		adaptor.Init(relayInfo)
+	}
 
 	var convertedRequest any
 	switch relayInfo.RelayMode {
@@ -407,6 +443,8 @@ func executeChannelStyleTest(
 			result.newAPIError = types.NewError(err, types.ErrorCodeConvertRequestFailed)
 			return
 		}
+	case relayconstant.RelayModeVideoSubmit:
+		convertedRequest = request
 	case relayconstant.RelayModeResponsesCompact:
 		switch req := request.(type) {
 		case *dto.OpenAIResponsesCompactionRequest:
@@ -471,7 +509,16 @@ func executeChannelStyleTest(
 
 	requestBody := bytes.NewBuffer(jsonData)
 	c.Request.Body = io.NopCloser(bytes.NewBuffer(jsonData))
-	resp, err := adaptor.DoRequest(c, relayInfo, requestBody)
+	var resp any
+	if isVideoTask {
+		var videoBody io.Reader
+		videoBody, err = taskAdaptor.BuildRequestBody(c, relayInfo)
+		if err == nil {
+			resp, err = taskAdaptor.DoRequest(c, relayInfo, videoBody)
+		}
+	} else {
+		resp, err = adaptor.DoRequest(c, relayInfo, requestBody)
+	}
 	if err != nil {
 		result.context = c
 		result.info = relayInfo
@@ -483,7 +530,11 @@ func executeChannelStyleTest(
 	var httpResp *http.Response
 	if resp != nil {
 		httpResp = resp.(*http.Response)
-		if httpResp.StatusCode != http.StatusOK {
+		validStatus := httpResp.StatusCode == http.StatusOK
+		if isVideoTask {
+			validStatus = httpResp.StatusCode >= http.StatusOK && httpResp.StatusCode < http.StatusMultipleChoices
+		}
+		if !validStatus {
 			responseBody, readErr := io.ReadAll(httpResp.Body)
 			if readErr != nil {
 				result.context = c
@@ -518,6 +569,34 @@ func executeChannelStyleTest(
 			}
 			return
 		}
+	}
+
+	if isVideoTask {
+		_, _, taskErr := taskAdaptor.DoResponse(c, httpResp, relayInfo)
+		if taskErr != nil {
+			result.context = c
+			result.info = relayInfo
+			result.localErr = taskErr.Error
+			result.newAPIError = types.NewError(taskErr.Error, types.ErrorCodeBadResponseBody)
+			return
+		}
+		// Video tests are real upstream submissions but do not return token
+		// usage. Settle at the already calculated request price so a successful
+		// test cannot leave a BillingSession's pre-consume reservation open.
+		if options.enableBilling && relayInfo.Billing != nil {
+			if err = service.SettleBilling(c, relayInfo, priceData.Quota); err != nil {
+				result.context = c
+				result.info = relayInfo
+				result.priceData = priceData
+				result.localErr = err
+				result.newAPIError = types.NewError(err, types.ErrorCodeModelPriceError)
+				return
+			}
+		}
+		result.context = c
+		result.info = relayInfo
+		result.priceData = priceData
+		return
 	}
 
 	usageAny, respErr := adaptor.DoResponse(c, httpResp, relayInfo)
@@ -676,6 +755,11 @@ func testChannel(channel *model.Channel, testUserID int, testModel string, endpo
 
 	info := execResult.info
 	usage := execResult.usage
+	if usage == nil {
+		// Asynchronous video submissions do not return token usage. Keep the
+		// log/settlement path total and avoid treating nil as a text response.
+		usage = &dto.Usage{}
+	}
 	priceData := execResult.priceData
 	respBody := execResult.responseBody
 	quota, tieredResult := settleTestQuota(info, priceData, usage)
@@ -723,6 +807,9 @@ func attachTestBillingRequestInput(info *relaycommon.RelayInfo, request dto.Requ
 }
 
 func settleTestQuota(info *relaycommon.RelayInfo, priceData types.PriceData, usage *dto.Usage) (int, *billingexpr.TieredResult) {
+	if usage == nil {
+		return priceData.Quota, nil
+	}
 	if usage != nil && info != nil && info.TieredBillingSnapshot != nil {
 		isClaudeUsageSemantic := usage.UsageSemantic == "anthropic" || info.GetFinalRequestRelayFormat() == types.RelayFormatClaude
 		usedVars := billingexpr.UsedVars(info.TieredBillingSnapshot.ExprString)
@@ -951,6 +1038,14 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 				N:       common.GetPointer(uint(1)),
 				Size:    "1024x1024",
 				Quality: quality,
+			}
+		case constant.EndpointTypeOpenAIVideo:
+			return &dto.OpenAIVideoRequest{
+				Model:       model,
+				Prompt:      "a simple test video",
+				Duration:    1,
+				Resolution:  "480p",
+				AspectRatio: "16:9",
 			}
 		case constant.EndpointTypeJinaRerank:
 			// 返回 RerankRequest
