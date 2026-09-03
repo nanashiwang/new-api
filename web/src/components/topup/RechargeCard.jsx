@@ -273,7 +273,7 @@ const RechargeCard = ({
                       extraText={
                         <div className='min-h-[44px]'>
                           <Text type='secondary' className='text-red-600'>
-                            {t('实付金额：')}
+                            {t('预计支付金额：')}
                             <span style={{ color: 'red' }}>
                               {hasSelectedPayMethod
                                 ? renderAmount()
@@ -383,7 +383,7 @@ const RechargeCard = ({
                             })}
                           </Space>
                           <Text type='tertiary' size='small'>
-                            {t('实付金额会按当前支付方式实时计算')}
+                            {t('预计支付金额会按当前支付方式实时计算')}
                           </Text>
                         </div>
                       ) : (

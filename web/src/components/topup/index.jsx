@@ -17,7 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useState, useContext, useRef } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useState,
+  useContext,
+  useRef,
+} from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   API,
@@ -36,7 +42,10 @@ import {
   displayAmountToQuota,
   quotaToDisplayAmount,
 } from '../../helpers/quota';
-import { getPaymentCurrencySymbol } from '../../helpers/render';
+import {
+  createPaymentQuote,
+  formatPaymentMoney,
+} from '../../helpers/paymentCurrency';
 import {
   Button,
   Card,
@@ -73,6 +82,12 @@ import SubscriptionIssuanceModal from '../subscriptions/SubscriptionIssuanceModa
 
 const { Text, Title } = Typography;
 
+const EMPTY_PAYMENT_QUOTE = Object.freeze({
+  amount: 0,
+  currency: '',
+  estimated: true,
+});
+
 const roundCurrencyAmountUp = (amount) => {
   const numericAmount = Number(amount || 0);
   const cents = Math.round(numericAmount * 100);
@@ -107,12 +122,12 @@ const getInviteOrigin = () => {
 };
 
 const TopUp = () => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [userState, userDispatch] = useContext(UserContext);
   const [statusState] = useContext(StatusContext);
 
   const [redemptionCode, setRedemptionCode] = useState('');
-  const [amount, setAmount] = useState(0.0);
+  const [paymentQuote, setPaymentQuote] = useState(EMPTY_PAYMENT_QUOTE);
   const [minTopUp, setMinTopUp] = useState(statusState?.status?.min_topup || 1);
   const [topUpCount, setTopUpCount] = useState(
     statusState?.status?.min_topup || 1,
@@ -147,6 +162,12 @@ const TopUp = () => {
 
   const affFetchedRef = useRef(false);
   const amountRequestRef = useRef(0);
+
+  const resetPaymentQuote = useCallback(() => {
+    amountRequestRef.current += 1;
+    setPaymentQuote(EMPTY_PAYMENT_QUOTE);
+    setAmountLoading(false);
+  }, []);
 
   // 邀请状态
   const [affLink, setAffLink] = useState('');
@@ -337,8 +358,8 @@ const TopUp = () => {
     const { showErrorToast = false } = options;
     const normalizedValue = Number(value ?? topUpCount);
     if (!paymentMethod) {
-      setAmount(0);
-      return 0;
+      resetPaymentQuote();
+      return null;
     }
 
     const requestId = amountRequestRef.current + 1;
@@ -357,15 +378,24 @@ const TopUp = () => {
       });
       if (requestId !== amountRequestRef.current) return null;
       if (res?.data?.message === 'success') {
-        const quotedAmount = parseFloat(res.data.data);
-        setAmount(quotedAmount);
-        return quotedAmount;
+        const quote = createPaymentQuote(
+          res.data.data,
+          res.data.currency,
+          paymentMethod,
+          res.data.estimated,
+        );
+        if (quote) {
+          setPaymentQuote(quote);
+          return quote;
+        }
       }
-      setAmount(0);
+      setPaymentQuote(EMPTY_PAYMENT_QUOTE);
       if (showErrorToast) showError(res?.data?.data || t('获取金额失败'));
-      return 0;
+      return null;
     } catch (err) {
-      if (requestId === amountRequestRef.current) setAmount(0);
+      if (requestId === amountRequestRef.current) {
+        setPaymentQuote(EMPTY_PAYMENT_QUOTE);
+      }
       return null;
     } finally {
       if (requestId === amountRequestRef.current) setAmountLoading(false);
@@ -404,10 +434,10 @@ const TopUp = () => {
     setPaymentLoading(true);
     try {
       debouncedGetAmount.cancel();
-      const quotedAmount = await fetchQuotedAmount(topUpCount, payWay, {
+      const quote = await fetchQuotedAmount(topUpCount, payWay, {
         showErrorToast: true,
       });
-      if (quotedAmount !== null && quotedAmount > 0) setOpen(true);
+      if (quote?.amount > 0) setOpen(true);
     } catch (error) {
     } finally {
       setPaymentLoading(false);
@@ -776,7 +806,7 @@ const TopUp = () => {
   useEffect(() => {
     if (!payMethods.length) {
       if (payWay) setPayWay('');
-      setAmount(0);
+      resetPaymentQuote();
       return;
     }
 
@@ -789,7 +819,7 @@ const TopUp = () => {
     }
 
     if (payWay) setPayWay('');
-    setAmount(0);
+    resetPaymentQuote();
   }, [
     payMethods,
     payWay,
@@ -797,21 +827,26 @@ const TopUp = () => {
     enableOnlineTopUp,
     enableStripeTopUp,
     enableWaffoTopUp,
+    resetPaymentQuote,
   ]);
 
   useEffect(() => {
     debouncedGetAmount.cancel();
+    resetPaymentQuote();
     if (!payWay || !canUsePayMethodForAmount(payWay, topUpCount)) {
-      setAmount(0);
       return;
     }
 
     debouncedGetAmount(topUpCount, { paymentMethod: payWay });
     return () => debouncedGetAmount.cancel();
-  }, [payWay, topUpCount]);
+  }, [payWay, topUpCount, resetPaymentQuote]);
 
-  const renderAmount = () =>
-    `${getPaymentCurrencySymbol()}${Number(amount || 0).toFixed(2)}`;
+  const renderAmount = (value = paymentQuote.amount) =>
+    formatPaymentMoney(
+      value,
+      paymentQuote.currency,
+      i18n.resolvedLanguage || i18n.language || 'zh-CN',
+    );
 
   const updateWalletQuota = (remainingQuota, remainingTransferableQuota) => {
     if (!userState.user) return;
@@ -883,7 +918,7 @@ const TopUp = () => {
         renderAmount={renderAmount}
         payWay={payWay}
         payMethods={payMethods}
-        amountNumber={amount}
+        amountNumber={paymentQuote.amount}
         discountRate={topupInfo?.discount?.[topUpCount] || 1.0}
       />
       <TopupHistoryModal

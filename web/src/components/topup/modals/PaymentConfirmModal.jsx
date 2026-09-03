@@ -73,7 +73,7 @@ const PaymentConfirmModal = ({
             </div>
             <div className='flex justify-between items-center'>
               <Text strong className='text-slate-700 dark:text-slate-200'>
-                {t('实付金额')}：
+                {t('预计支付金额')}：
               </Text>
               <div className='flex flex-col items-end'>
                 <div className='flex items-baseline space-x-2'>
@@ -109,7 +109,7 @@ const PaymentConfirmModal = ({
                     {t('原价')}：
                   </Text>
                   <Text delete className='text-slate-500 dark:text-slate-400'>
-                    {`${originalAmount.toFixed(2)} ${t('元')}`}
+                    {renderAmount(originalAmount)}
                   </Text>
                 </div>
                 <div className='flex justify-between items-center'>
@@ -117,7 +117,7 @@ const PaymentConfirmModal = ({
                     {t('优惠')}：
                   </Text>
                   <Text className='text-emerald-600 dark:text-emerald-400'>
-                    {`- ${discountAmount.toFixed(2)} ${t('元')}`}
+                    {`- ${renderAmount(discountAmount)}`}
                   </Text>
                 </div>
               </>
@@ -212,6 +212,9 @@ const PaymentConfirmModal = ({
                 })()}
               </div>
             </div>
+            <Text type='tertiary' size='small' className='block text-right'>
+              {t('最终金额以支付页面显示为准')}
+            </Text>
           </div>
         </Card>
       </div>

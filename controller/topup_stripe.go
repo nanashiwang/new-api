@@ -1,13 +1,14 @@
 package controller
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
-	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -19,7 +20,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stripe/stripe-go/v81"
-	"github.com/stripe/stripe-go/v81/checkout/session"
+	stripeclient "github.com/stripe/stripe-go/v81/client"
 	"github.com/stripe/stripe-go/v81/webhook"
 	"github.com/thanhpk/randstr"
 )
@@ -29,6 +30,14 @@ const (
 )
 
 var stripeAdaptor = &StripeAdaptor{}
+
+type stripePriceCurrencyLoaderFunc func(ctx context.Context, apiSecret string, priceID string) (string, error)
+
+var (
+	stripePriceCurrencyCacheMu sync.RWMutex
+	stripePriceCurrencyCache                                 = make(map[string]string)
+	stripePriceCurrencyLoader  stripePriceCurrencyLoaderFunc = loadStripePriceCurrency
+)
 
 // StripePayRequest represents a payment request for Stripe checkout.
 type StripePayRequest struct {
@@ -91,7 +100,13 @@ func (*StripeAdaptor) RequestAmount(c *gin.Context, req *StripePayRequest) {
 		c.JSON(200, gin.H{"message": "error", "data": "充值金额过低"})
 		return
 	}
-	c.JSON(200, gin.H{"message": "success", "data": strconv.FormatFloat(payMoney, 'f', 2, 64)})
+	currency, err := resolveStripePriceCurrency(c.Request.Context())
+	if err != nil {
+		log.Printf("获取 Stripe Price 币种失败: %v", err)
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "获取 Stripe 支付币种失败，请联系管理员检查价格配置"})
+		return
+	}
+	writePaymentQuote(c, payMoney, currency)
 }
 
 func (*StripeAdaptor) RequestPay(c *gin.Context, req *StripePayRequest) {
@@ -126,7 +141,7 @@ func (*StripeAdaptor) RequestPay(c *gin.Context, req *StripePayRequest) {
 	reference := fmt.Sprintf("new-api-ref-%d-%d-%s", user.Id, time.Now().UnixMilli(), randstr.String(4))
 	referenceId := "ref_" + common.Sha1([]byte(reference))
 
-	checkout, err := genStripeLink(referenceId, user.StripeCustomer, user.Email, req.Amount, req.SuccessURL, req.CancelURL)
+	checkout, err := genStripeLink(c.Request.Context(), referenceId, user.StripeCustomer, user.Email, req.Amount, req.SuccessURL, req.CancelURL)
 	if err != nil {
 		log.Println("获取Stripe Checkout支付链接失败", err)
 		c.JSON(200, gin.H{"message": "error", "data": "拉起支付失败"})
@@ -388,13 +403,11 @@ func sessionExpired(event stripe.Event) {
 //   - cancelURL: custom URL to redirect when payment is canceled (empty for default)
 //
 // Returns the checkout session URL or an error if the session creation fails.
-func genStripeLink(referenceId string, customerId string, email string, amount int64, successURL string, cancelURL string) (stripeCheckoutResult, error) {
+func genStripeLink(ctx context.Context, referenceId string, customerId string, email string, amount int64, successURL string, cancelURL string) (stripeCheckoutResult, error) {
 	checkout := stripeCheckoutResult{}
 	if !strings.HasPrefix(setting.StripeApiSecret, "sk_") && !strings.HasPrefix(setting.StripeApiSecret, "rk_") {
 		return checkout, fmt.Errorf("无效的Stripe API密钥")
 	}
-
-	stripe.Key = setting.StripeApiSecret
 
 	// Use custom URLs if provided, otherwise use defaults
 	if successURL == "" {
@@ -417,6 +430,7 @@ func genStripeLink(referenceId string, customerId string, email string, amount i
 		Mode:                stripe.String(string(stripe.CheckoutSessionModePayment)),
 		AllowPromotionCodes: stripe.Bool(setting.StripePromotionCodesEnabled),
 	}
+	params.Context = ctx
 
 	if "" == customerId {
 		if "" != email {
@@ -428,7 +442,8 @@ func genStripeLink(referenceId string, customerId string, email string, amount i
 		params.Customer = stripe.String(customerId)
 	}
 
-	result, err := session.New(params)
+	stripeClient := stripeclient.New(setting.StripeApiSecret, nil)
+	result, err := stripeClient.CheckoutSessions.New(params)
 	if err != nil {
 		return checkout, err
 	}
@@ -437,6 +452,57 @@ func genStripeLink(referenceId string, customerId string, email string, amount i
 	checkout.Currency = model.NormalizePaymentCurrency(string(result.Currency))
 	checkout.Money = stripeAmountFromMinorUnits(result.AmountTotal, checkout.Currency)
 	return checkout, nil
+}
+
+func loadStripePriceCurrency(ctx context.Context, apiSecret string, priceID string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+
+	stripeClient := stripeclient.New(apiSecret, nil)
+	params := &stripe.PriceParams{}
+	params.Context = ctx
+	price, err := stripeClient.Prices.Get(priceID, params)
+	if err != nil {
+		return "", err
+	}
+	if price == nil || price.Deleted {
+		return "", fmt.Errorf("Stripe Price 不存在")
+	}
+	currency := model.NormalizePaymentCurrency(string(price.Currency))
+	if currency == "" {
+		return "", fmt.Errorf("Stripe Price 币种无效")
+	}
+	return currency, nil
+}
+
+func resolveStripePriceCurrency(ctx context.Context) (string, error) {
+	apiSecret := strings.TrimSpace(setting.StripeApiSecret)
+	priceID := strings.TrimSpace(setting.StripePriceId)
+	if (!strings.HasPrefix(apiSecret, "sk_") && !strings.HasPrefix(apiSecret, "rk_")) || priceID == "" {
+		return "", fmt.Errorf("Stripe API 密钥或 Price ID 未正确配置")
+	}
+
+	cacheKey := fmt.Sprintf("%x:%s", common.Sha256Raw([]byte(apiSecret)), priceID)
+	stripePriceCurrencyCacheMu.RLock()
+	currency, ok := stripePriceCurrencyCache[cacheKey]
+	stripePriceCurrencyCacheMu.RUnlock()
+	if ok {
+		return currency, nil
+	}
+
+	currency, err := stripePriceCurrencyLoader(ctx, apiSecret, priceID)
+	if err != nil {
+		return "", err
+	}
+	currency = model.NormalizePaymentCurrency(currency)
+	if currency == "" {
+		return "", fmt.Errorf("Stripe Price 币种无效")
+	}
+
+	stripePriceCurrencyCacheMu.Lock()
+	stripePriceCurrencyCache[cacheKey] = currency
+	stripePriceCurrencyCacheMu.Unlock()
+	return currency, nil
 }
 
 func stripeAmountFromMinorUnits(amount int64, currency string) float64 {

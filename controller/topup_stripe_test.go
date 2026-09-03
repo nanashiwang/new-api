@@ -1,10 +1,12 @@
 package controller
 
 import (
+	"context"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/stretchr/testify/require"
 	"github.com/stripe/stripe-go/v81"
 )
@@ -219,4 +221,74 @@ func TestStripeSessionCompleted_LegacyAdaptiveReplayRepairsPaymentWithoutQuota(t
 	savedUser, err := model.GetUserById(user.Id, false)
 	require.NoError(t, err)
 	require.Equal(t, 100, savedUser.Quota)
+}
+
+func TestResolveStripePriceCurrencyUsesConfiguredPriceAndCache(t *testing.T) {
+	originalSecret := setting.StripeApiSecret
+	originalPriceID := setting.StripePriceId
+	originalLoader := stripePriceCurrencyLoader
+	t.Cleanup(func() {
+		setting.StripeApiSecret = originalSecret
+		setting.StripePriceId = originalPriceID
+		stripePriceCurrencyLoader = originalLoader
+		stripePriceCurrencyCacheMu.Lock()
+		stripePriceCurrencyCache = make(map[string]string)
+		stripePriceCurrencyCacheMu.Unlock()
+	})
+
+	stripePriceCurrencyCacheMu.Lock()
+	stripePriceCurrencyCache = make(map[string]string)
+	stripePriceCurrencyCacheMu.Unlock()
+	setting.StripeApiSecret = "sk_test_currency"
+	setting.StripePriceId = "price_usd"
+	calls := 0
+	stripePriceCurrencyLoader = func(_ context.Context, apiSecret string, priceID string) (string, error) {
+		calls++
+		require.Equal(t, setting.StripeApiSecret, apiSecret)
+		if priceID == "price_usd" {
+			return "usd", nil
+		}
+		return "eur", nil
+	}
+
+	currency, err := resolveStripePriceCurrency(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "USD", currency)
+
+	currency, err = resolveStripePriceCurrency(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "USD", currency)
+	require.Equal(t, 1, calls)
+
+	setting.StripePriceId = "price_eur"
+	currency, err = resolveStripePriceCurrency(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "EUR", currency)
+	require.Equal(t, 2, calls)
+}
+
+func TestResolveStripePriceCurrencyRejectsInvalidProviderCurrency(t *testing.T) {
+	originalSecret := setting.StripeApiSecret
+	originalPriceID := setting.StripePriceId
+	originalLoader := stripePriceCurrencyLoader
+	t.Cleanup(func() {
+		setting.StripeApiSecret = originalSecret
+		setting.StripePriceId = originalPriceID
+		stripePriceCurrencyLoader = originalLoader
+		stripePriceCurrencyCacheMu.Lock()
+		stripePriceCurrencyCache = make(map[string]string)
+		stripePriceCurrencyCacheMu.Unlock()
+	})
+
+	stripePriceCurrencyCacheMu.Lock()
+	stripePriceCurrencyCache = make(map[string]string)
+	stripePriceCurrencyCacheMu.Unlock()
+	setting.StripeApiSecret = "rk_test_currency"
+	setting.StripePriceId = "price_invalid"
+	stripePriceCurrencyLoader = func(_ context.Context, _ string, _ string) (string, error) {
+		return "US", nil
+	}
+
+	_, err := resolveStripePriceCurrency(context.Background())
+	require.Error(t, err)
 }

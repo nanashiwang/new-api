@@ -143,7 +143,7 @@ func RequestWaffoAmount(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "success", "data": strconv.FormatFloat(payMoney, 'f', 2, 64)})
+	writePaymentQuote(c, payMoney, getWaffoCurrency())
 }
 
 // RequestWaffoPay 创建 Waffo 支付订单

@@ -403,7 +403,7 @@ func RequestAmount(c *gin.Context) {
 		c.JSON(200, gin.H{"message": "error", "data": "充值金额过低"})
 		return
 	}
-	c.JSON(200, gin.H{"message": "success", "data": strconv.FormatFloat(payMoney, 'f', 2, 64)})
+	writePaymentQuote(c, payMoney, "CNY")
 }
 
 func GetUserTopUps(c *gin.Context) {
