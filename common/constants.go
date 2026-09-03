@@ -75,6 +75,12 @@ var EmailLoginAuthServerList = []string{
 var DebugEnabled bool
 var MemoryCacheEnabled bool
 
+// PulseUsageLogRequired is an operator-controlled safety gate. When enabled,
+// the usage log cannot be disabled because Meta Pulse treats LOG_DB as its
+// usage fact source. It is intentionally separate from LogConsumeEnabled,
+// which remains the persisted legacy option shown in the admin console.
+var PulseUsageLogRequired bool
+
 var LogConsumeEnabled = true
 
 var TLSInsecureSkipVerify bool

@@ -304,7 +304,17 @@ func SyncOptions(frequency int) {
 	}
 }
 
+func validatePulseUsageLogOption(key string, value string) error {
+	if key == "LogConsumeEnabled" && strings.EqualFold(strings.TrimSpace(value), "false") && common.PulseUsageLogRequired {
+		return errors.New("Meta Pulse 已启用，不能关闭消费日志（PULSE_USAGE_LOG_REQUIRED=true）")
+	}
+	return nil
+}
+
 func UpdateOption(key string, value string) error {
+	if err := validatePulseUsageLogOption(key, value); err != nil {
+		return err
+	}
 	isTieredBillingField := key == "billing_setting.billing_mode" || key == "billing_setting.billing_expr"
 	if isTieredBillingField {
 		tieredBillingOptionMutex.Lock()
@@ -422,6 +432,9 @@ func updateOptionMap(key string, value string) (err error) {
 }
 
 func updateOptionMapUnlocked(key string, value string) (err error) {
+	if err = validatePulseUsageLogOption(key, value); err != nil {
+		return err
+	}
 	// Validate the combined settings before publishing either snapshot. This
 	// prevents a malformed persisted value from replacing the last good value.
 	if key == "InviteBindingSettings" {

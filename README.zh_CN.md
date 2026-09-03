@@ -370,6 +370,7 @@ docker run --name new-api -d --restart always \
 | `STREAM_SCANNER_MAX_BUFFER_MB`  | 流式扫描器单行最大缓冲（MB），图像生成等超大 `data:` 片段（如 4K 图片 base64）需适当调大 | `64`                 |
 | `MAX_REQUEST_BODY_MB`           | 请求体最大大小（MB，**解压后**计；防止超大请求/zip bomb 导致内存暴涨），超过将返回 `413` | `256`                |
 | `AZURE_DEFAULT_API_VERSION`     | Azure API 版本                                                                           | `2025-04-01-preview` |
+| `PULSE_USAGE_LOG_REQUIRED`      | Meta Pulse 依赖 LOG_DB 时设为 `true`，禁止后台关闭消费日志；未启用 Pulse 时可保持 `false` | `false`              |
 | `ERROR_LOG_ENABLED`             | 错误日志开关                                                                             | `false`              |
 | `PYROSCOPE_URL`                 | Pyroscope 服务地址                                                                       | -                    |
 | `PYROSCOPE_APP_NAME`            | Pyroscope 应用名                                                                         | `new-api`            |

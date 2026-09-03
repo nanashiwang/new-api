@@ -122,6 +122,14 @@ func InitEnv() {
 	GeminiSafetySetting = GetEnvOrDefaultString("GEMINI_SAFETY_SETTING", "BLOCK_NONE")
 	CohereSafetySetting = GetEnvOrDefaultString("COHERE_SAFETY_SETTING", "NONE")
 
+	// Meta Pulse consumes LOG_DB as a source of truth. The explicit gate keeps
+	// an operator from disabling consume logs while Pulse is in service.
+	PulseUsageLogRequired = GetEnvOrDefaultBool("PULSE_USAGE_LOG_REQUIRED", false)
+	if PulseUsageLogRequired {
+		// Fail closed even if a stale persisted option is loaded later.
+		LogConsumeEnabled = true
+	}
+
 	// Initialize rate limit variables
 	GlobalApiRateLimitEnable = GetEnvOrDefaultBool("GLOBAL_API_RATE_LIMIT_ENABLE", true)
 	GlobalApiRateLimitNum = GetEnvOrDefault("GLOBAL_API_RATE_LIMIT", 180)
