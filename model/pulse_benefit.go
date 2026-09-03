@@ -35,6 +35,23 @@ type PulseBenefitGrantRequest struct {
 	PayloadHash       string `json:"payload_hash,omitempty"`
 }
 
+// PulseBenefitReceipt reserves source_ref before quota is changed. The
+// dedicated unique key keeps conflict semantics correct even when concurrent
+// requests carry different user IDs, while BenefitChangeRecord keeps the real
+// target_id required by the benefit audit trail.
+type PulseBenefitReceipt struct {
+	Id          int    `json:"id"`
+	SourceRef   string `json:"source_ref" gorm:"type:varchar(255);not null;uniqueIndex"`
+	PayloadHash string `json:"payload_hash" gorm:"type:char(64);not null"`
+	UserId      int    `json:"user_id" gorm:"not null;index"`
+	CreatedAt   int64  `json:"created_at" gorm:"bigint;index"`
+}
+
+func (r *PulseBenefitReceipt) BeforeCreate(tx *gorm.DB) error {
+	r.CreatedAt = common.GetTimestamp()
+	return nil
+}
+
 type PulseBenefitResult struct {
 	SourceRef   string `json:"source_ref"`
 	Status      string `json:"status"`
@@ -59,6 +76,21 @@ func GrantPulseBenefit(req PulseBenefitGrantRequest) (PulseBenefitResult, error)
 
 	result := PulseBenefitResult{SourceRef: req.SourceRef, PayloadHash: fingerprint}
 	err = DB.Transaction(func(tx *gorm.DB) error {
+		receipt, findErr := findPulseReceiptTx(tx, req.SourceRef)
+		if findErr != nil {
+			return findErr
+		}
+		if receipt != nil {
+			if receipt.PayloadHash != fingerprint || receipt.UserId != req.UserID {
+				return ErrPulseBenefitConflict
+			}
+			result.Status = "already_applied"
+			result.Applied = true
+			return nil
+		}
+
+		// Upgrade compatibility: register a pre-receipt grant without changing
+		// quota, then continue with the same idempotency contract.
 		existing, findErr := findPulseGrantTx(tx, req.SourceRef)
 		if findErr != nil {
 			return findErr
@@ -67,9 +99,15 @@ func GrantPulseBenefit(req PulseBenefitGrantRequest) (PulseBenefitResult, error)
 			if existing.PayloadHash == "" || existing.PayloadHash != fingerprint || existing.UserId != req.UserID {
 				return ErrPulseBenefitConflict
 			}
+			if err := createPulseReceiptTx(tx, req.SourceRef, fingerprint, req.UserID); err != nil {
+				return err
+			}
 			result.Status = "already_applied"
 			result.Applied = true
 			return nil
+		}
+		if err := createPulseReceiptTx(tx, req.SourceRef, fingerprint, req.UserID); err != nil {
+			return err
 		}
 
 		record := &BenefitChangeRecord{
@@ -79,10 +117,7 @@ func GrantPulseBenefit(req PulseBenefitGrantRequest) (PulseBenefitResult, error)
 			SourceRef:   req.SourceRef,
 			UserId:      req.UserID,
 			TargetType:  BenefitTargetUserQuota,
-			// Pulse has exactly one grant per source_ref. A stable target ID
-			// makes the existing cross-database unique index reject concurrent
-			// requests even when an attacker changes user_id.
-			TargetId:    0,
+			TargetId:    req.UserID,
 			PayloadHash: fingerprint,
 			Detail: marshalBenefitDetail(&QuotaBenefitDetail{
 				QuotaDelta: req.Amount,
@@ -90,9 +125,6 @@ func GrantPulseBenefit(req PulseBenefitGrantRequest) (PulseBenefitResult, error)
 			}),
 		}
 		if err := tx.Create(record).Error; err != nil {
-			if isBenefitDuplicateKeyErr(err) {
-				return fmt.Errorf("%w: %v", errPulseBenefitDuplicate, err)
-			}
 			return err
 		}
 		if err := GrantUserQuotaTx(tx, req.UserID, req.Amount, 0); err != nil {
@@ -113,14 +145,14 @@ func GrantPulseBenefit(req PulseBenefitGrantRequest) (PulseBenefitResult, error)
 	}
 	// A concurrent transaction won the unique source_ref race. Read its
 	// committed fingerprint after the failed transaction has rolled back.
-	existing, findErr := findPulseGrantTx(DB, req.SourceRef)
+	receipt, findErr := findPulseReceiptTx(DB, req.SourceRef)
 	if findErr != nil {
 		return PulseBenefitResult{}, findErr
 	}
-	if existing == nil {
+	if receipt == nil {
 		return PulseBenefitResult{}, err
 	}
-	if existing.PayloadHash == "" || existing.PayloadHash != fingerprint || existing.UserId != req.UserID {
+	if receipt.PayloadHash != fingerprint || receipt.UserId != req.UserID {
 		return PulseBenefitResult{}, ErrPulseBenefitConflict
 	}
 	result.Status = "already_applied"
@@ -205,6 +237,35 @@ func pulseBenefitFingerprint(req PulseBenefitGrantRequest) (string, error) {
 	}
 	digest := sha256.Sum256(payload)
 	return fmt.Sprintf("%x", digest[:]), nil
+}
+
+func createPulseReceiptTx(tx *gorm.DB, sourceRef, payloadHash string, userID int) error {
+	receipt := &PulseBenefitReceipt{SourceRef: sourceRef, PayloadHash: payloadHash, UserId: userID}
+	if err := tx.Create(receipt).Error; err != nil {
+		if isBenefitDuplicateKeyErr(err) {
+			return fmt.Errorf("%w: %v", errPulseBenefitDuplicate, err)
+		}
+		return err
+	}
+	return nil
+}
+
+func findPulseReceiptTx(tx *gorm.DB, sourceRef string) (*PulseBenefitReceipt, error) {
+	if tx == nil {
+		tx = DB
+	}
+	query := tx.Where("source_ref = ?", sourceRef)
+	if tx != DB && !common.UsingSQLite {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	var receipt PulseBenefitReceipt
+	if err := query.First(&receipt).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &receipt, nil
 }
 
 func findPulseGrantTx(tx *gorm.DB, sourceRef string) (*BenefitChangeRecord, error) {

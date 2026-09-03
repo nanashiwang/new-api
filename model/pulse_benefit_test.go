@@ -41,6 +41,12 @@ func TestGrantPulseBenefitIsIdempotentAndConflictsOnPayloadChange(t *testing.T) 
 		BenefitSourcePulseReward, request.SourceRef, BenefitActionGrant,
 	).Count(&count).Error)
 	require.EqualValues(t, 1, count)
+	var record BenefitChangeRecord
+	require.NoError(t, DB.Where("source_type = ? AND source_ref = ?", BenefitSourcePulseReward, request.SourceRef).First(&record).Error)
+	require.Equal(t, user.Id, record.TargetId)
+	var receiptCount int64
+	require.NoError(t, DB.Model(&PulseBenefitReceipt{}).Where("source_ref = ?", request.SourceRef).Count(&receiptCount).Error)
+	require.EqualValues(t, 1, receiptCount)
 }
 
 func TestRollbackPulseBenefitUsesOriginalSourceAndIsIdempotent(t *testing.T) {
