@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -38,6 +39,15 @@ func TestForumSSOConfigRequiresHTTPSAndSecrets(t *testing.T) {
 	_, _, err = forumSSOConfig()
 	require.Error(t, err)
 	t.Setenv("PULSE_FORUM_SSO_SECRET", "")
+	_, _, err = forumSSOConfig()
+	require.Error(t, err)
+	t.Setenv("PULSE_ENV", "production")
+	t.Setenv("PULSE_FORUM_SSO_SECRET", "short")
+	t.Setenv("PULSE_FORUM_SSO_CALLBACK_URL", "https://forum.example.test/api/user-center/login/callback")
+	_, _, err = forumSSOConfig()
+	require.Error(t, err)
+	t.Setenv("PULSE_FORUM_SSO_SECRET", strings.Repeat("c", 32))
+	t.Setenv("PULSE_FORUM_SSO_SECRET_PREVIOUS", "short")
 	_, _, err = forumSSOConfig()
 	require.Error(t, err)
 }

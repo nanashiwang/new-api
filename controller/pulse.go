@@ -136,11 +136,26 @@ func signHMAC(secret, payload string) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
+func middlewarePulseSecretUsable(secret string) bool {
+	secret = strings.TrimSpace(secret)
+	if secret == "" {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("PULSE_ENV")), "production") {
+		return len(secret) >= 32 && secret != "replace-me"
+	}
+	return true
+}
+
 func forumSSOConfig() (string, string, error) {
 	callback := strings.TrimSpace(os.Getenv("PULSE_FORUM_SSO_CALLBACK_URL"))
 	secret := strings.TrimSpace(os.Getenv("PULSE_FORUM_SSO_SECRET"))
-	if callback == "" || secret == "" {
-		return "", "", errors.New("PULSE_FORUM_SSO_CALLBACK_URL and PULSE_FORUM_SSO_SECRET are required")
+	if callback == "" || !middlewarePulseSecretUsable(secret) {
+		return "", "", errors.New("PULSE_FORUM_SSO_CALLBACK_URL and a valid PULSE_FORUM_SSO_SECRET are required")
+	}
+	previous := strings.TrimSpace(os.Getenv("PULSE_FORUM_SSO_SECRET_PREVIOUS"))
+	if previous != "" && (!middlewarePulseSecretUsable(previous) || previous == secret) {
+		return "", "", errors.New("PULSE_FORUM_SSO_SECRET_PREVIOUS is invalid or duplicates the active secret")
 	}
 	target, err := url.Parse(callback)
 	if err != nil || target.Scheme != "https" || target.Host == "" || target.User != nil || target.Fragment != "" || target.RawQuery != "" || target.Path != "/api/user-center/login/callback" {

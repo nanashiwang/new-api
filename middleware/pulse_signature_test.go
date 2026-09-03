@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -86,4 +87,11 @@ func TestPulseServiceHMACSecretsRequireActiveKey(t *testing.T) {
 	t.Setenv("PULSE_SERVICE_HMAC_SECRET", "")
 	t.Setenv("PULSE_SERVICE_HMAC_SECRET_PREVIOUS", "old-secret")
 	require.Empty(t, pulseServiceHMACSecrets())
+}
+
+func TestPulseHMACSecretsFailClosedForInvalidProductionRotation(t *testing.T) {
+	t.Setenv("PULSE_ENV", "production")
+	require.Empty(t, pulseHMACSecrets("short", ""))
+	require.Empty(t, pulseHMACSecrets(strings.Repeat("c", 32), "short"))
+	require.Empty(t, pulseHMACSecrets(strings.Repeat("c", 32), strings.Repeat("c", 32)))
 }

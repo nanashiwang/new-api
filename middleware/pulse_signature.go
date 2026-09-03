@@ -20,12 +20,13 @@ import (
 )
 
 const (
-	pulseUserHeader      = "X-Pulse-User-Id"
-	pulseRoleHeader      = "X-Pulse-Role"
-	pulseTimestampHeader = "X-Pulse-Timestamp"
-	pulseNonceHeader     = "X-Pulse-Nonce"
-	pulseSignatureHeader = "X-Pulse-Signature"
-	pulseMaxClockSkew    = 5 * time.Minute
+	pulseUserHeader          = "X-Pulse-User-Id"
+	pulseRoleHeader          = "X-Pulse-Role"
+	pulseTimestampHeader     = "X-Pulse-Timestamp"
+	pulseNonceHeader         = "X-Pulse-Nonce"
+	pulseSignatureHeader     = "X-Pulse-Signature"
+	pulseMaxClockSkew        = 5 * time.Minute
+	minimumPulseSecretLength = 32
 )
 
 var (
@@ -55,15 +56,34 @@ func verifyPulseServiceRequest(req *http.Request, secret string) bool {
 }
 
 func pulseServiceHMACSecrets() []string {
-	current := strings.TrimSpace(os.Getenv("PULSE_SERVICE_HMAC_SECRET"))
-	if current == "" {
+	return pulseHMACSecrets(os.Getenv("PULSE_SERVICE_HMAC_SECRET"), os.Getenv("PULSE_SERVICE_HMAC_SECRET_PREVIOUS"))
+}
+
+// pulseHMACSecrets returns the active key first and, during rotation, the
+// previous key second. In production a malformed rotation configuration fails
+// closed instead of silently weakening the authentication boundary.
+func pulseHMACSecrets(currentValue, previousValue string) []string {
+	current := strings.TrimSpace(currentValue)
+	previous := strings.TrimSpace(previousValue)
+	if !pulseSecretUsable(current) || (previous != "" && !pulseSecretUsable(previous)) || (previous != "" && previous == current) {
 		return nil
 	}
 	secrets := []string{current}
-	if previous := strings.TrimSpace(os.Getenv("PULSE_SERVICE_HMAC_SECRET_PREVIOUS")); previous != "" && previous != current {
+	if previous != "" {
 		secrets = append(secrets, previous)
 	}
 	return secrets
+}
+
+func pulseSecretUsable(secret string) bool {
+	secret = strings.TrimSpace(secret)
+	if secret == "" {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("PULSE_ENV")), "production") {
+		return len(secret) >= minimumPulseSecretLength && secret != "replace-me"
+	}
+	return true
 }
 
 func verifyPulseServiceRequestWithSecrets(req *http.Request, secrets []string) bool {

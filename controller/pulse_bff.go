@@ -139,8 +139,8 @@ func proxyPulseRead(c *gin.Context, upstreamPath string, query url.Values, clien
 func pulseBFFConfig() (*url.URL, string, error) {
 	rawURL := strings.TrimSpace(os.Getenv("PULSE_INTERNAL_URL"))
 	secret := strings.TrimSpace(os.Getenv("PULSE_USER_BFF_HMAC_SECRET"))
-	if rawURL == "" || secret == "" {
-		return nil, "", errors.New("PULSE_INTERNAL_URL and PULSE_USER_BFF_HMAC_SECRET are required")
+	if rawURL == "" || !middlewarePulseSecretUsable(secret) {
+		return nil, "", errors.New("PULSE_INTERNAL_URL and a valid PULSE_USER_BFF_HMAC_SECRET are required")
 	}
 	baseURL, err := url.Parse(rawURL)
 	if err != nil || (baseURL.Scheme != "http" && baseURL.Scheme != "https") || baseURL.Host == "" || baseURL.User != nil || baseURL.RawQuery != "" || baseURL.Fragment != "" {
