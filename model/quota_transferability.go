@@ -93,6 +93,39 @@ func GrantUserQuota(userID int, quota int, transferableQuota int) error {
 	})
 }
 
+// RevokeQuotaGrantTx reverses a non-transferable benefit, such as a Pulse
+// reward. The quota balance is fungible, so the reversal is represented by a
+// normal debit and an immutable BenefitChangeRecord supplied by the caller.
+// It deliberately does not touch wallet redemption codes.
+func RevokeQuotaGrantTx(tx *gorm.DB, userID int, quota int) error {
+	if tx == nil {
+		return errors.New("tx is nil")
+	}
+	if userID <= 0 {
+		return errors.New("invalid user id")
+	}
+	if quota <= 0 {
+		return nil
+	}
+	query := tx.Unscoped().Select("id", "quota", "transferable_quota").Where("id = ?", userID)
+	if !common.UsingSQLite {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	var user User
+	if err := query.First(&user).Error; err != nil {
+		return err
+	}
+	user.Quota -= quota
+	if user.Quota <= 0 {
+		user.TransferableQuota = 0
+	} else {
+		user.TransferableQuota = EffectiveTransferableQuota(user.Quota, user.TransferableQuota)
+	}
+	return tx.Model(&User{}).Where("id = ?", userID).Updates(map[string]any{
+		"quota": user.Quota, "transferable_quota": user.TransferableQuota,
+	}).Error
+}
+
 // MigrateWalletRedemptionTransferPolicy converts the historical "only paid
 // top-ups are transferable" balance into the current policy: every existing
 // balance is transferable except the still-unspent portion that came from

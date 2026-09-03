@@ -12,6 +12,10 @@ import (
 )
 
 func RollbackBenefitsBySource(businessType string, businessId int, sourceType string, sourceRef string) (int, string, error) {
+	return rollbackBenefitsBySource(businessType, businessId, sourceType, sourceRef, "")
+}
+
+func rollbackBenefitsBySource(businessType string, businessId int, sourceType string, sourceRef string, reason string) (int, string, error) {
 	if strings.TrimSpace(sourceType) == "" || strings.TrimSpace(sourceRef) == "" {
 		return 0, "", errors.New("invalid benefit rollback source")
 	}
@@ -41,7 +45,7 @@ func RollbackBenefitsBySource(businessType string, businessId int, sourceType st
 		}
 
 		summaries := make([]string, 0, 2)
-		quotaDelta, quotaSummary, err := rollbackQuotaBenefitsTx(tx, op, sourceType, sourceRef, grants)
+		quotaDelta, quotaSummary, err := rollbackQuotaBenefitsTx(tx, op, sourceType, sourceRef, grants, reason)
 		if err != nil {
 			_ = tx.Model(op).Updates(map[string]any{
 				"status":        BenefitRollbackStatusFailed,
@@ -214,7 +218,15 @@ func markReversedPaymentSourceTx(tx *gorm.DB, sourceType string, sourceRef strin
 	}
 }
 
-func rollbackQuotaBenefitsTx(tx *gorm.DB, op *BenefitRollbackOperation, sourceType string, sourceRef string, grants []*BenefitChangeRecord) (int, string, error) {
+func rollbackContext(reason string) string {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return "rollback"
+	}
+	return "rollback:" + reason
+}
+
+func rollbackQuotaBenefitsTx(tx *gorm.DB, op *BenefitRollbackOperation, sourceType string, sourceRef string, grants []*BenefitChangeRecord, reason string) (int, string, error) {
 	if tx == nil || op == nil {
 		return 0, "", errors.New("invalid quota rollback args")
 	}
@@ -238,8 +250,14 @@ func rollbackQuotaBenefitsTx(tx *gorm.DB, op *BenefitRollbackOperation, sourceTy
 		if detail.QuotaDelta <= 0 {
 			continue
 		}
-		if err := RevokeTransferableQuotaGrantTx(tx, grant.UserId, detail.QuotaDelta); err != nil {
-			return 0, "", err
+		var revokeErr error
+		if sourceType == BenefitSourcePulseReward {
+			revokeErr = RevokeQuotaGrantTx(tx, grant.UserId, detail.QuotaDelta)
+		} else {
+			revokeErr = RevokeTransferableQuotaGrantTx(tx, grant.UserId, detail.QuotaDelta)
+		}
+		if revokeErr != nil {
+			return 0, "", revokeErr
 		}
 		totalQuota += detail.QuotaDelta
 		if err := createBenefitChangeRecordTx(tx, &BenefitChangeRecord{
@@ -255,7 +273,7 @@ func rollbackQuotaBenefitsTx(tx *gorm.DB, op *BenefitRollbackOperation, sourceTy
 			Detail: marshalBenefitDetail(&QuotaBenefitDetail{
 				QuotaDelta:    -detail.QuotaDelta,
 				PaymentMethod: detail.PaymentMethod,
-				Context:       "rollback",
+				Context:       rollbackContext(reason),
 			}),
 		}); err != nil {
 			return 0, "", err

@@ -32,6 +32,10 @@ export function authHeader() {
   }
 }
 
+export function isBackendLoginRedirectPath(path) {
+  return path === '/api/forum/sso/start';
+}
+
 export function getSafeLoginRedirectPath(search, fallback = '/console') {
   let rawSearch = search;
   if (typeof rawSearch !== 'string') {
@@ -47,7 +51,12 @@ export const AuthRedirect = ({ children }) => {
   const user = localStorage.getItem('user');
 
   if (user) {
-    return <Navigate to={getSafeLoginRedirectPath()} replace />;
+    const path = getSafeLoginRedirectPath();
+    // A stale browser-side user record does not prove the server session used
+    // by the SSO bridge is alive. Keep the login form visible after the bridge
+    // redirects here instead of looping between /login and the backend route.
+    if (isBackendLoginRedirectPath(path)) return children;
+    return <Navigate to={path} replace />;
   }
 
   return children;

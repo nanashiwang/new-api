@@ -37,7 +37,10 @@ import {
   onLinuxDOOAuthClicked,
   onCustomOAuthClicked,
 } from '../../helpers/api';
-import { getSafeLoginRedirectPath } from '../../helpers/auth';
+import {
+  getSafeLoginRedirectPath,
+  isBackendLoginRedirectPath,
+} from '../../helpers/auth';
 import { setUserData } from '../../helpers/data';
 import {
   prepareCredentialRequestOptions,
@@ -123,7 +126,17 @@ const LoginForm = () => {
 
   const logo = getLogo();
   const systemName = getSystemName();
-  const navigateToPostLogin = () => navigate(getSafeLoginRedirectPath());
+  const navigateToPostLogin = () => {
+    const path = getSafeLoginRedirectPath();
+    // SSO start is a backend redirect endpoint, not a React route. A full
+    // navigation preserves the new-api session and lets it mint the forum
+    // login ticket after password/2FA authentication completes.
+    if (isBackendLoginRedirectPath(path)) {
+      window.location.assign(path);
+      return;
+    }
+    navigate(path);
+  };
 
   let affCode = new URLSearchParams(window.location.search).get('aff');
   if (affCode) {
@@ -144,12 +157,12 @@ const LoginForm = () => {
     (status.custom_oauth_providers || []).length > 0;
   const hasOAuthLoginOptions = Boolean(
     status.github_oauth ||
-      status.discord_oauth ||
-      status.oidc_enabled ||
-      status.wechat_login ||
-      status.linuxdo_oauth ||
-      status.telegram_oauth ||
-      hasCustomOAuthProviders,
+    status.discord_oauth ||
+    status.oidc_enabled ||
+    status.wechat_login ||
+    status.linuxdo_oauth ||
+    status.telegram_oauth ||
+    hasCustomOAuthProviders,
   );
 
   useEffect(() => {

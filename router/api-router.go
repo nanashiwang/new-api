@@ -32,6 +32,18 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/about", controller.GetAbout)
 		//apiRouter.GET("/midjourney", controller.GetMidjourney)
 		apiRouter.GET("/home_page_content", controller.GetHomePageContent)
+		// Meta Pulse integrations are isolated from the relay and dashboard auth.
+		// The benefit receiver is service-signed; the forum SSO start endpoint
+		// derives identity from the existing new-api session.
+		pulseBenefitRoute := apiRouter.Group("/internal/pulse/benefits")
+		{
+			pulseBenefitRoute.Use(middleware.PulseServiceAuth())
+			pulseBenefitRoute.POST("/grant", controller.GrantPulseBenefit)
+			pulseBenefitRoute.POST("/query", controller.QueryPulseBenefit)
+			pulseBenefitRoute.GET("/query/:source_ref", controller.QueryPulseBenefit)
+			pulseBenefitRoute.POST("/rollback", controller.RollbackPulseBenefit)
+		}
+		apiRouter.GET("/forum/sso/start", controller.ForumSSOStart)
 		apiRouter.POST("/usage/public_token", middleware.PublicTokenUsageRateLimit(), controller.GetPublicTokenUsage)
 		apiRouter.POST("/usage/public_token/batch", middleware.PublicTokenUsageRateLimit(), controller.GetPublicTokenBatchUsage)
 		apiRouter.POST("/usage/public_token/stats", middleware.PublicTokenUsageRateLimit(), controller.GetPublicTokenStats)

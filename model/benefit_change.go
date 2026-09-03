@@ -58,9 +58,11 @@ type BenefitChangeRecord struct {
 	TargetType string `json:"target_type" gorm:"type:varchar(64);not null;index;uniqueIndex:idx_benefit_change_dedup,priority:4"`
 	TargetId   int    `json:"target_id" gorm:"index;uniqueIndex:idx_benefit_change_dedup,priority:5"`
 
-	OriginRecordId      int    `json:"origin_record_id" gorm:"index;default:0"`
-	RollbackOperationId int    `json:"rollback_operation_id" gorm:"index;default:0"`
-	Detail              string `json:"detail" gorm:"type:text"`
+	OriginRecordId      int `json:"origin_record_id" gorm:"index;default:0"`
+	RollbackOperationId int `json:"rollback_operation_id" gorm:"index;default:0"`
+	// PayloadHash binds a source_ref to the complete request payload.
+	PayloadHash string `json:"payload_hash" gorm:"type:char(64);index"`
+	Detail      string `json:"detail" gorm:"type:text"`
 
 	CreatedAt int64 `json:"created_at" gorm:"bigint;index"`
 	UpdatedAt int64 `json:"updated_at" gorm:"bigint;index"`
