@@ -4,7 +4,7 @@ Meta Pulse 是独立的增长与权益服务，不进入 new-api relay 请求主
 
 ## 服务密钥
 
-在 new-api 与 Pulse 之间配置同一份强随机 `PULSE_SERVICE_HMAC_SECRET`，用于奖励结算接口的 HMAC 请求签名。每个请求必须包含用户 ID、角色、时间戳、随机 nonce 和请求体摘要；生产环境需要启用 Redis，避免多实例重复使用 nonce。
+在 new-api 与 Pulse 之间配置同一份强随机 `PULSE_SERVICE_HMAC_SECRET`，用于奖励结算接口的 HMAC 请求签名。每个请求必须包含用户 ID、角色、时间戳、随机 nonce 和请求体摘要；生产环境需要启用 Redis，避免多实例重复使用 nonce。密钥轮换时先设置接收端的 `*_PREVIOUS`，再切换发送端到新密钥，确认旧请求排空后清空旧密钥；缺少当前密钥或 Redis 时生产环境必须拒绝请求。
 
 用户只读入口 `/api/pulse/summary` 与 `/api/pulse/rewards` 由 new-api BFF 代理。BFF 从 `UserAuth` 上下文派生用户 ID，使用独立的 `PULSE_USER_BFF_HMAC_SECRET` 签名调用 `PULSE_INTERNAL_URL`，不会向 Pulse 转发浏览器 Cookie、Authorization 或用户自报身份。
 
@@ -13,9 +13,12 @@ Meta Pulse 是独立的增长与权益服务，不进入 new-api relay 请求主
 ```dotenv
 PULSE_ENV=production
 PULSE_SERVICE_HMAC_SECRET=请注入强随机值
+PULSE_SERVICE_HMAC_SECRET_PREVIOUS=轮换期间临时保留旧值
 PULSE_INTERNAL_URL=http://pulse-api:8088
 PULSE_USER_BFF_HMAC_SECRET=请注入另一份强随机值
+PULSE_USER_BFF_HMAC_SECRET_PREVIOUS=轮换期间临时保留旧值
 PULSE_FORUM_SSO_SECRET=请注入强随机值
+PULSE_FORUM_SSO_SECRET_PREVIOUS=轮换期间临时保留旧值
 PULSE_FORUM_SSO_CALLBACK_URL=https://forum.example.com/api/user-center/login/callback
 ```
 

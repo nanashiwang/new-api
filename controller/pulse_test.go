@@ -34,6 +34,9 @@ func TestForumSSOConfigRequiresHTTPSAndSecrets(t *testing.T) {
 	t.Setenv("PULSE_FORUM_SSO_CALLBACK_URL", "https://forum.example.test/callback#fragment")
 	_, _, err = forumSSOConfig()
 	require.Error(t, err)
+	t.Setenv("PULSE_FORUM_SSO_CALLBACK_URL", "https://forum.example.test/api/user-center/login/callback?unsafe=1")
+	_, _, err = forumSSOConfig()
+	require.Error(t, err)
 	t.Setenv("PULSE_FORUM_SSO_SECRET", "")
 	_, _, err = forumSSOConfig()
 	require.Error(t, err)
@@ -111,7 +114,7 @@ func TestForumSSOStartFailsClosedWhenUnconfigured(t *testing.T) {
 func TestForumSSOStartUsesSessionIdentityAndFixedCallback(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("PULSE_FORUM_SSO_SECRET", "forum-secret")
-	t.Setenv("PULSE_FORUM_SSO_CALLBACK_URL", "https://forum.example.test/api/user-center/login/callback?fixed=1")
+	t.Setenv("PULSE_FORUM_SSO_CALLBACK_URL", "https://forum.example.test/api/user-center/login/callback")
 
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
@@ -152,7 +155,7 @@ func TestForumSSOStartUsesSessionIdentityAndFixedCallback(t *testing.T) {
 	require.Equal(t, "https", target.Scheme)
 	require.Equal(t, "forum.example.test", target.Host)
 	require.Equal(t, "/api/user-center/login/callback", target.Path)
-	require.Equal(t, "1", target.Query().Get("fixed"))
+	require.Empty(t, target.Query().Get("fixed"))
 	require.Equal(t, strconv.Itoa(user.Id), target.Query().Get("user_id"))
 	require.NotEqual(t, "999", target.Query().Get("user_id"))
 	require.Equal(t, user.Username, target.Query().Get("username"))

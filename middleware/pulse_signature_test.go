@@ -70,3 +70,20 @@ func TestVerifyPulseServiceRequestFailsClosedInProductionWithoutRedis(t *testing
 	req := signedPulseRequest(t, "body", time.Now().Truncate(time.Second), "nonce-production-no-redis")
 	require.False(t, verifyPulseServiceRequest(req, "pulse-test-secret"))
 }
+
+func TestVerifyPulseServiceRequestAcceptsPreviousSecretFromRotationSet(t *testing.T) {
+	oldRedisEnabled := common.RedisEnabled
+	common.RedisEnabled = false
+	t.Cleanup(func() { common.RedisEnabled = oldRedisEnabled })
+	t.Setenv("PULSE_ENV", "test")
+	t.Setenv("PULSE_SERVICE_HMAC_SECRET", "pulse-current-secret")
+	t.Setenv("PULSE_SERVICE_HMAC_SECRET_PREVIOUS", "pulse-test-secret")
+	req := signedPulseRequest(t, `{"source_ref":"grant-rotation"}`, time.Now().Truncate(time.Second), "nonce-rotation")
+	require.True(t, verifyPulseServiceRequestWithSecrets(req, pulseServiceHMACSecrets()))
+}
+
+func TestPulseServiceHMACSecretsRequireActiveKey(t *testing.T) {
+	t.Setenv("PULSE_SERVICE_HMAC_SECRET", "")
+	t.Setenv("PULSE_SERVICE_HMAC_SECRET_PREVIOUS", "old-secret")
+	require.Empty(t, pulseServiceHMACSecrets())
+}

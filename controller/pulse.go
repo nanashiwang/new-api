@@ -143,10 +143,10 @@ func forumSSOConfig() (string, string, error) {
 		return "", "", errors.New("PULSE_FORUM_SSO_CALLBACK_URL and PULSE_FORUM_SSO_SECRET are required")
 	}
 	target, err := url.Parse(callback)
-	if err != nil || target.Scheme != "https" || target.Host == "" || target.Fragment != "" {
-		return "", "", errors.New("PULSE_FORUM_SSO_CALLBACK_URL must be an https URL without fragment")
+	if err != nil || target.Scheme != "https" || target.Host == "" || target.User != nil || target.Fragment != "" || target.RawQuery != "" || target.Path != "/api/user-center/login/callback" {
+		return "", "", errors.New("PULSE_FORUM_SSO_CALLBACK_URL must be an https callback URL without credentials, query, fragment, or unexpected path")
 	}
-	return callback, secret, nil
+	return target.String(), secret, nil
 }
 
 func sessionInt(value any) (int, bool) {

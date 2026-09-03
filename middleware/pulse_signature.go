@@ -42,7 +42,7 @@ var (
 // in-memory fallback is allowed only outside production.
 func PulseServiceAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if !verifyPulseServiceRequest(c.Request, os.Getenv("PULSE_SERVICE_HMAC_SECRET")) {
+		if !verifyPulseServiceRequestWithSecrets(c.Request, pulseServiceHMACSecrets()) {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			return
 		}
@@ -51,7 +51,30 @@ func PulseServiceAuth() gin.HandlerFunc {
 }
 
 func verifyPulseServiceRequest(req *http.Request, secret string) bool {
-	if req == nil || req.URL == nil || strings.TrimSpace(secret) == "" {
+	return verifyPulseServiceRequestWithSecrets(req, []string{secret})
+}
+
+func pulseServiceHMACSecrets() []string {
+	current := strings.TrimSpace(os.Getenv("PULSE_SERVICE_HMAC_SECRET"))
+	if current == "" {
+		return nil
+	}
+	secrets := []string{current}
+	if previous := strings.TrimSpace(os.Getenv("PULSE_SERVICE_HMAC_SECRET_PREVIOUS")); previous != "" && previous != current {
+		secrets = append(secrets, previous)
+	}
+	return secrets
+}
+
+func verifyPulseServiceRequestWithSecrets(req *http.Request, secrets []string) bool {
+	configured := false
+	for _, secret := range secrets {
+		if strings.TrimSpace(secret) != "" {
+			configured = true
+			break
+		}
+	}
+	if req == nil || req.URL == nil || !configured {
 		return false
 	}
 	userID := strings.TrimSpace(req.Header.Get(pulseUserHeader))
@@ -84,9 +107,20 @@ func verifyPulseServiceRequest(req *http.Request, secret string) bool {
 	if err != nil || len(provided) != sha256.Size {
 		return false
 	}
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write([]byte(canonical))
-	if !hmac.Equal(provided, mac.Sum(nil)) {
+	matched := false
+	for _, secret := range secrets {
+		secret = strings.TrimSpace(secret)
+		if secret == "" {
+			continue
+		}
+		mac := hmac.New(sha256.New, []byte(secret))
+		_, _ = mac.Write([]byte(canonical))
+		if hmac.Equal(provided, mac.Sum(nil)) {
+			matched = true
+			break
+		}
+	}
+	if !matched {
 		return false
 	}
 	return claimPulseNonce(req.Context(), role+":"+userID+":"+nonce, requestTime.Add(pulseMaxClockSkew))
