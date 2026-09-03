@@ -5490,7 +5490,10 @@
     "公对公转账": "Corporate Transfer",
     "转账": "Transfer",
     "系统将自动生成一条“AI API 调用服务”产品明细，数量为 1 项，单价和金额取转账总额；不会自动生成或增加钱包额度。": "The system automatically creates one “AI API service” product item with quantity 1. Its unit price and amount use the total transfer amount, and it does not create or add wallet quota.",
-    "渠道结算": "Règlement du canal"
+    "渠道结算": "Règlement du canal",
+    "修改邮箱并重发": "Modifier l’adresse e-mail et renvoyer",
+    "发票接收邮箱": "E-mail du destinataire de la facture",
+    "将重新发送已上传的发票 PDF 到指定邮箱；如原邮箱填写错误，可在此修正后重发。": "Le PDF de la facture importé sera renvoyé à l’adresse e-mail indiquée. Si l’adresse d’origine est incorrecte, corrigez-la ici avant le renvoi."
   },
   "?????? 0 ??? 7 ????": {},
   "?????? 0 ???????": {},

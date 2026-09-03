@@ -1020,6 +1020,7 @@ const TopupHistoryModal = ({
   const [invoiceEmailState, setInvoiceEmailState] = useState({
     visible: false,
     record: null,
+    invoiceSentTo: '',
     sendDetailBill: true,
     sendServiceConfirmation: false,
     detailBillFile: null,
@@ -2207,6 +2208,7 @@ const TopupHistoryModal = ({
     setInvoiceEmailState({
       visible: true,
       record,
+      invoiceSentTo: record?.invoice_sent_to || record?.email || '',
       sendDetailBill: record?.need_detail_bill !== false,
       sendServiceConfirmation: Boolean(record?.need_service_confirmation),
       detailBillFile: null,
@@ -2219,6 +2221,7 @@ const TopupHistoryModal = ({
     setInvoiceEmailState({
       visible: false,
       record: null,
+      invoiceSentTo: '',
       sendDetailBill: true,
       sendServiceConfirmation: false,
       detailBillFile: null,
@@ -2230,6 +2233,10 @@ const TopupHistoryModal = ({
   const submitResendInvoiceEmail = async () => {
     const id = Number(invoiceEmailState.record?.id || 0);
     if (!id) return;
+    if (!invoiceEmailState.invoiceSentTo.trim()) {
+      Toast.error({ content: t('发票接收邮箱不能为空') });
+      return;
+    }
     if (invoiceEmailState.sendDetailBill && !invoiceEmailState.detailBillFile) {
       Toast.error({
         content: t(
@@ -2252,6 +2259,7 @@ const TopupHistoryModal = ({
     setInvoiceEmailState((prev) => ({ ...prev, submitting: true }));
     try {
       const payload = new FormData();
+      payload.append('invoice_sent_to', invoiceEmailState.invoiceSentTo.trim());
       payload.append(
         'send_detail_bill',
         String(invoiceEmailState.sendDetailBill),
@@ -3782,7 +3790,7 @@ const TopupHistoryModal = ({
                 theme='outline'
                 onClick={() => openResendInvoiceEmailModal(record)}
               >
-                {t('重发邮件')}
+                {t('修改邮箱并重发')}
               </Button>
             ) : null}
           </Space>
@@ -5501,8 +5509,23 @@ const TopupHistoryModal = ({
       >
         <div className='space-y-3'>
           <Text type='secondary'>
-            {t('将重新发送已上传的发票 PDF 到用户接收邮箱。')}
+            {t(
+              '将重新发送已上传的发票 PDF 到指定邮箱；如原邮箱填写错误，可在此修正后重发。',
+            )}
           </Text>
+          <Input
+            value={invoiceEmailState.invoiceSentTo}
+            onChange={(value) =>
+              setInvoiceEmailState((prev) => ({
+                ...prev,
+                invoiceSentTo: value,
+              }))
+            }
+            placeholder={t('发票接收邮箱')}
+            type='email'
+            maxLength={128}
+            showClear
+          />
           <Checkbox
             checked={invoiceEmailState.sendDetailBill}
             onChange={(event) =>

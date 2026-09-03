@@ -499,7 +499,7 @@ func ApproveInvoiceRequest(id int, reviewerUserID int, input InvoiceReviewInput)
 	input.InvoiceUrl = strings.TrimSpace(input.InvoiceUrl)
 	input.InvoiceFileName = strings.TrimSpace(input.InvoiceFileName)
 	input.InvoiceFilePath = strings.TrimSpace(input.InvoiceFilePath)
-	input.InvoiceSentTo = strings.TrimSpace(input.InvoiceSentTo)
+	input.InvoiceSentTo = common.NormalizeEmailAddress(input.InvoiceSentTo)
 	input.InvoiceSendStatus = strings.TrimSpace(input.InvoiceSendStatus)
 	input.AdminRemark = strings.TrimSpace(input.AdminRemark)
 	if input.InvoiceNo == "" && input.InvoiceUrl == "" && input.InvoiceFilePath == "" {
@@ -528,7 +528,7 @@ func normalizeCreateInvoiceInput(input CreateInvoiceRequestInput) CreateInvoiceR
 	input.RegisteredPhone = strings.TrimSpace(input.RegisteredPhone)
 	input.BankName = strings.TrimSpace(input.BankName)
 	input.BankAccount = strings.TrimSpace(input.BankAccount)
-	input.Email = strings.TrimSpace(input.Email)
+	input.Email = common.NormalizeEmailAddress(input.Email)
 	input.Phone = strings.TrimSpace(input.Phone)
 	input.Remark = strings.TrimSpace(input.Remark)
 	for i := range input.ManualTransactions {
@@ -604,6 +604,9 @@ func validateCreateInvoiceInput(input CreateInvoiceRequestInput) error {
 	}
 	if len([]rune(input.Email)) > 128 {
 		return errors.New("接收邮箱不能超过 128 个字符")
+	}
+	if err := common.ValidateEmailAddress(input.Email); err != nil {
+		return errors.New("接收邮箱格式不正确")
 	}
 	if len([]rune(input.Phone)) > 32 {
 		return errors.New("手机号不能超过 32 个字符")
@@ -1041,6 +1044,11 @@ func reviewInvoiceRequest(id int, reviewerUserID int, targetStatus string, input
 	if len([]rune(input.InvoiceSentTo)) > 128 {
 		return nil, errors.New("发票接收邮箱不能超过 128 个字符")
 	}
+	if input.InvoiceSentTo != "" {
+		if err := common.ValidateEmailAddress(input.InvoiceSentTo); err != nil {
+			return nil, errors.New("发票接收邮箱格式不正确")
+		}
+	}
 	if input.InvoiceSendStatus != "" && !isValidInvoiceSendStatus(input.InvoiceSendStatus) {
 		return nil, errors.New("邮件发送状态不合法")
 	}
@@ -1062,6 +1070,17 @@ func reviewInvoiceRequest(id int, reviewerUserID int, targetStatus string, input
 		}
 		if request.Status != InvoiceStatusPending {
 			return ErrInvoiceRequestAlreadyReviewed
+		}
+		if targetStatus == InvoiceStatusInvoiced {
+			if input.InvoiceSentTo == "" {
+				input.InvoiceSentTo = common.NormalizeEmailAddress(request.Email)
+			}
+			if len([]rune(input.InvoiceSentTo)) > 128 {
+				return errors.New("发票接收邮箱不能超过 128 个字符")
+			}
+			if err := common.ValidateEmailAddress(input.InvoiceSentTo); err != nil {
+				return errors.New("发票接收邮箱格式不正确")
+			}
 		}
 		updates := map[string]interface{}{
 			"status":           targetStatus,
@@ -1132,7 +1151,18 @@ func reviewInvoiceRequest(id int, reviewerUserID int, targetStatus string, input
 }
 
 func UpdateInvoiceSendStatus(id int, status string, errorMessage string) (*InvoiceRequest, error) {
+	return updateInvoiceSendStatus(id, "", status, errorMessage)
+}
+
+// UpdateInvoiceSendStatusWithRecipient 原子记录邮件结果和本次实际收件邮箱，
+// 允许管理员修正历史错误邮箱后重发，同时保持发票审核状态不变。
+func UpdateInvoiceSendStatusWithRecipient(id int, recipient string, status string, errorMessage string) (*InvoiceRequest, error) {
+	return updateInvoiceSendStatus(id, recipient, status, errorMessage)
+}
+
+func updateInvoiceSendStatus(id int, recipient string, status string, errorMessage string) (*InvoiceRequest, error) {
 	status = strings.TrimSpace(status)
+	recipient = common.NormalizeEmailAddress(recipient)
 	errorMessage = strings.TrimSpace(errorMessage)
 	if id <= 0 {
 		return nil, ErrInvoiceRequestNotFound
@@ -1140,12 +1170,23 @@ func UpdateInvoiceSendStatus(id int, status string, errorMessage string) (*Invoi
 	if !isValidInvoiceSendStatus(status) {
 		return nil, errors.New("邮件发送状态不合法")
 	}
+	if recipient != "" {
+		if len([]rune(recipient)) > 128 {
+			return nil, errors.New("发票接收邮箱不能超过 128 个字符")
+		}
+		if err := common.ValidateEmailAddress(recipient); err != nil {
+			return nil, errors.New("发票接收邮箱格式不正确")
+		}
+	}
 	if len([]rune(errorMessage)) > 1000 {
 		errorMessage = string([]rune(errorMessage)[:1000])
 	}
 	updates := map[string]interface{}{
 		"invoice_send_status": status,
 		"invoice_send_error":  errorMessage,
+	}
+	if recipient != "" {
+		updates["invoice_sent_to"] = recipient
 	}
 	if status == InvoiceSendStatusSent {
 		updates["invoice_sent_at"] = common.GetTimestamp()
@@ -1159,7 +1200,16 @@ func UpdateInvoiceSendStatus(id int, status string, errorMessage string) (*Invoi
 		return nil, result.Error
 	}
 	if result.RowsAffected == 0 {
-		return nil, ErrInvoiceRequestNotFound
+		// MySQL 在提交值未变化时可能返回零影响行，需要区分幂等更新与记录不存在。
+		var matched int64
+		if err := DB.Model(&InvoiceRequest{}).
+			Where("id = ? AND status = ?", id, InvoiceStatusInvoiced).
+			Count(&matched).Error; err != nil {
+			return nil, err
+		}
+		if matched == 0 {
+			return nil, ErrInvoiceRequestNotFound
+		}
 	}
 	return GetInvoiceRequestDetail(id)
 }

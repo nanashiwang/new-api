@@ -92,6 +92,31 @@ func TestGetEligibleInvoiceOrders_FiltersSuccessfulUnoccupiedOrders(t *testing.T
 	require.Equal(t, PaymentRecordTypeTopUp, records[1].OrderType)
 }
 
+func TestCreateInvoiceRequest_RejectsInvalidEmail(t *testing.T) {
+	setupInvoiceTestDB(t)
+
+	user := createPaymentRecordTestUser(t, "invalid-invoice-email")
+	topup := createPaymentRecordTopUp(t, user.Id, "T-INV-INVALID-EMAIL", 100, common.TopUpStatusSuccess)
+	input := createInvoiceRequestInput(PaymentRecordTypeTopUp, topup.Id)
+	input.Email = "2370708759@qq,com"
+
+	_, err := CreateInvoiceRequest(user.Id, input)
+	require.ErrorContains(t, err, "接收邮箱格式不正确")
+}
+
+func TestCreateInvoiceRequest_NormalizesRecipientDomain(t *testing.T) {
+	setupInvoiceTestDB(t)
+
+	user := createPaymentRecordTestUser(t, "normalized-invoice-email")
+	topup := createPaymentRecordTopUp(t, user.Id, "T-INV-NORMALIZED-EMAIL", 100, common.TopUpStatusSuccess)
+	input := createInvoiceRequestInput(PaymentRecordTypeTopUp, topup.Id)
+	input.Email = "  Invoice@Example.COM  "
+
+	request, err := CreateInvoiceRequest(user.Id, input)
+	require.NoError(t, err)
+	require.Equal(t, "Invoice@example.com", request.Email)
+}
+
 func TestCreateInvoiceRequest_OccupiesOrderAndRejectedReleasesIt(t *testing.T) {
 	setupInvoiceTestDB(t)
 
@@ -219,6 +244,24 @@ func TestApproveInvoiceRequest_KeepsOrderOccupiedAndPreventsSecondReview(t *test
 	require.ErrorIs(t, err, ErrInvoiceRequestAlreadyReviewed)
 }
 
+func TestApproveInvoiceRequest_RejectsInvalidRecipientBeforeReview(t *testing.T) {
+	setupInvoiceTestDB(t)
+
+	user := createPaymentRecordTestUser(t, "invalid-review-email")
+	topup := createPaymentRecordTopUp(t, user.Id, "T-INV-INVALID-REVIEW-EMAIL", 100, common.TopUpStatusSuccess)
+	request, err := CreateInvoiceRequest(user.Id, createInvoiceRequestInput(PaymentRecordTypeTopUp, topup.Id))
+	require.NoError(t, err)
+
+	_, err = ApproveInvoiceRequest(request.Id, user.Id, InvoiceReviewInput{
+		InvoiceNo:     "FP-INVALID-EMAIL",
+		InvoiceSentTo: "2370708759@qq,com",
+	})
+	require.ErrorContains(t, err, "发票接收邮箱格式不正确")
+	unchanged, err := GetInvoiceRequestDetail(request.Id)
+	require.NoError(t, err)
+	require.Equal(t, InvoiceStatusPending, unchanged.Status)
+}
+
 func TestApproveInvoiceRequest_AllowsInvoiceFileWithoutInvoiceNo(t *testing.T) {
 	setupInvoiceTestDB(t)
 
@@ -285,8 +328,9 @@ func TestGetInvoiceRequestDetail_IncludesReviewerInfo(t *testing.T) {
 	topup := createPaymentRecordTopUp(t, alice.Id, "T-INV-008", 100, common.TopUpStatusSuccess)
 	request, err := CreateInvoiceRequest(alice.Id, createInvoiceRequestInput(PaymentRecordTypeTopUp, topup.Id))
 	require.NoError(t, err)
-	_, err = ApproveInvoiceRequest(request.Id, reviewer.Id, InvoiceReviewInput{InvoiceNo: "FP-008"})
+	approved, err := ApproveInvoiceRequest(request.Id, reviewer.Id, InvoiceReviewInput{InvoiceNo: "FP-008"})
 	require.NoError(t, err)
+	require.Equal(t, request.Email, approved.InvoiceSentTo)
 
 	detail, err := GetInvoiceRequestDetail(request.Id)
 	require.NoError(t, err)
@@ -325,6 +369,50 @@ func TestUpdateInvoiceSendStatus(t *testing.T) {
 	require.Equal(t, InvoiceSendStatusSent, sent.InvoiceSendStatus)
 	require.Empty(t, sent.InvoiceSendError)
 	require.Greater(t, sent.InvoiceSentAt, int64(0))
+}
+
+func TestUpdateInvoiceSendStatusWithRecipientPersistsCorrectedEmail(t *testing.T) {
+	setupInvoiceTestDB(t)
+
+	user := createPaymentRecordTestUser(t, "corrected-invoice-email")
+	reviewer := createPaymentRecordTestUser(t, "corrected-invoice-email-admin")
+	topup := createPaymentRecordTopUp(t, user.Id, "T-INV-CORRECTED-EMAIL", 100, common.TopUpStatusSuccess)
+	request, err := CreateInvoiceRequest(user.Id, createInvoiceRequestInput(PaymentRecordTypeTopUp, topup.Id))
+	require.NoError(t, err)
+	_, err = ApproveInvoiceRequest(request.Id, reviewer.Id, InvoiceReviewInput{
+		InvoiceNo:     "FP-CORRECTED-EMAIL",
+		InvoiceSentTo: "old@example.com",
+	})
+	require.NoError(t, err)
+
+	updated, err := UpdateInvoiceSendStatusWithRecipient(request.Id, "  New@Example.COM  ", InvoiceSendStatusFailed, "邮箱已修正")
+	require.NoError(t, err)
+	require.Equal(t, "New@example.com", updated.InvoiceSentTo)
+	require.Equal(t, InvoiceSendStatusFailed, updated.InvoiceSendStatus)
+	require.Equal(t, "邮箱已修正", updated.InvoiceSendError)
+
+	_, err = UpdateInvoiceSendStatusWithRecipient(request.Id, "2370708759@qq,com", InvoiceSendStatusSent, "")
+	require.ErrorContains(t, err, "发票接收邮箱格式不正确")
+	unchanged, err := GetInvoiceRequestDetail(request.Id)
+	require.NoError(t, err)
+	require.Equal(t, "New@example.com", unchanged.InvoiceSentTo)
+	require.Equal(t, InvoiceSendStatusFailed, unchanged.InvoiceSendStatus)
+}
+
+func TestUpdateInvoiceSendStatusWithRecipientRejectsPendingRequest(t *testing.T) {
+	setupInvoiceTestDB(t)
+
+	user := createPaymentRecordTestUser(t, "pending-recipient-update")
+	topup := createPaymentRecordTopUp(t, user.Id, "T-INV-PENDING-RECIPIENT", 100, common.TopUpStatusSuccess)
+	request, err := CreateInvoiceRequest(user.Id, createInvoiceRequestInput(PaymentRecordTypeTopUp, topup.Id))
+	require.NoError(t, err)
+
+	_, err = UpdateInvoiceSendStatusWithRecipient(request.Id, "new@example.com", InvoiceSendStatusSent, "")
+	require.ErrorIs(t, err, ErrInvoiceRequestNotFound)
+	unchanged, err := GetInvoiceRequestDetail(request.Id)
+	require.NoError(t, err)
+	require.Equal(t, InvoiceStatusPending, unchanged.Status)
+	require.Empty(t, unchanged.InvoiceSentTo)
 }
 
 func TestCreateInvoiceRequest_ManualTransferStoresAuditableSnapshotsWithoutTopUp(t *testing.T) {

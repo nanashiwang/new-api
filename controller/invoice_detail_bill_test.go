@@ -1,8 +1,13 @@
 package controller
 
 import (
+	"bytes"
+	"mime/multipart"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/gin-gonic/gin"
 
 	"github.com/QuantumNous/new-api/model"
 )
@@ -96,5 +101,48 @@ func TestBuildInvoiceDetailBillHTMLUsesManualTransferWordingAndNoFakeOrderID(t *
 		if strings.Contains(html, unexpected) {
 			t.Fatalf("manual detail bill html should not contain %q:\n%s", unexpected, html)
 		}
+	}
+}
+
+func TestParseInvoiceEmailPayloadIncludesRecipient(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	request := httptest.NewRequest("POST", "/", strings.NewReader(`{"invoice_sent_to":"new@example.com"}`))
+	request.Header.Set("Content-Type", "application/json")
+	context.Request = request
+
+	payload, err := parseInvoiceEmailPayload(context)
+	if err != nil {
+		t.Fatalf("parseInvoiceEmailPayload() error = %v", err)
+	}
+	if payload.InvoiceSentTo != "new@example.com" {
+		t.Fatalf("InvoiceSentTo = %q, want %q", payload.InvoiceSentTo, "new@example.com")
+	}
+}
+
+func TestParseInvoiceEmailPayloadIncludesMultipartRecipient(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	if err := writer.WriteField("invoice_sent_to", "new@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	request := httptest.NewRequest("POST", "/", body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	context.Request = request
+
+	payload, err := parseInvoiceEmailPayload(context)
+	if err != nil {
+		t.Fatalf("parseInvoiceEmailPayload() error = %v", err)
+	}
+	if payload.InvoiceSentTo != "new@example.com" {
+		t.Fatalf("InvoiceSentTo = %q, want %q", payload.InvoiceSentTo, "new@example.com")
 	}
 }

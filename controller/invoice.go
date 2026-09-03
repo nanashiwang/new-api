@@ -62,6 +62,7 @@ type invoiceApprovePayload struct {
 }
 
 type invoiceEmailPayload struct {
+	InvoiceSentTo                 string
 	SendDetailBill                bool
 	SendServiceConfirmation       bool
 	DetailBillFileHeader          *multipart.FileHeader
@@ -282,6 +283,23 @@ func ResendInvoiceEmail(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	previousRecipient := common.NormalizeEmailAddress(request.InvoiceSentTo)
+	if previousRecipient == "" {
+		previousRecipient = common.NormalizeEmailAddress(request.Email)
+	}
+	recipient := common.NormalizeEmailAddress(payload.InvoiceSentTo)
+	if recipient == "" {
+		recipient = previousRecipient
+	}
+	if len([]rune(recipient)) > 128 {
+		common.ApiErrorMsg(c, "发票接收邮箱不能超过 128 个字符")
+		return
+	}
+	if err := common.ValidateEmailAddress(recipient); err != nil {
+		common.ApiErrorMsg(c, "发票接收邮箱格式不正确，请修改后重试")
+		return
+	}
+	request.InvoiceSentTo = recipient
 	extraAttachments := make([]*common.EmailAttachment, 0, 2)
 	if payload.SendDetailBill {
 		detailBillAttachment, readErr := readInvoiceDetailBillAttachment(payload.DetailBillFileHeader)
@@ -303,6 +321,14 @@ func ResendInvoiceEmail(c *gin.Context) {
 	if err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	if previousRecipient != recipient {
+		model.RecordLogWithAdminInfo(request.UserId, model.LogTypeManage,
+			fmt.Sprintf("管理员修正发票（ID %d）收件邮箱并重发：%s -> %s", request.Id, common.MaskEmail(previousRecipient), common.MaskEmail(recipient)),
+			map[string]interface{}{
+				"admin_id": c.GetInt("id"), "admin_username": c.GetString("username"), "invoice_id": request.Id,
+				"previous_recipient": previousRecipient, "new_recipient": recipient,
+			})
 	}
 	common.ApiSuccess(c, request)
 }
@@ -378,8 +404,17 @@ func parseInvoiceApprovePayload(c *gin.Context, id int) (invoiceApprovePayload, 
 				return payload, fmt.Errorf("请上传产品明细清单 PDF")
 			}
 		}
-		if payload.SendEmail && payload.InvoiceSentTo == "" {
-			return payload, fmt.Errorf("发票接收邮箱不能为空")
+		if payload.SendEmail {
+			payload.InvoiceSentTo = common.NormalizeEmailAddress(payload.InvoiceSentTo)
+			if payload.InvoiceSentTo == "" {
+				return payload, fmt.Errorf("发票接收邮箱不能为空")
+			}
+			if len([]rune(payload.InvoiceSentTo)) > 128 {
+				return payload, fmt.Errorf("发票接收邮箱不能超过 128 个字符")
+			}
+			if err := common.ValidateEmailAddress(payload.InvoiceSentTo); err != nil {
+				return payload, fmt.Errorf("发票接收邮箱格式不正确")
+			}
 		}
 		return payload, nil
 	}
@@ -399,6 +434,7 @@ func parseInvoiceEmailPayload(c *gin.Context) (invoiceEmailPayload, error) {
 	payload := invoiceEmailPayload{}
 	contentType := strings.ToLower(c.GetHeader("Content-Type"))
 	if strings.HasPrefix(contentType, "multipart/form-data") {
+		payload.InvoiceSentTo = strings.TrimSpace(c.PostForm("invoice_sent_to"))
 		if raw := strings.TrimSpace(c.PostForm("send_detail_bill")); raw != "" {
 			payload.SendDetailBill = parseInvoiceBool(raw, false)
 		}
@@ -425,8 +461,9 @@ func parseInvoiceEmailPayload(c *gin.Context) (invoiceEmailPayload, error) {
 		return payload, nil
 	}
 	var req struct {
-		SendDetailBill          bool `json:"send_detail_bill"`
-		SendServiceConfirmation bool `json:"send_service_confirmation"`
+		InvoiceSentTo           string `json:"invoice_sent_to"`
+		SendDetailBill          bool   `json:"send_detail_bill"`
+		SendServiceConfirmation bool   `json:"send_service_confirmation"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil && err != io.EOF {
 		return payload, err
@@ -437,6 +474,7 @@ func parseInvoiceEmailPayload(c *gin.Context) (invoiceEmailPayload, error) {
 	if req.SendServiceConfirmation {
 		return payload, fmt.Errorf("请上传产品明细清单 PDF")
 	}
+	payload.InvoiceSentTo = strings.TrimSpace(req.InvoiceSentTo)
 	payload.SendDetailBill = req.SendDetailBill
 	payload.SendServiceConfirmation = req.SendServiceConfirmation
 	return payload, nil
@@ -562,15 +600,26 @@ func sendInvoiceFileAndUpdateStatus(request *model.InvoiceRequest, extraAttachme
 	if request == nil {
 		return nil, model.ErrInvoiceRequestNotFound
 	}
+	recipient := common.NormalizeEmailAddress(request.InvoiceSentTo)
+	if recipient == "" {
+		recipient = common.NormalizeEmailAddress(request.Email)
+	}
 	err := sendInvoiceFileEmail(request, extraAttachments...)
 	if err != nil {
+		if common.ValidateEmailAddress(recipient) == nil {
+			updated, updateErr := model.UpdateInvoiceSendStatusWithRecipient(request.Id, recipient, model.InvoiceSendStatusFailed, err.Error())
+			if updateErr != nil {
+				return nil, updateErr
+			}
+			return updated, nil
+		}
 		updated, updateErr := model.UpdateInvoiceSendStatus(request.Id, model.InvoiceSendStatusFailed, err.Error())
 		if updateErr != nil {
 			return nil, updateErr
 		}
 		return updated, nil
 	}
-	return model.UpdateInvoiceSendStatus(request.Id, model.InvoiceSendStatusSent, "")
+	return model.UpdateInvoiceSendStatusWithRecipient(request.Id, recipient, model.InvoiceSendStatusSent, "")
 }
 
 func sendInvoiceFileEmail(request *model.InvoiceRequest, extraAttachments ...*common.EmailAttachment) error {
@@ -583,6 +632,9 @@ func sendInvoiceFileEmail(request *model.InvoiceRequest, extraAttachments ...*co
 	}
 	if receiver == "" {
 		return fmt.Errorf("发票接收邮箱不能为空")
+	}
+	if err := common.ValidateEmailAddress(receiver); err != nil {
+		return fmt.Errorf("发票接收邮箱格式不正确")
 	}
 	data, err := os.ReadFile(request.InvoiceFilePath)
 	if err != nil {

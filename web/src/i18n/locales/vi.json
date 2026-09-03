@@ -5788,7 +5788,10 @@
     "银行转账": "Bank Transfer",
     "公对公转账": "Corporate Transfer",
     "系统将自动生成一条“AI API 调用服务”产品明细，数量为 1 项，单价和金额取转账总额；不会自动生成或增加钱包额度。": "The system automatically creates one “AI API service” product item with quantity 1. Its unit price and amount use the total transfer amount, and it does not create or add wallet quota.",
-    "渠道结算": "Quyết toán kênh"
+    "渠道结算": "Quyết toán kênh",
+    "修改邮箱并重发": "Sửa email và gửi lại",
+    "发票接收邮箱": "Email nhận hóa đơn",
+    "将重新发送已上传的发票 PDF 到指定邮箱；如原邮箱填写错误，可在此修正后重发。": "PDF hóa đơn đã tải lên sẽ được gửi lại đến email chỉ định. Nếu địa chỉ ban đầu bị sai, hãy sửa tại đây trước khi gửi lại."
   },
   "?????? 0 ??? 7 ????": {},
   "?????? 0 ???????": {},
