@@ -66,7 +66,13 @@ func ForumSSOStart(c *gin.Context) {
 		Timestamp:   time.Now().Unix(),
 		Nonce:       nonce,
 	}
-	ticket.Signature = ticket.sign(secret)
+	signature, err := ticket.sign(secret)
+	if err != nil {
+		common.SysError("refusing to issue invalid forum SSO ticket: " + err.Error())
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "生成登录凭证失败"})
+		return
+	}
+	ticket.Signature = signature
 	target, err := url.Parse(callback)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "论坛回调地址无效"})
@@ -96,11 +102,30 @@ type forumSSOTicket struct {
 	Signature   string
 }
 
-func (t forumSSOTicket) sign(secret string) string {
+func (t forumSSOTicket) sign(secret string) (string, error) {
+	if err := t.validate(); err != nil {
+		return "", err
+	}
 	return signHMAC(secret, strings.Join([]string{
 		t.UserID, t.Username, t.DisplayName, t.Email, t.Avatar,
 		strconv.FormatInt(t.Timestamp, 10), t.Nonce,
-	}, "\n"))
+	}, "\n")), nil
+}
+
+func (t forumSSOTicket) validate() error {
+	parsedUserID, err := strconv.ParseUint(t.UserID, 10, 64)
+	if err != nil || parsedUserID == 0 || strconv.FormatUint(parsedUserID, 10) != t.UserID {
+		return errors.New("invalid forum SSO user id")
+	}
+	if t.Timestamp <= 0 || strings.TrimSpace(t.Nonce) == "" {
+		return errors.New("incomplete forum SSO ticket")
+	}
+	for _, field := range []string{t.UserID, t.Username, t.DisplayName, t.Email, t.Avatar, t.Nonce} {
+		if strings.ContainsAny(field, "\r\n") {
+			return errors.New("forum SSO ticket fields must not contain CR or LF")
+		}
+	}
+	return nil
 }
 
 func signHMAC(secret, payload string) string {

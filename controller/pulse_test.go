@@ -48,7 +48,33 @@ func TestForumSSOTicketSignUsesStableHMACPayload(t *testing.T) {
 	mac := hmac.New(sha256.New, []byte("forum-secret"))
 	_, err := mac.Write([]byte(payload))
 	require.NoError(t, err)
-	require.Equal(t, hex.EncodeToString(mac.Sum(nil)), ticket.sign("forum-secret"))
+	signature, err := ticket.sign("forum-secret")
+	require.NoError(t, err)
+	require.Equal(t, hex.EncodeToString(mac.Sum(nil)), signature)
+}
+
+func TestForumSSOTicketRejectsAmbiguousOrNonCanonicalFields(t *testing.T) {
+	valid := forumSSOTicket{UserID: "7", Username: "alice", Timestamp: 1700000000, Nonce: "nonce-1"}
+	for _, test := range []struct {
+		name   string
+		mutate func(*forumSSOTicket)
+	}{
+		{name: "zero user id", mutate: func(ticket *forumSSOTicket) { ticket.UserID = "0" }},
+		{name: "negative user id", mutate: func(ticket *forumSSOTicket) { ticket.UserID = "-1" }},
+		{name: "non-canonical user id", mutate: func(ticket *forumSSOTicket) { ticket.UserID = "007" }},
+		{name: "username CRLF", mutate: func(ticket *forumSSOTicket) { ticket.Username = "alice\r\nadmin" }},
+		{name: "display name LF", mutate: func(ticket *forumSSOTicket) { ticket.DisplayName = "Alice\nAdmin" }},
+		{name: "email LF", mutate: func(ticket *forumSSOTicket) { ticket.Email = "alice@example.test\nadmin@example.test" }},
+		{name: "avatar LF", mutate: func(ticket *forumSSOTicket) { ticket.Avatar = "https://example.test/a\nb" }},
+		{name: "nonce LF", mutate: func(ticket *forumSSOTicket) { ticket.Nonce = "nonce\nshift" }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ticket := valid
+			test.mutate(&ticket)
+			_, err := ticket.sign("forum-secret")
+			require.Error(t, err)
+		})
+	}
 }
 
 func TestForumSSOStartRedirectsUnauthenticatedUsersToLogin(t *testing.T) {
