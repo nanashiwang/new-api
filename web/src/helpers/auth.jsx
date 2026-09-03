@@ -20,6 +20,12 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import { Navigate } from 'react-router-dom';
 import { history } from './history';
+import {
+  getSafeLoginRedirectPath,
+  isBackendLoginRedirectPath,
+} from './authRedirect';
+
+export * from './authRedirect';
 
 export function authHeader() {
   // return authorization header with jwt token
@@ -30,21 +36,6 @@ export function authHeader() {
   } else {
     return {};
   }
-}
-
-export function isBackendLoginRedirectPath(path) {
-  return path === '/api/forum/sso/start';
-}
-
-export function getSafeLoginRedirectPath(search, fallback = '/console') {
-  let rawSearch = search;
-  if (typeof rawSearch !== 'string') {
-    rawSearch = typeof window !== 'undefined' ? window.location.search : '';
-  }
-  const next = new URLSearchParams(rawSearch).get('next');
-  const isSafeInternalPath =
-    next && next.startsWith('/') && !next.startsWith('//');
-  return isSafeInternalPath ? next : fallback;
 }
 
 export const AuthRedirect = ({ children }) => {

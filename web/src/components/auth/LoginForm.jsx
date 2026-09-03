@@ -38,8 +38,9 @@ import {
   onCustomOAuthClicked,
 } from '../../helpers/api';
 import {
+  buildAuthPathWithNext,
   getSafeLoginRedirectPath,
-  isBackendLoginRedirectPath,
+  navigateToLoginRedirect,
 } from '../../helpers/auth';
 import { setUserData } from '../../helpers/data';
 import {
@@ -126,17 +127,18 @@ const LoginForm = () => {
 
   const logo = getLogo();
   const systemName = getSystemName();
-  const navigateToPostLogin = () => {
-    const path = getSafeLoginRedirectPath();
-    // SSO start is a backend redirect endpoint, not a React route. A full
-    // navigation preserves the new-api session and lets it mint the forum
-    // login ticket after password/2FA authentication completes.
-    if (isBackendLoginRedirectPath(path)) {
-      window.location.assign(path);
-      return;
-    }
-    navigate(path);
+  const requestedPostLoginPath = getSafeLoginRedirectPath(undefined, '');
+  const postLoginPath = requestedPostLoginPath || '/console';
+  const registerPath = buildAuthPathWithNext(
+    '/register',
+    requestedPostLoginPath,
+  );
+  const oauthLoginOptions = {
+    shouldLogout: true,
+    postLoginPath: requestedPostLoginPath,
   };
+  const navigateToPostLogin = () =>
+    navigateToLoginRedirect(postLoginPath, navigate);
 
   let affCode = new URLSearchParams(window.location.search).get('aff');
   if (affCode) {
@@ -157,12 +159,12 @@ const LoginForm = () => {
     (status.custom_oauth_providers || []).length > 0;
   const hasOAuthLoginOptions = Boolean(
     status.github_oauth ||
-    status.discord_oauth ||
-    status.oidc_enabled ||
-    status.wechat_login ||
-    status.linuxdo_oauth ||
-    status.telegram_oauth ||
-    hasCustomOAuthProviders,
+      status.discord_oauth ||
+      status.oidc_enabled ||
+      status.wechat_login ||
+      status.linuxdo_oauth ||
+      status.telegram_oauth ||
+      hasCustomOAuthProviders,
   );
 
   useEffect(() => {
@@ -220,7 +222,7 @@ const LoginForm = () => {
         localStorage.setItem('user', JSON.stringify(data));
         setUserData(data);
         updateAPI();
-        navigate('/');
+        navigateToPostLogin();
         showSuccess('登录成功！');
         setShowWeChatLoginModal(false);
       } else {
@@ -322,7 +324,7 @@ const LoginForm = () => {
         showSuccess('登录成功！');
         setUserData(data);
         updateAPI();
-        navigate('/');
+        navigateToPostLogin();
       } else {
         showError(message);
       }
@@ -352,7 +354,7 @@ const LoginForm = () => {
       setGithubButtonDisabled(true);
     }, 20000);
     try {
-      onGitHubOAuthClicked(status.github_client_id, { shouldLogout: true });
+      onGitHubOAuthClicked(status.github_client_id, oauthLoginOptions);
     } finally {
       // 由于重定向，这里不会执行到，但为了完整性添加
       setTimeout(() => setGithubLoading(false), 3000);
@@ -367,7 +369,7 @@ const LoginForm = () => {
     }
     setDiscordLoading(true);
     try {
-      onDiscordOAuthClicked(status.discord_client_id, { shouldLogout: true });
+      onDiscordOAuthClicked(status.discord_client_id, oauthLoginOptions);
     } finally {
       // 由于重定向，这里不会执行到，但为了完整性添加
       setTimeout(() => setDiscordLoading(false), 3000);
@@ -386,7 +388,7 @@ const LoginForm = () => {
         status.oidc_authorization_endpoint,
         status.oidc_client_id,
         false,
-        { shouldLogout: true },
+        oauthLoginOptions,
       );
     } finally {
       // 由于重定向，这里不会执行到，但为了完整性添加
@@ -402,7 +404,7 @@ const LoginForm = () => {
     }
     setLinuxdoLoading(true);
     try {
-      onLinuxDOOAuthClicked(status.linuxdo_client_id, { shouldLogout: true });
+      onLinuxDOOAuthClicked(status.linuxdo_client_id, oauthLoginOptions);
     } finally {
       // 由于重定向，这里不会执行到，但为了完整性添加
       setTimeout(() => setLinuxdoLoading(false), 3000);
@@ -417,7 +419,7 @@ const LoginForm = () => {
     }
     setCustomOAuthLoading((prev) => ({ ...prev, [provider.slug]: true }));
     try {
-      onCustomOAuthClicked(provider, { shouldLogout: true });
+      onCustomOAuthClicked(provider, oauthLoginOptions);
     } finally {
       // 由于重定向，这里不会执行到，但为了完整性添加
       setTimeout(() => {
@@ -732,7 +734,7 @@ const LoginForm = () => {
                   <Text>
                     {t('没有账户？')}{' '}
                     <Link
-                      to='/register'
+                      to={registerPath}
                       className='text-blue-600 hover:text-blue-800 font-medium'
                     >
                       {t('注册')}
@@ -885,7 +887,7 @@ const LoginForm = () => {
                   <Text>
                     {t('没有账户？')}{' '}
                     <Link
-                      to='/register'
+                      to={registerPath}
                       className='text-blue-600 hover:text-blue-800 font-medium'
                     >
                       {t('注册')}

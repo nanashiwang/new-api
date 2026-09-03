@@ -61,7 +61,8 @@
     "test:tiered-billing-display": "node scripts/tiered-billing-display.test.mjs",
     "test:playground-sse": "node scripts/playground-sse.test.mjs",
     "test:ccswitch-config": "node scripts/ccswitch-config.test.mjs",
-    "test:desktop-download": "node scripts/desktop-download.test.mjs"
+    "test:desktop-download": "node scripts/desktop-download.test.mjs",
+    "test:auth-redirect": "node scripts/auth-redirect.test.mjs"
   },
   "eslintConfig": {
     "extends": [

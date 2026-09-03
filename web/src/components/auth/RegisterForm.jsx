@@ -64,6 +64,11 @@ import { StatusContext } from '../../context/Status';
 import { useTranslation } from 'react-i18next';
 import { SiDiscord } from 'react-icons/si';
 import Turnstile from '../common/ResilientTurnstile';
+import {
+  buildAuthPathWithNext,
+  getSafeLoginRedirectPath,
+  navigateToLoginRedirect,
+} from '../../helpers/auth';
 
 const TelegramLoginButton = lazy(() => import('react-telegram-login/src'));
 const OAuthProviderIcon = lazy(() => import('../common/OAuthProviderIcon'));
@@ -117,6 +122,15 @@ const RegisterForm = () => {
 
   const logo = getLogo();
   const systemName = getSystemName();
+  const requestedPostLoginPath = getSafeLoginRedirectPath(undefined, '');
+  const postLoginPath = requestedPostLoginPath || '/console';
+  const loginPath = buildAuthPathWithNext('/login', requestedPostLoginPath);
+  const oauthLoginOptions = {
+    shouldLogout: true,
+    postLoginPath: requestedPostLoginPath,
+  };
+  const navigateToPostLogin = () =>
+    navigateToLoginRedirect(postLoginPath, navigate);
 
   let affCode = new URLSearchParams(window.location.search).get('aff');
   if (affCode) {
@@ -214,7 +228,7 @@ const RegisterForm = () => {
         localStorage.setItem('user', JSON.stringify(data));
         setUserData(data);
         updateAPI();
-        navigate('/');
+        navigateToPostLogin();
         showSuccess('登录成功！');
         setShowWeChatLoginModal(false);
       } else {
@@ -261,7 +275,7 @@ const RegisterForm = () => {
         const { success, message } = res.data;
         if (success) {
           localStorage.removeItem('aff');
-          navigate('/login');
+          navigate(loginPath);
           showSuccess('注册成功！');
         } else {
           showError(message);
@@ -325,7 +339,7 @@ const RegisterForm = () => {
       setGithubButtonDisabled(true);
     }, 20000);
     try {
-      onGitHubOAuthClicked(status.github_client_id, { shouldLogout: true });
+      onGitHubOAuthClicked(status.github_client_id, oauthLoginOptions);
     } finally {
       setTimeout(() => setGithubLoading(false), 3000);
     }
@@ -334,7 +348,7 @@ const RegisterForm = () => {
   const handleDiscordClick = () => {
     setDiscordLoading(true);
     try {
-      onDiscordOAuthClicked(status.discord_client_id, { shouldLogout: true });
+      onDiscordOAuthClicked(status.discord_client_id, oauthLoginOptions);
     } finally {
       setTimeout(() => setDiscordLoading(false), 3000);
     }
@@ -347,7 +361,7 @@ const RegisterForm = () => {
         status.oidc_authorization_endpoint,
         status.oidc_client_id,
         false,
-        { shouldLogout: true },
+        oauthLoginOptions,
       );
     } finally {
       setTimeout(() => setOidcLoading(false), 3000);
@@ -357,7 +371,7 @@ const RegisterForm = () => {
   const handleLinuxDOClick = () => {
     setLinuxdoLoading(true);
     try {
-      onLinuxDOOAuthClicked(status.linuxdo_client_id, { shouldLogout: true });
+      onLinuxDOOAuthClicked(status.linuxdo_client_id, oauthLoginOptions);
     } finally {
       setTimeout(() => setLinuxdoLoading(false), 3000);
     }
@@ -366,7 +380,7 @@ const RegisterForm = () => {
   const handleCustomOAuthClick = (provider) => {
     setCustomOAuthLoading((prev) => ({ ...prev, [provider.slug]: true }));
     try {
-      onCustomOAuthClicked(provider, { shouldLogout: true });
+      onCustomOAuthClicked(provider, oauthLoginOptions);
     } finally {
       setTimeout(() => {
         setCustomOAuthLoading((prev) => ({ ...prev, [provider.slug]: false }));
@@ -413,7 +427,7 @@ const RegisterForm = () => {
         showSuccess('登录成功！');
         setUserData(data);
         updateAPI();
-        navigate('/');
+        navigateToPostLogin();
       } else {
         showError(message);
       }
@@ -580,7 +594,7 @@ const RegisterForm = () => {
                 <Text>
                   {t('已有账户？')}{' '}
                   <Link
-                    to='/login'
+                    to={loginPath}
                     className='text-blue-600 hover:text-blue-800 font-medium'
                   >
                     {t('登录')}
@@ -773,7 +787,7 @@ const RegisterForm = () => {
                 <Text>
                   {t('已有账户？')}{' '}
                   <Link
-                    to='/login'
+                    to={loginPath}
                     className='text-blue-600 hover:text-blue-800 font-medium'
                   >
                     {t('登录')}

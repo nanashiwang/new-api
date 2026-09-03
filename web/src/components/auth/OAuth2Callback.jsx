@@ -29,20 +29,24 @@ import {
 } from '../../helpers';
 import { UserContext } from '../../context/User';
 import Loading from '../common/ui/Loading';
+import {
+  consumeOAuthLoginRedirect,
+  navigateToLoginRedirect,
+} from '../../helpers/authRedirect';
 
 const OAuth2Callback = (props) => {
   const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const [, userDispatch] = useContext(UserContext);
   const navigate = useNavigate();
-  
+
   // 防止 React 18 Strict Mode 下重复执行
   const hasExecuted = useRef(false);
 
   // 最大重试次数
   const MAX_RETRIES = 3;
 
-  const sendCode = async (code, state, retry = 0) => {
+  const sendCode = async (code, state, postLoginPath, retry = 0) => {
     try {
       const { data: resData } = await API.get(
         `/api/oauth/${props.type}?code=${code}&state=${state}`,
@@ -66,14 +70,14 @@ const OAuth2Callback = (props) => {
         setUserData(data);
         updateAPI();
         showSuccess(t('登录成功！'));
-        navigate('/console/token');
+        navigateToLoginRedirect(postLoginPath, navigate);
       }
     } catch (error) {
       // 网络错误等可重试
       if (retry < MAX_RETRIES) {
         // 递增的退避等待
         await new Promise((resolve) => setTimeout(resolve, (retry + 1) * 2000));
-        return sendCode(code, state, retry + 1);
+        return sendCode(code, state, postLoginPath, retry + 1);
       }
 
       // 重试次数耗尽，提示错误并返回设置页面
@@ -99,7 +103,8 @@ const OAuth2Callback = (props) => {
       return;
     }
 
-    sendCode(code, state);
+    const postLoginPath = consumeOAuthLoginRedirect(state);
+    sendCode(code, state, postLoginPath);
   }, []);
 
   return <Loading />;
