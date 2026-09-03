@@ -52,6 +52,7 @@ const routerMap = {
   playground: '/console/playground',
   imagePlayground: '/console/image-playground',
   personal: '/console/personal',
+  pulse: '/console/pulse',
 };
 
 const SiderBar = ({ onNavigate = () => {} }) => {
@@ -159,6 +160,11 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('钱包管理'),
         itemKey: 'topup',
         to: '/topup',
+      },
+      {
+        text: t('Meta Pulse'),
+        itemKey: 'pulse',
+        to: '/pulse',
       },
       {
         text: t('个人设置'),

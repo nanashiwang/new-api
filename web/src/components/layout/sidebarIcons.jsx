@@ -35,6 +35,7 @@ import {
   Package,
   Server,
   CalendarClock,
+  Activity,
 } from 'lucide-react';
 
 export function getLucideIcon(key, selected = false) {
@@ -63,6 +64,8 @@ export function getLucideIcon(key, selected = false) {
       return <BarChart3 {...commonProps} color={iconColor} />;
     case 'task':
       return <CheckSquare {...commonProps} color={iconColor} />;
+    case 'pulse':
+      return <Activity {...commonProps} color={iconColor} />;
     case 'topup':
       return <CreditCard {...commonProps} color={iconColor} />;
     case 'channel':
