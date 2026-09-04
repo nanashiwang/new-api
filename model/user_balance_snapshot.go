@@ -199,12 +199,13 @@ func SaveUserBalanceSnapshot(now time.Time) (*UserBalanceSnapshot, error) {
 
 func queryUserBalanceAggregate() (userBalanceAggregateRow, error) {
 	var aggregate userBalanceAggregateRow
-	// 余额走势统计口径：已禁用用户（status != 启用）不计入；余额为负者按 0 处理，
-	// 故 total_quota 取正余额之和，避免负余额拉低总额走势。
+	// 余额走势统计口径：已禁用用户（status != 启用）不计入；total_quota
+	// 保留启用用户的净余额，total_positive_quota 单独统计正余额总和，
+	// 这样负余额不会被静默抹掉，报表也能同时展示风险规模。
 	err := DB.Model(&User{}).
 		Where("balance_trend_disabled = ? AND status = ?", false, common.UserStatusEnabled).
 		Select(`
-		COALESCE(SUM(CASE WHEN quota > 0 THEN quota ELSE 0 END), 0) AS total_quota,
+		COALESCE(SUM(quota), 0) AS total_quota,
 		COALESCE(SUM(CASE WHEN quota > 0 THEN quota ELSE 0 END), 0) AS total_positive_quota,
 		COUNT(*) AS user_count,
 		COALESCE(SUM(CASE WHEN quota > 0 THEN 1 ELSE 0 END), 0) AS positive_user_count,
