@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -217,6 +219,15 @@ func TestSnapshotEqual_NilVsEmpty(t *testing.T) {
 	b := taskSnapshot{Status: TaskStatusInProgress, Data: json.RawMessage{}}
 	// bytes.Equal(nil, []byte{}) == true
 	assert.True(t, a.Equal(b))
+}
+
+func TestInitTaskRetainsRequestIDForAsyncBillingCorrelation(t *testing.T) {
+	task := InitTask(constant.TaskPlatformSuno, &relaycommon.RelayInfo{
+		UserId:      7,
+		RequestId:   "request-async-1",
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 1},
+	})
+	require.Equal(t, "request-async-1", task.PrivateData.RequestId)
 }
 
 func TestSnapshot_Roundtrip(t *testing.T) {

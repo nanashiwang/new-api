@@ -351,6 +351,9 @@ type RecordTaskBillingLogParams struct {
 	Quota     int
 	TokenId   int
 	Group     string
+	// RequestId links asynchronous task billing events to the original
+	// consume log. It is intentionally a correlation key, not request content.
+	RequestId string
 	Other     map[string]interface{}
 }
 
@@ -377,6 +380,7 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 		ChannelId: params.ChannelId,
 		TokenId:   params.TokenId,
 		Group:     params.Group,
+		RequestId: params.RequestId,
 		Other:     common.MapToJsonStr(params.Other),
 	}
 	err := LOG_DB.Create(log).Error

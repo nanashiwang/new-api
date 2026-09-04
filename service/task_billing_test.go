@@ -121,12 +121,13 @@ func makeTask(userId, channelId, quota, tokenId int, billingSource string, subsc
 			OriginModelName: "test-model",
 		},
 		PrivateData: model.TaskPrivateData{
+			RequestId:      "request-task-correlation",
 			BillingSource:  billingSource,
 			SubscriptionId: subscriptionId,
 			TokenId:        tokenId,
 			BillingContext: &model.TaskBillingContext{
-				ModelPrice: 0.02,
-				GroupRatio: 1.0,
+				ModelPrice:      0.02,
+				GroupRatio:      1.0,
 				OriginModelName: "test-model",
 			},
 		},
@@ -215,6 +216,7 @@ func TestRefundTaskQuota_Wallet(t *testing.T) {
 	assert.Equal(t, model.LogTypeRefund, log.Type)
 	assert.Equal(t, preConsumed, log.Quota)
 	assert.Equal(t, "test-model", log.ModelName)
+	assert.Equal(t, "request-task-correlation", log.RequestId)
 }
 
 func TestRefundTaskQuota_Subscription(t *testing.T) {
@@ -615,9 +617,11 @@ type mockAdaptor struct {
 	adjustReturn int
 }
 
-func (m *mockAdaptor) Init(_ *relaycommon.RelayInfo)                                            {}
-func (m *mockAdaptor) FetchTask(string, string, map[string]any, string) (*http.Response, error)  { return nil, nil }
-func (m *mockAdaptor) ParseTaskResult([]byte) (*relaycommon.TaskInfo, error)                     { return nil, nil }
+func (m *mockAdaptor) Init(_ *relaycommon.RelayInfo) {}
+func (m *mockAdaptor) FetchTask(string, string, map[string]any, string) (*http.Response, error) {
+	return nil, nil
+}
+func (m *mockAdaptor) ParseTaskResult([]byte) (*relaycommon.TaskInfo, error) { return nil, nil }
 func (m *mockAdaptor) AdjustBillingOnComplete(_ *model.Task, _ *relaycommon.TaskInfo) int {
 	return m.adjustReturn
 }
