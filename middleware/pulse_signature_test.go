@@ -64,6 +64,17 @@ func TestVerifyPulseServiceRequestRejectsMissingSecretAndTampering(t *testing.T)
 	require.False(t, verifyPulseServiceRequest(tampered, "pulse-test-secret"))
 }
 
+func TestVerifyPulseServiceRequestRejectsOversizedBody(t *testing.T) {
+	oldRedisEnabled := common.RedisEnabled
+	common.RedisEnabled = false
+	t.Cleanup(func() { common.RedisEnabled = oldRedisEnabled })
+	t.Setenv("PULSE_ENV", "test")
+
+	body := strings.Repeat("x", pulseMaxRequestBodyBytes+1)
+	req := signedPulseRequest(t, body, time.Now().Truncate(time.Second), "nonce-oversized")
+	require.False(t, verifyPulseServiceRequest(req, "pulse-test-secret"))
+}
+
 func TestVerifyPulseServiceRequestFailsClosedInProductionWithoutRedis(t *testing.T) {
 	oldRedisEnabled := common.RedisEnabled
 	common.RedisEnabled = false

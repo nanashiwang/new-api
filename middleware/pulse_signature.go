@@ -26,6 +26,7 @@ const (
 	pulseNonceHeader         = "X-Pulse-Nonce"
 	pulseSignatureHeader     = "X-Pulse-Signature"
 	pulseServiceUserIDKey    = "pulse_service_user_id"
+	pulseMaxRequestBodyBytes = 64 << 10
 	pulseMaxClockSkew        = 5 * time.Minute
 	minimumPulseSecretLength = 32
 )
@@ -129,8 +130,11 @@ func verifyPulseServiceRequestWithSecrets(req *http.Request, secrets []string) b
 	if delta := time.Since(requestTime); delta > pulseMaxClockSkew || delta < -pulseMaxClockSkew {
 		return false
 	}
-	body, err := io.ReadAll(req.Body)
-	if err != nil {
+	if req.Body == nil {
+		return false
+	}
+	body, err := io.ReadAll(io.LimitReader(req.Body, pulseMaxRequestBodyBytes+1))
+	if err != nil || len(body) > pulseMaxRequestBodyBytes {
 		return false
 	}
 	req.Body = io.NopCloser(bytes.NewReader(body))
