@@ -15,12 +15,12 @@ func TestEmailVerificationRateLimitMemory_LimitsSameEmailAcrossIPs(t *testing.T)
 	gin.SetMode(gin.TestMode)
 
 	originRedisEnabled := common.RedisEnabled
-	originLimiter := inMemoryRateLimiter
 	common.RedisEnabled = false
+	// Reset the package limiter without copying its embedded sync.Mutex.
 	inMemoryRateLimiter = common.InMemoryRateLimiter{}
 	t.Cleanup(func() {
 		common.RedisEnabled = originRedisEnabled
-		inMemoryRateLimiter = originLimiter
+		inMemoryRateLimiter = common.InMemoryRateLimiter{}
 	})
 
 	router := gin.New()
