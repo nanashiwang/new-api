@@ -28,6 +28,7 @@ export const REDEMPTION_LIMIT_DEFAULTS = Object.freeze({
   WalletRedemptionDailyQuotaLimit: 5000,
   WalletRedemptionReviewDistinctCreatorThreshold: 3,
   WalletRedemptionReviewSmallQuotaLimit: 100,
+  WalletRedemptionAutoBindMaxAgeHours: 24,
 });
 
 export function resolveRedemptionLimitInputs(options = {}) {

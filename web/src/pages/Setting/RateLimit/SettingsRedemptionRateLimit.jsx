@@ -385,6 +385,22 @@ export default function RedemptionRateLimit(props) {
                   }
                 />
               </Col>
+              <Col xs={24} sm={12} md={4} lg={4} xl={4}>
+                <Form.InputNumber
+                  label={t('钱包兑换码自动绑定账号最大年龄')}
+                  step={1}
+                  min={0}
+                  suffix={t('小时')}
+                  extraText={t('仅影响钱包兑换码自动建立邀请关系；0 表示关闭')}
+                  field={'WalletRedemptionAutoBindMaxAgeHours'}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      WalletRedemptionAutoBindMaxAgeHours: String(value),
+                    })
+                  }
+                />
+              </Col>
             </Row>
             <Row>
               <Button size='default' onClick={onSubmit}>

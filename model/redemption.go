@@ -729,7 +729,7 @@ func bindWalletRedemptionCreatorTx(tx *gorm.DB, redemption *Redemption, redeemer
 	// Lock both users in deterministic ID order to avoid A/B cross-redemption
 	// deadlocks. SQLite serializes writes and does not support FOR UPDATE.
 	var users []*User
-	query := tx.Select("id", "status", "inviter_id").
+	query := tx.Select("id", "status", "inviter_id", "created_at").
 		Where("id IN ?", []int{creatorUserID, redeemerUserID}).
 		Order("id ASC")
 	if !common.UsingSQLite {
@@ -748,6 +748,18 @@ func bindWalletRedemptionCreatorTx(tx *gorm.DB, redemption *Redemption, redeemer
 		return false, false, nil
 	}
 	if redeemer.InviterId != 0 {
+		return false, false, nil
+	}
+	// Only recently created accounts may gain an inviter implicitly by
+	// redeeming a wallet-funded code. Older unbound accounts can still redeem
+	// the quota, but cannot be converted into referral relationships.
+	maxAgeHours := common.WalletRedemptionAutoBindMaxAgeHours
+	if maxAgeHours <= 0 || redeemer.CreatedAt <= 0 {
+		return false, false, nil
+	}
+	now := common.GetTimestamp()
+	maxAgeSeconds := int64(maxAgeHours) * 60 * 60
+	if redeemer.CreatedAt > now || now-redeemer.CreatedAt > maxAgeSeconds {
 		return false, false, nil
 	}
 	wouldCreateCycle, err := walletRedemptionWouldCreateCycleTx(tx, creatorUserID, redeemerUserID)

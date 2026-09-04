@@ -58,6 +58,7 @@ func setupWalletRedemptionTest(t *testing.T) {
 	originalDailyQuotaLimit := common.WalletRedemptionDailyQuotaLimit
 	originalReviewThreshold := common.WalletRedemptionReviewDistinctCreatorThreshold
 	originalReviewSmallLimit := common.WalletRedemptionReviewSmallQuotaLimit
+	originalAutoBindMaxAgeHours := common.WalletRedemptionAutoBindMaxAgeHours
 	common.QuotaPerUnit = 10
 	common.WalletRedemptionDailyCreateLimit = 100
 	common.WalletRedemptionMinimumQuota = 10
@@ -65,6 +66,7 @@ func setupWalletRedemptionTest(t *testing.T) {
 	common.WalletRedemptionDailyQuotaLimit = 5000
 	common.WalletRedemptionReviewDistinctCreatorThreshold = 3
 	common.WalletRedemptionReviewSmallQuotaLimit = 100
+	common.WalletRedemptionAutoBindMaxAgeHours = 24
 	require.NoError(t, common.SetInviteBindingSettings(common.InviteBindingSettings{
 		Threshold:          0,
 		RateAfterThreshold: 100,
@@ -77,6 +79,7 @@ func setupWalletRedemptionTest(t *testing.T) {
 		common.WalletRedemptionDailyQuotaLimit = originalDailyQuotaLimit
 		common.WalletRedemptionReviewDistinctCreatorThreshold = originalReviewThreshold
 		common.WalletRedemptionReviewSmallQuotaLimit = originalReviewSmallLimit
+		common.WalletRedemptionAutoBindMaxAgeHours = originalAutoBindMaxAgeHours
 		_ = common.SetInviteBindingSettings(originalBindingSettings)
 	})
 	require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&Redemption{}).Error)
@@ -452,6 +455,35 @@ func TestWalletRedemption_BindsUnboundRedeemerWithoutRewards(t *testing.T) {
 	assert.Zero(t, refreshedCreator.AffQuota)
 	assert.Zero(t, refreshedCreator.AffHistoryQuota)
 	assert.Zero(t, countInviteCommissionLedgers(t))
+}
+
+func TestWalletRedemption_AutoBindingRequiresRecentAccount(t *testing.T) {
+	setupWalletRedemptionTest(t)
+	creator := createInviteCommissionTestUser(t, "wallet_age_creator", 0)
+	oldRedeemer := createInviteCommissionTestUser(t, "wallet_age_old", 0)
+	newRedeemer := createInviteCommissionTestUser(t, "wallet_age_new", 0)
+	oldCreatedAt := common.GetTimestamp() - int64((24*time.Hour).Seconds()) - 1
+	recentCreatedAt := common.GetTimestamp() - int64((24*time.Hour).Seconds()) + 1
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", oldRedeemer.Id).Update("created_at", oldCreatedAt).Error)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", newRedeemer.Id).Update("created_at", recentCreatedAt).Error)
+	setWalletQuota(t, creator.Id, 1000)
+	oldCode, err := CreateWalletFundedRedemption(creator.Id, 100, "wallet-age-old-001")
+	require.NoError(t, err)
+	newCode, err := CreateWalletFundedRedemption(creator.Id, 100, "wallet-age-new-001")
+	require.NoError(t, err)
+
+	_, err = RedeemWithResult(oldCode.Redemption.Key, oldRedeemer.Id)
+	require.NoError(t, err)
+	_, err = RedeemWithResult(newCode.Redemption.Key, newRedeemer.Id)
+	require.NoError(t, err)
+
+	var refreshedOld, refreshedNew, refreshedCreator User
+	require.NoError(t, DB.First(&refreshedOld, oldRedeemer.Id).Error)
+	require.NoError(t, DB.First(&refreshedNew, newRedeemer.Id).Error)
+	require.NoError(t, DB.First(&refreshedCreator, creator.Id).Error)
+	assert.Zero(t, refreshedOld.InviterId)
+	assert.Equal(t, creator.Id, refreshedNew.InviterId)
+	assert.Equal(t, 1, refreshedCreator.AffCount)
 }
 
 func TestWalletRedemption_LegacyCodeCannotTransferButCreatorCanRecover(t *testing.T) {

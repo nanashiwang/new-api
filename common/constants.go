@@ -155,6 +155,11 @@ var WalletRedemptionReviewDistinctCreatorThreshold = 3
 // 0 表示关闭复查触发。
 var WalletRedemptionReviewSmallQuotaLimit = 100
 
+// WalletRedemptionAutoBindMaxAgeHours limits automatic inviter binding caused
+// by wallet-funded redemption codes. A value of 0 disables this binding path;
+// redemption itself remains available.
+var WalletRedemptionAutoBindMaxAgeHours = 24
+
 // InvoiceServiceFeeRate 发票申请手续费费率，按发票开票金额(元)计算。
 // 取值建议 [0,1]：0.01 表示 1%，0 表示不收取手续费。
 var InvoiceServiceFeeRate = 0.01

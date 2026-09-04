@@ -5584,6 +5584,8 @@
   "0 代表不限制；按北京时间自然日统计": "0 signifie illimité ; calculé selon le jour de Pékin",
   "触发复查的不同创建人数": "Créateurs distincts déclenchant la révision",
   "纳入复查的小额码上限": "Seuil des petits codes à réviser",
+  "钱包兑换码自动绑定账号最大年龄": "Âge maximal du compte pour la liaison automatique via code portefeuille",
+  "仅影响钱包兑换码自动建立邀请关系；0 表示关闭": "Affecte uniquement la liaison automatique via les codes portefeuille ; 0 désactive",
   "兑换码限制必须是非负整数": "Les limites doivent être des entiers non négatifs",
   "人工复查不同创建人数必须为 0 或至少 2": "Le seuil de créateurs doit être 0 ou au moins 2",
   "人工复查小额上限不能低于单个兑换码最低额度": "Le seuil des petits codes ne peut pas être inférieur au minimum",

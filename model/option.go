@@ -167,6 +167,7 @@ func InitOptionMap() {
 	common.OptionMap["WalletRedemptionDailyQuotaLimit"] = strconv.Itoa(common.WalletRedemptionDailyQuotaLimit)
 	common.OptionMap["WalletRedemptionReviewDistinctCreatorThreshold"] = strconv.Itoa(common.WalletRedemptionReviewDistinctCreatorThreshold)
 	common.OptionMap["WalletRedemptionReviewSmallQuotaLimit"] = strconv.Itoa(common.WalletRedemptionReviewSmallQuotaLimit)
+	common.OptionMap["WalletRedemptionAutoBindMaxAgeHours"] = strconv.Itoa(common.WalletRedemptionAutoBindMaxAgeHours)
 	common.OptionMap["InvoiceServiceFeeRate"] = strconv.FormatFloat(common.InvoiceServiceFeeRate, 'f', -1, 64)
 	common.OptionMap["QuotaRemindThreshold"] = strconv.Itoa(common.QuotaRemindThreshold)
 	common.OptionMap["PreConsumedQuota"] = strconv.Itoa(common.PreConsumedQuota)
@@ -754,6 +755,8 @@ func updateOptionMapUnlocked(key string, value string) (err error) {
 		common.WalletRedemptionReviewDistinctCreatorThreshold, _ = strconv.Atoi(value)
 	case "WalletRedemptionReviewSmallQuotaLimit":
 		common.WalletRedemptionReviewSmallQuotaLimit, _ = strconv.Atoi(value)
+	case "WalletRedemptionAutoBindMaxAgeHours":
+		common.WalletRedemptionAutoBindMaxAgeHours, _ = strconv.Atoi(value)
 	case "InvoiceServiceFeeRate":
 		// 发票手续费费率，使用小数表达（例如 0.01 表示 1%）。
 		common.InvoiceServiceFeeRate, _ = strconv.ParseFloat(value, 64)
@@ -888,6 +891,13 @@ func validateInviteCommissionDailyCapOption(key string, value string) error {
 }
 
 func validateWalletRedemptionPolicyOption(key string, value string) error {
+	if key == "WalletRedemptionAutoBindMaxAgeHours" {
+		parsed, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || parsed < 0 {
+			return errors.New("WalletRedemptionAutoBindMaxAgeHours must be a non-negative integer")
+		}
+		return nil
+	}
 	return validateWalletRedemptionPolicyField(key, value)
 }
 
