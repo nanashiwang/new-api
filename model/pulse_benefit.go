@@ -16,6 +16,11 @@ const (
 	// BenefitSourcePulseReward is the only source type accepted by the Pulse
 	// internal receiver. The source_ref is the immutable Pulse reward grant ID.
 	BenefitSourcePulseReward = "pulse_reward"
+
+	PulseBenefitStatusApplied        = "applied"
+	PulseBenefitStatusAlreadyApplied = "already_applied"
+	PulseBenefitStatusRolledBack     = "rolled_back"
+	PulseBenefitStatusNotFound       = "not_found"
 )
 
 var (
@@ -57,6 +62,7 @@ type PulseBenefitResult struct {
 	SourceRef   string `json:"source_ref"`
 	Status      string `json:"status"`
 	Applied     bool   `json:"applied"`
+	RolledBack  bool   `json:"rolled_back"`
 	PayloadHash string `json:"payload_hash,omitempty"`
 }
 
@@ -85,8 +91,17 @@ func GrantPulseBenefit(req PulseBenefitGrantRequest) (PulseBenefitResult, error)
 			if receipt.PayloadHash != fingerprint || receipt.UserId != req.UserID {
 				return ErrPulseBenefitConflict
 			}
-			result.Status = "already_applied"
-			result.Applied = true
+			grant, findErr := findPulseGrantTx(tx, req.SourceRef)
+			if findErr != nil {
+				return findErr
+			}
+			if grant == nil || grant.PayloadHash != fingerprint || grant.UserId != req.UserID {
+				return errors.New("pulse benefit receipt has no matching grant")
+			}
+			result, findErr = pulseBenefitResultTx(tx, grant, PulseBenefitStatusAlreadyApplied)
+			if findErr != nil {
+				return findErr
+			}
 			return nil
 		}
 
@@ -103,8 +118,10 @@ func GrantPulseBenefit(req PulseBenefitGrantRequest) (PulseBenefitResult, error)
 			if err := createPulseReceiptTx(tx, req.SourceRef, fingerprint, req.UserID); err != nil {
 				return err
 			}
-			result.Status = "already_applied"
-			result.Applied = true
+			result, findErr = pulseBenefitResultTx(tx, existing, PulseBenefitStatusAlreadyApplied)
+			if findErr != nil {
+				return findErr
+			}
 			return nil
 		}
 		if err := createPulseReceiptTx(tx, req.SourceRef, fingerprint, req.UserID); err != nil {
@@ -131,12 +148,12 @@ func GrantPulseBenefit(req PulseBenefitGrantRequest) (PulseBenefitResult, error)
 		if err := GrantUserQuotaTx(tx, req.UserID, req.Amount, 0); err != nil {
 			return err
 		}
-		result.Status = "applied"
+		result.Status = PulseBenefitStatusApplied
 		result.Applied = true
 		return nil
 	})
 	if err == nil {
-		if result.Status == "applied" {
+		if result.Status == PulseBenefitStatusApplied {
 			_ = cacheIncrUserQuota(req.UserID, int64(req.Amount))
 		}
 		return result, nil
@@ -156,9 +173,14 @@ func GrantPulseBenefit(req PulseBenefitGrantRequest) (PulseBenefitResult, error)
 	if receipt.PayloadHash != fingerprint || receipt.UserId != req.UserID {
 		return PulseBenefitResult{}, ErrPulseBenefitConflict
 	}
-	result.Status = "already_applied"
-	result.Applied = true
-	return result, nil
+	grant, findErr := findPulseGrantTx(DB, req.SourceRef)
+	if findErr != nil {
+		return PulseBenefitResult{}, findErr
+	}
+	if grant == nil || grant.PayloadHash != fingerprint || grant.UserId != req.UserID {
+		return PulseBenefitResult{}, errors.New("pulse benefit receipt has no matching grant")
+	}
+	return pulseBenefitResultTx(DB, grant, PulseBenefitStatusAlreadyApplied)
 }
 
 // QueryPulseBenefit returns the state for a stable source_ref. It is safe to
@@ -173,16 +195,28 @@ func QueryPulseBenefit(sourceRef string) (PulseBenefitResult, error) {
 		return PulseBenefitResult{}, err
 	}
 	if grant == nil {
-		return PulseBenefitResult{SourceRef: sourceRef, Status: "not_found", Applied: false}, ErrPulseBenefitNotFound
+		return PulseBenefitResult{SourceRef: sourceRef, Status: PulseBenefitStatusNotFound}, ErrPulseBenefitNotFound
 	}
-	status := "applied"
+	return pulseBenefitResultTx(DB, grant, PulseBenefitStatusApplied)
+}
+
+func pulseBenefitResultTx(tx *gorm.DB, grant *BenefitChangeRecord, activeStatus string) (PulseBenefitResult, error) {
+	if tx == nil {
+		tx = DB
+	}
 	var rollback BenefitChangeRecord
-	if err := DB.Where("origin_record_id = ? AND action = ?", grant.Id, BenefitActionRollback).First(&rollback).Error; err == nil {
-		status = "rolled_back"
+	if err := tx.Where("origin_record_id = ? AND action = ?", grant.Id, BenefitActionRollback).First(&rollback).Error; err == nil {
+		return PulseBenefitResult{
+			SourceRef: grant.SourceRef, Status: PulseBenefitStatusRolledBack,
+			RolledBack: true, PayloadHash: grant.PayloadHash,
+		}, nil
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return PulseBenefitResult{}, err
 	}
-	return PulseBenefitResult{SourceRef: sourceRef, Status: status, Applied: true, PayloadHash: grant.PayloadHash}, nil
+	return PulseBenefitResult{
+		SourceRef: grant.SourceRef, Status: activeStatus,
+		Applied: true, PayloadHash: grant.PayloadHash,
+	}, nil
 }
 
 // RollbackPulseBenefit reuses the original source_ref. The generic rollback
@@ -204,7 +238,14 @@ func RollbackPulseBenefit(sourceRef, reason string) (PulseBenefitResult, error) 
 	if err != nil {
 		return PulseBenefitResult{}, err
 	}
-	return PulseBenefitResult{SourceRef: sourceRef, Status: "rolled_back", Applied: true, PayloadHash: grant.PayloadHash}, nil
+	result, err := QueryPulseBenefit(sourceRef)
+	if err != nil {
+		return PulseBenefitResult{}, err
+	}
+	if !result.RolledBack || result.Applied {
+		return PulseBenefitResult{}, errors.New("pulse benefit rollback state is inconsistent")
+	}
+	return result, nil
 }
 
 var errPulseBenefitDuplicate = errors.New("pulse benefit duplicate")

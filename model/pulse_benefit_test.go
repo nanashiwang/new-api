@@ -63,10 +63,28 @@ func TestRollbackPulseBenefitUsesOriginalSourceAndIsIdempotent(t *testing.T) {
 
 	first, err := RollbackPulseBenefit(request.SourceRef, "人工撤销")
 	require.NoError(t, err)
-	require.Equal(t, "rolled_back", first.Status)
+	require.Equal(t, PulseBenefitStatusRolledBack, first.Status)
+	require.False(t, first.Applied)
+	require.True(t, first.RolledBack)
 	second, err := RollbackPulseBenefit(request.SourceRef, "重复撤销")
 	require.NoError(t, err)
-	require.Equal(t, "rolled_back", second.Status)
+	require.Equal(t, PulseBenefitStatusRolledBack, second.Status)
+	require.False(t, second.Applied)
+	require.True(t, second.RolledBack)
+
+	query, err := QueryPulseBenefit(request.SourceRef)
+	require.NoError(t, err)
+	require.Equal(t, PulseBenefitStatusRolledBack, query.Status)
+	require.False(t, query.Applied)
+	require.True(t, query.RolledBack)
+
+	// A delayed/replayed grant must report the reversal rather than claiming
+	// that the reward is still active or adding quota again.
+	replayed, err := GrantPulseBenefit(request)
+	require.NoError(t, err)
+	require.Equal(t, PulseBenefitStatusRolledBack, replayed.Status)
+	require.False(t, replayed.Applied)
+	require.True(t, replayed.RolledBack)
 
 	var refreshed User
 	require.NoError(t, DB.First(&refreshed, user.Id).Error)
