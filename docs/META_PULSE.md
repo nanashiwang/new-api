@@ -22,6 +22,8 @@ PULSE_FORUM_SSO_SECRET_PREVIOUS=轮换期间临时保留旧值
 PULSE_FORUM_SSO_CALLBACK_URL=https://forum.example.com/api/user-center/login/callback
 ```
 
+Benefit 内部接口在完成服务签名后按 `pulse-settlement` 服务身份独立限流，默认每 60 秒 600 次；它不使用公共 API 的 IP 限流，避免 Worker 被通用登录限额误伤。SSO 入口另使用 CriticalRateLimit。生产环境仍须按真实吞吐调整参数并完成压测。
+
 不要把真实密钥提交到 Git，也不要让浏览器、论坛前端或 YuanHeng 持有服务密钥。
 
 ## Pulse 奖励接口
@@ -32,7 +34,7 @@ PULSE_FORUM_SSO_CALLBACK_URL=https://forum.example.com/api/user-center/login/cal
 - `POST /query` 或 `GET /query/:source_ref`：查询原始奖励状态，用于超时后的恢复；不得更换 `source_ref` 重发。
 - `POST /rollback`：使用原始 `source_ref` 追加可审计的撤销记录。
 
-同一 `source_ref` 携带相同 payload 会返回幂等成功；payload、用户或额度不一致会返回 conflict。Pulse 奖励不会写入可转赠额度，也不会直接修改 `users.quota`。
+Grant 的请求体 `user_id` 必须与已验签的 `X-Pulse-User-Id` 一致；同一 `source_ref` 携带相同 payload 会返回幂等成功；payload、用户或额度不一致会返回 conflict。Pulse 奖励不会写入可转赠额度，也不会直接修改 `users.quota`。
 
 ## 论坛登录入口
 
