@@ -128,6 +128,20 @@ func TestPulseBenefitFingerprintMatchesSettlementPayload(t *testing.T) {
 	}
 	fingerprint, err := pulseBenefitFingerprint(request)
 	require.NoError(t, err)
-	digest := sha256.Sum256([]byte(`{"grant_id":"grant-fingerprint","user_id":42,"amount":99,"transferable_quota":false,"source_ref":"grant-fingerprint","reward_type":"period"}`))
+	digest := sha256.Sum256([]byte(`{"amount":99,"grant_id":"grant-fingerprint","reward_type":"period","source_ref":"grant-fingerprint","transferable_quota":false,"user_id":42}`))
 	require.Equal(t, fmt.Sprintf("%x", digest[:]), fingerprint)
+}
+
+func TestCanonicalPulseBenefitJSONIgnoresObjectOrderWhitespaceAndPreservesNumbers(t *testing.T) {
+	first, err := canonicalPulseBenefitJSON([]byte(` { "z": 9007199254740993, "a": { "b": 2, "a": 1 } } `))
+	require.NoError(t, err)
+	second, err := canonicalPulseBenefitJSON([]byte(`{"a":{"a":1,"b":2},"z":9007199254740993}`))
+	require.NoError(t, err)
+	require.Equal(t, second, first)
+	require.Equal(t, `{"a":{"a":1,"b":2},"z":9007199254740993}`, string(first))
+}
+
+func TestCanonicalPulseBenefitJSONRejectsTrailingJSON(t *testing.T) {
+	_, err := canonicalPulseBenefitJSON([]byte(`{"grant_id":"one"}{"grant_id":"two"}`))
+	require.Error(t, err)
 }

@@ -1,9 +1,12 @@
 package model
 
 import (
+	"bytes"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -235,8 +238,34 @@ func pulseBenefitFingerprint(req PulseBenefitGrantRequest) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	digest := sha256.Sum256(payload)
+	canonical, err := canonicalPulseBenefitJSON(payload)
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(canonical)
 	return fmt.Sprintf("%x", digest[:]), nil
+}
+
+// canonicalPulseBenefitJSON makes the fingerprint independent of JSON object
+// key order and insignificant whitespace. UseNumber is required so future
+// payload fields cannot lose integer precision through float64 decoding.
+func canonicalPulseBenefitJSON(payload []byte) ([]byte, error) {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return nil, errors.New("pulse benefit payload contains trailing JSON")
+		}
+		return nil, err
+	}
+	// Keep common.Marshal as the project's JSON boundary; encoding/json sorts
+	// map keys deterministically during this marshal.
+	return common.Marshal(value)
 }
 
 func createPulseReceiptTx(tx *gorm.DB, sourceRef, payloadHash string, userID int) error {
