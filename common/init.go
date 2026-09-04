@@ -146,6 +146,10 @@ func InitEnv() {
 	CriticalRateLimitEnable = GetEnvOrDefaultBool("CRITICAL_RATE_LIMIT_ENABLE", true)
 	CriticalRateLimitNum = GetEnvOrDefault("CRITICAL_RATE_LIMIT", 20)
 	CriticalRateLimitDuration = int64(GetEnvOrDefault("CRITICAL_RATE_LIMIT_DURATION", 20*60))
+
+	PulseBenefitRateLimitEnable = GetEnvOrDefaultBool("PULSE_BENEFIT_RATE_LIMIT_ENABLE", true)
+	PulseBenefitRateLimitNum = GetEnvOrDefault("PULSE_BENEFIT_RATE_LIMIT", 600)
+	PulseBenefitRateLimitDuration = int64(GetEnvOrDefault("PULSE_BENEFIT_RATE_LIMIT_DURATION", 60))
 	initConstantEnv()
 }
 

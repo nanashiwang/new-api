@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -108,10 +109,19 @@ func GlobalWebRateLimit() func(c *gin.Context) {
 }
 
 func GlobalAPIRateLimit() func(c *gin.Context) {
-	if common.GlobalApiRateLimitEnable {
-		return rateLimitFactory(common.GlobalApiRateLimitNum, common.GlobalApiRateLimitDuration, "GA")
+	if !common.GlobalApiRateLimitEnable {
+		return defNext
 	}
-	return defNext
+	global := rateLimitFactory(common.GlobalApiRateLimitNum, common.GlobalApiRateLimitDuration, "GA")
+	return func(c *gin.Context) {
+		// Signed Pulse calls have their own service-identity limit. Do not
+		// subject a worker to the public IP limit before service auth runs.
+		if isPulseBenefitPath(c.Request.URL.Path) {
+			c.Next()
+			return
+		}
+		global(c)
+	}
 }
 
 func PublicTokenUsageRateLimit() func(c *gin.Context) {
@@ -130,6 +140,22 @@ func CriticalRateLimit() func(c *gin.Context) {
 		return rateLimitFactory(common.CriticalRateLimitNum, common.CriticalRateLimitDuration, "CT")
 	}
 	return defNext
+}
+
+// PulseBenefitRateLimit protects the authenticated Pulse-to-new-api Benefit
+// boundary. It is deliberately keyed by the verified service role rather than
+// client IP: workers may run behind different addresses, while an invalid
+// signature is rejected by PulseServiceAuth before this middleware runs.
+func PulseBenefitRateLimit() func(c *gin.Context) {
+	if !common.PulseBenefitRateLimitEnable {
+		return defNext
+	}
+	return serviceRateLimitFactory(
+		common.PulseBenefitRateLimitNum,
+		common.PulseBenefitRateLimitDuration,
+		"PB",
+		pulseServiceRateLimitSubject,
+	)
 }
 
 // WalletRedemptionRateLimit is keyed by the authenticated user rather than IP,
@@ -152,6 +178,49 @@ func DownloadRateLimit() func(c *gin.Context) {
 
 func UploadRateLimit() func(c *gin.Context) {
 	return rateLimitFactory(common.UploadRateLimitNum, common.UploadRateLimitDuration, "UP")
+}
+
+// serviceRateLimitFactory creates a rate limiter keyed by an authenticated
+// service identity. It must be installed after the service-auth middleware.
+func serviceRateLimitFactory(maxRequestNum int, duration int64, mark string, subject func(*gin.Context) string) func(c *gin.Context) {
+	if common.RedisEnabled {
+		return func(c *gin.Context) {
+			identity := strings.TrimSpace(subject(c))
+			if identity == "" {
+				identity = "unknown"
+			}
+			key := buildRateLimitRedisKey(mark, "service:"+identity)
+			userRedisRateLimiter(c, maxRequestNum, duration, mark, key)
+		}
+	}
+	inMemoryRateLimiter.Init(getRateLimitExpiration(duration))
+	return func(c *gin.Context) {
+		identity := strings.TrimSpace(subject(c))
+		if identity == "" {
+			identity = "unknown"
+		}
+		key := mark + ":service:" + identity
+		if !inMemoryRateLimiter.Request(key, maxRequestNum, duration) {
+			abortWithRateLimit(c, maxRequestNum, duration, mark)
+			return
+		}
+	}
+}
+
+func pulseServiceRateLimitSubject(c *gin.Context) string {
+	if value, exists := c.Get("pulse_service_role"); exists {
+		if role, ok := value.(string); ok && strings.TrimSpace(role) != "" {
+			return role
+		}
+	}
+	// This fallback keeps the middleware composable in tests and only runs
+	// safely in production after PulseServiceAuth has accepted the request.
+	return c.GetHeader("X-Pulse-Role")
+}
+
+func isPulseBenefitPath(path string) bool {
+	const prefix = "/api/internal/pulse/benefits"
+	return path == prefix || strings.HasPrefix(path, prefix+"/")
 }
 
 // userRateLimitFactory creates a rate limiter keyed by authenticated user ID

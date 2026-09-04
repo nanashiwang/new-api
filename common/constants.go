@@ -263,6 +263,12 @@ var (
 	CriticalRateLimitNum            = 20
 	CriticalRateLimitDuration int64 = 20 * 60
 
+	// Pulse Benefit is a service-to-service endpoint. Keep its limit
+	// independent from the stricter anonymous/critical API limit.
+	PulseBenefitRateLimitEnable   bool
+	PulseBenefitRateLimitNum            = 600
+	PulseBenefitRateLimitDuration int64 = 60
+
 	RegisterRateLimitNum            = 10
 	RegisterRateLimitDuration int64 = 60 * 60 // 10 次/小时/IP
 

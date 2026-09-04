@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -94,4 +95,24 @@ func TestPulseHMACSecretsFailClosedForInvalidProductionRotation(t *testing.T) {
 	require.Empty(t, pulseHMACSecrets("short", ""))
 	require.Empty(t, pulseHMACSecrets(strings.Repeat("c", 32), "short"))
 	require.Empty(t, pulseHMACSecrets(strings.Repeat("c", 32), strings.Repeat("c", 32)))
+}
+
+func TestPulseServiceAuthStoresVerifiedServiceIdentity(t *testing.T) {
+	oldRedisEnabled := common.RedisEnabled
+	common.RedisEnabled = false
+	t.Cleanup(func() { common.RedisEnabled = oldRedisEnabled })
+	t.Setenv("PULSE_ENV", "test")
+	t.Setenv("PULSE_SERVICE_HMAC_SECRET", "pulse-test-secret")
+	t.Setenv("PULSE_SERVICE_HMAC_SECRET_PREVIOUS", "")
+
+	req := signedPulseRequest(t, `{"source_ref":"grant-context"}`, time.Now().Truncate(time.Second), "nonce-context")
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = req
+
+	PulseServiceAuth()(ctx)
+	role, exists := ctx.Get("pulse_service_role")
+	require.True(t, exists)
+	require.Equal(t, "pulse-settlement", role)
+	require.False(t, ctx.IsAborted())
 }

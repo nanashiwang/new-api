@@ -47,6 +47,9 @@ func PulseServiceAuth() gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			return
 		}
+		// Downstream middleware must use the identity that was authenticated
+		// here, not an unauthenticated client address or user-supplied value.
+		c.Set("pulse_service_role", strings.TrimSpace(c.GetHeader(pulseRoleHeader)))
 		c.Next()
 	}
 }

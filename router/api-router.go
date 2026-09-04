@@ -37,13 +37,13 @@ func SetApiRouter(router *gin.Engine) {
 		// derives identity from the existing new-api session.
 		pulseBenefitRoute := apiRouter.Group("/internal/pulse/benefits")
 		{
-			pulseBenefitRoute.Use(middleware.PulseServiceAuth())
+			pulseBenefitRoute.Use(middleware.PulseServiceAuth(), middleware.PulseBenefitRateLimit())
 			pulseBenefitRoute.POST("/grant", controller.GrantPulseBenefit)
 			pulseBenefitRoute.POST("/query", controller.QueryPulseBenefit)
 			pulseBenefitRoute.GET("/query/:source_ref", controller.QueryPulseBenefit)
 			pulseBenefitRoute.POST("/rollback", controller.RollbackPulseBenefit)
 		}
-		apiRouter.GET("/forum/sso/start", controller.ForumSSOStart)
+		apiRouter.GET("/forum/sso/start", middleware.CriticalRateLimit(), controller.ForumSSOStart)
 		pulseUserRoute := apiRouter.Group("/pulse")
 		pulseUserRoute.Use(middleware.UserAuth())
 		{
