@@ -183,7 +183,7 @@ func sessionInt(value any) (int, bool) {
 // GrantPulseBenefit receives the idempotent quota grant from Pulse.
 func GrantPulseBenefit(c *gin.Context) {
 	var request model.PulseBenefitGrantRequest
-	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+	if err := common.DecodeJsonUseNumberStrict(c.Request.Body, &request); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "参数错误"})
 		return
 	}
@@ -214,7 +214,7 @@ func QueryPulseBenefit(c *gin.Context) {
 		var request struct {
 			SourceRef string `json:"source_ref"`
 		}
-		if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		if err := common.DecodeJsonUseNumberStrict(c.Request.Body, &request); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "参数错误"})
 			return
 		}
@@ -239,7 +239,7 @@ func RollbackPulseBenefit(c *gin.Context) {
 		SourceRef string `json:"source_ref"`
 		Reason    string `json:"reason"`
 	}
-	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+	if err := common.DecodeJsonUseNumberStrict(c.Request.Body, &request); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "参数错误"})
 		return
 	}
