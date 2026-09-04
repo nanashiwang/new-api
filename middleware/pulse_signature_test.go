@@ -111,6 +111,9 @@ func TestPulseServiceAuthStoresVerifiedServiceIdentity(t *testing.T) {
 	ctx.Request = req
 
 	PulseServiceAuth()(ctx)
+	userID, exists := ctx.Get(pulseServiceUserIDKey)
+	require.True(t, exists)
+	require.Equal(t, uint64(42), userID)
 	role, exists := ctx.Get("pulse_service_role")
 	require.True(t, exists)
 	require.Equal(t, "pulse-settlement", role)

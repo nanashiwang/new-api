@@ -25,6 +25,7 @@ const (
 	pulseTimestampHeader     = "X-Pulse-Timestamp"
 	pulseNonceHeader         = "X-Pulse-Nonce"
 	pulseSignatureHeader     = "X-Pulse-Signature"
+	pulseServiceUserIDKey    = "pulse_service_user_id"
 	pulseMaxClockSkew        = 5 * time.Minute
 	minimumPulseSecretLength = 32
 )
@@ -49,6 +50,14 @@ func PulseServiceAuth() gin.HandlerFunc {
 		}
 		// Downstream middleware must use the identity that was authenticated
 		// here, not an unauthenticated client address or user-supplied value.
+		userID, err := strconv.ParseUint(strings.TrimSpace(c.GetHeader(pulseUserHeader)), 10, 64)
+		if err != nil || userID == 0 {
+			// Verification already checked this; keep the second parse fail-closed
+			// if the request is mutated by another middleware.
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+			return
+		}
+		c.Set(pulseServiceUserIDKey, userID)
 		c.Set("pulse_service_role", strings.TrimSpace(c.GetHeader(pulseRoleHeader)))
 		c.Next()
 	}

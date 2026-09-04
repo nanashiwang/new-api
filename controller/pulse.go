@@ -187,6 +187,16 @@ func GrantPulseBenefit(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "参数错误"})
 		return
 	}
+	signedUserID, ok := c.Get("pulse_service_user_id")
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "message": "服务身份未验证"})
+		return
+	}
+	parsedSignedUserID, ok := signedUserID.(uint64)
+	if !ok || request.UserID <= 0 || parsedSignedUserID != uint64(request.UserID) {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "user_id 与签名主体不一致"})
+		return
+	}
 	result, err := model.GrantPulseBenefit(request)
 	if err != nil {
 		writePulseBenefitError(c, err)
