@@ -3,10 +3,8 @@ package model
 import (
 	"bytes"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -250,17 +248,8 @@ func pulseBenefitFingerprint(req PulseBenefitGrantRequest) (string, error) {
 // key order and insignificant whitespace. UseNumber is required so future
 // payload fields cannot lose integer precision through float64 decoding.
 func canonicalPulseBenefitJSON(payload []byte) ([]byte, error) {
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	decoder.UseNumber()
 	var value any
-	if err := decoder.Decode(&value); err != nil {
-		return nil, err
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			return nil, errors.New("pulse benefit payload contains trailing JSON")
-		}
+	if err := common.DecodeJsonUseNumberStrict(bytes.NewReader(payload), &value); err != nil {
 		return nil, err
 	}
 	// Keep common.Marshal as the project's JSON boundary; encoding/json sorts

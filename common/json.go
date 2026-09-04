@@ -3,6 +3,7 @@ package common
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 )
 
@@ -66,4 +67,23 @@ func JsonRawMessageToString(data json.RawMessage) string {
 		return string(trimmed)
 	}
 	return value
+}
+
+// DecodeJsonUseNumberStrict decodes exactly one JSON value while preserving
+// numbers as json.Number and rejecting trailing JSON values. Core layers use
+// this wrapper instead of reaching into encoding/json directly.
+func DecodeJsonUseNumberStrict(reader io.Reader, v any) error {
+	decoder := json.NewDecoder(reader)
+	decoder.UseNumber()
+	if err := decoder.Decode(v); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return errors.New("trailing JSON value")
+		}
+		return err
+	}
+	return nil
 }
