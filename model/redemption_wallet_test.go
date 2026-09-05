@@ -462,8 +462,8 @@ func TestWalletRedemption_AutoBindingRequiresRecentAccount(t *testing.T) {
 	creator := createInviteCommissionTestUser(t, "wallet_age_creator", 0)
 	oldRedeemer := createInviteCommissionTestUser(t, "wallet_age_old", 0)
 	newRedeemer := createInviteCommissionTestUser(t, "wallet_age_new", 0)
-	oldCreatedAt := common.GetTimestamp() - int64((24*time.Hour).Seconds()) - 1
-	recentCreatedAt := common.GetTimestamp() - int64((24*time.Hour).Seconds()) + 1
+	oldCreatedAt := common.GetTimestamp() - int64((48 * time.Hour).Seconds())
+	recentCreatedAt := common.GetTimestamp() - int64(time.Hour.Seconds())
 	require.NoError(t, DB.Model(&User{}).Where("id = ?", oldRedeemer.Id).Update("created_at", oldCreatedAt).Error)
 	require.NoError(t, DB.Model(&User{}).Where("id = ?", newRedeemer.Id).Update("created_at", recentCreatedAt).Error)
 	setWalletQuota(t, creator.Id, 1000)
