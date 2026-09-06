@@ -435,6 +435,9 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 }
 
 func StreamResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse, claudeInfo *ClaudeResponseInfo) *dto.ChatCompletionsStreamResponse {
+	if claudeResponse == nil {
+		return nil
+	}
 	var response dto.ChatCompletionsStreamResponse
 	response.Object = "chat.completion.chunk"
 	response.Model = claudeResponse.Model
@@ -443,12 +446,9 @@ func StreamResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse, claudeInfo 
 	if claudeInfo != nil && claudeInfo.ToolCallStreamStates == nil {
 		claudeInfo.ToolCallStreamStates = make(map[int]*ToolCallStreamState)
 	}
-	fcIdx := 0
+	blockIndex := 0
 	if claudeResponse.Index != nil {
-		fcIdx = *claudeResponse.Index - 1
-		if fcIdx < 0 {
-			fcIdx = 0
-		}
+		blockIndex = *claudeResponse.Index
 	}
 	var choice dto.ChatCompletionsStreamResponseChoice
 	if claudeResponse.Type == "message_start" {
@@ -467,14 +467,21 @@ func StreamResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse, claudeInfo 
 			}
 			if claudeResponse.ContentBlock.Type == "tool_use" {
 				if claudeInfo != nil {
-					claudeInfo.ToolCallStreamStates[fcIdx] = &ToolCallStreamState{
-						ID:   claudeResponse.ContentBlock.Id,
-						Name: claudeResponse.ContentBlock.Name,
+					// Claude indexes all content blocks, including text/thinking.
+					// OpenAI indexes tool calls only; keep a request-local mapping.
+					if _, exists := claudeInfo.ToolCallStreamStates[blockIndex]; exists {
+						return nil
 					}
+					claudeInfo.ToolCallStreamStates[blockIndex] = &ToolCallStreamState{
+						ID:    claudeResponse.ContentBlock.Id,
+						Name:  claudeResponse.ContentBlock.Name,
+						Index: claudeInfo.NextToolCallIndex,
+					}
+					claudeInfo.NextToolCallIndex++
 					return nil
 				}
 				tools = append(tools, dto.ToolCallResponse{
-					Index: common.GetPointer(fcIdx),
+					Index: common.GetPointer(blockIndex),
 					ID:    claudeResponse.ContentBlock.Id,
 					Type:  "function",
 					Function: dto.FunctionResponse{
@@ -495,21 +502,29 @@ func StreamResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse, claudeInfo 
 					return nil
 				}
 				arguments := *claudeResponse.Delta.PartialJson
-				if strings.TrimSpace(arguments) == "" {
+				// A whitespace-only delta can be part of a JSON string. Only
+				// the truly empty fragment is safe to omit.
+				if arguments == "" {
 					return nil
 				}
 				toolCall := dto.ToolCallResponse{
 					Type:  "function",
-					Index: common.GetPointer(fcIdx),
+					Index: common.GetPointer(blockIndex),
 					Function: dto.FunctionResponse{
 						Arguments: arguments,
 					},
 				}
 				if claudeInfo != nil {
-					if state, ok := claudeInfo.ToolCallStreamStates[fcIdx]; ok {
-						state.Emitted = true
+					state, ok := claudeInfo.ToolCallStreamStates[blockIndex]
+					if !ok {
+						// Do not attach orphan/late argument deltas to another tool.
+						return nil
+					}
+					toolCall.Index = common.GetPointer(state.Index)
+					if !state.Emitted {
 						toolCall.ID = state.ID
 						toolCall.Function.Name = state.Name
+						state.Emitted = true
 					}
 				}
 				tools = append(tools, toolCall)
@@ -525,16 +540,16 @@ func StreamResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse, claudeInfo 
 		if claudeInfo == nil {
 			return nil
 		}
-		state, ok := claudeInfo.ToolCallStreamStates[fcIdx]
+		state, ok := claudeInfo.ToolCallStreamStates[blockIndex]
 		if !ok {
 			return nil
 		}
-		delete(claudeInfo.ToolCallStreamStates, fcIdx)
+		delete(claudeInfo.ToolCallStreamStates, blockIndex)
 		if state.Emitted {
 			return nil
 		}
 		tools = append(tools, dto.ToolCallResponse{
-			Index: common.GetPointer(fcIdx),
+			Index: common.GetPointer(state.Index),
 			ID:    state.ID,
 			Type:  "function",
 			Function: dto.FunctionResponse{
@@ -633,11 +648,13 @@ type ClaudeResponseInfo struct {
 	Usage                *dto.Usage
 	Done                 bool
 	ToolCallStreamStates map[int]*ToolCallStreamState
+	NextToolCallIndex    int
 }
 
 type ToolCallStreamState struct {
 	ID      string
 	Name    string
+	Index   int
 	Emitted bool
 }
 

@@ -504,6 +504,11 @@ func TestStreamResponseClaude2OpenAI_EmptyInputJSONDeltaIgnored(t *testing.T) {
 }
 
 func TestStreamResponseClaude2OpenAI_NonEmptyInputJSONDeltaPreserved(t *testing.T) {
+	state := &ClaudeResponseInfo{}
+	StreamResponseClaude2OpenAI(&dto.ClaudeResponse{
+		Type: "content_block_start", Index: common.GetPointer(1),
+		ContentBlock: &dto.ClaudeMediaMessage{Type: "tool_use", Id: "call_test", Name: "search"},
+	}, state)
 	partial := `{"query":"today"}`
 	resp := &dto.ClaudeResponse{
 		Type:  "content_block_delta",
@@ -514,7 +519,7 @@ func TestStreamResponseClaude2OpenAI_NonEmptyInputJSONDeltaPreserved(t *testing.
 		},
 	}
 
-	chunk := StreamResponseClaude2OpenAI(resp, &ClaudeResponseInfo{})
+	chunk := StreamResponseClaude2OpenAI(resp, state)
 	require.NotNil(t, chunk)
 	require.Len(t, chunk.Choices, 1)
 	require.Len(t, chunk.Choices[0].Delta.ToolCalls, 1)
