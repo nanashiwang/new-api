@@ -47,6 +47,10 @@ import {
   formatPaymentMoney,
 } from '../../helpers/paymentCurrency';
 import {
+  redirectToPayment,
+  submitPaymentForm,
+} from '../../helpers/paymentNavigation';
+import {
   Button,
   Card,
   Form,
@@ -472,28 +476,15 @@ const TopUp = () => {
       }
       const res = await API.post(endpoint, payload);
       if (res?.data?.message === 'success') {
+        let redirected;
         if (payWay === 'stripe') {
-          window.open(res.data.data.pay_link, '_blank');
+          redirected = redirectToPayment(res.data.data?.pay_link);
         } else if (isWaffo) {
-          window.open(res.data.data.payment_url, '_blank');
+          redirected = redirectToPayment(res.data.data?.payment_url);
         } else {
-          let params = res.data.data;
-          let url = res.data.url;
-          let form = document.createElement('form');
-          form.action = url;
-          form.method = 'POST';
-          form.target = '_blank';
-          for (let key in params) {
-            let input = document.createElement('input');
-            input.type = 'hidden';
-            input.name = key;
-            input.value = params[key];
-            form.appendChild(input);
-          }
-          document.body.appendChild(form);
-          form.submit();
-          document.body.removeChild(form);
+          redirected = submitPaymentForm(res.data.url, res.data.data);
         }
+        if (!redirected) showError(t('支付失败'));
       } else {
         showError(res?.data?.message || t('支付失败'));
       }
@@ -514,7 +505,9 @@ const TopUp = () => {
         payment_method: 'creem',
       });
       if (res?.data?.message === 'success') {
-        window.open(res.data.data.checkout_url, '_blank');
+        if (!redirectToPayment(res.data.data?.checkout_url)) {
+          showError(t('支付失败'));
+        }
       } else {
         showError(res?.data?.message || t('支付失败'));
       }
