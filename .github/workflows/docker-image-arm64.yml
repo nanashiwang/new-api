@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - '*'
+      - '!cn-tunnel-*' # Published independently by cn-tunnel.yml
   workflow_dispatch:
     inputs:
       tag:
