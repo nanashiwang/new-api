@@ -13,6 +13,7 @@ DOMAIN="cn.meta-api.vip"
 CLIENT_NAME="newapi-fuzhou"
 OUTPUT_DIR=""
 ADD_CLIENT=0
+CN_TUNNEL_VERSION="1.1.0"
 
 log() {
   printf '[wireguard] %s\n' "$*"
@@ -507,3 +508,22 @@ log "客户端安装包：${ZIP_PATH}"
 log "安装包 SHA256：$(sha256sum "$ZIP_PATH" | awk '{print $1}')"
 log "请在云平台安全组放行 UDP ${LISTEN_PORT}，然后通过安全渠道把 ZIP 发给客户。"
 log "客户安装后可用以下命令检查握手：sudo wg show ${INTERFACE}"
+
+# Public bootstrap downloads contain no client keys. The provisioning code is decoded locally.
+python3 - "$BUNDLE_DIR" "$CLIENT_NAME" "$DOMAIN" "$SERVER_TUNNEL_IP" "$CN_TUNNEL_VERSION" <<'ONLINE'
+import base64, json, pathlib, sys
+root, name, domain, ip, version = sys.argv[1:]
+root = pathlib.Path(root)
+payload = dict(version=version, name=name, domain=domain, ip=ip, config=(root / (name + '.conf')).read_text())
+code = base64.b64encode(json.dumps(payload, separators=(',', ':')).encode()).decode()
+base = 'https://github.com/nanashiwang/new-api/releases/download/cn-tunnel-v' + version
+linux = '(f=$(mktemp) && curl -fLsS --connect-timeout 15 --max-time 120 ' + base + '/client-install.sh -o "$f" && sudo bash "$f" ' + code + '; r=$?; rm -f "$f"; exit "$r")'
+windows = "$f=Join-Path $env:TEMP ([Guid]::NewGuid().ToString('N')+'.ps1'); try { Invoke-WebRequest '" + base + "/client-install.ps1' -UseBasicParsing -TimeoutSec 120 -OutFile $f; & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $f -Code '" + code + "'; if ($LASTEXITCODE -ne 0) { throw '安装失败，请查看上方错误' } } finally { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue }"
+text = '专属命令包含设备私钥，只能私下发送给该设备使用；勿公开或上传日志。\n\nWindows（管理员 PowerShell，整行复制）：\n' + windows + '\n\nUbuntu（整行复制）：\n' + linux + '\n'
+(root / '一键安装命令.txt').write_text(text)
+print('\n' + text)
+print('命令已保存：' + str(root / '一键安装命令.txt'))
+ONLINE
+if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+  chown "$SUDO_USER":"$(id -gn "$SUDO_USER")" "$BUNDLE_DIR/一键安装命令.txt"
+fi

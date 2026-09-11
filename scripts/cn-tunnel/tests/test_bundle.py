@@ -4,6 +4,9 @@ No network interfaces, packages, services, firewall or host files are changed.
 Windows syntax is additionally checked by the Windows CI job.
 """
 import os
+import base64
+import json
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -92,6 +95,36 @@ class BundleTest(unittest.TestCase):
         self.assertEqual(config.read_text(), second)
         self.run_server('--client-name', 'new-device', ok=False)
         self.assertEqual(config.read_text(), second)
+
+    def test_cloud_code_and_linux_render_match_offline_bundle(self):
+        self.run_server('--client-name', 'cloud-client')
+        bundle = self.output / 'cloud-client'
+        commands = (bundle / '一键安装命令.txt').read_text()
+        code = re.search(r"-Code '([A-Za-z0-9+/=]+)'", commands).group(1)
+        payload = json.loads(base64.b64decode(code))
+        self.assertEqual(payload['config'], (bundle / 'cloud-client.conf').read_text())
+        self.assertEqual(payload['domain'], 'cn.meta-api.vip')
+        self.assertLess(max(map(len, commands.splitlines())), 8191)
+        self.assertNotIn('?code=', commands)
+        self.assertNotIn('/' + code, commands)
+        built = self.root / 'built'
+        subprocess.run(['python3', str(SOURCE.parent / 'build.py'), str(built)], check=True)
+        wrapper = (built / 'client-install.sh').read_text()
+        python_block = re.search(r"<<'PY'\n(.*?)\nPY", wrapper, re.S).group(1)
+        rendered = self.root / 'rendered'
+        rendered.mkdir()
+        (rendered / 'code').write_text(code)
+        result = subprocess.run(['python3', '-', str(rendered)], input=python_block, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for name in ('cloud-client.conf', 'install-client-linux.sh', 'uninstall-client-linux.sh'):
+            self.assertEqual((rendered / name).read_bytes(), (bundle / name).read_bytes().replace(str(self.conf_dir).encode(), b'/etc/wireguard'))
+        for mutation in ({'name': '../escape'}, {'version': '0.0.0'},
+                         {'config': payload['config'] + 'PostUp = touch /tmp/unsafe\n'},
+                         {'config': payload['config'].replace('10.66.0.1/32', '0.0.0.0/0')}):
+            bad = dict(payload, **mutation)
+            (rendered / 'code').write_bytes(base64.b64encode(json.dumps(bad).encode()))
+            result = subprocess.run(['python3', '-', str(rendered)], input=python_block, text=True, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
 
     def test_invalid_addresses_and_names_have_no_side_effects(self):
         for args in (('--client-cidr', '10.66.0.1/32'), ('--client-cidr', '10.67.0.2/32'),

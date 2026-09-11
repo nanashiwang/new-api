@@ -1,0 +1,59 @@
+#Requires -Version 5.1
+param([string]$Code)
+$ErrorActionPreference = 'Stop'
+
+function New-CnClientFiles([string]$ConfigCode, [string]$Directory) {
+    $Payload = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($ConfigCode)) | ConvertFrom-Json
+    if ($Payload.version -cne '__VERSION__') { throw '配置码与安装器版本不匹配，请使用服务端生成的完整命令' }
+    $Name = [string]$Payload.name
+    $Domain = [string]$Payload.domain
+    $Ip = [string]$Payload.ip
+    if ($Name -cnotmatch '^[A-Za-z0-9][A-Za-z0-9_-]{0,14}$') { throw '设备名无效' }
+    if ($Domain -cnotmatch '^[A-Za-z0-9.-]+$') { throw '域名无效' }
+    $ParsedIp = $null
+    if (-not [Net.IPAddress]::TryParse($Ip, [ref]$ParsedIp) -or $ParsedIp.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) { throw '隧道 IPv4 无效' }
+    $Lines = @(([string]$Payload.config -split '\r?\n') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $Patterns = @('\[Interface\]', 'PrivateKey = [A-Za-z0-9+/]{43}=', 'Address = [0-9.]+/32', 'MTU = 1280',
+        '\[Peer\]', 'PublicKey = [A-Za-z0-9+/]{43}=', 'PresharedKey = [A-Za-z0-9+/]{43}=',
+        'Endpoint = [0-9.]+:[0-9]{1,5}', ('AllowedIPs = ' + [regex]::Escape($Ip) + '/32'), 'PersistentKeepalive = 25')
+    if ($Lines.Count -ne $Patterns.Count) { throw 'WireGuard 配置格式无效' }
+    for ($i = 0; $i -lt $Patterns.Count; $i++) {
+        if ($Lines[$i] -cnotmatch ('^' + $Patterns[$i] + '$')) { throw 'WireGuard 配置格式无效' }
+    }
+    [IO.File]::WriteAllText((Join-Path $Directory ($Name + '.conf')), [string]$Payload.config, (New-Object Text.UTF8Encoding($false)))
+    $Templates = @{
+        'install-client.ps1' = '__INSTALL_TEMPLATE_BASE64__'
+        'uninstall-client.ps1' = '__UNINSTALL_TEMPLATE_BASE64__'
+    }
+    foreach ($File in $Templates.Keys) {
+        $Text = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Templates[$File])).TrimStart([char]0xFEFF)
+        $Text = $Text.Replace('__TUNNEL_NAME__', $Name).Replace('__CONFIG_FILE__', ($Name + '.conf')).Replace('__SERVICE_DOMAIN__', $Domain).Replace('__TUNNEL_SERVER_IP__', $Ip)
+        [IO.File]::WriteAllText((Join-Path $Directory $File), $Text, (New-Object Text.UTF8Encoding($true)))
+    }
+    return $Name
+}
+
+if ($MyInvocation.InvocationName -ne '.') {
+    $Identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $Principal = New-Object Security.Principal.WindowsPrincipal($Identity)
+    if (-not $Principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        throw '请右键打开管理员 PowerShell，再粘贴服务端生成的命令'
+    }
+    if (-not $Code) { throw '缺少服务端生成的专属配置码' }
+    $Root = Join-Path $env:ProgramData 'NewAPI-WireGuard'
+    New-Item -ItemType Directory -Path $Root -Force | Out-Null
+    & icacls.exe $Root '/inheritance:r' '/grant:r' '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw '无法保护安装目录权限' }
+    $Work = Join-Path $Root ([Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $Work | Out-Null
+    try {
+        $Name = New-CnClientFiles $Code $Work
+        $Uninstall = Join-Path $Root ('uninstall-' + $Name + '.ps1')
+        Copy-Item -LiteralPath (Join-Path $Work 'uninstall-client.ps1') -Destination $Uninstall -Force
+        Write-Host ('恢复直连命令：powershell.exe -ExecutionPolicy Bypass -File "' + $Uninstall + '"')
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Work 'install-client.ps1')
+        if ($LASTEXITCODE -ne 0) { throw ('隧道安装或连通性检查失败，退出码：' + $LASTEXITCODE) }
+    } finally {
+        Remove-Item -LiteralPath $Work -Recurse -Force
+    }
+}

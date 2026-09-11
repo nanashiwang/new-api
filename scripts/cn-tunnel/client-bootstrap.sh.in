@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+[ "$(id -u)" -eq 0 ] || { echo '请通过 sudo bash 运行客户端安装命令' >&2; exit 1; }
+[ "$#" -eq 1 ] || { echo '缺少服务端生成的专属配置码' >&2; exit 1; }
+command -v python3 >/dev/null || { echo '请先安装 python3' >&2; exit 1; }
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+# The code is decoded locally, never sent to a download service.
+printf '%s' "$1" > "$WORK/code"
+python3 - "$WORK" <<'PY'
+import base64, ipaddress, json, pathlib, re, sys
+root = pathlib.Path(sys.argv[1])
+payload = json.loads(base64.b64decode((root / 'code').read_bytes(), validate=True))
+if payload.get('version') != '__VERSION__':
+    sys.exit('配置码与安装器版本不匹配，请使用服务端生成的完整命令')
+name, domain, ip = (payload[key] for key in ('name', 'domain', 'ip'))
+if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,14}', name):
+    sys.exit('设备名无效')
+if not re.fullmatch(r'[A-Za-z0-9.-]+', domain):
+    sys.exit('域名无效')
+ipaddress.IPv4Address(ip)
+# Only the generated WireGuard fields are accepted; no shell hooks or arbitrary routes.
+conf = payload['config']
+lines = [line.strip() for line in conf.splitlines() if line.strip()]
+patterns = [r'\[Interface\]', r'PrivateKey = [A-Za-z0-9+/]{43}=',
+            r'Address = [0-9.]+/32', r'MTU = 1280', r'\[Peer\]',
+            r'PublicKey = [A-Za-z0-9+/]{43}=', r'PresharedKey = [A-Za-z0-9+/]{43}=',
+            r'Endpoint = [0-9.]+:[0-9]{1,5}', r'AllowedIPs = ' + re.escape(ip) + r'/32',
+            r'PersistentKeepalive = 25']
+if len(lines) != len(patterns) or not all(re.fullmatch(pattern, line) for pattern, line in zip(patterns, lines)):
+    sys.exit('WireGuard 配置格式无效')
+(root / (name + '.conf')).write_text(conf)
+for filename, encoded in [('install-client-linux.sh', '__INSTALL_TEMPLATE_BASE64__'),
+                          ('uninstall-client-linux.sh', '__UNINSTALL_TEMPLATE_BASE64__')]:
+    text = base64.b64decode(encoded).decode()
+    for marker, value in [('__TUNNEL_NAME__', name), ('__CONFIG_FILE__', name + '.conf'),
+                          ('__SERVICE_DOMAIN__', domain), ('__TUNNEL_SERVER_IP__', ip)]:
+        text = text.replace(marker, value)
+    (root / filename).write_text(text)
+(root / 'name').write_text(name)
+PY
+NAME="$(cat "$WORK/name")"
+# Keep the recovery script even if connectivity verification fails.
+install -d -m 700 /var/lib/newapi-cn-tunnel
+install -m 700 "$WORK/uninstall-client-linux.sh" "/var/lib/newapi-cn-tunnel/uninstall-${NAME}.sh"
+printf '恢复直连命令：sudo bash /var/lib/newapi-cn-tunnel/uninstall-%s.sh\n' "$NAME"
+bash "$WORK/install-client-linux.sh"
