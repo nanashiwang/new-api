@@ -110,6 +110,8 @@ func (p QuotaPolicy) Validate() error {
 }
 
 type ChannelSettings struct {
+	CPAUserIdentityEnabled         bool                           `json:"cpa_user_identity_enabled,omitempty"`
+	CPAInstanceID                  string                         `json:"cpa_instance_id,omitempty"`
 	ForceFormat                    bool                           `json:"force_format,omitempty"`
 	ThinkingToContent              bool                           `json:"thinking_to_content,omitempty"`
 	Proxy                          string                         `json:"proxy"`
@@ -134,6 +136,9 @@ type ChannelSettings struct {
 }
 
 func (s ChannelSettings) Validate() error {
+	if err := s.ValidateCPAIdentity(); err != nil {
+		return err
+	}
 	if err := s.ValidateChatCompletionsToResponsesMode(); err != nil {
 		return err
 	}

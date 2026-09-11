@@ -190,6 +190,8 @@ const EditChannelModal = (props) => {
     multi_key_mode: 'random',
     // 渠道额外设置的默认值
     force_format: false,
+    cpa_user_identity_enabled: false,
+    cpa_instance_id: '',
     thinking_to_content: false,
     proxy: '',
     pass_through_body_enabled: false,
@@ -538,6 +540,8 @@ const EditChannelModal = (props) => {
   // 渠道额外设置状态
   const [channelSettings, setChannelSettings] = useState({
     force_format: false,
+    cpa_user_identity_enabled: false,
+    cpa_instance_id: '',
     thinking_to_content: false,
     proxy: '',
     pass_through_body_enabled: false,
@@ -818,6 +822,8 @@ const EditChannelModal = (props) => {
         try {
           const parsedSettings = JSON.parse(data.setting);
           data.force_format = parsedSettings.force_format || false;
+          data.cpa_user_identity_enabled = parsedSettings.cpa_user_identity_enabled === true;
+          data.cpa_instance_id = parsedSettings.cpa_instance_id || '';
           data.thinking_to_content =
             parsedSettings.thinking_to_content || false;
           data.proxy = parsedSettings.proxy || '';
@@ -850,6 +856,8 @@ const EditChannelModal = (props) => {
         } catch (error) {
           console.error('解析渠道设置失败:', error);
           data.force_format = false;
+          data.cpa_user_identity_enabled = false;
+          data.cpa_instance_id = '';
           data.thinking_to_content = false;
           data.proxy = '';
           data.pass_through_body_enabled = false;
@@ -871,6 +879,8 @@ const EditChannelModal = (props) => {
         }
       } else {
         data.force_format = false;
+          data.cpa_user_identity_enabled = false;
+          data.cpa_instance_id = '';
         data.thinking_to_content = false;
         data.claude_incremental_cache_enabled = false;
         data.proxy = '';
@@ -1477,6 +1487,8 @@ const EditChannelModal = (props) => {
     // 重置渠道设置状态
     setChannelSettings({
       force_format: false,
+    cpa_user_identity_enabled: false,
+    cpa_instance_id: '',
       thinking_to_content: false,
       proxy: '',
       pass_through_body_enabled: false,
@@ -1888,6 +1900,8 @@ const EditChannelModal = (props) => {
     const channelExtraSettings = {
       ...originalChannelExtraSettings,
       force_format: localInputs.force_format || false,
+      cpa_user_identity_enabled: localInputs.cpa_user_identity_enabled === true,
+      cpa_instance_id: (localInputs.cpa_instance_id || '').trim(),
       thinking_to_content: localInputs.thinking_to_content || false,
       proxy: localInputs.proxy || '',
       pass_through_body_enabled: localInputs.pass_through_body_enabled || false,
@@ -2001,6 +2015,8 @@ const EditChannelModal = (props) => {
 
     // 清理不需要发送到后端的字段
     delete localInputs.force_format;
+    delete localInputs.cpa_user_identity_enabled;
+    delete localInputs.cpa_instance_id;
     delete localInputs.thinking_to_content;
     delete localInputs.client_restriction_mode;
     delete localInputs.client_restriction_clients;
@@ -4549,6 +4565,25 @@ const EditChannelModal = (props) => {
                         </Text>
                       </div>
                     </div>
+
+                    <Form.Switch
+                      field='cpa_user_identity_enabled'
+                      label={t('CPA 用户身份转发')}
+                      checkedText={t('开')}
+                      uncheckedText={t('关')}
+                      onChange={(value) => handleChannelSettingsChange('cpa_user_identity_enabled', value)}
+                      extraText={t('仅对可信 CPA 渠道开启，使用登录用户 ID 覆盖身份请求头，用于跨令牌识别同一用户。')}
+                    />
+                    {inputs.cpa_user_identity_enabled && (
+                      <Form.Input
+                        field='cpa_instance_id'
+                        label={t('New API 实例标识')}
+                        placeholder='newapi-main'
+                        maxLength={64}
+                        onChange={(value) => handleChannelSettingsChange('cpa_instance_id', value)}
+                        extraText={t('同一站点的 CPA 渠道填写相同标识，不同站点不要重复；使用字母或数字开头，允许字母、数字、点、下划线和短横线，最多 64 位。')}
+                      />
+                    )}
 
                     {inputs.type === 14 && (
                       <Form.Switch

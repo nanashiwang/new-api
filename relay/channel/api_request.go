@@ -391,6 +391,9 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		targetHeader.Set(key, value)
 	}
 	targetHeader.Set("Content-Type", c.Request.Header.Get("Content-Type"))
+	if err = applyCPAIdentity(targetHeader, info); err != nil {
+		return nil, err
+	}
 	targetConn, _, err := websocket.DefaultDialer.Dial(fullRequestURL, targetHeader)
 	if err != nil {
 		return nil, fmt.Errorf("dial failed to %s: %w", fullRequestURL, err)
@@ -545,6 +548,9 @@ func shouldUseImageHTTPClient(info *common.RelayInfo) bool {
 }
 
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
+	if err := applyCPAIdentity(req.Header, info); err != nil {
+		return nil, err
+	}
 	var client *http.Client
 	var err error
 	isImageRequest := shouldUseImageHTTPClient(info)
@@ -577,6 +583,7 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		}
 	}
 
+	client = cpaIdentityHTTPClient(client, info)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, newDoRequestError(c, err)

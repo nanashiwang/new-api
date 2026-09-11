@@ -1,5 +1,9 @@
 {
   "translation": {
+    "CPA 用户身份转发": "CPA user identity forwarding",
+    "仅对可信 CPA 渠道开启，使用登录用户 ID 覆盖身份请求头，用于跨令牌识别同一用户。": "Enable only for trusted CPA channels. Override identity headers with the authenticated user ID to identify the same user across tokens.",
+    "New API 实例标识": "New API instance ID",
+    "同一站点的 CPA 渠道填写相同标识，不同站点不要重复；使用字母或数字开头，允许字母、数字、点、下划线和短横线，最多 64 位。": "Use the same ID for CPA channels on one site and different IDs for different sites. Start with a letter or digit; letters, digits, dots, underscores and hyphens are allowed, up to 64 characters.",
     "一级": "Level 1",
     "二级": "Level 2",
     "一级邀请充值返佣比例": "Level-1 referral recharge commission rate",

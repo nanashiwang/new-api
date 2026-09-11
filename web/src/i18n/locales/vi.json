@@ -1,5 +1,9 @@
 {
   "translation": {
+    "CPA 用户身份转发": "Chuyển tiếp danh tính người dùng CPA",
+    "仅对可信 CPA 渠道开启，使用登录用户 ID 覆盖身份请求头，用于跨令牌识别同一用户。": "Chỉ bật cho kênh CPA đáng tin cậy. Ghi đè tiêu đề bằng ID người dùng đã xác thực để nhận diện cùng một người qua nhiều token.",
+    "New API 实例标识": "ID phiên bản New API",
+    "同一站点的 CPA 渠道填写相同标识，不同站点不要重复；使用字母或数字开头，允许字母、数字、点、下划线和短横线，最多 64 位。": "Các kênh CPA cùng một trang dùng chung ID; các trang khác nhau dùng ID khác nhau. Tối đa 64 ký tự chữ Latin, số, dấu chấm, gạch dưới và gạch ngang; bắt đầu bằng chữ hoặc số.",
     "一级": "Cấp 1",
     "二级": "Cấp 2",
     "一级邀请充值返佣比例": "Tỷ lệ hoa hồng nạp tiền giới thiệu cấp 1",
