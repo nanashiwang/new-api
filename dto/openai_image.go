@@ -2,6 +2,7 @@ package dto
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 
@@ -10,6 +11,42 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+// Bound image multipliers before any quota arithmetic or provider submission.
+const MaxImageN = 128
+
+// ImageBillingQuantity follows the OpenAI default n=1. Only Ali may override
+// it with parameters.n; an explicit provider zero is invalid, not a default.
+func (i *ImageRequest) ImageBillingQuantity(ali bool) (count int, promptExtend bool, err error) {
+	count = 1
+	if i.N != nil {
+		if *i.N > MaxImageN {
+			return 0, false, fmt.Errorf("n must be between 1 and %d", MaxImageN)
+		}
+		if *i.N != 0 {
+			count = int(*i.N)
+		}
+	}
+	if ali {
+		if raw, ok := i.Extra["parameters"]; ok {
+			var parameters struct {
+				N            *uint `json:"n"`
+				PromptExtend bool  `json:"prompt_extend"`
+			}
+			if err := common.Unmarshal(raw, &parameters); err != nil {
+				return 0, false, fmt.Errorf("invalid image parameters: %w", err)
+			}
+			if parameters.N != nil {
+				if *parameters.N == 0 || *parameters.N > MaxImageN {
+					return 0, false, fmt.Errorf("parameters.n must be between 1 and %d", MaxImageN)
+				}
+				count = int(*parameters.N)
+			}
+			promptExtend = parameters.PromptExtend
+		}
+	}
+	return count, promptExtend, nil
+}
 
 type ImageRequest struct {
 	Model             string          `json:"model"`
