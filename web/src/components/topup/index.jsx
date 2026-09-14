@@ -118,11 +118,12 @@ const renderValidityLabel = (t, validitySeconds) =>
     ? `${Number(validitySeconds || 0)}s`
     : t('长期有效');
 
-const getInviteOrigin = () => {
-  const origin = window.location.origin.replace(/\/$/, '');
-  return origin === 'https://nan.meta-api.vip'
-    ? 'https://cn.meta-api.vip'
-    : origin;
+const getInviteOrigin = (serverAddress = '') => {
+  const configuredOrigin = String(serverAddress || '')
+    .trim()
+    .replace(/\/+$/, '');
+  if (configuredOrigin) return configuredOrigin;
+  return window.location.origin.replace(/\/$/, '');
 };
 
 const TopUp = () => {
@@ -164,7 +165,7 @@ const TopUp = () => {
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [payMethods, setPayMethods] = useState([]);
 
-  const affFetchedRef = useRef(false);
+  const affOriginRef = useRef('');
   const amountRequestRef = useRef(0);
 
   const resetPaymentQuote = useCallback(() => {
@@ -627,11 +628,15 @@ const TopUp = () => {
     } catch (e) {}
   };
 
-  const getAffLink = async () => {
+  const getAffLink = async (
+    serverAddress = statusState?.status?.server_address,
+  ) => {
     const res = await API.get('/api/user/aff');
     if (res.data?.success) {
+      const inviteOrigin = getInviteOrigin(serverAddress);
       setAffCode(res.data.data);
-      setAffLink(`${getInviteOrigin()}/i/${res.data.data}`);
+      setAffLink(`${inviteOrigin}/i/${res.data.data}`);
+      affOriginRef.current = inviteOrigin;
     }
   };
 
@@ -783,11 +788,16 @@ const TopUp = () => {
 
   useEffect(() => {
     getUserQuota();
-    getAffLink();
     getTopupInfo();
     getSubscriptionPlans();
     getSubscriptionSelf();
   }, []);
+
+  useEffect(() => {
+    const inviteOrigin = getInviteOrigin(statusState?.status?.server_address);
+    if (affOriginRef.current === inviteOrigin) return;
+    getAffLink(statusState?.status?.server_address);
+  }, [statusState?.status?.server_address]);
 
   useEffect(() => {
     if (statusState?.status) {
