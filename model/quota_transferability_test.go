@@ -1,9 +1,13 @@
 package model
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/alicebob/miniredis/v2"
+	"github.com/go-redis/redis/v8"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -234,6 +238,64 @@ func TestFreeAndReferralQuotaRemainNonTransferable(t *testing.T) {
 	require.NoError(t, DB.First(&afterReferralTransfer, user.Id).Error)
 	assert.Equal(t, 250, afterReferralTransfer.Quota)
 	assert.Equal(t, 250, afterReferralTransfer.TransferableQuota)
+}
+
+func TestTransferAffQuotaToQuota_PreservesCachedQuotaDelta(t *testing.T) {
+	setupInviteCommissionSubscriptionTest(t)
+
+	originalQuotaPerUnit := common.QuotaPerUnit
+	originalSyncFrequency := common.SyncFrequency
+	originalRDB := common.RDB
+	originalRedisEnabled := common.RedisEnabled
+	common.QuotaPerUnit = 10
+	common.SyncFrequency = 60
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originalQuotaPerUnit
+		common.SyncFrequency = originalSyncFrequency
+		common.RDB = originalRDB
+		common.RedisEnabled = originalRedisEnabled
+	})
+
+	redisServer := miniredis.RunT(t)
+	redisClient := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	t.Cleanup(func() {
+		require.NoError(t, redisClient.Close())
+	})
+	common.RDB = redisClient
+	common.RedisEnabled = true
+
+	user := createInviteCommissionTestUser(t, "affiliate_transfer_cache", 0)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Updates(map[string]any{
+		"quota":              100,
+		"transferable_quota": 100,
+		"aff_quota":          100,
+	}).Error)
+	require.NoError(t, DB.First(user, user.Id).Error)
+	require.NoError(t, updateUserCache(*user))
+
+	// 模拟一次已写入 Redis、但尚未批量落库的并发调用扣费。
+	require.NoError(t, cacheDecrUserQuota(user.Id, 20))
+	cacheKey := getUserCacheKey(user.Id)
+	ctx := context.Background()
+	beforeTTL, err := common.RDB.TTL(ctx, cacheKey).Result()
+	require.NoError(t, err)
+	require.Greater(t, beforeTTL, time.Duration(0))
+
+	require.NoError(t, user.TransferAffQuotaToQuota(50))
+
+	var persisted User
+	require.NoError(t, DB.First(&persisted, user.Id).Error)
+	assert.Equal(t, 150, persisted.Quota)
+	assert.Equal(t, 50, persisted.AffQuota)
+	assert.Equal(t, 150, persisted.TransferableQuota)
+
+	cachedQuota, err := common.RDB.HGet(ctx, cacheKey, "Quota").Int()
+	require.NoError(t, err)
+	assert.Equal(t, 130, cachedQuota)
+	assert.Equal(t, user.Username, common.RDB.HGet(ctx, cacheKey, "Username").Val())
+	afterTTL, err := common.RDB.TTL(ctx, cacheKey).Result()
+	require.NoError(t, err)
+	assert.Equal(t, beforeTTL, afterTTL)
 }
 
 func TestMigrateWalletRedemptionTransferPolicyBackfillsNonCodeBalances(t *testing.T) {

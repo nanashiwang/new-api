@@ -1491,8 +1491,11 @@ func (user *User) TransferAffQuotaToQuota(quota int) error {
 	if err := tx.Commit().Error; err != nil {
 		return err
 	}
-	// 用事务后的准确值覆盖 Redis 缓存，避免返回旧余额
-	_ = updateUserQuotaCache(user.Id, user.Quota)
+	// Redis 中可能包含尚未批量落库的并发扣费，只原子增加本次划转额度，
+	// 避免用数据库快照覆盖缓存后吞掉这部分余额变化。
+	if cacheErr := cacheIncrUserQuota(user.Id, int64(quota)); cacheErr != nil {
+		common.SysLog("failed to increment user quota cache after affiliate transfer: " + cacheErr.Error())
+	}
 	return nil
 }
 
