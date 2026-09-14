@@ -187,19 +187,19 @@ func ServeDesktopUpdateManifest(c *gin.Context) {
 		c.Status(http.StatusNotFound)
 		return
 	}
-	if _, err := service.GetDesktopUpdateManifestSummary(); err != nil {
-		respondDesktopUpdatePublicError(c, err)
-		return
-	}
-	file, info, err := service.OpenDesktopUpdateManifest()
+	payload, err := service.GetDesktopUpdateManifestPayload()
 	if err != nil {
 		respondDesktopUpdatePublicError(c, err)
 		return
 	}
-	defer file.Close()
 	c.Header("Content-Type", "application/json; charset=utf-8")
-	c.Header("ETag", desktopUpdateETag(info))
-	http.ServeContent(c.Writer, c.Request, "latest.json", info.ModTime(), file)
+	c.Header("Content-Length", strconv.Itoa(len(payload)))
+	c.Header("ETag", fmt.Sprintf(`"%x"`, sha256.Sum256(payload)))
+	if c.Request.Method == http.MethodHead {
+		c.Status(http.StatusOK)
+		return
+	}
+	c.Data(http.StatusOK, "application/json; charset=utf-8", payload)
 }
 
 func ServeDesktopDownloadCatalog(c *gin.Context) {

@@ -405,15 +405,13 @@ const DesktopUpdateSetting = () => {
               <Text strong>{t('对外基础地址')}</Text>
               <Input
                 value={settings.public_base_url}
-                placeholder='https://example.com/desktop/update'
-                onChange={(public_base_url) =>
-                  setSettings((current) => ({
-                    ...current,
-                    public_base_url,
-                  }))
-                }
+                readOnly
+                placeholder={t('请先填写服务器地址，以自动生成完整的端点 URL')}
               />
-              <Text type='tertiary'>{manifestURL || '-'}</Text>
+              <Text type='tertiary'>
+                {manifestURL ||
+                  t('请先填写服务器地址，以自动生成完整的端点 URL')}
+              </Text>
             </div>
             <div className='flex flex-col gap-2'>
               <Text strong>{t('单文件上传限制')}</Text>

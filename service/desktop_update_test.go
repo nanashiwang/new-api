@@ -11,14 +11,17 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 )
 
 func withDesktopUpdateTestState(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
+	originalServerAddress := system_setting.ServerAddress
+	system_setting.ServerAddress = "https://updates.example.com"
+	t.Cleanup(func() { system_setting.ServerAddress = originalServerAddress })
 	t.Setenv("DESKTOP_UPDATE_DIR", root)
 	t.Setenv("DESKTOP_UPDATE_ENABLED", "false")
-	t.Setenv("DESKTOP_UPDATE_PUBLIC_BASE_URL", "")
 	t.Setenv("DESKTOP_UPDATE_PUBLISH_TOKEN", "")
 	setDesktopUpdateTestOption(t, DesktopUpdateSettingsOptionKey, "", false)
 	setDesktopUpdateTestOption(t, DesktopUpdateTokenOptionKey, "", false)
@@ -91,15 +94,59 @@ func TestDesktopUpdateValidationRejectsTraversal(t *testing.T) {
 
 func TestDesktopUpdateInvalidEffectiveSettingsFailClosed(t *testing.T) {
 	withDesktopUpdateTestState(t)
-	t.Setenv("DESKTOP_UPDATE_ENABLED", "true")
-	t.Setenv("DESKTOP_UPDATE_PUBLIC_BASE_URL", "ftp://updates.example.com")
+	system_setting.ServerAddress = "ftp://updates.example.com"
+	setDesktopUpdateTestOption(t, DesktopUpdateSettingsOptionKey, `{"enabled":true,"public_base_url":"https://updates.example.com/desktop/update","max_upload_mb":256,"retention_count":10}`, true)
 	if settings := GetDesktopUpdateSettings(); settings.Enabled {
-		t.Fatalf("invalid environment configuration must disable public serving: %+v", settings)
+		t.Fatalf("invalid system server address must disable public serving: %+v", settings)
 	}
 
-	setDesktopUpdateTestOption(t, DesktopUpdateSettingsOptionKey, `{"enabled":true,"public_base_url":"https://user:pass@updates.example.com","max_upload_mb":256,"retention_count":10}`, true)
-	if settings := GetDesktopUpdateSettings(); settings.Enabled {
-		t.Fatalf("credential-bearing persisted URL must disable public serving: %+v", settings)
+	system_setting.ServerAddress = "https://updates.example.com"
+	setDesktopUpdateTestOption(t, DesktopUpdateSettingsOptionKey, `{"enabled":true,"public_base_url":"https://legacy.example.com/desktop/update","max_upload_mb":256,"retention_count":10}`, true)
+	if settings := GetDesktopUpdateSettings(); settings.PublicBaseURL != "https://updates.example.com/desktop/update" {
+		t.Fatalf("persisted public URL must follow system server address: %+v", settings)
+	}
+}
+
+func TestDesktopUpdatePublicBaseURLUsesSystemServerAddress(t *testing.T) {
+	withDesktopUpdateTestState(t)
+	system_setting.ServerAddress = "https://tenant.example.com/"
+	setDesktopUpdateTestOption(t, DesktopUpdateSettingsOptionKey, `{"enabled":true,"public_base_url":"https://legacy.example.com/desktop/update","max_upload_mb":256,"retention_count":10}`, true)
+
+	settings := GetDesktopUpdateSettings()
+	if settings.PublicBaseURL != "https://tenant.example.com/desktop/update" {
+		t.Fatalf("unexpected desktop update public base URL: %q", settings.PublicBaseURL)
+	}
+	validated, err := ValidateDesktopUpdateSettings(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if validated.PublicBaseURL != settings.PublicBaseURL {
+		t.Fatalf("validated public base URL drifted: %q", validated.PublicBaseURL)
+	}
+}
+
+func TestDesktopUpdateManifestPayloadFollowsServerAddress(t *testing.T) {
+	root := withDesktopUpdateTestState(t)
+	artifact := "YuanHeng_1.2.3_x64-setup.exe"
+	if _, err := SaveDesktopUpdateArtifact("1.2.3", artifact, strings.NewReader("installer"), 1024); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"version":"1.2.3","platforms":{"windows-x86_64":{"signature":"signed","url":"https://example.com/` + artifact + `"}}}`
+	if _, err := PublishDesktopUpdateManifest(strings.NewReader(manifest), "https://updates.example.com/desktop/update", 10); err != nil {
+		t.Fatal(err)
+	}
+
+	system_setting.ServerAddress = "https://new.example.com"
+	payload, err := GetDesktopUpdateManifestPayload()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantURL := "https://new.example.com/desktop/update/releases/1.2.3/" + artifact
+	if !bytes.Contains(payload, []byte(wantURL)) {
+		t.Fatalf("manifest payload did not follow current server address: %s", payload)
+	}
+	if _, err := os.Stat(filepath.Join(root, latestManifestName)); err != nil {
+		t.Fatal(err)
 	}
 }
 

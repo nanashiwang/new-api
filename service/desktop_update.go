@@ -20,11 +20,13 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 )
 
 const (
 	DesktopUpdateSettingsOptionKey       = "DesktopUpdateSettings"
 	DesktopUpdateTokenOptionKey          = "DesktopUpdatePublishToken"
+	DesktopUpdatePublicPath              = "/desktop/update"
 	latestManifestName                   = "latest.json"
 	defaultDesktopUpdateDir              = "/data/desktop-updates"
 	manifestMaxBytes               int64 = 1024 * 1024
@@ -112,10 +114,21 @@ type DesktopUpdateStorageStatus struct {
 func defaultDesktopUpdateSettings() DesktopUpdateSettings {
 	return DesktopUpdateSettings{
 		Enabled:        common.GetEnvOrDefaultBool("DESKTOP_UPDATE_ENABLED", false),
-		PublicBaseURL:  strings.TrimRight(strings.TrimSpace(os.Getenv("DESKTOP_UPDATE_PUBLIC_BASE_URL")), "/"),
+		PublicBaseURL:  DesktopUpdatePublicBaseURL(),
 		MaxUploadMB:    common.GetEnvOrDefault("DESKTOP_UPDATE_MAX_UPLOAD_MB", 256),
 		RetentionCount: common.GetEnvOrDefault("DESKTOP_UPDATE_RETENTION_COUNT", 10),
 	}
+}
+
+// DesktopUpdatePublicBaseURL derives the public update endpoint from the
+// system-wide server address. The server address is the single source of
+// truth for payment callbacks, homepage links, and desktop update URLs.
+func DesktopUpdatePublicBaseURL() string {
+	serverAddress := strings.TrimRight(strings.TrimSpace(system_setting.ServerAddress), "/")
+	if serverAddress == "" {
+		return ""
+	}
+	return serverAddress + DesktopUpdatePublicPath
 }
 
 func GetDesktopUpdateSettings() DesktopUpdateSettings {
@@ -132,7 +145,10 @@ func GetDesktopUpdateSettings() DesktopUpdateSettings {
 			settings.Enabled = false
 		}
 	}
-	settings.PublicBaseURL = strings.TrimRight(strings.TrimSpace(settings.PublicBaseURL), "/")
+	// Older versions persisted public_base_url (often as a manually entered
+	// domain). Ignore that stale value so changing the system server address
+	// automatically updates both the public catalog and updater manifest.
+	settings.PublicBaseURL = DesktopUpdatePublicBaseURL()
 	if settings.MaxUploadMB < 1 || settings.MaxUploadMB > 4096 {
 		settings.MaxUploadMB = 256
 	}
@@ -148,7 +164,9 @@ func GetDesktopUpdateSettings() DesktopUpdateSettings {
 }
 
 func ValidateDesktopUpdateSettings(settings DesktopUpdateSettings) (DesktopUpdateSettings, error) {
-	settings.PublicBaseURL = strings.TrimRight(strings.TrimSpace(settings.PublicBaseURL), "/")
+	// public_base_url is kept in the API shape for compatibility, but the
+	// effective value must always follow the system server address.
+	settings.PublicBaseURL = DesktopUpdatePublicBaseURL()
 	if settings.MaxUploadMB < 1 || settings.MaxUploadMB > 4096 {
 		return settings, errors.New("单文件大小限制必须在 1 到 4096 MB 之间")
 	}
@@ -161,7 +179,7 @@ func ValidateDesktopUpdateSettings(settings DesktopUpdateSettings) (DesktopUpdat
 		}
 	}
 	if settings.Enabled && settings.PublicBaseURL == "" {
-		return settings, errors.New("启用桌面更新服务前必须配置对外基础地址")
+		return settings, errors.New("启用桌面更新服务前必须先配置系统设置中的服务器地址")
 	}
 	return settings, nil
 }
@@ -596,6 +614,23 @@ func GetDesktopUpdateManifestSummary() (*DesktopUpdateManifestSummary, error) {
 		return nil, err
 	}
 	return &summary, nil
+}
+
+// GetDesktopUpdateManifestPayload returns the active manifest with all
+// installer URLs rewritten to the current system server address. This keeps
+// already-published manifests correct after an administrator changes
+// ServerAddress, without requiring a second manual release publish.
+func GetDesktopUpdateManifestPayload() ([]byte, error) {
+	data, err := readCurrentDesktopUpdateManifest()
+	if err != nil {
+		return nil, err
+	}
+	settings := GetDesktopUpdateSettings()
+	rewritten, _, err := parseAndRewriteDesktopUpdateManifest(data, settings.PublicBaseURL)
+	if err != nil {
+		return nil, err
+	}
+	return rewritten, nil
 }
 
 func RepublishCurrentDesktopUpdateManifest(baseURL string, retentionCount int) error {
