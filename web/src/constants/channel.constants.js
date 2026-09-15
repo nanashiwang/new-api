@@ -197,3 +197,9 @@ export const MODEL_FETCHABLE_CHANNEL_TYPES = new Set([
 ]);
 
 export const MODEL_TABLE_PAGE_SIZE = 10;
+
+// 渠道类型映射表 - 用于监控面板显示
+export const CHANNEL_TYPE_MAP = CHANNEL_OPTIONS.reduce((map, option) => {
+  map[option.value] = option.label;
+  return map;
+}, {});
