@@ -20,8 +20,9 @@ For commercial licensing, please contact support@quantumnous.com
 import React, { useState, useEffect } from 'react';
 import { Card, Table, Tabs, TabPane, Spin, Button, Select, Space, Tag, Typography } from '@douyinfe/semi-ui';
 import { IconRefresh, IconFilter } from '@douyinfe/semi-icons';
-import { API } from '../../helpers';
-import { showError } from '../../helpers/notification';
+import { API } from '../../helpers/apiCore';
+import { showError } from '../../helpers/toast';
+import { renderQuota } from '../../helpers/dashboardFormat';
 import { useTranslation } from 'react-i18next';
 import { CHANNEL_TYPE_MAP } from '../../constants/channel.constants';
 
@@ -95,7 +96,7 @@ const ChannelMonitorPanel = ({ CARD_PROPS, ILLUSTRATION_SIZE }) => {
       dataIndex: 'total_quota',
       key: 'total_quota',
       sorter: (a, b) => a.total_quota - b.total_quota,
-      render: (quota) => `$${((quota || 0) / 500000).toFixed(4)}`,
+      render: (quota) => renderQuota(quota || 0, 4),
     },
     {
       title: t('平均响应时间'),
@@ -155,7 +156,7 @@ const ChannelMonitorPanel = ({ CARD_PROPS, ILLUSTRATION_SIZE }) => {
       dataIndex: 'total_quota',
       key: 'total_quota',
       sorter: (a, b) => a.total_quota - b.total_quota,
-      render: (quota) => `$${((quota || 0) / 500000).toFixed(4)}`,
+      render: (quota) => renderQuota(quota || 0, 4),
     },
     {
       title: t('平均响应时间'),
