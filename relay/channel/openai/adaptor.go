@@ -11,6 +11,7 @@ import (
 	"net/textproto"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -303,41 +304,37 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 		}
 
 	}
-	if strings.HasPrefix(info.UpstreamModelName, "o") || strings.HasPrefix(info.UpstreamModelName, "gpt-5") {
-		if request.MaxCompletionTokens == 0 && request.MaxTokens != 0 {
-			request.MaxCompletionTokens = request.MaxTokens
-			request.MaxTokens = 0
-		}
-
-		if strings.HasPrefix(info.UpstreamModelName, "o") {
-			request.Temperature = nil
-		}
-
-		// gpt-5系列模型适配 归零不再支持的参数
-		if strings.HasPrefix(info.UpstreamModelName, "gpt-5") {
-			request.Temperature = nil
-			request.TopP = 0
-			request.LogProbs = false
-			request.TopLogProbs = 0
-		}
-
+	suffixEffort, suffixModel := reasoning.ParseOpenAIReasoningEffortFromModelSuffix(info.UpstreamModelName)
+	if dto.GetOpenAIChatCapabilities(info.UpstreamModelName, request.ReasoningEffort).UseMaxCompletionTokens ||
+		(suffixEffort != "" && dto.GetOpenAIChatCapabilities(suffixModel, suffixEffort).UseMaxCompletionTokens) {
 		// 转换模型推理力度后缀
-		effort, originModel := reasoning.ParseOpenAIReasoningEffortFromModelSuffix(info.UpstreamModelName)
-		if effort != "" {
-			request.ReasoningEffort = effort
-			info.UpstreamModelName = originModel
-			request.Model = originModel
+		if suffixEffort != "" {
+			request.ReasoningEffort = suffixEffort
+			info.UpstreamModelName = suffixModel
+			request.Model = suffixModel
 		}
 
 		info.ReasoningEffort = request.ReasoningEffort
-
-		// o系列模型developer适配（o1-mini除外）
-		if !strings.HasPrefix(info.UpstreamModelName, "o1-mini") && !strings.HasPrefix(info.UpstreamModelName, "o1-preview") {
-			//修改第一个Message的内容，将system改为developer
-			if len(request.Messages) > 0 && request.Messages[0].Role == "system" {
-				request.Messages[0].Role = "developer"
-			}
+	}
+	capabilities := dto.GetOpenAIChatCapabilities(info.UpstreamModelName, request.ReasoningEffort)
+	if capabilities.UseMaxCompletionTokens {
+		if request.MaxCompletionTokens == 0 {
+			request.MaxCompletionTokens = request.MaxTokens
 		}
+		request.MaxTokens = 0
+	}
+	if !capabilities.SupportsTemperature {
+		request.Temperature = nil
+	}
+	if !capabilities.SupportsTopP {
+		request.TopP = 0
+	}
+	if !capabilities.SupportsLogProbs {
+		request.LogProbs = false
+		request.TopLogProbs = 0
+	}
+	if capabilities.UseDeveloperRole && len(request.Messages) > 0 && request.Messages[0].Role == "system" {
+		request.Messages[0].Role = "developer"
 	}
 
 	return request, nil
@@ -428,6 +425,11 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		writer := multipart.NewWriter(&requestBody)
 
 		writer.WriteField("model", request.Model)
+		count, _, err := request.ImageBillingQuantity(false)
+		if err != nil {
+			return nil, err
+		}
+		writer.WriteField("n", strconv.Itoa(count))
 		// 使用已解析的 multipart 表单，避免重复解析
 		mf := c.Request.MultipartForm
 		if mf == nil {
@@ -443,7 +445,7 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		// 写入所有非文件字段
 		if mf != nil {
 			for key, values := range mf.Value {
-				if key == "model" {
+				if key == "model" || key == "n" {
 					continue
 				}
 				for _, value := range values {

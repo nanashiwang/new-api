@@ -47,17 +47,11 @@ func oaiImage2AliImageRequest(info *relaycommon.RelayInfo, request dto.ImageRequ
 		}
 	}
 
-	if strings.Contains(request.Model, "z-image") {
-		// z-image 开启prompt_extend后，按2倍计费
-		if imageRequest.Parameters.PromptExtendValue() {
-			info.PriceData.AddOtherRatio("prompt_extend", 2)
-		}
+	count, _, err := request.ImageBillingQuantity(true)
+	if err != nil {
+		return nil, err
 	}
-
-	// 检查n参数
-	if imageRequest.Parameters.N != 0 {
-		info.PriceData.AddOtherRatio("n", float64(imageRequest.Parameters.N))
-	}
+	imageRequest.Parameters.N = count
 
 	// 同步图片模型和异步图片模型请求格式不一样
 	if isSync {
@@ -183,6 +177,11 @@ func oaiFormEdit2AliImageEdit(c *gin.Context, info *relaycommon.RelayInfo, reque
 	imageRequest.Parameters = AliImageParameters{
 		Watermark: request.Watermark,
 	}
+	count, _, err := request.ImageBillingQuantity(true)
+	if err != nil {
+		return nil, err
+	}
+	imageRequest.Parameters.N = count
 	return &imageRequest, nil
 }
 
