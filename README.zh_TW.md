@@ -314,6 +314,12 @@ docker run --name new-api -d --restart always \
 | `MAX_REQUEST_BODY_MB` | 請求體最大大小（MB，**解壓縮後**計；防止超大請求/zip bomb 導致記憶體暴漲），超過將返回 `413` | `256` |
 | `AZURE_DEFAULT_API_VERSION` | Azure API 版本                                                 | `2025-04-01-preview` |
 | `ERROR_LOG_ENABLED` | 錯誤日誌開關                                                       | `false` |
+| `LOG_RETENTION_DAYS` | 日誌自動清理保留天數，`0` 表示關閉自動清理 | `0` |
+| `LOG_RETENTION_INTERVAL_HOURS` | 日誌自動清理的執行間隔（小時） | `24` |
+| `LOG_RETENTION_BATCH_SIZE` | 日誌清理單批刪除列數，手動清理介面同樣使用該值 | `2000` |
+| `LOG_CACHE_RATE_SCAN_LIMIT` | 快取命中率統計最多取樣的日誌列數，`0` 表示不限制 | `50000` |
+| `CHANNEL_MONITOR_CACHE_TTL` | 通道監控統計的快取時間（秒），同時決定統計視窗的對齊粒度 | `60` |
+| `CHANNEL_MONITOR_CACHE_CAP` | 通道監控統計的記憶體快取條目上限 | `128` |
 | `PYROSCOPE_URL` | Pyroscope 服務位址                                            | - |
 | `PYROSCOPE_APP_NAME` | Pyroscope 應用名                                        | `new-api` |
 | `PYROSCOPE_BASIC_AUTH_USER` | Pyroscope Basic Auth 用戶名                        | - |

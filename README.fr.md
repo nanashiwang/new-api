@@ -317,6 +317,12 @@ docker run --name new-api -d --restart always \
 | `MAX_REQUEST_BODY_MB` | Taille maximale du corps de requête (Mo, comptée **après décompression** ; évite les requêtes énormes/zip bombs qui saturent la mémoire). Dépassement ⇒ `413` | `256` |
 | `AZURE_DEFAULT_API_VERSION` | Version de l'API Azure | `2025-04-01-preview` |
 | `ERROR_LOG_ENABLED` | Interrupteur du journal d'erreurs | `false` |
+| `LOG_RETENTION_DAYS` | Jours de journaux conservés par le nettoyage automatique ; `0` le désactive | `0` |
+| `LOG_RETENTION_INTERVAL_HOURS` | Intervalle entre deux nettoyages automatiques (heures) | `24` |
+| `LOG_RETENTION_BATCH_SIZE` | Lignes supprimées par lot ; l'endpoint de nettoyage manuel l'utilise aussi | `2000` |
+| `LOG_CACHE_RATE_SCAN_LIMIT` | Lignes maximales échantillonnées pour le taux de cache ; `0` = illimité | `50000` |
+| `CHANNEL_MONITOR_CACHE_TTL` | Durée du cache des statistiques de canaux (secondes) ; aligne aussi la fenêtre | `60` |
+| `CHANNEL_MONITOR_CACHE_CAP` | Nombre maximal d'entrées en mémoire pour ces statistiques | `128` |
 | `PYROSCOPE_URL` | Adresse du serveur Pyroscope | - |
 | `PYROSCOPE_APP_NAME` | Nom de l'application Pyroscope | `new-api` |
 | `PYROSCOPE_BASIC_AUTH_USER` | Utilisateur Basic Auth Pyroscope | - |

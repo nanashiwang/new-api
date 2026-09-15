@@ -2,9 +2,15 @@ package model
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/pkg/cachex"
+
+	"github.com/samber/hot"
 )
 
 // ChannelMonitorStats 渠道监控统计数据
@@ -39,11 +45,57 @@ type monitorStatsRow struct {
 
 const monitorMaxTimeRange = int64(30 * 24 * 3600)
 
-// GetChannelMonitorStats 获取渠道监控统计数据
-// groupBy 为 "group" 时按日志分组聚合，否则按渠道聚合。
-func GetChannelMonitorStats(startTime, endTime int64, groupBy, username string) ([]ChannelMonitorStats, error) {
+var (
+	channelMonitorStatsCache     *cachex.HybridCache[[]ChannelMonitorStats]
+	channelMonitorStatsCacheOnce sync.Once
+)
+
+func channelMonitorStatsCacheTTL() time.Duration {
+	ttlSeconds := common.GetEnvOrDefault("CHANNEL_MONITOR_CACHE_TTL", 60)
+	if ttlSeconds <= 0 {
+		ttlSeconds = 60
+	}
+	return time.Duration(ttlSeconds) * time.Second
+}
+
+func channelMonitorStatsCacheCapacity() int {
+	capacity := common.GetEnvOrDefault("CHANNEL_MONITOR_CACHE_CAP", 128)
+	if capacity <= 0 {
+		capacity = 128
+	}
+	return capacity
+}
+
+func getChannelMonitorStatsCache() *cachex.HybridCache[[]ChannelMonitorStats] {
+	channelMonitorStatsCacheOnce.Do(func() {
+		ttl := channelMonitorStatsCacheTTL()
+		channelMonitorStatsCache = cachex.NewHybridCache[[]ChannelMonitorStats](cachex.HybridCacheConfig[[]ChannelMonitorStats]{
+			Namespace: cachex.Namespace("channel_monitor_stats:v1"),
+			Redis:     common.RDB,
+			RedisEnabled: func() bool {
+				return common.RedisEnabled && common.RDB != nil
+			},
+			RedisCodec: cachex.JSONCodec[[]ChannelMonitorStats]{},
+			Memory: func() *hot.HotCache[string, []ChannelMonitorStats] {
+				return hot.NewHotCache[string, []ChannelMonitorStats](hot.LRU, channelMonitorStatsCacheCapacity()).
+					WithTTL(ttl).
+					WithJanitor().
+					Build()
+			},
+		})
+	})
+	return channelMonitorStatsCache
+}
+
+// normalizeMonitorRange 校正时间窗口，并把边界对齐到缓存 TTL 的整数倍。
+//
+// 对齐是缓存能否生效的前提，不只是键的格式问题：前端把 end_time 取为当前秒，
+// 每次刷新都是一个新值，未对齐的键永远不会命中，缓存形同虚设。对齐查询本身
+// 而不仅是键，可以保证返回的数据与缓存键描述的窗口一致；代价是窗口边界最多
+// 偏移一个 TTL，对趋势性的监控统计可以接受。
+func normalizeMonitorRange(startTime, endTime int64) (int64, int64) {
 	now := time.Now().Unix()
-	if endTime <= 0 {
+	if endTime <= 0 || endTime > now {
 		endTime = now
 	}
 	if startTime <= 0 {
@@ -56,6 +108,47 @@ func GetChannelMonitorStats(startTime, endTime int64, groupBy, username string) 
 		startTime = endTime - monitorMaxTimeRange
 	}
 
+	bucket := int64(channelMonitorStatsCacheTTL() / time.Second)
+	if bucket > 1 {
+		endTime = endTime / bucket * bucket
+		startTime = startTime / bucket * bucket
+	}
+	if startTime >= endTime {
+		startTime = endTime - bucket
+	}
+	return startTime, endTime
+}
+
+func channelMonitorStatsCacheKey(startTime, endTime int64, groupBy, username string) string {
+	return strconv.FormatInt(startTime, 10) + ":" + strconv.FormatInt(endTime, 10) +
+		":" + groupBy + ":" + username
+}
+
+// GetChannelMonitorStats 获取渠道监控统计数据
+// groupBy 为 "group" 时按日志分组聚合，否则按渠道聚合。
+//
+// 统计查询要对时间窗口内的全部 logs 行做聚合，成本随日志量线性增长，因此结果
+// 按归一化后的窗口缓存，避免仪表盘刷新或多个管理员同时查看时重复扫描日志表。
+func GetChannelMonitorStats(startTime, endTime int64, groupBy, username string) ([]ChannelMonitorStats, error) {
+	startTime, endTime = normalizeMonitorRange(startTime, endTime)
+	groupBy = strings.TrimSpace(groupBy)
+	username = strings.TrimSpace(username)
+
+	cache := getChannelMonitorStatsCache()
+	cacheKey := channelMonitorStatsCacheKey(startTime, endTime, groupBy, username)
+	if cached, found, err := cache.Get(cacheKey); err == nil && found {
+		return cached, nil
+	}
+
+	stats, err := loadChannelMonitorStats(startTime, endTime, groupBy, username)
+	if err != nil {
+		return nil, err
+	}
+	_ = cache.SetWithTTL(cacheKey, stats, channelMonitorStatsCacheTTL())
+	return stats, nil
+}
+
+func loadChannelMonitorStats(startTime, endTime int64, groupBy, username string) ([]ChannelMonitorStats, error) {
 	groupCol := logGroupCol
 	if groupCol == "" {
 		groupCol = commonGroupCol
@@ -137,7 +230,7 @@ func fillChannelInfo(stats []ChannelMonitorStats) {
 	}
 
 	var channels []Channel
-	err := DB.Select("id, name, type, " + commonGroupCol).
+	err := DB.Select("id, name, type, "+commonGroupCol).
 		Where("id IN ?", ids).
 		Find(&channels).Error
 	if err != nil {

@@ -325,6 +325,12 @@ docker run --name new-api -d --restart always \
 | `RESPONSES_REQUEST_BODY_LIMIT_MB` | Business preflight limit for `/v1/responses` and `/v1/chat/completions` request bodies (MB, counted after decompression). Oversized image/base64/context payloads fail locally with `413` instead of being retried upstream. Set `0` to disable this route-specific limit | `20` |
 | `AZURE_DEFAULT_API_VERSION` | Azure API version | `2025-04-01-preview` |
 | `ERROR_LOG_ENABLED` | Error log switch | `false` |
+| `LOG_RETENTION_DAYS` | Days of logs to keep for automatic cleanup; `0` disables it | `0` |
+| `LOG_RETENTION_INTERVAL_HOURS` | Interval between automatic log cleanup runs (hours) | `24` |
+| `LOG_RETENTION_BATCH_SIZE` | Rows deleted per batch; the manual cleanup endpoint uses it too | `2000` |
+| `LOG_CACHE_RATE_SCAN_LIMIT` | Max log rows sampled for cache hit rate stats; `0` means unlimited | `50000` |
+| `CHANNEL_MONITOR_CACHE_TTL` | Channel monitor stats cache TTL (seconds); also the window alignment granularity | `60` |
+| `CHANNEL_MONITOR_CACHE_CAP` | Max in-memory entries for channel monitor stats | `128` |
 | `PYROSCOPE_URL` | Pyroscope server address | - |
 | `PYROSCOPE_APP_NAME` | Pyroscope application name | `new-api` |
 | `PYROSCOPE_BASIC_AUTH_USER` | Pyroscope basic auth user | - |

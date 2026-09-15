@@ -375,6 +375,12 @@ docker run --name new-api -d --restart always \
 | `PULSE_BENEFIT_RATE_LIMIT` | 每个服务身份在限流窗口内允许的 Benefit 请求数 | `600` |
 | `PULSE_BENEFIT_RATE_LIMIT_DURATION` | Benefit 限流窗口，单位秒 | `60` |
 | `ERROR_LOG_ENABLED`             | 错误日志开关                                                                             | `false`              |
+| `LOG_RETENTION_DAYS`            | 日志自动清理保留天数，`0` 表示关闭自动清理                                               | `0`                  |
+| `LOG_RETENTION_INTERVAL_HOURS`  | 日志自动清理的执行间隔（小时）                                                           | `24`                 |
+| `LOG_RETENTION_BATCH_SIZE`      | 日志清理单批删除行数，手动清理接口同样使用该值                                           | `2000`               |
+| `LOG_CACHE_RATE_SCAN_LIMIT`     | 缓存命中率统计最多取样的日志行数，`0` 表示不限制；行数越多统计越慢                       | `50000`              |
+| `CHANNEL_MONITOR_CACHE_TTL`     | 渠道监控统计的缓存时间（秒），同时决定统计窗口的对齐粒度                                 | `60`                 |
+| `CHANNEL_MONITOR_CACHE_CAP`     | 渠道监控统计的内存缓存条目上限                                                           | `128`                |
 | `PYROSCOPE_URL`                 | Pyroscope 服务地址                                                                       | -                    |
 | `PYROSCOPE_APP_NAME`            | Pyroscope 应用名                                                                         | `new-api`            |
 | `PYROSCOPE_BASIC_AUTH_USER`     | Pyroscope Basic Auth 用户名                                                              | -                    |

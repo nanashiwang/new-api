@@ -319,6 +319,12 @@ docker run --name new-api -d --restart always \
 | `MAX_REQUEST_BODY_MB` | リクエストボディ最大サイズ（MB、**解凍後**に計測。巨大リクエスト/zip bomb によるメモリ枯渇を防止）。超過時は `413` | `256` |
 | `AZURE_DEFAULT_API_VERSION` | Azure APIバージョン | `2025-04-01-preview` |
 | `ERROR_LOG_ENABLED` | エラーログスイッチ | `false` |
+| `LOG_RETENTION_DAYS` | ログ自動削除の保持日数。`0` で自動削除を無効化 | `0` |
+| `LOG_RETENTION_INTERVAL_HOURS` | ログ自動削除の実行間隔（時間） | `24` |
+| `LOG_RETENTION_BATCH_SIZE` | 1 バッチあたりの削除行数。手動削除 API も同じ値を使用 | `2000` |
+| `LOG_CACHE_RATE_SCAN_LIMIT` | キャッシュヒット率統計でサンプリングする最大行数。`0` は無制限 | `50000` |
+| `CHANNEL_MONITOR_CACHE_TTL` | チャネル監視統計のキャッシュ時間（秒）。統計期間の丸め単位も兼ねる | `60` |
+| `CHANNEL_MONITOR_CACHE_CAP` | チャネル監視統計のメモリキャッシュ上限件数 | `128` |
 | `PYROSCOPE_URL` | Pyroscopeサーバーのアドレス | - |
 | `PYROSCOPE_APP_NAME` | Pyroscopeアプリ名 | `new-api` |
 | `PYROSCOPE_BASIC_AUTH_USER` | Pyroscope Basic Authユーザー | - |

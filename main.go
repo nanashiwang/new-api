@@ -126,6 +126,8 @@ func main() {
 	service.StartInviteCommissionSettlementTask()
 	// 渠道上游模型更新巡检任务。
 	controller.StartChannelUpstreamModelUpdateTask()
+	// 日志保留期清理任务（默认关闭，由 LOG_RETENTION_DAYS 启用）。
+	service.StartLogRetentionTask()
 
 	// Wire task polling adaptor factory (breaks service -> relay import cycle)
 	service.GetTaskAdaptorFunc = func(platform constant.TaskPlatform) service.TaskPollingAdaptor {

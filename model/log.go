@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"regexp"
@@ -523,49 +524,61 @@ func getDisplayedInputTokens(promptTokens, cacheReadTokens, cacheWriteTokens int
 	return promptTokens
 }
 
-func calculateCacheRates(rows []logCacheRateRow) (cacheHitRate float64, cacheGlobalRate float64) {
-	var globalReadTokens int
-	var globalInputTokens int
-	var hitReadTokens int
-	var hitInputTokens int
+// cacheRateAccumulator 以逐行累加的方式统计缓存率，使调用方不必把结果集
+// 全部读入内存。缓存率是比值，只依赖这几个累计量，与行的到达顺序无关。
+type cacheRateAccumulator struct {
+	globalReadTokens  int
+	globalInputTokens int
+	hitReadTokens     int
+	hitInputTokens    int
+}
 
-	for _, row := range rows {
-		other := tokenUsageOtherInfo{}
-		if row.Other != "" {
-			_ = common.UnmarshalJsonStr(row.Other, &other)
-		}
-
-		cacheReadTokens := other.CacheTokens
-		if cacheReadTokens < 0 {
-			cacheReadTokens = 0
-		}
-		cacheWriteTokens := sumCacheCreationTokens(other)
-		if cacheWriteTokens < 0 {
-			cacheWriteTokens = 0
-		}
-
-		displayedInputTokens := getDisplayedInputTokens(
-			row.PromptTokens,
-			cacheReadTokens,
-			cacheWriteTokens,
-			other,
-		)
-
-		globalReadTokens += cacheReadTokens
-		globalInputTokens += displayedInputTokens
-		if cacheReadTokens > 0 {
-			hitReadTokens += cacheReadTokens
-			hitInputTokens += displayedInputTokens
-		}
+func (a *cacheRateAccumulator) add(row logCacheRateRow) {
+	other := tokenUsageOtherInfo{}
+	if row.Other != "" {
+		_ = common.UnmarshalJsonStr(row.Other, &other)
 	}
 
-	if globalInputTokens > 0 {
-		cacheGlobalRate = float64(globalReadTokens) / float64(globalInputTokens)
+	cacheReadTokens := other.CacheTokens
+	if cacheReadTokens < 0 {
+		cacheReadTokens = 0
 	}
-	if hitInputTokens > 0 {
-		cacheHitRate = float64(hitReadTokens) / float64(hitInputTokens)
+	cacheWriteTokens := sumCacheCreationTokens(other)
+	if cacheWriteTokens < 0 {
+		cacheWriteTokens = 0
+	}
+
+	displayedInputTokens := getDisplayedInputTokens(
+		row.PromptTokens,
+		cacheReadTokens,
+		cacheWriteTokens,
+		other,
+	)
+
+	a.globalReadTokens += cacheReadTokens
+	a.globalInputTokens += displayedInputTokens
+	if cacheReadTokens > 0 {
+		a.hitReadTokens += cacheReadTokens
+		a.hitInputTokens += displayedInputTokens
+	}
+}
+
+func (a *cacheRateAccumulator) rates() (cacheHitRate float64, cacheGlobalRate float64) {
+	if a.globalInputTokens > 0 {
+		cacheGlobalRate = float64(a.globalReadTokens) / float64(a.globalInputTokens)
+	}
+	if a.hitInputTokens > 0 {
+		cacheHitRate = float64(a.hitReadTokens) / float64(a.hitInputTokens)
 	}
 	return cacheHitRate, cacheGlobalRate
+}
+
+func calculateCacheRates(rows []logCacheRateRow) (cacheHitRate float64, cacheGlobalRate float64) {
+	accumulator := cacheRateAccumulator{}
+	for _, row := range rows {
+		accumulator.add(row)
+	}
+	return accumulator.rates()
 }
 
 func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string, requestID string, fuzzyUsername bool) (stat Stat, err error) {
@@ -641,14 +654,60 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 		common.SysError("failed to query rpm/tpm stat: " + err.Error())
 		return stat, errors.New("查询统计数据失败")
 	}
-	rows := make([]logCacheRateRow, 0)
-	if err := cacheRateQuery.Scan(&rows).Error; err != nil {
-		common.SysError("failed to query log cache stat: " + err.Error())
-		return stat, errors.New("查询统计数据失败")
+	stat.CacheHitRate, stat.CacheGlobalRate, err = scanCacheRates(cacheRateQuery)
+	if err != nil {
+		return stat, err
 	}
-	stat.CacheHitRate, stat.CacheGlobalRate = calculateCacheRates(rows)
 
 	return stat, nil
+}
+
+// cacheRateScanLimit 限制缓存率统计读取的日志行数。
+//
+// 缓存率必须逐行解析 other 中的 JSON 才能算出，无法下推为跨数据库通用的聚合，
+// 所以行数直接决定这次查询的代价。不设上限时，一个宽时间范围的统计请求会把
+// 该范围内的全部日志行连同 other 列拉进内存，在日志量大的部署上足以拖垮
+// 日志库。取最近的若干行计算，得到的是同一口径下的近似值；上限可通过
+// LOG_CACHE_RATE_SCAN_LIMIT 调整，设为 0 表示不限制。
+func cacheRateScanLimit() int {
+	return common.GetEnvOrDefault("LOG_CACHE_RATE_SCAN_LIMIT", 50000)
+}
+
+// scanCacheRates 流式读取缓存率统计所需的行，逐行累加而不缓冲整个结果集。
+func scanCacheRates(query *gorm.DB) (cacheHitRate float64, cacheGlobalRate float64, err error) {
+	if limit := cacheRateScanLimit(); limit > 0 {
+		// 按最新的行取样，使结果反映当前的缓存表现。
+		query = query.Order("created_at DESC").Limit(limit)
+	}
+
+	rows, err := query.Rows()
+	if err != nil {
+		common.SysError("failed to query log cache stat: " + err.Error())
+		return 0, 0, errors.New("查询统计数据失败")
+	}
+	defer rows.Close()
+
+	accumulator := cacheRateAccumulator{}
+	for rows.Next() {
+		var promptTokens sql.NullInt64
+		var other sql.NullString
+		// 历史行的 other 可能为 NULL，此处不能直接扫描进 string。
+		if err := rows.Scan(&promptTokens, &other); err != nil {
+			common.SysError("failed to scan log cache stat: " + err.Error())
+			return 0, 0, errors.New("查询统计数据失败")
+		}
+		accumulator.add(logCacheRateRow{
+			PromptTokens: int(promptTokens.Int64),
+			Other:        other.String,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		common.SysError("failed to iterate log cache stat: " + err.Error())
+		return 0, 0, errors.New("查询统计数据失败")
+	}
+
+	cacheHitRate, cacheGlobalRate = accumulator.rates()
+	return cacheHitRate, cacheGlobalRate, nil
 }
 
 func SumUsedToken(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string) (token int) {

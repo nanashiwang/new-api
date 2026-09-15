@@ -6,6 +6,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -204,7 +205,9 @@ func DeleteHistoryLogs(c *gin.Context) {
 		})
 		return
 	}
-	count, err := model.DeleteOldLog(c.Request.Context(), targetTimestamp, 100)
+	// 每批删除的行数取自与自动清理任务相同的配置，避免手动清理以远小于
+	// 后台任务的批次反复往返日志库。
+	count, err := model.DeleteOldLog(c.Request.Context(), targetTimestamp, service.LogRetentionBatchSize())
 	if err != nil {
 		common.ApiError(c, err)
 		return
