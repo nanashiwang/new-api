@@ -30,6 +30,14 @@ Benefit 内部接口在完成服务签名后按 `pulse-settlement` 服务身份�
 
 不要把真实密钥提交到 Git，也不要让浏览器、论坛前端或 YuanHeng 持有服务密钥。
 
+### 在管理面板配置
+
+`PULSE_INTERNAL_URL`、`PULSE_USER_BFF_HMAC_SECRET` 和 `PULSE_ADMIN_HMAC_SECRET` 也可以在「系统设置 → 配置 Meta Pulse 对接」中填写，免去为了改一次配置登录服务器。面板里的值优先于同名环境变量；留空表示「这里没有配置」，仍然回退到环境变量，所以升级到带这些选项的版本不会让已部署实例失效。
+
+「生成新密钥」按钮调用 `GET /api/pulse/ops/secret/generate`（仅管理员），返回一份 64 位强随机值，**只显示这一次**：`GetOptions` 会过滤所有 `Secret` 后缀的选项，保存之后页面不会再回传它。HMAC 是对称密钥，因此必须先把这份值写进 Pulse 服务端的同名配置，两边一致后再在面板保存，否则签名会在切换的间隙失败。轮换仍然依赖 Pulse 侧的 `*_PREVIOUS`：先给 Pulse 配好新旧两份，再更新 new-api，确认旧请求排空后清空 `*_PREVIOUS`。
+
+该接口不持久化任何东西——管理员在 Pulse 知道这个值之前就保存，只会让两边签名对不上。
+
 ## Pulse 奖励接口
 
 路由前缀为 `/api/internal/pulse/benefits`，仅接受 `pulse-settlement` 角色的服务签名：
