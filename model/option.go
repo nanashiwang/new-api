@@ -148,6 +148,9 @@ func InitOptionMap() {
 	common.OptionMap["WeChatAccountQRCodeImageURL"] = ""
 	common.OptionMap["TurnstileSiteKey"] = ""
 	common.OptionMap["TurnstileSecretKey"] = ""
+	common.OptionMap["PulseInternalURL"] = ""
+	common.OptionMap["PulseUserBFFHMACSecret"] = ""
+	common.OptionMap["PulseAdminHMACSecret"] = ""
 	common.OptionMap["QuotaForNewUser"] = strconv.Itoa(common.QuotaForNewUser)
 	common.OptionMap["QuotaForInviter"] = strconv.Itoa(common.QuotaForInviter)
 	common.OptionMap["QuotaForInvitee"] = strconv.Itoa(common.QuotaForInvitee)
@@ -726,6 +729,12 @@ func updateOptionMapUnlocked(key string, value string) (err error) {
 		common.TurnstileSiteKey = value
 	case "TurnstileSecretKey":
 		common.TurnstileSecretKey = value
+	case "PulseInternalURL":
+		common.PulseInternalURL = value
+	case "PulseUserBFFHMACSecret":
+		common.PulseUserBFFHMACSecret = value
+	case "PulseAdminHMACSecret":
+		common.PulseAdminHMACSecret = value
 	case "QuotaForNewUser":
 		common.QuotaForNewUser, _ = strconv.Atoi(value)
 	case "QuotaForInviter":

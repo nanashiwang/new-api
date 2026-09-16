@@ -81,6 +81,16 @@ var MemoryCacheEnabled bool
 // which remains the persisted legacy option shown in the admin console.
 var PulseUsageLogRequired bool
 
+// Pulse connection settings are persisted options so an operator can configure
+// them from the admin console instead of editing the deployment environment.
+// The environment variable of the same purpose stays as the fallback: instances
+// that already set it keep working after an upgrade that adds no option rows.
+var (
+	PulseInternalURL       = ""
+	PulseUserBFFHMACSecret = ""
+	PulseAdminHMACSecret   = ""
+)
+
 var LogConsumeEnabled = true
 
 var TLSInsecureSkipVerify bool

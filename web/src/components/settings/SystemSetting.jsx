@@ -42,6 +42,7 @@ import {
 } from '../../helpers';
 import axios from 'axios';
 import { useTranslation } from 'react-i18next';
+import { copy } from '../../helpers/clipboard';
 import CustomOAuthSetting from './CustomOAuthSetting';
 
 const SystemSetting = () => {
@@ -101,6 +102,9 @@ const SystemSetting = () => {
     LinuxDOClientSecret: '',
     LinuxDOMinimumTrustLevel: '',
     ServerAddress: '',
+    PulseInternalURL: '',
+    PulseUserBFFHMACSecret: '',
+    PulseAdminHMACSecret: '',
     // SSRF防护配置
     'fetch_setting.enable_ssrf_protection': true,
     'fetch_setting.allow_private_ip': '',
@@ -126,6 +130,9 @@ const SystemSetting = () => {
   const [domainList, setDomainList] = useState([]);
   const [ipList, setIpList] = useState([]);
   const [allowedPorts, setAllowedPorts] = useState([]);
+  // 生成出来的密钥只在这一次可见：保存后 GetOptions 会把它过滤掉，
+  // 所以必须让管理员在离开这个弹窗前抄走。
+  const [generatedPulseSecret, setGeneratedPulseSecret] = useState(null);
 
   const getOptions = async () => {
     setLoading(true);
@@ -586,6 +593,76 @@ const SystemSetting = () => {
       { key: 'TelegramBotName', value: inputs.TelegramBotName },
     ];
     await updateOptions(options);
+  };
+
+  const submitPulse = async () => {
+    const options = [];
+
+    const trimmedURL = removeTrailingSlash(
+      (inputs.PulseInternalURL || '').trim(),
+    );
+    if (trimmedURL !== '' && !/^https?:\/\//.test(trimmedURL)) {
+      showError(t('Pulse 内网地址必须以 http:// 或 https:// 开头'));
+      return;
+    }
+    if (originInputs['PulseInternalURL'] !== trimmedURL) {
+      options.push({ key: 'PulseInternalURL', value: trimmedURL });
+    }
+
+    // 空值表示“沿用已保存的密钥”：后端不会把已存密钥回传前端，
+    // 提交空串会把它抹掉，反而让签名断掉。
+    const secretFields = [
+      { key: 'PulseUserBFFHMACSecret', label: t('Pulse 用户侧密钥') },
+      { key: 'PulseAdminHMACSecret', label: t('Pulse 运营侧密钥') },
+    ];
+    for (const field of secretFields) {
+      const value = (inputs[field.key] || '').trim();
+      if (value === '' || originInputs[field.key] === value) {
+        continue;
+      }
+      // 生产环境要求至少 32 字符，提前拦住可以避免保存后才在日志里发现失效。
+      if (value.length < 32) {
+        showError(t('{{name}}至少需要 32 个字符', { name: field.label }));
+        return;
+      }
+      options.push({ key: field.key, value });
+    }
+
+    if (options.length > 0) {
+      await updateOptions(options);
+    }
+  };
+
+  // 生成的密钥不落库：同一个值必须同时配置到 Pulse 侧，
+  // 在 Pulse 知道它之前就保存会让两边签名对不上。
+  const generatePulseSecret = async () => {
+    try {
+      const res = await API.get('/api/pulse/ops/secret/generate');
+      const { success, message, data } = res.data;
+      if (!success) {
+        showError(message || t('生成密钥失败'));
+        return;
+      }
+      setGeneratedPulseSecret(data);
+    } catch (error) {
+      showError(t('生成密钥失败'));
+    }
+  };
+
+  const copyPulseSecret = async () => {
+    if (!generatedPulseSecret) return;
+    if (await copy(generatedPulseSecret)) {
+      showSuccess(t('已复制到剪贴板'));
+    } else {
+      showError(t('复制失败，请手动选中复制'));
+    }
+  };
+
+  const applyGeneratedPulseSecret = (field) => {
+    if (!generatedPulseSecret) return;
+    formApiRef.current?.setValue(field, generatedPulseSecret);
+    setInputs((prev) => ({ ...prev, [field]: generatedPulseSecret }));
+    showSuccess(t('已填入，请记得保存并同步到 Pulse 服务端'));
   };
 
   const submitTurnstile = async () => {
@@ -1635,7 +1712,102 @@ const SystemSetting = () => {
                     {t('保存 Turnstile 设置')}
                   </Button>
                 </Form.Section>
+
+                <Form.Section text={t('配置 Meta Pulse 对接')}>
+                  <Banner
+                    type='info'
+                    className='!rounded-xl'
+                    closeIcon={null}
+                    description={t(
+                      'HMAC 是对称密钥，这里保存的值必须与 Pulse 服务端同名配置完全一致，否则签名校验会失败。用户侧与运营侧使用两个独立密钥，泄露用户侧密钥也无法访问运营接口。',
+                    )}
+                  />
+                  <Row
+                    gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
+                  >
+                    <Col xs={24} sm={24} md={12} lg={12} xl={12}>
+                      <Form.Input
+                        field='PulseInternalURL'
+                        label={t('Pulse 内网地址')}
+                        placeholder='http://pulse-api:8080'
+                        extraText={t(
+                          '留空则回退到部署环境变量 PULSE_INTERNAL_URL',
+                        )}
+                      />
+                    </Col>
+                    <Col xs={24} sm={24} md={12} lg={12} xl={12}>
+                      <Form.Input
+                        field='PulseUserBFFHMACSecret'
+                        label={t('Pulse 用户侧密钥')}
+                        type='password'
+                        placeholder={t('敏感信息不会发送到前端显示')}
+                        extraText={t(
+                          '对应 Pulse 的 PULSE_USER_BFF_HMAC_SECRET',
+                        )}
+                      />
+                    </Col>
+                    <Col xs={24} sm={24} md={12} lg={12} xl={12}>
+                      <Form.Input
+                        field='PulseAdminHMACSecret'
+                        label={t('Pulse 运营侧密钥')}
+                        type='password'
+                        placeholder={t('敏感信息不会发送到前端显示')}
+                        extraText={t('对应 Pulse 的 PULSE_ADMIN_HMAC_SECRET')}
+                      />
+                    </Col>
+                  </Row>
+                  <div className='flex flex-wrap gap-2'>
+                    <Button onClick={submitPulse}>
+                      {t('保存 Pulse 设置')}
+                    </Button>
+                    <Button theme='light' onClick={generatePulseSecret}>
+                      {t('生成新密钥')}
+                    </Button>
+                  </div>
+                </Form.Section>
               </Card>
+
+              <Modal
+                title={t('新的 Pulse 密钥')}
+                visible={generatedPulseSecret !== null}
+                onCancel={() => setGeneratedPulseSecret(null)}
+                footer={
+                  <div className='flex flex-wrap justify-end gap-2'>
+                    <Button
+                      onClick={() =>
+                        applyGeneratedPulseSecret('PulseUserBFFHMACSecret')
+                      }
+                    >
+                      {t('填入用户侧')}
+                    </Button>
+                    <Button
+                      onClick={() =>
+                        applyGeneratedPulseSecret('PulseAdminHMACSecret')
+                      }
+                    >
+                      {t('填入运营侧')}
+                    </Button>
+                    <Button type='primary' onClick={copyPulseSecret}>
+                      {t('复制')}
+                    </Button>
+                  </div>
+                }
+              >
+                <Banner
+                  type='warning'
+                  className='!rounded-xl'
+                  closeIcon={null}
+                  description={t(
+                    '这个密钥只显示这一次。保存后页面不会再回传它，请先复制并写入 Pulse 服务端的同名配置，两边一致后再保存。',
+                  )}
+                />
+                <Typography.Paragraph
+                  copyable={{ content: generatedPulseSecret || '' }}
+                  className='!mt-4 break-all font-mono'
+                >
+                  {generatedPulseSecret}
+                </Typography.Paragraph>
+              </Modal>
 
               <Modal
                 title={t('确认取消密码登录')}

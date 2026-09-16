@@ -55,6 +55,7 @@ func SetApiRouter(router *gin.Engine) {
 		pulseOpsRoute.Use(middleware.AdminAuth())
 		{
 			pulseOpsRoute.GET("/overview", controller.GetPulseOperationsOverview)
+			pulseOpsRoute.GET("/secret/generate", controller.GeneratePulseSecret)
 		}
 		apiRouter.POST("/usage/public_token", middleware.PublicTokenUsageRateLimit(), controller.GetPublicTokenUsage)
 		apiRouter.POST("/usage/public_token/batch", middleware.PublicTokenUsageRateLimit(), controller.GetPublicTokenBatchUsage)

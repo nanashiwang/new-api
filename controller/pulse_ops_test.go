@@ -116,3 +116,64 @@ func TestPulseOpsDegradesWhenUpstreamFails(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, response.Code)
 	require.NotContains(t, response.Body.String(), "pulse_period")
 }
+
+// An operator who saves the secret in the admin console expects it to take
+// effect without touching the deployment environment, so the stored option wins.
+// The environment stays as the fallback for instances configured before the
+// options existed.
+func TestPulseInternalConfigPrefersConsoleOptionOverEnvironment(t *testing.T) {
+	const stored = "console-managed-secret-at-least-32-chars"
+	t.Setenv("PULSE_INTERNAL_URL", "http://env.pulse.internal")
+	t.Setenv("PULSE_ADMIN_HMAC_SECRET", "environment-secret-at-least-32-chars")
+	t.Cleanup(func() {
+		common.PulseInternalURL = ""
+		common.PulseAdminHMACSecret = ""
+	})
+
+	common.PulseInternalURL = "http://console.pulse.internal"
+	common.PulseAdminHMACSecret = stored
+	baseURL, secret, err := pulseOpsConfig()
+	require.NoError(t, err)
+	require.Equal(t, "http://console.pulse.internal", baseURL.String())
+	require.Equal(t, stored, secret)
+
+	// Empty options mean "not configured here", not "configured as empty".
+	common.PulseInternalURL = ""
+	common.PulseAdminHMACSecret = ""
+	baseURL, secret, err = pulseOpsConfig()
+	require.NoError(t, err)
+	require.Equal(t, "http://env.pulse.internal", baseURL.String())
+	require.Equal(t, "environment-secret-at-least-32-chars", secret)
+}
+
+func TestGeneratePulseSecretReturnsUsableUniqueSecrets(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	call := func(role int) *httptest.ResponseRecorder {
+		response := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(response)
+		c.Request = httptest.NewRequest(http.MethodGet, "/api/pulse/ops/secret/generate", nil)
+		c.Set("id", 7)
+		c.Set("role", role)
+		GeneratePulseSecret(c)
+		return response
+	}
+
+	require.Equal(t, http.StatusForbidden, call(common.RoleCommonUser).Code)
+
+	seen := make(map[string]bool, 8)
+	for i := 0; i < 8; i++ {
+		response := call(common.RoleAdminUser)
+		require.Equal(t, http.StatusOK, response.Code)
+		var payload struct {
+			Success bool   `json:"success"`
+			Data    string `json:"data"`
+		}
+		require.NoError(t, common.UnmarshalJsonStr(response.Body.String(), &payload))
+		require.True(t, payload.Success)
+		// The generated value has to pass the same gate the signing path uses,
+		// otherwise the console would hand out secrets Pulse refuses.
+		require.True(t, middlewarePulseSecretUsable(payload.Data))
+		require.False(t, seen[payload.Data], "生成的密钥必须唯一")
+		seen[payload.Data] = true
+	}
+}

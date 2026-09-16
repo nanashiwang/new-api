@@ -144,15 +144,26 @@ func proxyPulseSignedRead(c *gin.Context, role string, config func() (*url.URL, 
 }
 
 func pulseBFFConfig() (*url.URL, string, error) {
-	return pulseInternalConfig("PULSE_USER_BFF_HMAC_SECRET")
+	return pulseInternalConfig(common.PulseUserBFFHMACSecret, "PULSE_USER_BFF_HMAC_SECRET")
 }
 
-// pulseInternalConfig resolves the shared upstream URL plus the secret named by
-// secretEnv. Each Pulse role has its own secret, so a leaked user-facing key
-// cannot be replayed against an administrative route.
-func pulseInternalConfig(secretEnv string) (*url.URL, string, error) {
-	rawURL := strings.TrimSpace(os.Getenv("PULSE_INTERNAL_URL"))
-	secret := strings.TrimSpace(os.Getenv(secretEnv))
+// pulseInternalConfig resolves the shared upstream URL plus one role's secret.
+// Each Pulse role has its own secret, so a leaked user-facing key cannot be
+// replayed against an administrative route.
+//
+// The console-managed option wins over the environment variable: an operator
+// who sets the secret in the admin console expects that value to take effect
+// without a redeploy. The environment stays as the fallback so instances
+// configured before the options existed keep working untouched.
+func pulseInternalConfig(optionSecret, secretEnv string) (*url.URL, string, error) {
+	rawURL := strings.TrimSpace(common.PulseInternalURL)
+	if rawURL == "" {
+		rawURL = strings.TrimSpace(os.Getenv("PULSE_INTERNAL_URL"))
+	}
+	secret := strings.TrimSpace(optionSecret)
+	if secret == "" {
+		secret = strings.TrimSpace(os.Getenv(secretEnv))
+	}
 	if rawURL == "" || !middlewarePulseSecretUsable(secret) {
 		return nil, "", errors.New("PULSE_INTERNAL_URL and a valid " + secretEnv + " are required")
 	}
