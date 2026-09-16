@@ -53,6 +53,7 @@ const routerMap = {
   imagePlayground: '/console/image-playground',
   personal: '/console/personal',
   pulse: '/console/pulse',
+  pulseOps: '/console/pulse-ops',
 };
 
 const SiderBar = ({ onNavigate = () => {} }) => {
@@ -224,6 +225,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('用户管理'),
         itemKey: 'user',
         to: '/user',
+        className: isAdmin() ? '' : 'tableHiddle',
+      },
+      {
+        text: t('Pulse 运营'),
+        itemKey: 'pulseOps',
+        to: '/pulse-ops',
         className: isAdmin() ? '' : 'tableHiddle',
       },
       {

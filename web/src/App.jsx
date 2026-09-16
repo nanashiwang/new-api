@@ -54,6 +54,7 @@ const Redemption = lazy(() => import('./pages/Redemption'));
 const TopUp = lazy(() => import('./pages/TopUp'));
 const Log = lazy(() => import('./pages/Log'));
 const Pulse = lazy(() => import('./pages/Pulse'));
+const PulseOps = lazy(() => import('./pages/PulseOps'));
 const Chat = lazy(() => import('./pages/Chat'));
 const Chat2Link = lazy(() => import('./pages/Chat2Link'));
 const Midjourney = lazy(() => import('./pages/Midjourney'));
@@ -380,6 +381,16 @@ function App() {
             <PrivateRoute>
               <Suspense fallback={<Loading></Loading>} key={location.pathname}>
                 <Pulse />
+              </Suspense>
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path='/console/pulse-ops'
+          element={
+            <PrivateRoute>
+              <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+                <PulseOps />
               </Suspense>
             </PrivateRoute>
           }

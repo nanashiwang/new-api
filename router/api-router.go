@@ -51,6 +51,11 @@ func SetApiRouter(router *gin.Engine) {
 			pulseUserRoute.GET("/summary", controller.GetPulseSummary)
 			pulseUserRoute.GET("/rewards", controller.GetPulseRewards)
 		}
+		pulseOpsRoute := apiRouter.Group("/pulse/ops")
+		pulseOpsRoute.Use(middleware.AdminAuth())
+		{
+			pulseOpsRoute.GET("/overview", controller.GetPulseOperationsOverview)
+		}
 		apiRouter.POST("/usage/public_token", middleware.PublicTokenUsageRateLimit(), controller.GetPublicTokenUsage)
 		apiRouter.POST("/usage/public_token/batch", middleware.PublicTokenUsageRateLimit(), controller.GetPublicTokenBatchUsage)
 		apiRouter.POST("/usage/public_token/stats", middleware.PublicTokenUsageRateLimit(), controller.GetPublicTokenStats)

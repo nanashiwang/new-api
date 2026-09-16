@@ -65,6 +65,7 @@ export function getLucideIcon(key, selected = false) {
     case 'task':
       return <CheckSquare {...commonProps} color={iconColor} />;
     case 'pulse':
+    case 'pulseOps':
       return <Activity {...commonProps} color={iconColor} />;
     case 'topup':
       return <CreditCard {...commonProps} color={iconColor} />;

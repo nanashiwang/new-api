@@ -74,12 +74,19 @@ func GetPulseRewards(c *gin.Context) {
 }
 
 func proxyPulseRead(c *gin.Context, upstreamPath string, query url.Values, client pulseHTTPDoer) {
+	proxyPulseSignedRead(c, pulseBFFRole, pulseBFFConfig, upstreamPath, query, client)
+}
+
+// proxyPulseSignedRead performs the read as the logged-in user under the given
+// Pulse role. The role selects which HMAC secret signs the call, so the caller
+// decides the privilege level; the browser never sees either.
+func proxyPulseSignedRead(c *gin.Context, role string, config func() (*url.URL, string, error), upstreamPath string, query url.Values, client pulseHTTPDoer) {
 	userID := c.GetInt("id")
 	if userID <= 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "message": "未登录"})
 		return
 	}
-	baseURL, secret, err := pulseBFFConfig()
+	baseURL, secret, err := config()
 	if err != nil {
 		common.SysError("Pulse BFF 配置无效：" + err.Error())
 		writePulseBFFUnavailable(c)
@@ -104,12 +111,12 @@ func proxyPulseRead(c *gin.Context, upstreamPath string, query url.Values, clien
 		writePulseBFFUnavailable(c)
 		return
 	}
-	canonical := pulseBFFCanonicalPayload(req.Method, req.URL.EscapedPath(), user, pulseBFFRole, timestamp, nonce, nil)
+	canonical := pulseBFFCanonicalPayload(req.Method, req.URL.EscapedPath(), user, role, timestamp, nonce, nil)
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write([]byte(canonical))
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set(pulseHeaderUserID, user)
-	req.Header.Set(pulseHeaderRole, pulseBFFRole)
+	req.Header.Set(pulseHeaderRole, role)
 	req.Header.Set(pulseHeaderTimestamp, strconv.FormatInt(timestamp, 10))
 	req.Header.Set(pulseHeaderNonce, nonce)
 	req.Header.Set(pulseHeaderSignature, hex.EncodeToString(mac.Sum(nil)))
@@ -137,10 +144,17 @@ func proxyPulseRead(c *gin.Context, upstreamPath string, query url.Values, clien
 }
 
 func pulseBFFConfig() (*url.URL, string, error) {
+	return pulseInternalConfig("PULSE_USER_BFF_HMAC_SECRET")
+}
+
+// pulseInternalConfig resolves the shared upstream URL plus the secret named by
+// secretEnv. Each Pulse role has its own secret, so a leaked user-facing key
+// cannot be replayed against an administrative route.
+func pulseInternalConfig(secretEnv string) (*url.URL, string, error) {
 	rawURL := strings.TrimSpace(os.Getenv("PULSE_INTERNAL_URL"))
-	secret := strings.TrimSpace(os.Getenv("PULSE_USER_BFF_HMAC_SECRET"))
+	secret := strings.TrimSpace(os.Getenv(secretEnv))
 	if rawURL == "" || !middlewarePulseSecretUsable(secret) {
-		return nil, "", errors.New("PULSE_INTERNAL_URL and a valid PULSE_USER_BFF_HMAC_SECRET are required")
+		return nil, "", errors.New("PULSE_INTERNAL_URL and a valid " + secretEnv + " are required")
 	}
 	baseURL, err := url.Parse(rawURL)
 	if err != nil || (baseURL.Scheme != "http" && baseURL.Scheme != "https") || baseURL.Host == "" || baseURL.User != nil || baseURL.RawQuery != "" || baseURL.Fragment != "" {
