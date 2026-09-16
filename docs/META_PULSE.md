@@ -8,6 +8,8 @@ Meta Pulse 是独立的增长与权益服务，不进入 new-api relay 请求主
 
 用户只读入口 `/api/pulse/summary` 与 `/api/pulse/rewards` 由 new-api BFF 代理。BFF 从 `UserAuth` 上下文派生用户 ID，使用独立的 `PULSE_USER_BFF_HMAC_SECRET` 签名调用 `PULSE_INTERNAL_URL`，不会向 Pulse 转发浏览器 Cookie、Authorization 或用户自报身份。
 
+管理端只读入口 `/api/pulse/ops/overview` 同样由 new-api 代签，但使用 `admin` 角色和独立的 `PULSE_ADMIN_HMAC_SECRET`。浏览器持有运营密钥等于把运营权限交给每一个访客，所以签名只发生在服务端；用户侧密钥泄露也无法重放到运营路由。该密钥必须与 Pulse 侧的 `PULSE_ADMIN_HMAC_SECRET` 一致。
+
 论坛单点登录另使用 `PULSE_FORUM_SSO_SECRET`。它只由 new-api 签发短期、单次 Login Ticket，论坛插件负责验签和消费。回调地址必须是 HTTPS 且不带 fragment：
 
 ```dotenv
@@ -17,6 +19,8 @@ PULSE_SERVICE_HMAC_SECRET_PREVIOUS=轮换期间临时保留旧值
 PULSE_INTERNAL_URL=http://pulse-api:8088
 PULSE_USER_BFF_HMAC_SECRET=请注入另一份强随机值
 PULSE_USER_BFF_HMAC_SECRET_PREVIOUS=轮换期间临时保留旧值
+PULSE_ADMIN_HMAC_SECRET=与 Pulse 侧同名变量保持一致
+PULSE_ADMIN_HMAC_SECRET_PREVIOUS=轮换期间临时保留旧值
 PULSE_FORUM_SSO_SECRET=请注入强随机值
 PULSE_FORUM_SSO_SECRET_PREVIOUS=轮换期间临时保留旧值
 PULSE_FORUM_SSO_CALLBACK_URL=https://forum.example.com/api/user-center/login/callback
