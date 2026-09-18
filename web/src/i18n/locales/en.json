@@ -1,5 +1,6 @@
 {
   "translation": {
+    "多厂商通用": "Multi-provider",
     "历史错误记录可能来自重试，不能据此判断最终调用结果。": "Historical error records may be retry attempts and do not establish the final request outcome.",
     "调用失败": "Call failed",
     "启用调用失败日志记录": "Enable failed-call logs",

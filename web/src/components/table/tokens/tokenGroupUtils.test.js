@@ -49,7 +49,7 @@ describe('tokenGroupUtils', () => {
     assert.equal(resolveTokenGroupVendor(''), '');
   });
 
-  test('builds compact vendor options and keeps fallback last', () => {
+  test('builds compact vendor options and puts common vendor first', () => {
     assert.deepEqual(
       buildTokenGroupVendorOptions(
         [
@@ -58,12 +58,12 @@ describe('tokenGroupUtils', () => {
           { value: 'Claude · 优质' },
           { value: 'default' },
         ],
-        '其他',
+        '多厂商通用',
       ),
       [
+        { value: TOKEN_GROUP_OTHER_VENDOR, label: '多厂商通用 · 1' },
         { value: 'OpenAI', label: 'OpenAI · 2' },
         { value: 'Claude', label: 'Claude · 1' },
-        { value: TOKEN_GROUP_OTHER_VENDOR, label: '其他 · 1' },
       ],
     );
   });
@@ -105,9 +105,87 @@ describe('tokenGroupUtils', () => {
     ];
 
     assert.deepEqual(
-      buildTokenGroupVendorOptions(groups, '其他').map((item) => item.value),
-      ['OpenAI', 'Claude', 'Gemini', 'MiMo', TOKEN_GROUP_OTHER_VENDOR],
+      buildTokenGroupVendorOptions(groups).map((item) => item.value),
+      [TOKEN_GROUP_OTHER_VENDOR, 'OpenAI', 'Claude', 'MiMo', 'Gemini'],
     );
+  });
+
+  test('keeps Gemini last even with unknown vendors and shuffled input', () => {
+    const names = [
+      'gemini',
+      'MiMo · 优质',
+      '测试勿选',
+      'Kimi · 优质',
+      'Grok · 优质',
+      'Deepseek · 优质',
+      'Claude · 优质',
+      'OpenAI · 优质',
+      'Custom · 优质',
+      'Gemini · 企业专属',
+    ];
+    const groups = names.map((value) => Object.freeze({ value, ratio: 0.45 }));
+    Object.freeze(groups);
+    const expected = [
+      TOKEN_GROUP_OTHER_VENDOR,
+      'OpenAI',
+      'Claude',
+      'Grok',
+      'Kimi',
+      'DeepSeek',
+      'MiMo',
+      'Custom',
+      'Gemini',
+    ];
+    for (let offset = 0; offset < groups.length; offset++) {
+      const shuffled = [...groups.slice(offset), ...groups.slice(0, offset)];
+      assert.deepEqual(
+        buildTokenGroupVendorOptions(shuffled).map((option) => option.value),
+        expected,
+      );
+      assert.deepEqual(
+        buildTokenGroupVendorOptions(shuffled.reverse()).map(
+          (option) => option.value,
+        ),
+        expected,
+      );
+    }
+    const options = buildTokenGroupVendorOptions(groups);
+    assert.equal(options[0].label, '多厂商通用 · 1');
+    assert.equal(options.at(-1).label, 'Gemini · 2');
+    assert.deepEqual(
+      groups.map((group) => group.value),
+      names,
+    );
+    assert.ok(groups.every((group) => group.ratio === 0.45));
+  });
+
+  test('does not manufacture absent vendors or groups', () => {
+    assert.deepEqual(buildTokenGroupVendorOptions(), []);
+    assert.deepEqual(buildTokenGroupVendorOptions([{ value: '' }]), []);
+    assert.deepEqual(buildTokenGroupVendorOptions([{ value: 'gemini' }]), [
+      { value: 'Gemini', label: 'Gemini · 1' },
+    ]);
+    assert.deepEqual(
+      buildTokenGroupVendorOptions([{ value: 'default' }], 'Multi-provider'),
+      [{ value: TOKEN_GROUP_OTHER_VENDOR, label: 'Multi-provider · 1' }],
+    );
+  });
+
+  test('retains fallback group membership and existing token selection', () => {
+    const groups = ['default', '企业专属', 'group_1', '测试', '测试勿选'].map(
+      (value) => ({ value }),
+    );
+    assert.deepEqual(
+      filterTokenGroupsByVendor(groups, TOKEN_GROUP_OTHER_VENDOR),
+      groups,
+    );
+    groups.forEach(({ value }) => {
+      assert.equal(resolveTokenGroupVendor(value), TOKEN_GROUP_OTHER_VENDOR);
+      assert.equal(
+        shouldClearTokenGroupForVendor(value, TOKEN_GROUP_OTHER_VENDOR),
+        false,
+      );
+    });
   });
 
   test('filters groups without changing their configured order', () => {

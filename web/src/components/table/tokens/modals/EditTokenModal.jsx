@@ -92,7 +92,7 @@ const EditTokenModal = (props) => {
     readStoredChannelLimitTagMode,
   );
   const groupVendorOptions = useMemo(
-    () => buildTokenGroupVendorOptions(groups, t('其他')),
+    () => buildTokenGroupVendorOptions(groups, t('多厂商通用')),
     [groups, t],
   );
 

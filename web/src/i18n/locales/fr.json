@@ -1,5 +1,6 @@
 {
   "translation": {
+    "多厂商通用": "Multi-fournisseurs",
     "历史错误记录可能来自重试，不能据此判断最终调用结果。": "Les anciennes erreurs peuvent correspondre à des tentatives de réessai et ne permettent pas de déterminer le résultat final.",
     "调用失败": "Appel échoué",
     "启用调用失败日志记录": "Activer les journaux des appels échoués",

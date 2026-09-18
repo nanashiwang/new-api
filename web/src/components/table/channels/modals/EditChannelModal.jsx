@@ -272,7 +272,7 @@ const EditChannelModal = (props) => {
   }, [groupOptions]);
 
   const groupVendorOptions = useMemo(
-    () => buildTokenGroupVendorOptions(orderedGroupOptions, t('其他')),
+    () => buildTokenGroupVendorOptions(orderedGroupOptions, t('多厂商通用')),
     [orderedGroupOptions, t],
   );
 

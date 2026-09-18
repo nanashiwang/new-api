@@ -143,7 +143,7 @@ export const resolveTokenGroupVendor = (groupName) => {
 
 export const buildTokenGroupVendorOptions = (
   groups = [],
-  otherLabel = '其他',
+  otherLabel = '多厂商通用',
 ) => {
   const vendorCounts = new Map();
 
@@ -155,8 +155,12 @@ export const buildTokenGroupVendorOptions = (
 
   return Array.from(vendorCounts.entries())
     .sort(([leftVendor], [rightVendor]) => {
-      if (leftVendor === TOKEN_GROUP_OTHER_VENDOR) return 1;
-      if (rightVendor === TOKEN_GROUP_OTHER_VENDOR) return -1;
+      // 仅调整供应商入口的展示，不改变实际分组排序、标识或默认选择。
+      if (leftVendor === rightVendor) return 0;
+      if (leftVendor === TOKEN_GROUP_OTHER_VENDOR) return -1;
+      if (rightVendor === TOKEN_GROUP_OTHER_VENDOR) return 1;
+      if (leftVendor === 'Gemini') return 1;
+      if (rightVendor === 'Gemini') return -1;
       return compareByKnownOrder(
         leftVendor,
         rightVendor,

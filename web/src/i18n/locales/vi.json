@@ -1,5 +1,6 @@
 {
   "translation": {
+    "多厂商通用": "Dùng chung nhiều nhà cung cấp",
     "历史错误记录可能来自重试，不能据此判断最终调用结果。": "Bản ghi lỗi cũ có thể là các lần thử lại và không xác định kết quả cuối cùng của yêu cầu.",
     "调用失败": "Lệnh gọi thất bại",
     "启用调用失败日志记录": "Bật nhật ký lệnh gọi thất bại",
