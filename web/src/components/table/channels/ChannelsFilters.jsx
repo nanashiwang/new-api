@@ -74,7 +74,7 @@ const ChannelsFilters = ({
           ) {
             return {
               ...option,
-              label: `${t('通用分组')} · ${option.label}`,
+              label: `${t('多厂商通用')} · ${option.label}`,
             };
           }
           return option;
