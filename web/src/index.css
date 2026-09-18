@@ -1560,22 +1560,26 @@ html.dark .with-pastel-balls::before {
 
 /* ==================== 模型定价页面布局 ==================== */
 .pricing-layout {
-  height: calc(100vh - 60px);
+  /* PageLayout 已为固定导航预留 64px，这里只占用剩余视口。 */
+  height: calc(100vh - 64px);
+  height: calc(100dvh - 64px);
   overflow: hidden;
-  margin-top: 60px;
 }
 
 .pricing-sidebar {
   width: clamp(280px, 24vw, 520px) !important;
   min-width: clamp(280px, 24vw, 520px) !important;
   max-width: clamp(280px, 24vw, 520px) !important;
-  height: calc(100vh - 60px);
+  height: 100%;
   background-color: var(--semi-color-bg-0);
   overflow: auto;
 }
 
 .pricing-content {
-  height: calc(100vh - 60px);
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   background-color: var(--semi-color-bg-0);
   display: flex;
   flex-direction: column;
@@ -1585,11 +1589,12 @@ html.dark .with-pastel-balls::before {
   border-color: var(--semi-color-border);
 }
 
-.pricing-content-mobile {
-  height: 100%;
+.pricing-content-body {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .pricing-search-header {
@@ -1603,13 +1608,8 @@ html.dark .with-pastel-balls::before {
 
 .pricing-view-container {
   flex: 1;
-  overflow: auto;
-}
-
-.pricing-view-container-mobile {
-  flex: 1;
-  overflow: auto;
   min-height: 0;
+  overflow: auto;
 }
 
 /* ==================== semi-ui 组件自定义样式 ==================== */

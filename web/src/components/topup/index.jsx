@@ -864,7 +864,7 @@ const TopUp = () => {
 
   return (
     <div
-      className='w-full max-w-7xl mx-auto relative min-h-screen lg:min-h-0 mt-[60px] px-2'
+      className='relative w-full px-2 md:px-0'
       data-onboarding='wallet-management-panel'
     >
       <TransferModal

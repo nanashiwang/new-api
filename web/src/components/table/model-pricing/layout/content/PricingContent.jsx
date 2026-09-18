@@ -26,9 +26,7 @@ import GroupHealthOverview from '../../view/GroupHealthOverview';
 const PricingContent = ({ isMobile, sidebarProps, ...props }) => {
   const [activeTab, setActiveTab] = useState('models');
   return (
-    <div
-      className={isMobile ? 'pricing-content-mobile' : 'pricing-scroll-hide'}
-    >
+    <div className='pricing-content-body'>
       {/* 固定的顶部区域（分类介绍 + 搜索和操作） */}
       <div className='pricing-search-header'>
         <PricingTopSection
@@ -64,11 +62,7 @@ const PricingContent = ({ isMobile, sidebarProps, ...props }) => {
       </div>
 
       {/* 可滚动的内容区域 */}
-      <div
-        className={
-          isMobile ? 'pricing-view-container-mobile' : 'pricing-view-container'
-        }
-      >
+      <div className='pricing-scroll-hide pricing-view-container'>
         {activeTab === 'health' ? (
           <GroupHealthOverview {...props} />
         ) : (
