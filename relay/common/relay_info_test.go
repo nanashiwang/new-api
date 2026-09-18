@@ -12,6 +12,7 @@ func TestSetFirstEffectiveOutputTimeCapturesInitialChannelOnce(t *testing.T) {
 	info := &RelayInfo{ChannelMeta: &ChannelMeta{ChannelId: 10, ChannelTag: "tag-a"}}
 	info.SetFirstEffectiveOutputTime()
 	first := info.FirstEffectiveOutputTime
+	require.False(t, info.GroupHealthFirstOutputTime.IsZero())
 
 	info.ChannelMeta = &ChannelMeta{ChannelId: 20, ChannelTag: "tag-b"}
 	time.Sleep(time.Millisecond)

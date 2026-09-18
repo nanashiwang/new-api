@@ -162,6 +162,7 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	var lastStreamData string
 	var secondLastStreamData string // 存储倒数第二个stream data，用于音频模型
 	var terminalError *types.NewAPIError
+	var completed bool
 
 	// 检查是否为音频模型
 	isAudioModel := strings.Contains(strings.ToLower(model), "audio")
@@ -191,6 +192,15 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 				}
 				return false
 			}
+			info.ObserveOpenAIStreamOutput(data)
+			var event dto.ChatCompletionsStreamResponse
+			if common.UnmarshalJsonStr(data, &event) == nil {
+				for _, choice := range event.Choices {
+					completed = completed || (choice.FinishReason != nil && *choice.FinishReason != "")
+				}
+			} else if info.StreamStatus != nil {
+				info.StreamStatus.RecordError("invalid OpenAI stream event")
+			}
 			// Some providers append metadata chunks after the standard usage chunk.
 			// Keep the latest valid usage instead of assuming it is the final SSE event.
 			updateUsageFromStreamData(data, &usage, &containStreamUsage)
@@ -207,6 +217,9 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	})
 	if terminalError != nil {
 		return nil, terminalError
+	}
+	if !completed && info.StreamStatus != nil && info.StreamStatus.EndReason != relaycommon.StreamEndReasonDone {
+		info.StreamStatus.RecordError("OpenAI stream ended without a completion marker")
 	}
 
 	// 对音频模型，从倒数第二个stream data中提取usage信息

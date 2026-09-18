@@ -24,13 +24,14 @@ import {
   showInfo,
   showSuccess,
   timestamp2string,
-  renderGroupOption,
   getModelCategories,
   selectFilter,
   isAdmin,
 } from '../../../../helpers';
 import { quotaToUSDAmount, usdAmountToQuota } from '../../../../helpers/quota';
 import { useIsMobile } from '../../../../hooks/common/useIsMobile';
+import { useGroupHealth } from '../../../../hooks/group-health/useGroupHealth';
+import { TokenGroupHealth, TokenGroupHealthOption } from '../TokenGroupHealth';
 import {
   Button,
   Checkbox,
@@ -82,6 +83,14 @@ const EditTokenModal = (props) => {
   const loadedTokenValuesRef = useRef(null);
   const [models, setModels] = useState([]);
   const [groups, setGroups] = useState([]);
+  const groupHealth = useGroupHealth({ enabled: Boolean(props.visiable) });
+  const groupHealthByName = useMemo(
+    () =>
+      new Map(
+        (groupHealth.data?.groups || []).map((stats) => [stats.group, stats]),
+      ),
+    [groupHealth.data],
+  );
   const [channelOptions, setChannelOptions] = useState([]);
   const [tokenMode, setTokenMode] = useState('standard');
   const isAdminUser = isAdmin();
@@ -1251,7 +1260,17 @@ const EditTokenModal = (props) => {
                           )}
                           disabled={!values.group_vendor}
                           filter={selectFilter}
-                          renderOptionItem={renderGroupOption}
+                          renderOptionItem={(item) => (
+                            <TokenGroupHealthOption
+                              item={item}
+                              stats={groupHealthByName.get(item.value)}
+                              loading={groupHealth.loading}
+                              error={groupHealth.error}
+                              collectionEnabled={
+                                groupHealth.data?.enabled !== false
+                              }
+                            />
+                          )}
                           renderSelectedItem={(optionNode) =>
                             formatTokenGroupSelectedLabel(optionNode)
                           }
@@ -1285,6 +1304,20 @@ const EditTokenModal = (props) => {
                       </Col>
                     </>
                   )}
+                  {values.group ? (
+                    <Col span={24}>
+                      <TokenGroupHealth
+                        key={values.group}
+                        group={values.group}
+                        stats={groupHealthByName.get(values.group)}
+                        loading={groupHealth.loading}
+                        error={groupHealth.error}
+                        onRetry={groupHealth.refresh}
+                        collectionEnabled={groupHealth.data?.enabled !== false}
+                        collectionData={groupHealth.data}
+                      />
+                    </Col>
+                  ) : null}
                   {!isSellableToken && (
                     <>
                       <Col

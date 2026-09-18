@@ -1294,6 +1294,7 @@ func handleFinalStream(c *gin.Context, info *relaycommon.RelayInfo, resp *dto.Ch
 func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response, callback func(data string, geminiResponse *dto.GeminiChatResponse) bool) (*dto.Usage, *types.NewAPIError) {
 	var usage = &dto.Usage{}
 	var imageCount int
+	var completed bool
 	responseText := strings.Builder{}
 
 	helper.StreamScannerHandler(c, resp, info, func(data string) bool {
@@ -1301,21 +1302,37 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		err := common.UnmarshalJsonStr(data, &geminiResponse)
 		if err != nil {
 			logger.LogError(c, "error unmarshalling stream response: "+err.Error())
+			info.StreamStatus.RecordError("invalid Gemini stream event")
 			return false
+		}
+		var envelope struct {
+			Error any `json:"error"`
+		}
+		if common.UnmarshalJsonStr(data, &envelope) == nil && envelope.Error != nil {
+			info.StreamStatus.RecordError("upstream Gemini stream error")
 		}
 
 		if len(geminiResponse.Candidates) == 0 && geminiResponse.PromptFeedback != nil && geminiResponse.PromptFeedback.BlockReason != nil {
 			common.SetContextKey(c, constant.ContextKeyAdminRejectReason, fmt.Sprintf("gemini_block_reason=%s", *geminiResponse.PromptFeedback.BlockReason))
+			info.StreamStatus.RecordError("Gemini prompt blocked")
 		}
 
 		// 统计图片数量
 		for _, candidate := range geminiResponse.Candidates {
+			completed = completed || (candidate.FinishReason != nil && *candidate.FinishReason != "")
+			if candidate.FinishReason != nil && isGeminiFailureFinishReason(*candidate.FinishReason) {
+				info.StreamStatus.RecordError("Gemini generation did not complete: " + *candidate.FinishReason)
+			}
 			for _, part := range candidate.Content.Parts {
 				if part.InlineData != nil && part.InlineData.MimeType != "" {
 					imageCount++
 				}
 				if part.Text != "" {
 					responseText.WriteString(part.Text)
+				}
+				if part.Text != "" || (part.FunctionCall != nil && part.FunctionCall.FunctionName != "") ||
+					(part.ExecutableCode != nil && part.ExecutableCode.Code != "") {
+					info.SetGroupHealthFirstOutputTime()
 				}
 			}
 		}
@@ -1328,6 +1345,9 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 
 		return callback(data, &geminiResponse)
 	})
+	if !completed && info.StreamStatus != nil {
+		info.StreamStatus.RecordError("Gemini stream ended without a completion marker")
+	}
 
 	if imageCount != 0 {
 		if usage.CompletionTokens == 0 {
@@ -1344,6 +1364,15 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	}
 
 	return usage, nil
+}
+
+func isGeminiFailureFinishReason(reason string) bool {
+	switch reason {
+	case "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "MALFORMED_FUNCTION_CALL", "IMAGE_SAFETY", "IMAGE_PROHIBITED_CONTENT", "NO_IMAGE", "UNEXPECTED_TOOL_CALL":
+		return true
+	default:
+		return false
+	}
 }
 
 func GeminiChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {

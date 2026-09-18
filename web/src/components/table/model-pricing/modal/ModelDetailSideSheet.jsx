@@ -25,7 +25,7 @@ import { useIsMobile } from '../../../../hooks/common/useIsMobile';
 import ModelHeader from './components/ModelHeader';
 import ModelBasicInfo from './components/ModelBasicInfo';
 import ModelEndpoints from './components/ModelEndpoints';
-import ModelPricingTable from './components/ModelPricingTable';
+import ModelGroupPerformance from './components/ModelGroupPerformance';
 import DynamicPricingBreakdown from './components/DynamicPricingBreakdown';
 
 const { Text } = Typography;
@@ -111,7 +111,8 @@ const ModelDetailSideSheet = ({
               )}
             <Divider margin={16} />
             <div style={{ padding: '0 24px' }}>
-              <ModelPricingTable
+              <ModelGroupPerformance
+                enabled={visible}
                 modelData={modelData}
                 groupRatio={groupRatio}
                 timeRatioMap={timeRatioMap}

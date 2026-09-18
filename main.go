@@ -2,13 +2,17 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"embed"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -19,6 +23,7 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
+	grouphealth "github.com/QuantumNous/new-api/pkg/group_health"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/router"
@@ -59,6 +64,11 @@ func main() {
 	}
 
 	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := grouphealth.Flush(ctx); err != nil {
+			common.SysError("failed to flush group health metrics on shutdown: " + err.Error())
+		}
+		cancel()
 		err := model.CloseDB()
 		if err != nil {
 			common.FatalLog("failed to close database: " + err.Error())
@@ -215,9 +225,25 @@ func main() {
 	// Log startup success message
 	common.LogStartupSuccess(startTime, port)
 
-	err = server.Run(":" + port)
-	if err != nil {
-		common.FatalLog("failed to start HTTP server: " + err.Error())
+	// Let active requests finish before persisting the final health snapshots.
+	// Hard kills can still lose samples that have not been persisted.
+	shutdownSignal, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	httpServer := &http.Server{Addr: ":" + port, Handler: server.Handler()}
+	serverErrors := make(chan error, 1)
+	go func() { serverErrors <- httpServer.ListenAndServe() }()
+	select {
+	case err = <-serverErrors:
+		if !errors.Is(err, http.ErrServerClosed) {
+			common.FatalLog("failed to start HTTP server: " + err.Error())
+		}
+	case <-shutdownSignal.Done():
+		stop()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if err := httpServer.Shutdown(ctx); err != nil {
+			common.SysError("HTTP shutdown exceeded grace period: " + err.Error())
+		}
+		cancel()
 	}
 }
 

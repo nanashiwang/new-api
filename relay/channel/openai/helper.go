@@ -20,6 +20,7 @@ import (
 
 // 辅助函数
 func HandleStreamFormat(c *gin.Context, info *relaycommon.RelayInfo, data string, forceFormat bool, thinkToContent bool) error {
+	info.ObserveOpenAIStreamOutput(data)
 	info.SendResponseCount++
 
 	switch info.RelayFormat {

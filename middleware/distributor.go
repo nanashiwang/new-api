@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
+	grouphealth "github.com/QuantumNous/new-api/pkg/group_health"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
@@ -45,6 +46,7 @@ func (r *ModelRequest) HasImageGenerationTool() bool {
 
 func Distribute() func(c *gin.Context) {
 	return func(c *gin.Context) {
+		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
 		// Detect client tool type from request headers
 		clientID := service.DetectClient(c)
 		common.SetContextKey(c, constant.ContextKeyClientID, clientID)
@@ -144,10 +146,14 @@ func Distribute() func(c *gin.Context) {
 
 			channel, selectGroup, selectErr := selectChannelForRequest(c, modelRequest.Model, usingGroup, clientID, specificChannelID)
 			if selectErr != nil {
+				if selectErr.StatusCode >= 500 || selectErr.StatusCode == http.StatusTooManyRequests {
+					recordUnavailableGroupHealth(c, modelRequest.Model, usingGroup, selectGroup)
+				}
 				abortWithOpenAiMessage(c, selectErr.StatusCode, selectErr.Error(), selectErr.GetErrorCode())
 				return
 			}
 			if channel == nil {
+				recordUnavailableGroupHealth(c, modelRequest.Model, usingGroup, selectGroup)
 				showGroup := usingGroup
 				if usingGroup == "auto" && selectGroup != "" {
 					showGroup = fmt.Sprintf("auto(%s)", selectGroup)
@@ -157,7 +163,6 @@ func Distribute() func(c *gin.Context) {
 			}
 			selectedChannel = channel
 		}
-		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
 		c.Next()
 		if selectedChannel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
 			// relay 层可能因容量压力改选了其它渠道，应记录最终实际使用的渠道，
@@ -636,4 +641,39 @@ func extractModelNameFromGeminiPath(path string) string {
 
 	// 返回模型名部分
 	return path[startIndex : startIndex+colonIndex]
+}
+
+// Selection outages are samples only for configured models after authentication
+// and model/group permission checks. Invalid requests and unknown model names do
+// not manufacture failures or unbounded metric cardinality.
+func recordUnavailableGroupHealth(c *gin.Context, modelName, usingGroup, selectedGroup string) {
+	if !grouphealth.SupportsRequest(c.Request.Method, c.Request.URL.Path) {
+		return
+	}
+	for _, group := range unavailableHealthGroups(c, modelName, usingGroup, selectedGroup) {
+		grouphealth.Record(grouphealth.Sample{Group: group, Model: modelName, Success: false})
+	}
+}
+
+func unavailableHealthGroups(c *gin.Context, modelName, usingGroup, selectedGroup string) []string {
+	candidates := []string{usingGroup}
+	if usingGroup == "auto" {
+		candidates = []string{selectedGroup}
+		if selectedGroup == "" || selectedGroup == "auto" {
+			// An exhausted auto chain has no selected group. Include only its
+			// configured, permitted model routes, never unsupported candidates.
+			candidates = service.GetUserAutoGroup(common.GetContextKeyString(c, constant.ContextKeyUserGroup))
+		}
+	}
+	groups := make([]string, 0, len(candidates))
+	seen := make(map[string]bool, len(candidates))
+	allowed := GetAllowedTokenChannelIDs(c)
+	for _, group := range candidates {
+		if !seen[group] && (model.HasConfiguredGroupModel(group, modelName, allowed) ||
+			model.HasConfiguredGroupModel(group, ratio_setting.FormatMatchingModelName(modelName), allowed)) {
+			groups = append(groups, group)
+			seen[group] = true
+		}
+	}
+	return groups
 }

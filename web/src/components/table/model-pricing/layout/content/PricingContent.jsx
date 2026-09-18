@@ -17,11 +17,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
+import React, { useState } from 'react';
+import { Tabs, TabPane } from '@douyinfe/semi-ui';
 import PricingTopSection from '../header/PricingTopSection';
 import PricingView from './PricingView';
+import GroupHealthOverview from '../../view/GroupHealthOverview';
 
 const PricingContent = ({ isMobile, sidebarProps, ...props }) => {
+  const [activeTab, setActiveTab] = useState('models');
   return (
     <div
       className={isMobile ? 'pricing-content-mobile' : 'pricing-scroll-hide'}
@@ -49,6 +52,15 @@ const PricingContent = ({ isMobile, sidebarProps, ...props }) => {
           tokenUnit={sidebarProps.tokenUnit}
           setTokenUnit={sidebarProps.setTokenUnit}
         />
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          type='line'
+          size='small'
+        >
+          <TabPane tab={props.t('模型列表')} itemKey='models' />
+          <TabPane tab={props.t('分组健康')} itemKey='health' />
+        </Tabs>
       </div>
 
       {/* 可滚动的内容区域 */}
@@ -57,7 +69,11 @@ const PricingContent = ({ isMobile, sidebarProps, ...props }) => {
           isMobile ? 'pricing-view-container-mobile' : 'pricing-view-container'
         }
       >
-        <PricingView {...props} viewMode={sidebarProps.viewMode} />
+        {activeTab === 'health' ? (
+          <GroupHealthOverview {...props} />
+        ) : (
+          <PricingView {...props} viewMode={sidebarProps.viewMode} />
+        )}
       </div>
     </div>
   );

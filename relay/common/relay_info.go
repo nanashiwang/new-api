@@ -164,16 +164,19 @@ type TokenCountMeta struct {
 }
 
 type RelayInfo struct {
-	TokenId                        int
-	TokenKey                       string
-	TokenGroup                     string
-	UserId                         int
-	UsingGroup                     string // 使用的分组，当auto跨分组重试时，会变动
-	UserGroup                      string // 用户所在分组
-	TokenUnlimited                 bool
-	StartTime                      time.Time
-	FirstResponseTime              time.Time
-	FirstEffectiveOutputTime       time.Time
+	TokenId                  int
+	TokenKey                 string
+	TokenGroup               string
+	UserId                   int
+	UsingGroup               string // 使用的分组，当auto跨分组重试时，会变动
+	UserGroup                string // 用户所在分组
+	TokenUnlimited           bool
+	StartTime                time.Time
+	FirstResponseTime        time.Time
+	FirstEffectiveOutputTime time.Time
+	// Group health observes more providers without changing the existing slow
+	// TTFT routing guard's sampling coverage or first-channel attribution.
+	GroupHealthFirstOutputTime     time.Time
 	FirstEffectiveOutputChannelId  int
 	FirstEffectiveOutputChannelTag string
 	isFirstResponse                bool
@@ -729,6 +732,7 @@ func (info *RelayInfo) SetFirstResponseTime() {
 }
 
 func (info *RelayInfo) SetFirstEffectiveOutputTime() {
+	info.SetGroupHealthFirstOutputTime()
 	if info == nil || !info.FirstEffectiveOutputTime.IsZero() {
 		return
 	}

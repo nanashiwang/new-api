@@ -1,0 +1,295 @@
+.group-health-panel {
+  border: 1px solid var(--semi-color-border);
+  border-radius: 14px;
+  padding: 18px;
+  background: var(--semi-color-bg-1);
+  min-width: 0;
+}
+.group-health-panel-header,
+.group-health-toolbar,
+.group-health-bucket-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.group-health-panel-header {
+  margin-bottom: 18px;
+}
+.group-health-name {
+  color: var(--semi-color-text-0);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+  flex: 1;
+  min-width: 120px;
+}
+.group-health-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.group-health-badge {
+  font-size: 11px;
+  border-radius: 5px;
+  padding: 3px 7px;
+  background: var(--semi-color-fill-0);
+  color: var(--semi-color-text-2);
+}
+.group-health-badge-healthy {
+  background: var(--semi-color-success-light-default);
+  color: var(--semi-color-success);
+}
+.group-health-badge-warning {
+  background: var(--semi-color-warning-light-default);
+  color: var(--semi-color-warning);
+}
+.group-health-badge-degraded {
+  background: var(--semi-color-danger-light-default);
+  color: var(--semi-color-danger);
+}
+.group-health-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.group-health-metrics > div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.group-health-label {
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+}
+.group-health-number {
+  font-size: 26px;
+  line-height: 1.2;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--semi-color-text-0);
+}
+.group-health-text-healthy {
+  color: var(--semi-color-success);
+}
+.group-health-text-warning {
+  color: var(--semi-color-warning);
+}
+.group-health-text-degraded {
+  color: var(--semi-color-danger);
+}
+.group-health-text-empty,
+.group-health-muted {
+  color: var(--semi-color-text-2);
+}
+.group-health-caption {
+  font-size: 11px;
+  color: var(--semi-color-text-2);
+  line-height: 1.6;
+}
+.group-health-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  font-size: 11px;
+  color: var(--semi-color-text-2);
+  line-height: 1.6;
+}
+.group-health-inline strong {
+  color: var(--semi-color-text-1);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.group-health-trend-heading,
+.group-health-axis {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--semi-color-text-2);
+  font-size: 10px;
+}
+.group-health-trend-heading {
+  margin-bottom: 4px;
+}
+.group-health-bars {
+  display: grid;
+  grid-template-columns: repeat(24, minmax(0, 1fr));
+  gap: 3px;
+}
+.group-health-bar {
+  position: relative;
+  border: 0;
+  padding: 0;
+  height: 36px;
+  border-radius: 4px;
+  cursor: pointer;
+  min-width: 0;
+  background: transparent;
+}
+.group-health-bar::before {
+  content: '';
+  position: absolute;
+  inset: 6px 0;
+  background: var(--health-bar-color);
+  border-radius: 3px;
+}
+.group-health-bar:hover::before {
+  filter: brightness(0.9);
+}
+.group-health-bar:focus-visible,
+.group-health-bar[aria-pressed='true'] {
+  outline: 2px solid var(--semi-color-primary);
+  outline-offset: 1px;
+  z-index: 1;
+}
+.group-health-bar-healthy {
+  --health-bar-color: #24b47e;
+}
+.group-health-bar-warning {
+  --health-bar-color: #edb448;
+}
+.group-health-bar-degraded {
+  --health-bar-color: #ed6d68;
+}
+.group-health-bar-limited {
+  --health-bar-color: #afbdd1;
+}
+.group-health-bar-empty {
+  --health-bar-color: var(--semi-color-fill-1);
+}
+.group-health-axis {
+  margin-top: 2px;
+}
+.group-health-bucket {
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 12px;
+  background: var(--semi-color-fill-0);
+}
+.group-health-bucket-header {
+  font-size: 11px;
+  color: var(--semi-color-text-2);
+  margin-bottom: 5px;
+}
+.group-health-note {
+  margin: 12px 0 0;
+  color: var(--semi-color-text-2);
+  font-size: 11px;
+  line-height: 1.7;
+}
+.group-health-collection-warning {
+  color: var(--semi-color-warning);
+}
+.group-health-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px 12px;
+  color: var(--semi-color-text-2);
+  font-size: 13px;
+}
+.group-health-legend {
+  display: flex;
+  gap: 8px 14px;
+  flex-wrap: wrap;
+  color: var(--semi-color-text-2);
+  font-size: 10px;
+}
+.group-health-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.group-health-legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--health-bar-color);
+}
+.group-health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 315px), 1fr));
+  gap: 16px;
+  margin-top: 18px;
+}
+.group-health-overview {
+  padding: 16px 0 24px;
+}
+.group-health-toolbar {
+  margin-bottom: 12px;
+}
+.group-health-toolbar-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--semi-color-text-0);
+}
+.group-health-toolbar-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+}
+.group-health-filter-select {
+  width: 250px;
+  max-width: 100%;
+}
+.group-health-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+}
+.group-health-price-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 0 0;
+  border-top: 1px solid var(--semi-color-border);
+  margin-top: 16px;
+}
+.group-health-price-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+.group-health-price-row > span {
+  color: var(--semi-color-text-1);
+  overflow-wrap: anywhere;
+}
+.group-health-price-summary-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+}
+@media (max-width: 600px) {
+  .group-health-overview {
+    padding-inline: 4px;
+  }
+  .group-health-panel {
+    padding: 14px;
+  }
+  .group-health-number {
+    font-size: 23px;
+  }
+  .group-health-bars {
+    gap: 2px;
+  }
+  .group-health-toolbar-controls {
+    width: 100%;
+  }
+  .group-health-filter-select {
+    flex: 1;
+    min-width: 0;
+  }
+}

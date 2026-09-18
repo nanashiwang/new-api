@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	grouphealth "github.com/QuantumNous/new-api/pkg/group_health"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -233,12 +234,21 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		Retry:           common.GetPointer(0),
 	}
 
+	var healthRequest *grouphealth.Request
+	if grouphealth.SupportsRequest(c.Request.Method, c.Request.URL.Path) {
+		healthRequest = grouphealth.NewRequest(relayInfo.OriginModelName, relayInfo.IsStream)
+		defer healthRequest.Finish()
+	}
+
 	// lastRelayError 保留最近一次上游错误，避免重试找不到新渠道时用 (retry) 错误覆盖原始错误。
 	var lastRelayError *types.NewAPIError
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
 		channel, releaseSlot, channelErr, overloadControl := selectChannelWithConcurrency(c, relayInfo, retryParam)
 		if channelErr != nil {
+			if healthRequest != nil && (channelErr.StatusCode >= 500 || channelErr.StatusCode == http.StatusTooManyRequests) {
+				healthRequest.Failure(relayInfo.UsingGroup)
+			}
 			logger.LogError(c, channelErr.Error())
 			if overloadControl {
 				// Layer C 过载控制的终态错误（429/503 / 客户端断开）：直接采用，
@@ -275,6 +285,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				return
 			}
 			c.Request.Body = io.NopCloser(bodyStorage)
+			if healthRequest != nil {
+				grouphealth.ResetAttempt(relayInfo)
+			}
 
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
@@ -290,6 +303,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if breakLoop {
 			break
 		}
+		healthRequest.Observe(relayInfo, newAPIError == nil && c.Request.Context().Err() == nil, time.Now())
 
 		if newAPIError == nil {
 			service.ClearUserScopedCircuit(c, channel)

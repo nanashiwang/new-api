@@ -914,6 +914,9 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 		return nil, err
 	}
 
+	if !claudeInfo.Done && info.StreamStatus != nil {
+		info.StreamStatus.RecordError("Claude stream ended without a completion marker")
+	}
 	HandleStreamFinalResponse(c, info, claudeInfo)
 	return claudeInfo.Usage, nil
 }
