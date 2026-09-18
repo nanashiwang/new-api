@@ -39,6 +39,7 @@ import {
   renderModelPrice,
   renderTieredModelPrice,
 } from '../../helpers';
+import { getRequestFailureDetails } from '../../helpers/requestFailure';
 import { ITEMS_PER_PAGE } from '../../constants';
 import { useTableCompactMode } from '../common/useTableCompactMode';
 
@@ -565,6 +566,21 @@ export const useLogsData = () => {
           value: logs[i].request_id,
         });
       }
+      if (logs[i].type === 5) {
+        expandDataLocal.push(...getRequestFailureDetails(logs[i], t));
+        if (isAdminUser && other?.admin_info?.error_message) {
+          expandDataLocal.push({
+            key: t('管理员错误详情'),
+            value: other.admin_info.error_message,
+          });
+        }
+        if (isAdminUser && other?.admin_info?.attempts?.length) {
+          expandDataLocal.push({
+            key: t('渠道尝试记录'),
+            value: JSON.stringify(other.admin_info.attempts, null, 2),
+          });
+        }
+      }
       if (other?.ws || other?.audio) {
         expandDataLocal.push({
           key: t('语音输入'),
@@ -739,7 +755,7 @@ export const useLogsData = () => {
           });
         }
       }
-      if (other?.request_path) {
+      if (logs[i].type !== 5 && other?.request_path) {
         expandDataLocal.push({
           key: t('请求路径'),
           value: other.request_path,
@@ -794,13 +810,13 @@ export const useLogsData = () => {
           ),
         });
       }
-      if (isAdminUser && logs[i].type !== 6) {
+      if (isAdminUser && logs[i].type !== 6 && logs[i].type !== 5) {
         expandDataLocal.push({
           key: t('请求转换'),
           value: requestConversionDisplayValue(other?.request_conversion),
         });
       }
-      if (isAdminUser && logs[i].type !== 6) {
+      if (isAdminUser && logs[i].type !== 6 && logs[i].type !== 5) {
         let localCountMode = '';
         if (other?.admin_info?.local_count_tokens) {
           localCountMode = t('本地计费');

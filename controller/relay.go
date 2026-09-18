@@ -89,6 +89,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	defer func() {
 		if newAPIError != nil {
+			service.MarkRequestFailure(c, newAPIError)
 			if newAPIError.RetryAfter > 0 {
 				retryAfterSeconds := int((newAPIError.RetryAfter + time.Second - 1) / time.Second)
 				if retryAfterSeconds < 1 {
@@ -133,6 +134,8 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = types.NewError(err, types.ErrorCodeGenRelayInfoFailed)
 		return
 	}
+
+	c.Set(service.RequestLogStreamKey, relayInfo.IsStream)
 
 	// Enforce a user-scoped cooling-off period before token counting, billing,
 	// channel selection, or any upstream request. Local rejections never create
@@ -576,46 +579,7 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		})
 	}
 
-	if constant.ErrorLogEnabled && types.IsRecordErrorLog(err) {
-		// 保存错误日志到mysql中
-		userId := c.GetInt("id")
-		tokenName := c.GetString("token_name")
-		modelName := c.GetString("original_model")
-		tokenId := c.GetInt("token_id")
-		userGroup := c.GetString("group")
-		channelId := c.GetInt("channel_id")
-		other := make(map[string]interface{})
-		if c.Request != nil && c.Request.URL != nil {
-			other["request_path"] = c.Request.URL.Path
-		}
-		other["error_type"] = err.GetErrorType()
-		other["error_code"] = err.GetErrorCode()
-		other["status_code"] = err.StatusCode
-		other["channel_id"] = channelId
-		other["channel_name"] = c.GetString("channel_name")
-		other["channel_type"] = c.GetInt("channel_type")
-		if c.Request != nil && c.Request.ContentLength > 0 {
-			other["client_request_length"] = c.Request.ContentLength
-		}
-		if err.Upstream != nil && !err.Upstream.IsZero() {
-			other["upstream"] = err.Upstream
-		}
-		adminInfo := make(map[string]interface{})
-		adminInfo["use_channel"] = c.GetStringSlice("use_channel")
-		isMultiKey := common.GetContextKeyBool(c, constant.ContextKeyChannelIsMultiKey)
-		if isMultiKey {
-			adminInfo["is_multi_key"] = true
-			adminInfo["multi_key_index"] = common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex)
-		}
-		service.AppendChannelAffinityAdminInfo(c, adminInfo)
-		other["admin_info"] = adminInfo
-		startTime := common.GetContextKeyTime(c, constant.ContextKeyRequestStartTime)
-		if startTime.IsZero() {
-			startTime = time.Now()
-		}
-		useTimeSeconds := int(time.Since(startTime).Seconds())
-		model.RecordErrorLog(c, userId, channelId, modelName, tokenName, err.MaskSensitiveErrorWithStatusCode(), tokenId, useTimeSeconds, false, userGroup, other)
-	}
+	service.AppendRequestFailureAttempt(c, channelError, err)
 
 }
 
@@ -994,6 +958,10 @@ func RelayTask(c *gin.Context) {
 
 // respondTaskError 统一输出 Task 错误响应（含 429 限流提示改写）
 func respondTaskError(c *gin.Context, taskErr *dto.TaskError) {
+	logErr := types.NewErrorWithStatusCode(fmt.Errorf("%s", taskErr.Message), types.ErrorCode(taskErr.Code), taskErr.StatusCode)
+	logErr.UpstreamStatusCode = taskErr.UpstreamStatusCode
+	logErr.RetryAfter = taskErr.RetryAfter
+	service.MarkRequestFailure(c, logErr)
 	if taskErr.RetryAfter > 0 {
 		retryAfterSeconds := int((taskErr.RetryAfter + time.Second - 1) / time.Second)
 		if retryAfterSeconds < 1 {

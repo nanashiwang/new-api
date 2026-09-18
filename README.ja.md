@@ -318,7 +318,7 @@ docker run --name new-api -d --restart always \
 | `STREAM_SCANNER_MAX_BUFFER_MB` | ストリームスキャナの1行あたりバッファ上限（MB）。4K画像など巨大なbase64 `data:` ペイロードを扱う場合は値を増加させてください | `64` |
 | `MAX_REQUEST_BODY_MB` | リクエストボディ最大サイズ（MB、**解凍後**に計測。巨大リクエスト/zip bomb によるメモリ枯渇を防止）。超過時は `413` | `256` |
 | `AZURE_DEFAULT_API_VERSION` | Azure APIバージョン | `2025-04-01-preview` |
-| `ERROR_LOG_ENABLED` | エラーログスイッチ | `false` |
+| `ERROR_LOG_ENABLED` | エラーログスイッチ | `true` |
 | `LOG_RETENTION_DAYS` | ログ自動削除の保持日数。`0` で自動削除を無効化 | `0` |
 | `LOG_RETENTION_INTERVAL_HOURS` | ログ自動削除の実行間隔（時間） | `24` |
 | `LOG_RETENTION_BATCH_SIZE` | 1 バッチあたりの削除行数。手動削除 API も同じ値を使用 | `2000` |

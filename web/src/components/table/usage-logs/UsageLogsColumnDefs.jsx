@@ -95,7 +95,7 @@ function buildChannelAffinityTooltip(affinity, t) {
   );
 }
 
-function renderType(type, t) {
+function renderType(type, t, record) {
   switch (type) {
     case 1:
       return (
@@ -124,7 +124,7 @@ function renderType(type, t) {
     case 5:
       return (
         <Tag color='red' shape='circle'>
-          {t('错误')}
+          {t(getLogOther(record.other)?.request_failure ? '调用失败' : '错误')}
         </Tag>
       );
     case 6:
@@ -668,8 +668,8 @@ export const getLogsColumns = ({
       key: COLUMN_KEYS.TYPE,
       title: t('类型'),
       dataIndex: 'type',
-      render: (text) => {
-        return <>{renderType(text, t)}</>;
+      render: (text, record) => {
+        return <>{renderType(text, t, record)}</>;
       },
     },
     {
@@ -700,7 +700,7 @@ export const getLogsColumns = ({
           return (
             <Space>
               {renderUseTime(text)}
-              {renderFirstUseTime(other?.frt)}
+              {record.type !== 5 && renderFirstUseTime(other?.frt)}
               {renderIsStream(record.is_stream, t, other?.stream_status)}
             </Space>
           );
@@ -729,6 +729,7 @@ export const getLogsColumns = ({
       ),
       dataIndex: 'prompt_tokens',
       render: (text, record) => {
+        if (record.type === 5) return <span>—</span>;
         const other = getLogOther(record.other);
         const cacheSummary = getPromptCacheSummary(other);
         const hasCacheRead = (cacheSummary?.cacheReadTokens || 0) > 0;
@@ -778,6 +779,7 @@ export const getLogsColumns = ({
       title: t('输出'),
       dataIndex: 'completion_tokens',
       render: (text, record) => {
+        if (record.type === 5) return <span>—</span>;
         return parseInt(text) > 0 &&
           (record.type === 0 ||
             record.type === 2 ||
@@ -795,6 +797,14 @@ export const getLogsColumns = ({
       dataIndex: 'quota',
       width: 120,
       render: (text, record) => {
+        if (record.type === 5)
+          return (
+            <Tooltip
+              content={t('费用请以相同 Request ID 下的消费或退款记录为准。')}
+            >
+              <span>—</span>
+            </Tooltip>
+          );
         if (
           !(
             record.type === 0 ||

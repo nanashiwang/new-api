@@ -46,6 +46,7 @@ export default function SettingsLog(props) {
   const [loadingCleanHistoryLog, setLoadingCleanHistoryLog] = useState(false);
   const [inputs, setInputs] = useState({
     LogConsumeEnabled: false,
+    ErrorLogEnabled: true,
     historyTimestamp: dayjs().subtract(1, 'month').toDate(),
   });
   const refForm = useRef();
@@ -214,6 +215,20 @@ export default function SettingsLog(props) {
                       LogConsumeEnabled: value,
                     });
                   }}
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Switch
+                  field='ErrorLogEnabled'
+                  label={t('启用调用失败日志记录')}
+                  extraText={t(
+                    '记录请求最终失败，用户可查看原因和排查信息；自动重试成功不会记为失败。',
+                  )}
+                  checkedText='｜'
+                  uncheckedText='〇'
+                  onChange={(value) =>
+                    setInputs({ ...inputs, ErrorLogEnabled: value })
+                  }
                 />
               </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>

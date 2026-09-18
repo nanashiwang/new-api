@@ -316,7 +316,7 @@ docker run --name new-api -d --restart always \
 | `STREAM_SCANNER_MAX_BUFFER_MB` | Taille max du buffer par ligne (Mo) pour le scanner SSE ; à augmenter quand les sorties image/base64 sont très volumineuses (ex. images 4K) | `64` |
 | `MAX_REQUEST_BODY_MB` | Taille maximale du corps de requête (Mo, comptée **après décompression** ; évite les requêtes énormes/zip bombs qui saturent la mémoire). Dépassement ⇒ `413` | `256` |
 | `AZURE_DEFAULT_API_VERSION` | Version de l'API Azure | `2025-04-01-preview` |
-| `ERROR_LOG_ENABLED` | Interrupteur du journal d'erreurs | `false` |
+| `ERROR_LOG_ENABLED` | Interrupteur du journal d'erreurs | `true` |
 | `LOG_RETENTION_DAYS` | Jours de journaux conservés par le nettoyage automatique ; `0` le désactive | `0` |
 | `LOG_RETENTION_INTERVAL_HOURS` | Intervalle entre deux nettoyages automatiques (heures) | `24` |
 | `LOG_RETENTION_BATCH_SIZE` | Lignes supprimées par lot ; l'endpoint de nettoyage manuel l'utilise aussi | `2000` |

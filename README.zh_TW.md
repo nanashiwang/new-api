@@ -313,7 +313,7 @@ docker run --name new-api -d --restart always \
 | `STREAM_SCANNER_MAX_BUFFER_MB` | 流式掃描器單行最大緩衝（MB），圖像生成等超大 `data:` 片段（如 4K 圖片 base64）需適當調大 | `64` |
 | `MAX_REQUEST_BODY_MB` | 請求體最大大小（MB，**解壓縮後**計；防止超大請求/zip bomb 導致記憶體暴漲），超過將返回 `413` | `256` |
 | `AZURE_DEFAULT_API_VERSION` | Azure API 版本                                                 | `2025-04-01-preview` |
-| `ERROR_LOG_ENABLED` | 錯誤日誌開關                                                       | `false` |
+| `ERROR_LOG_ENABLED` | 錯誤日誌開關                                                       | `true` |
 | `LOG_RETENTION_DAYS` | 日誌自動清理保留天數，`0` 表示關閉自動清理 | `0` |
 | `LOG_RETENTION_INTERVAL_HOURS` | 日誌自動清理的執行間隔（小時） | `24` |
 | `LOG_RETENTION_BATCH_SIZE` | 日誌清理單批刪除列數，手動清理介面同樣使用該值 | `2000` |

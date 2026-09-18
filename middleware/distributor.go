@@ -61,6 +61,7 @@ func Distribute() func(c *gin.Context) {
 			abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
 			return
 		}
+		c.Set("original_model", modelRequest.Model)
 		responsesImageGenerationTool := isResponsesCreateRequest(c) && modelRequest.HasImageGenerationTool()
 		if shouldSelectChannel && strings.TrimSpace(modelRequest.Model) != "" {
 			role := getModelPermissionRole(c)

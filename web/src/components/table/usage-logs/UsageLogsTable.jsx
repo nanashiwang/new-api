@@ -18,12 +18,13 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useMemo } from 'react';
-import { Empty, Descriptions } from '@douyinfe/semi-ui';
+import { Empty, Descriptions, Button } from '@douyinfe/semi-ui';
 import CardTable from '../../common/ui/CardTable';
 import {
   IllustrationNoResult,
   IllustrationNoResultDark,
 } from '@douyinfe/semi-illustrations';
+import { buildRequestFailureReport } from '../../../helpers/requestFailure';
 import { getLogsColumns } from './UsageLogsColumnDefs';
 
 const LogsTable = (logsData) => {
@@ -85,7 +86,21 @@ const LogsTable = (logsData) => {
   }, [compactMode, visibleColumnsList]);
 
   const expandRowRender = (record, index) => {
-    return <Descriptions data={expandData[record.key]} />;
+    return (
+      <div>
+        <Descriptions data={expandData[record.key]} />
+        {record.type === 5 && (
+          <Button
+            size='small'
+            onClick={(event) => {
+              copyText(event, buildRequestFailureReport(record, t));
+            }}
+          >
+            {t('复制排查信息')}
+          </Button>
+        )}
+      </div>
+    );
   };
 
   return (

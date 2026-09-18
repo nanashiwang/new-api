@@ -90,6 +90,23 @@ func formatUserLogs(logs []*Log, startIdx int) {
 			delete(otherMap, "reject_reason")
 			delete(otherMap, "po")
 		}
+		if logs[i].Type == LogTypeError {
+			// Error payloads used to include channel and upstream diagnostics at
+			// the top level. Use an allowlist for both legacy and new user views.
+			public := make(map[string]interface{})
+			for _, key := range []string{"request_failure", "failure_category", "failure_reason", "failure_hint", "request_path", "error_code", "status_code", "http_status", "latency_ms", "retry_after_seconds"} {
+				if value, ok := otherMap[key]; ok {
+					public[key] = value
+				}
+			}
+			if public["request_failure"] != true {
+				logs[i].Content = "请求失败，请提供请求 ID 联系管理员排查。"
+			} else if reason, ok := public["failure_reason"].(string); ok {
+				logs[i].Content = reason
+			}
+			logs[i].ChannelId = 0
+			otherMap = public
+		}
 		logs[i].Other = common.MapToJsonStr(otherMap)
 		logs[i].Id = startIdx + i + 1
 	}

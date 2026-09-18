@@ -374,7 +374,7 @@ docker run --name new-api -d --restart always \
 | `PULSE_BENEFIT_RATE_LIMIT_ENABLE` | 启用 Pulse Benefit 内部接口限流（按已验签服务身份） | `true` |
 | `PULSE_BENEFIT_RATE_LIMIT` | 每个服务身份在限流窗口内允许的 Benefit 请求数 | `600` |
 | `PULSE_BENEFIT_RATE_LIMIT_DURATION` | Benefit 限流窗口，单位秒 | `60` |
-| `ERROR_LOG_ENABLED`             | 错误日志开关                                                                             | `false`              |
+| `ERROR_LOG_ENABLED`             | 错误日志开关                                                                             | `true`              |
 | `LOG_RETENTION_DAYS`            | 日志自动清理保留天数，`0` 表示关闭自动清理                                               | `0`                  |
 | `LOG_RETENTION_INTERVAL_HOURS`  | 日志自动清理的执行间隔（小时）                                                           | `24`                 |
 | `LOG_RETENTION_BATCH_SIZE`      | 日志清理单批删除行数，手动清理接口同样使用该值                                           | `2000`               |

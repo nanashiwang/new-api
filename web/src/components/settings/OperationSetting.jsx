@@ -69,6 +69,7 @@ const OperationSetting = () => {
 
     /* 日志设置 */
     LogConsumeEnabled: false,
+    ErrorLogEnabled: true,
 
     /* 监控设置 */
     ChannelDisableThreshold: 0,

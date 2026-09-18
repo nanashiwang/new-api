@@ -62,7 +62,8 @@
     "test:playground-sse": "node scripts/playground-sse.test.mjs",
     "test:ccswitch-config": "node scripts/ccswitch-config.test.mjs",
     "test:desktop-download": "node scripts/desktop-download.test.mjs",
-    "test:auth-redirect": "node scripts/auth-redirect.test.mjs"
+    "test:auth-redirect": "node scripts/auth-redirect.test.mjs",
+    "test:request-failure": "node scripts/request-failure.test.mjs"
   },
   "eslintConfig": {
     "extends": [
