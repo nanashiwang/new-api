@@ -290,7 +290,8 @@ code {
 
 /* 侧边栏区域容器 */
 .sidebar-section {
-  padding-top: 12px;
+  /* Nav 的列表容器已提供 12px 顶部间距。 */
+  padding-top: 0;
 }
 
 @media (max-width: 767px) {
@@ -1506,8 +1507,11 @@ html.dark .with-pastel-balls::before {
 .table-scroll-card {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 110px);
-  max-height: calc(100vh - 110px);
+  /* 固定导航 64px，加上控制台上下各 24px 的内边距。 */
+  height: calc(100vh - 112px);
+  height: calc(100dvh - 112px);
+  max-height: calc(100vh - 112px);
+  max-height: calc(100dvh - 112px);
 }
 
 .table-scroll-card .semi-card-body {
@@ -1534,8 +1538,11 @@ html.dark .with-pastel-balls::before {
 
 @media (max-width: 767px) {
   .table-scroll-card {
-    height: calc(100vh - 77px);
-    max-height: calc(100vh - 77px);
+    /* 手机控制台上下内边距各 5px。 */
+    height: calc(100vh - 74px);
+    height: calc(100dvh - 74px);
+    max-height: calc(100vh - 74px);
+    max-height: calc(100dvh - 74px);
   }
 
   .semi-input-suffix-text {

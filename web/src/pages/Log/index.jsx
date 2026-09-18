@@ -21,7 +21,7 @@ import React from 'react';
 import UsageLogsTable from '../../components/table/usage-logs';
 
 const Token = () => (
-  <div className='mt-[60px] px-2' data-onboarding='usage-log-panel'>
+  <div className='px-2' data-onboarding='usage-log-panel'>
     <UsageLogsTable />
   </div>
 );

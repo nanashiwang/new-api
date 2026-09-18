@@ -211,7 +211,7 @@ const Pulse = () => {
   );
 
   return (
-    <div className='mt-[60px] px-2 pb-8'>
+    <div className='px-2 pb-8'>
       <div className='mx-auto w-full max-w-[1440px]'>
         <div className='mb-5 flex flex-wrap items-center justify-between gap-3'>
           <div>

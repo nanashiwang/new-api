@@ -48,11 +48,12 @@ const ChatArea = ({
 
   return (
     <Card
-      className='h-full'
+      className='h-full min-h-0'
       bordered={false}
       bodyStyle={{
         padding: 0,
-        height: 'calc(100vh - 66px)',
+        height: '100%',
+        minHeight: 0,
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
@@ -94,7 +95,7 @@ const ChatArea = ({
       )}
 
       {/* 聊天内容区域 */}
-      <div className='flex-1 overflow-hidden'>
+      <div className='flex-1 min-h-0 overflow-hidden'>
         <Chat
           ref={chatRef}
           chatBoxRenderConfig={{

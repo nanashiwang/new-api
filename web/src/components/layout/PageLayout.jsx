@@ -27,6 +27,7 @@ import React, {
   Suspense,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
 } from 'react';
@@ -67,7 +68,12 @@ const PageLayout = () => {
     '/pricing',
   ];
 
-  const shouldHideFooter = cardProPages.includes(location.pathname);
+  const isFullHeightConsolePage =
+    location.pathname === '/console/playground' ||
+    location.pathname === '/console/chat' ||
+    location.pathname.startsWith('/console/chat/');
+  const shouldHideFooter =
+    cardProPages.includes(location.pathname) || isFullHeightConsolePage;
 
   const shouldInnerPadding =
     location.pathname.includes('/console') &&
@@ -77,6 +83,12 @@ const PageLayout = () => {
   const isConsoleRoute = location.pathname.startsWith('/console');
   const isStandalonePage = location.pathname === '/usage';
   const showSider = isConsoleRoute && (!isMobile || drawerOpen);
+
+  useLayoutEffect(() => {
+    // 桌面端滚动右侧容器，手机端滚动窗口；切页都从顶部开始。
+    document.querySelector('.app-workspace')?.scrollTo(0, 0);
+    window.scrollTo(0, 0);
+  }, [location.pathname]);
 
   // 首页若设置了自定义 home_page_content，自定义 HTML 自带顶部导航，
   // 全局 Header 与之并排会出现"双顶栏"。此时隐藏全局 Header，
@@ -228,11 +240,15 @@ const PageLayout = () => {
           </Sider>
         )}
         <Layout
+          className='app-workspace'
           style={{
             flex: '1 1 auto',
             display: 'flex',
             flexDirection: 'column',
             minWidth: 0,
+            minHeight: 0,
+            overflowX: isMobile ? 'visible' : 'hidden',
+            overflowY: isMobile ? 'visible' : 'auto',
           }}
         >
           <ContentSafetyNotice />

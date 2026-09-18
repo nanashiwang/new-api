@@ -37,7 +37,7 @@ const UpstreamAccountsPage = () => {
   const accountsHook = useUpstreamAccounts();
 
   return (
-    <div className='mt-[60px] space-y-4 px-2 pb-6'>
+    <div className='space-y-4 px-2 pb-6'>
       <Card className='overflow-hidden' bodyStyle={{ padding: 0 }}>
         <div className='relative overflow-hidden px-5 py-5 sm:px-6'>
           <div className='absolute inset-0 bg-gradient-to-r from-cyan-500/10 via-emerald-500/5 to-transparent' />

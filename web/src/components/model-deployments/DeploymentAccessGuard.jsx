@@ -43,7 +43,7 @@ const DeploymentAccessGuard = ({
 
   if (loading) {
     return (
-      <div className='mt-[60px] px-2'>
+      <div className='px-2'>
         <Card loading={true} style={{ minHeight: '400px' }}>
           <div style={{ textAlign: 'center', padding: '50px 0' }}>
             <Text type='secondary'>{t('加载设置中...')}</Text>
@@ -56,9 +56,8 @@ const DeploymentAccessGuard = ({
   if (!isEnabled) {
     return (
       <div
-        className='mt-[60px] px-4'
+        className='px-4 py-6'
         style={{
-          minHeight: 'calc(100vh - 60px)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -282,7 +281,7 @@ const DeploymentAccessGuard = ({
 
   if (connectionLoading || (connectionOk === null && !connectionError)) {
     return (
-      <div className='mt-[60px] px-2'>
+      <div className='px-2'>
         <Card loading={true} style={{ minHeight: '400px' }}>
           <div style={{ textAlign: 'center', padding: '50px 0' }}>
             <Text type='secondary'>{t('正在检查 io.net 连接...')}</Text>
@@ -302,9 +301,8 @@ const DeploymentAccessGuard = ({
 
     return (
       <div
-        className='mt-[60px] px-4'
+        className='px-4 py-6'
         style={{
-          minHeight: 'calc(100vh - 60px)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
