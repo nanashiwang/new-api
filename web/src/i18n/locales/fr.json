@@ -1,5 +1,7 @@
 {
   "translation": {
+    "统计说明": "Détails des statistiques",
+    "首字": "TTFT",
     "Pulse 奖励撤销密钥": "Secret d’annulation des récompenses Pulse",
     "Pulse 自动发奖密钥": "Secret d’attribution automatique Pulse",
     "Pulse 设置已保存并生效": "Paramètres Pulse enregistrés et appliqués",
@@ -603,7 +605,7 @@
     "成功兑换额度：": "Montant de l'échange réussi :",
     "成功后切换亲和": "成功后切换亲和",
     "成功金额": "",
-    "成功率": "",
+    "成功率": "Taux de réussite",
     "成功时自动启用通道": "Activer le canal en cas de succès",
     "尺寸": "",
     "充值": "Recharger",
@@ -2817,7 +2819,7 @@
     "请至少选择一个渠道": "Veuillez sélectionner au moins un canal",
     "请至少选择一个用户！": "Veuillez sélectionner au moins un utilisateur !",
     "区域": "Région",
-    "趋势": "",
+    "趋势": "Tendance",
     "渠道": "Canal",
     "渠道 ID": "ID du Canal",
     "渠道标签": "Étiquette du canal",

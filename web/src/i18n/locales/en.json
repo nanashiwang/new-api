@@ -1,5 +1,7 @@
 {
   "translation": {
+    "统计说明": "Statistics details",
+    "首字": "TTFT",
     "Pulse 奖励撤销密钥": "Pulse reward rollback secret",
     "Pulse 自动发奖密钥": "Pulse automatic reward secret",
     "Pulse 设置已保存并生效": "Pulse settings saved and applied",
@@ -579,7 +581,7 @@
     "成功兑换额度：": "Successful redemption amount:",
     "成功后切换亲和": "成功后切换亲和",
     "成功金额": "",
-    "成功率": "",
+    "成功率": "Success rate",
     "成功时自动启用通道": "Enable channel when successful",
     "尺寸": "",
     "充值": "Top Up",
@@ -2781,7 +2783,7 @@
     "请至少选择一个渠道": "Please select at least one channel",
     "请至少选择一个用户！": "Please select at least one user!",
     "区域": "Region",
-    "趋势": "",
+    "趋势": "Trend",
     "渠道": "Channel",
     "渠道 ID": "Channel ID",
     "渠道标签": "Channel Tag",

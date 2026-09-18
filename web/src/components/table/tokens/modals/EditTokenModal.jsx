@@ -1271,6 +1271,11 @@ const EditTokenModal = (props) => {
                               }
                             />
                           )}
+                          dropdownMatchSelectWidth={false}
+                          dropdownStyle={{
+                            minWidth: 0,
+                            maxWidth: 'calc(100vw - 24px)',
+                          }}
                           renderSelectedItem={(optionNode) =>
                             formatTokenGroupSelectedLabel(optionNode)
                           }
@@ -1281,6 +1286,26 @@ const EditTokenModal = (props) => {
                             },
                           ]}
                           style={{ width: '100%' }}
+                          fieldStyle={
+                            values.group ? { paddingBottom: 4 } : undefined
+                          }
+                        />
+                        <TokenGroupHealth
+                          key={values.group}
+                          group={values.group}
+                          description={
+                            groups.find(
+                              (option) => option.value === values.group,
+                            )?.label
+                          }
+                          stats={groupHealthByName.get(values.group)}
+                          loading={groupHealth.loading}
+                          error={groupHealth.error}
+                          onRetry={groupHealth.refresh}
+                          collectionEnabled={
+                            groupHealth.data?.enabled !== false
+                          }
+                          collectionData={groupHealth.data}
                         />
                       </Col>
                     </>
@@ -1304,20 +1329,6 @@ const EditTokenModal = (props) => {
                       </Col>
                     </>
                   )}
-                  {values.group ? (
-                    <Col span={24}>
-                      <TokenGroupHealth
-                        key={values.group}
-                        group={values.group}
-                        stats={groupHealthByName.get(values.group)}
-                        loading={groupHealth.loading}
-                        error={groupHealth.error}
-                        onRetry={groupHealth.refresh}
-                        collectionEnabled={groupHealth.data?.enabled !== false}
-                        collectionData={groupHealth.data}
-                      />
-                    </Col>
-                  ) : null}
                   {!isSellableToken && (
                     <>
                       <Col

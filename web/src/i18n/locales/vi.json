@@ -1,5 +1,7 @@
 {
   "translation": {
+    "统计说明": "Chi tiết thống kê",
+    "首字": "TTFT",
     "Pulse 奖励撤销密钥": "Khóa hoàn tác phần thưởng Pulse",
     "Pulse 自动发奖密钥": "Khóa phát thưởng tự động Pulse",
     "Pulse 设置已保存并生效": "Đã lưu và áp dụng cài đặt Pulse",
@@ -593,7 +595,7 @@
     "成功兑换额度：": "Số tiền đổi thành công:",
     "成功后切换亲和": "成功后切换亲和",
     "成功金额": "",
-    "成功率": "",
+    "成功率": "Tỷ lệ thành công",
     "成功时自动启用通道": "Bật kênh khi thành công",
     "尺寸": "",
     "充值": "Nạp tiền",
@@ -3008,7 +3010,7 @@
     "请至少选择一个渠道": "Vui lòng chọn ít nhất một kênh",
     "请至少选择一个用户！": "Vui lòng chọn ít nhất một người dùng!",
     "区域": "Khu vực",
-    "趋势": "",
+    "趋势": "Xu hướng",
     "渠道": "Kênh",
     "渠道 ID": "ID kênh",
     "渠道标签": "Thẻ kênh",
