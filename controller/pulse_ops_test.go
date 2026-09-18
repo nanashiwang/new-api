@@ -126,20 +126,17 @@ func TestPulseInternalConfigPrefersConsoleOptionOverEnvironment(t *testing.T) {
 	t.Setenv("PULSE_INTERNAL_URL", "http://env.pulse.internal")
 	t.Setenv("PULSE_ADMIN_HMAC_SECRET", "environment-secret-at-least-32-chars")
 	t.Cleanup(func() {
-		common.PulseInternalURL = ""
-		common.PulseAdminHMACSecret = ""
+		common.ReplacePulseConfig(nil)
 	})
 
-	common.PulseInternalURL = "http://console.pulse.internal"
-	common.PulseAdminHMACSecret = stored
+	common.ReplacePulseConfig(map[string]string{"PulseInternalURL": "http://console.pulse.internal", "PulseAdminHMACSecret": stored})
 	baseURL, secret, err := pulseOpsConfig()
 	require.NoError(t, err)
 	require.Equal(t, "http://console.pulse.internal", baseURL.String())
 	require.Equal(t, stored, secret)
 
-	// Empty options mean "not configured here", not "configured as empty".
-	common.PulseInternalURL = ""
-	common.PulseAdminHMACSecret = ""
+	// No persisted override means environment fallback.
+	common.ReplacePulseConfig(nil)
 	baseURL, secret, err = pulseOpsConfig()
 	require.NoError(t, err)
 	require.Equal(t, "http://env.pulse.internal", baseURL.String())

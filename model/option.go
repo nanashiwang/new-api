@@ -149,9 +149,6 @@ func InitOptionMap() {
 	common.OptionMap["WeChatAccountQRCodeImageURL"] = ""
 	common.OptionMap["TurnstileSiteKey"] = ""
 	common.OptionMap["TurnstileSecretKey"] = ""
-	common.OptionMap["PulseInternalURL"] = ""
-	common.OptionMap["PulseUserBFFHMACSecret"] = ""
-	common.OptionMap["PulseAdminHMACSecret"] = ""
 	common.OptionMap["QuotaForNewUser"] = strconv.Itoa(common.QuotaForNewUser)
 	common.OptionMap["QuotaForInviter"] = strconv.Itoa(common.QuotaForInviter)
 	common.OptionMap["QuotaForInvitee"] = strconv.Itoa(common.QuotaForInvitee)
@@ -244,12 +241,20 @@ func InitOptionMap() {
 }
 
 func loadOptionsFromDatabase() {
+	pulseConfigOptionMutex.Lock()
+	defer pulseConfigOptionMutex.Unlock()
 	tieredBillingOptionMutex.Lock()
-	options, _ := AllOption()
+	options, err := AllOption()
+	if err != nil {
+		tieredBillingOptionMutex.Unlock()
+		common.SysLog("failed to load options from database; retaining current configuration")
+		return
+	}
+	loadPulseConfigOptions(options)
 	loadTieredBillingOptions(options)
 	tieredBillingOptionMutex.Unlock()
 	for _, option := range options {
-		if option.Key == "billing_setting.billing_mode" || option.Key == "billing_setting.billing_expr" {
+		if common.IsPulseConfigKey(option.Key) || option.Key == "billing_setting.billing_mode" || option.Key == "billing_setting.billing_expr" {
 			continue
 		}
 		err := updateOptionMap(option.Key, option.Value)
@@ -310,13 +315,19 @@ func SyncOptions(frequency int) {
 }
 
 func validatePulseUsageLogOption(key string, value string) error {
-	if key == "LogConsumeEnabled" && strings.EqualFold(strings.TrimSpace(value), "false") && common.PulseUsageLogRequired {
-		return errors.New("Meta Pulse 已启用，不能关闭消费日志（PULSE_USAGE_LOG_REQUIRED=true）")
+	if key == "LogConsumeEnabled" && value != "true" && common.PulseUsageLogsRequired() {
+		return errors.New("Meta Pulse 已启用，不能关闭消费日志（Pulse 消费日志保护已开启）")
 	}
 	return nil
 }
 
 func UpdateOption(key string, value string) error {
+	if common.IsPulseConfigKey(key) {
+		return errors.New("请通过 Meta Pulse 专用设置一次性保存配置")
+	}
+	if key == "LogConsumeEnabled" {
+		return updatePulseConsumeLogOption(value)
+	}
 	if err := validatePulseUsageLogOption(key, value); err != nil {
 		return err
 	}
@@ -732,12 +743,6 @@ func updateOptionMapUnlocked(key string, value string) (err error) {
 		common.TurnstileSiteKey = value
 	case "TurnstileSecretKey":
 		common.TurnstileSecretKey = value
-	case "PulseInternalURL":
-		common.PulseInternalURL = value
-	case "PulseUserBFFHMACSecret":
-		common.PulseUserBFFHMACSecret = value
-	case "PulseAdminHMACSecret":
-		common.PulseAdminHMACSecret = value
 	case "QuotaForNewUser":
 		common.QuotaForNewUser, _ = strconv.Atoi(value)
 	case "QuotaForInviter":

@@ -9,7 +9,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -61,11 +60,12 @@ func pulseServiceAuthForRoles(allowedRoles ...string) gin.HandlerFunc {
 				break
 			}
 		}
-		secrets := pulseServiceHMACSecrets()
+		cfg := common.GetPulseConfig()
+		secrets := pulseServiceHMACSecretsWithConfig(cfg)
 		if role == "pulse-rollback" {
-			secrets = pulseRollbackHMACSecrets()
+			secrets = pulseRollbackHMACSecretsWithConfig(cfg)
 		}
-		if !allowed || !verifyPulseServiceRequestForRole(c.Request, secrets, role) {
+		if !allowed || !verifyPulseServiceRequestForRoleWithConfig(c.Request, secrets, role, cfg) {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			return
 		}
@@ -89,15 +89,23 @@ func verifyPulseServiceRequest(req *http.Request, secret string) bool {
 }
 
 func pulseServiceHMACSecrets() []string {
-	return pulseHMACSecrets(os.Getenv("PULSE_SERVICE_HMAC_SECRET"), os.Getenv("PULSE_SERVICE_HMAC_SECRET_PREVIOUS"))
+	return pulseServiceHMACSecretsWithConfig(common.GetPulseConfig())
+}
+
+func pulseServiceHMACSecretsWithConfig(cfg common.PulseConfig) []string {
+	return pulseHMACSecretsWithConfig(cfg["PulseServiceHMACSecret"], cfg["PulseServiceHMACSecretPrevious"], cfg)
 }
 
 // Rollback credentials are never usable by the settlement worker. Fail closed
 // when operators accidentally reuse any current/previous settlement key.
 func pulseRollbackHMACSecrets() []string {
-	secrets := pulseHMACSecrets(os.Getenv("PULSE_ROLLBACK_HMAC_SECRET"), os.Getenv("PULSE_ROLLBACK_HMAC_SECRET_PREVIOUS"))
+	return pulseRollbackHMACSecretsWithConfig(common.GetPulseConfig())
+}
+
+func pulseRollbackHMACSecretsWithConfig(cfg common.PulseConfig) []string {
+	secrets := pulseHMACSecretsWithConfig(cfg["PulseRollbackHMACSecret"], cfg["PulseRollbackHMACSecretPrevious"], cfg)
 	for _, candidate := range secrets {
-		for _, worker := range []string{os.Getenv("PULSE_SERVICE_HMAC_SECRET"), os.Getenv("PULSE_SERVICE_HMAC_SECRET_PREVIOUS")} {
+		for _, worker := range []string{cfg["PulseServiceHMACSecret"], cfg["PulseServiceHMACSecretPrevious"]} {
 			if candidate == strings.TrimSpace(worker) {
 				return nil
 			}
@@ -110,9 +118,13 @@ func pulseRollbackHMACSecrets() []string {
 // previous key second. In production a malformed rotation configuration fails
 // closed instead of silently weakening the authentication boundary.
 func pulseHMACSecrets(currentValue, previousValue string) []string {
+	return pulseHMACSecretsWithConfig(currentValue, previousValue, common.GetPulseConfig())
+}
+
+func pulseHMACSecretsWithConfig(currentValue, previousValue string, cfg common.PulseConfig) []string {
 	current := strings.TrimSpace(currentValue)
 	previous := strings.TrimSpace(previousValue)
-	if !pulseSecretUsable(current) || (previous != "" && !pulseSecretUsable(previous)) || (previous != "" && previous == current) {
+	if !cfg.SecretUsable(current) || (previous != "" && !cfg.SecretUsable(previous)) || (previous != "" && previous == current) {
 		return nil
 	}
 	secrets := []string{current}
@@ -123,14 +135,7 @@ func pulseHMACSecrets(currentValue, previousValue string) []string {
 }
 
 func pulseSecretUsable(secret string) bool {
-	secret = strings.TrimSpace(secret)
-	if secret == "" {
-		return false
-	}
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("PULSE_ENV")), "production") {
-		return len(secret) >= minimumPulseSecretLength && secret != "replace-me"
-	}
-	return true
+	return common.GetPulseConfig().SecretUsable(secret)
 }
 
 func verifyPulseServiceRequestWithSecrets(req *http.Request, secrets []string) bool {
@@ -138,6 +143,10 @@ func verifyPulseServiceRequestWithSecrets(req *http.Request, secrets []string) b
 }
 
 func verifyPulseServiceRequestForRole(req *http.Request, secrets []string, expectedRole string) bool {
+	return verifyPulseServiceRequestForRoleWithConfig(req, secrets, expectedRole, common.GetPulseConfig())
+}
+
+func verifyPulseServiceRequestForRoleWithConfig(req *http.Request, secrets []string, expectedRole string, cfg common.PulseConfig) bool {
 	configured := false
 	for _, secret := range secrets {
 		if strings.TrimSpace(secret) != "" {
@@ -197,7 +206,7 @@ func verifyPulseServiceRequestForRole(req *http.Request, secrets []string, expec
 	if !matched {
 		return false
 	}
-	return claimPulseNonce(req.Context(), role+":"+userID+":"+nonce, requestTime.Add(pulseMaxClockSkew))
+	return claimPulseNonceWithConfig(req.Context(), role+":"+userID+":"+nonce, requestTime.Add(pulseMaxClockSkew), cfg)
 }
 
 func pulseCanonicalPayload(method, path, userID, role string, timestamp int64, nonce string, body []byte) string {
@@ -209,6 +218,10 @@ func pulseCanonicalPayload(method, path, userID, role string, timestamp int64, n
 }
 
 func claimPulseNonce(ctx context.Context, key string, expiresAt time.Time) bool {
+	return claimPulseNonceWithConfig(ctx, key, expiresAt, common.GetPulseConfig())
+}
+
+func claimPulseNonceWithConfig(ctx context.Context, key string, expiresAt time.Time, cfg common.PulseConfig) bool {
 	if common.RedisEnabled && common.RDB != nil {
 		ttl := time.Until(expiresAt)
 		if ttl <= 0 {
@@ -217,7 +230,7 @@ func claimPulseNonce(ctx context.Context, key string, expiresAt time.Time) bool 
 		claimed, err := common.RDB.SetNX(ctx, "newapi:pulse:nonce:"+key, "1", ttl).Result()
 		return err == nil && claimed
 	}
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("PULSE_ENV")), "production") {
+	if cfg.Production() {
 		return false
 	}
 	pulseNonceMemory.Lock()

@@ -3,7 +3,6 @@ package model
 import (
 	"errors"
 	"fmt"
-	"os"
 	"strconv"
 	"time"
 
@@ -32,7 +31,8 @@ type pulseBenefitPolicy struct{ maxGrant, userDaily, daily int64 }
 
 func loadPulseBenefitPolicy() (pulseBenefitPolicy, error) {
 	var policy pulseBenefitPolicy
-	switch os.Getenv("PULSE_BENEFIT_ENABLED") {
+	cfg := common.GetPulseConfig()
+	switch cfg["PulseBenefitEnabled"] {
 	case "true":
 	case "", "false":
 		return policy, ErrPulseBenefitPaused
@@ -40,11 +40,11 @@ func loadPulseBenefitPolicy() (pulseBenefitPolicy, error) {
 		return policy, ErrPulseBenefitPolicy
 	}
 	for name, target := range map[string]*int64{
-		"PULSE_BENEFIT_MAX_GRANT_QUOTA":  &policy.maxGrant,
-		"PULSE_BENEFIT_USER_DAILY_QUOTA": &policy.userDaily,
-		"PULSE_BENEFIT_DAILY_QUOTA":      &policy.daily,
+		"PulseBenefitMaxGrantQuota":  &policy.maxGrant,
+		"PulseBenefitUserDailyQuota": &policy.userDaily,
+		"PulseBenefitDailyQuota":     &policy.daily,
 	} {
-		raw := os.Getenv(name)
+		raw := cfg[name]
 		// Canonical decimal integers only: no signs, fractions or exponent notation.
 		value, err := strconv.ParseInt(raw, 10, strconv.IntSize)
 		if err != nil || value <= 0 || strconv.FormatInt(value, 10) != raw {

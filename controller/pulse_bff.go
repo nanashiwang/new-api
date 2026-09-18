@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -144,7 +143,7 @@ func proxyPulseSignedRead(c *gin.Context, role string, config func() (*url.URL, 
 }
 
 func pulseBFFConfig() (*url.URL, string, error) {
-	return pulseInternalConfig(common.PulseUserBFFHMACSecret, "PULSE_USER_BFF_HMAC_SECRET")
+	return pulseInternalConfig("PulseUserBFFHMACSecret", "PULSE_USER_BFF_HMAC_SECRET")
 }
 
 // pulseInternalConfig resolves the shared upstream URL plus one role's secret.
@@ -156,15 +155,10 @@ func pulseBFFConfig() (*url.URL, string, error) {
 // without a redeploy. The environment stays as the fallback so instances
 // configured before the options existed keep working untouched.
 func pulseInternalConfig(optionSecret, secretEnv string) (*url.URL, string, error) {
-	rawURL := strings.TrimSpace(common.PulseInternalURL)
-	if rawURL == "" {
-		rawURL = strings.TrimSpace(os.Getenv("PULSE_INTERNAL_URL"))
-	}
-	secret := strings.TrimSpace(optionSecret)
-	if secret == "" {
-		secret = strings.TrimSpace(os.Getenv(secretEnv))
-	}
-	if rawURL == "" || !middlewarePulseSecretUsable(secret) {
+	cfg := common.GetPulseConfig()
+	rawURL := strings.TrimSpace(cfg["PulseInternalURL"])
+	secret := strings.TrimSpace(cfg[optionSecret])
+	if rawURL == "" || !cfg.SecretUsable(secret) {
 		return nil, "", errors.New("PULSE_INTERNAL_URL and a valid " + secretEnv + " are required")
 	}
 	baseURL, err := url.Parse(rawURL)

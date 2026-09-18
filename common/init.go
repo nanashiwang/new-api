@@ -124,8 +124,7 @@ func InitEnv() {
 
 	// Meta Pulse consumes LOG_DB as a source of truth. The explicit gate keeps
 	// an operator from disabling consume logs while Pulse is in service.
-	PulseUsageLogRequired = GetEnvOrDefaultBool("PULSE_USAGE_LOG_REQUIRED", false)
-	if PulseUsageLogRequired {
+	if PulseUsageLogsRequired() {
 		// Fail closed even if a stale persisted option is loaded later.
 		LogConsumeEnabled = true
 	}

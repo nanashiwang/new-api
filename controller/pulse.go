@@ -7,7 +7,6 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -137,24 +136,18 @@ func signHMAC(secret, payload string) string {
 }
 
 func middlewarePulseSecretUsable(secret string) bool {
-	secret = strings.TrimSpace(secret)
-	if secret == "" {
-		return false
-	}
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("PULSE_ENV")), "production") {
-		return len(secret) >= 32 && secret != "replace-me"
-	}
-	return true
+	return common.GetPulseConfig().SecretUsable(secret)
 }
 
 func forumSSOConfig() (string, string, error) {
-	callback := strings.TrimSpace(os.Getenv("PULSE_FORUM_SSO_CALLBACK_URL"))
-	secret := strings.TrimSpace(os.Getenv("PULSE_FORUM_SSO_SECRET"))
-	if callback == "" || !middlewarePulseSecretUsable(secret) {
+	cfg := common.GetPulseConfig()
+	callback := strings.TrimSpace(cfg["PulseForumSSOCallbackURL"])
+	secret := strings.TrimSpace(cfg["PulseForumSSOSecret"])
+	if callback == "" || !cfg.SecretUsable(secret) {
 		return "", "", errors.New("PULSE_FORUM_SSO_CALLBACK_URL and a valid PULSE_FORUM_SSO_SECRET are required")
 	}
-	previous := strings.TrimSpace(os.Getenv("PULSE_FORUM_SSO_SECRET_PREVIOUS"))
-	if previous != "" && (!middlewarePulseSecretUsable(previous) || previous == secret) {
+	previous := strings.TrimSpace(cfg["PulseForumSSOSecretPrevious"])
+	if previous != "" && (!cfg.SecretUsable(previous) || previous == secret) {
 		return "", "", errors.New("PULSE_FORUM_SSO_SECRET_PREVIOUS is invalid or duplicates the active secret")
 	}
 	target, err := url.Parse(callback)

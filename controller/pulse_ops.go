@@ -33,7 +33,7 @@ func GetPulseOperationsOverview(c *gin.Context) {
 }
 
 func pulseOpsConfig() (*url.URL, string, error) {
-	return pulseInternalConfig(common.PulseAdminHMACSecret, "PULSE_ADMIN_HMAC_SECRET")
+	return pulseInternalConfig("PulseAdminHMACSecret", "PULSE_ADMIN_HMAC_SECRET")
 }
 
 // GeneratePulseSecret returns a fresh HMAC secret for the admin console to

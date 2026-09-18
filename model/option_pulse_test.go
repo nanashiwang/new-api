@@ -8,9 +8,8 @@ import (
 )
 
 func TestPulseUsageLogGateRejectsDisablingConsumeLogs(t *testing.T) {
-	original := common.PulseUsageLogRequired
-	common.PulseUsageLogRequired = true
-	t.Cleanup(func() { common.PulseUsageLogRequired = original })
+	common.ReplacePulseConfig(map[string]string{"PulseUsageLogRequired": "true"})
+	t.Cleanup(func() { common.ReplacePulseConfig(nil) })
 
 	if err := validatePulseUsageLogOption("LogConsumeEnabled", "false"); err == nil || !strings.Contains(err.Error(), "不能关闭消费日志") {
 		t.Fatalf("gate error = %v, want consume log rejection", err)
@@ -24,9 +23,8 @@ func TestPulseUsageLogGateRejectsDisablingConsumeLogs(t *testing.T) {
 }
 
 func TestPulseUsageLogGateAllowsLegacyToggleWhenDisabled(t *testing.T) {
-	original := common.PulseUsageLogRequired
-	common.PulseUsageLogRequired = false
-	t.Cleanup(func() { common.PulseUsageLogRequired = original })
+	common.ReplacePulseConfig(map[string]string{"PulseUsageLogRequired": "false", "PulseBenefitEnabled": "false"})
+	t.Cleanup(func() { common.ReplacePulseConfig(nil) })
 
 	if err := validatePulseUsageLogOption("LogConsumeEnabled", "false"); err != nil {
 		t.Fatalf("legacy toggle rejected without gate: %v", err)

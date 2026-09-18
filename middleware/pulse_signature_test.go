@@ -218,3 +218,31 @@ func TestPulseBenefitGETQueryAcceptsSignedEmptyBody(t *testing.T) {
 	req.Header.Set(pulseSignatureHeader, hex.EncodeToString(mac.Sum(nil)))
 	require.True(t, verifyPulseServiceRequest(req, "query-secret"))
 }
+
+func TestPulseServiceAuthImmediatelyUsesConsoleRotationAndEnvironmentOverride(t *testing.T) {
+	original := common.GetPulseConfigOverrides()
+	t.Cleanup(func() { common.ReplacePulseConfig(original) })
+	t.Setenv("PULSE_ENV", "production")
+	t.Setenv("PULSE_SERVICE_HMAC_SECRET", "old-environment-worker-key")
+	oldRedisEnabled, oldRedis := common.RedisEnabled, common.RDB
+	common.RedisEnabled, common.RDB = false, nil
+	t.Cleanup(func() { common.RedisEnabled, common.RDB = oldRedisEnabled, oldRedis })
+	common.ReplacePulseConfig(map[string]string{"PulseEnv": "test", "PulseServiceHMACSecret": "new-console-worker-key"})
+	router := gin.New()
+	router.POST("/grant", PulseServiceAuth(), func(c *gin.Context) { c.Status(http.StatusOK) })
+	for _, test := range []struct {
+		key    string
+		status int
+	}{
+		{"old-environment-worker-key", http.StatusUnauthorized},
+		{"new-console-worker-key", http.StatusOK},
+	} {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, signedPulseRoleRequest(t, "/grant", "pulse-settlement", test.key, "console-config-"+test.key))
+		require.Equal(t, test.status, response.Code)
+	}
+	common.ReplacePulseConfig(map[string]string{"PulseEnv": "test", "PulseServiceHMACSecret": ""})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, signedPulseRoleRequest(t, "/grant", "pulse-settlement", "old-environment-worker-key", "cleared-console-key"))
+	require.Equal(t, http.StatusUnauthorized, response.Code)
+}

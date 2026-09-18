@@ -82,7 +82,7 @@ func GetOptions(c *gin.Context) {
 	common.OptionMapRWMutex.Lock()
 	for k, v := range common.OptionMap {
 		value := common.Interface2String(v)
-		if strings.HasSuffix(k, "Token") ||
+		if common.IsPulseConfigKey(k) || strings.HasSuffix(k, "Token") ||
 			strings.HasSuffix(k, "Secret") ||
 			(strings.HasSuffix(k, "Key") && !isVisiblePublicKeyOption(k)) ||
 			strings.HasSuffix(k, "secret") ||

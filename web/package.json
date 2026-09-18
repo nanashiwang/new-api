@@ -63,7 +63,8 @@
     "test:ccswitch-config": "node scripts/ccswitch-config.test.mjs",
     "test:desktop-download": "node scripts/desktop-download.test.mjs",
     "test:auth-redirect": "node scripts/auth-redirect.test.mjs",
-    "test:request-failure": "node scripts/request-failure.test.mjs"
+    "test:request-failure": "node scripts/request-failure.test.mjs",
+    "test:pulse-settings": "node scripts/pulse-settings.test.mjs"
   },
   "eslintConfig": {
     "extends": [
