@@ -550,6 +550,11 @@ func reverseInviteCommissionsByTradeNoTx(tx *gorm.DB, tradeNo string) (int, erro
 		if newAffHistoryQuota < 0 {
 			newAffHistoryQuota = 0
 		}
+		if walletDebit > 0 {
+			if err := InvalidatePulsePaidFundingTx(tx, inviter.Id, "commission_clawback"); err != nil {
+				return 0, err
+			}
+		}
 		if err := tx.Unscoped().Model(&User{}).Where("id = ?", inviter.Id).Updates(map[string]any{
 			"quota":              newQuota,
 			"transferable_quota": newTransferableQuota,

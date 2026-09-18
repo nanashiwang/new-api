@@ -283,6 +283,9 @@ func CreateWalletFundedRedemption(userID int, quota int, requestID string) (*Wal
 			return ErrRedemptionInsufficientTransferableQuota
 		}
 
+		if err := InvalidatePulsePaidFundingTx(tx, userID, "wallet_code_create"); err != nil {
+			return err
+		}
 		updateResult := tx.Model(&User{}).
 			Where("id = ? AND status = ?", userID, common.UserStatusEnabled).
 			Updates(map[string]any{

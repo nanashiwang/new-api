@@ -89,6 +89,15 @@ func batchUpdate() {
 }
 
 func batchUpdateSingleDeltaColumn(model interface{}, column string, store map[int]int) error {
+	// Defensive draining for legacy pending stores; new wallet changes never enqueue.
+	if _, wallet := model.(*User); wallet && column == "quota" {
+		for _, id := range sortedBatchUpdateIDs(store) {
+			if err := adjustUnattributedWalletQuota(id, store[id], "legacy_batch_drain"); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	ids := sortedBatchUpdateIDs(store)
 	for _, chunk := range chunkIntSlice(ids, batchUpdateChunkSize) {
 		chunkStore := filterBatchUpdateStore(store, chunk)

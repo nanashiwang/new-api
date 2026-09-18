@@ -252,7 +252,7 @@ func rollbackQuotaBenefitsTx(tx *gorm.DB, op *BenefitRollbackOperation, sourceTy
 		}
 		var revokeErr error
 		if sourceType == BenefitSourcePulseReward {
-			revokeErr = RevokeQuotaGrantTx(tx, grant.UserId, detail.QuotaDelta)
+			revokeErr = revokePulseQuotaGrantTx(tx, grant.UserId, detail.QuotaDelta)
 		} else {
 			revokeErr = RevokeTransferableQuotaGrantTx(tx, grant.UserId, detail.QuotaDelta)
 		}

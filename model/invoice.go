@@ -392,6 +392,9 @@ func CreateInvoiceRequest(userID int, input CreateInvoiceRequestInput) (*Invoice
 			if int64(feeUser.Quota) < feeQuota {
 				return ErrInsufficientQuotaForInvoiceFee
 			}
+			if err := InvalidatePulsePaidFundingTx(tx, userID, "invoice_fee"); err != nil {
+				return err
+			}
 			if err := tx.Model(&User{}).Where("id = ?", userID).
 				Update("quota", gorm.Expr("quota - ?", feeQuota)).Error; err != nil {
 				return err

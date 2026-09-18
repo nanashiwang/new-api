@@ -79,6 +79,9 @@ type User struct {
 	VerificationCode     string         `json:"verification_code" gorm:"-:all"`                         // this field is only for Email verification, don't save it to database!
 	AccessToken          *string        `json:"-" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
 	Quota                int            `json:"quota" gorm:"type:int;default:0"`
+	PulsePaidQuota       int64          `json:"-" gorm:"type:bigint;not null;default:0"`
+	PulseRewardHold      bool           `json:"-" gorm:"not null;default:false"`
+	PulseFundingEpoch    uint64         `json:"-" gorm:"type:bigint;not null;default:0"`
 	TransferableQuota    int            `json:"transferable_quota" gorm:"type:int;not null;default:0;column:transferable_quota"`
 	UsedQuota            int            `json:"used_quota" gorm:"type:int;default:0;column:used_quota"` // used quota
 	RequestCount         int            `json:"request_count" gorm:"type:int;default:0;"`               // request number
@@ -1627,7 +1630,12 @@ func (user *User) Update(updatePassword bool) error {
 	if newUser.TransferableQuota < 0 {
 		newUser.TransferableQuota = 0
 	}
-	if err = DB.Model(&User{}).Where("id = ?", user.Id).Updates(newUser).Error; err != nil {
+	if err = DB.Transaction(func(tx *gorm.DB) error {
+		if err := InvalidatePulsePaidFundingTx(tx, user.Id, "admin_user_update"); err != nil {
+			return err
+		}
+		return tx.Model(&User{}).Where("id = ?", user.Id).Omit("pulse_paid_quota", "pulse_funding_epoch", "pulse_reward_hold").Updates(newUser).Error
+	}); err != nil {
 		return err
 	}
 
@@ -1671,7 +1679,12 @@ func (user *User) Edit(updatePassword bool) error {
 		transferableQuota = 0
 	}
 	updates["transferable_quota"] = transferableQuota
-	if err = DB.Model(&User{}).Where("id = ?", user.Id).Updates(updates).Error; err != nil {
+	if err = DB.Transaction(func(tx *gorm.DB) error {
+		if err := InvalidatePulsePaidFundingTx(tx, user.Id, "admin_user_edit"); err != nil {
+			return err
+		}
+		return tx.Model(&User{}).Where("id = ?", user.Id).Omit("pulse_paid_quota", "pulse_funding_epoch", "pulse_reward_hold").Updates(updates).Error
+	}); err != nil {
 		return err
 	}
 
@@ -2045,55 +2058,31 @@ func GetUserSetting(id int, fromDB bool) (settingMap dto.UserSetting, err error)
 	return userBase.GetSetting(), nil
 }
 
-func IncreaseUserQuota(id int, quota int, db bool) (err error) {
+// Wallet changes commit immediately: deferred debits cannot safely coexist with
+// paid-source reservations, because a later batch could spend already-certified funds.
+func IncreaseUserQuota(id int, quota int, db bool) error {
 	if quota < 0 {
 		return errors.New("quota 不能为负数！")
 	}
-	gopool.Go(func() {
-		err := cacheIncrUserQuota(id, int64(quota))
-		if err != nil {
-			common.SysLog("failed to increase user quota: " + err.Error())
-		}
-	})
-	if !db && common.BatchUpdateEnabled {
-		addNewRecord(BatchUpdateTypeUserQuota, id, quota)
+	if quota == 0 {
 		return nil
 	}
-	return increaseUserQuota(id, quota)
+	return adjustUnattributedWalletQuota(id, quota, "unattributed_credit")
 }
 
-func increaseUserQuota(id int, quota int) (err error) {
-	err = DB.Model(&User{}).Where("id = ?", id).Update("quota", gorm.Expr("quota + ?", quota)).Error
-	if err != nil {
-		return err
-	}
-	return err
-}
+func increaseUserQuota(id int, quota int) error { return IncreaseUserQuota(id, quota, true) }
 
-func DecreaseUserQuota(id int, quota int) (err error) {
+func DecreaseUserQuota(id int, quota int) error {
 	if quota < 0 {
 		return errors.New("quota 不能为负数！")
 	}
-	gopool.Go(func() {
-		err := cacheDecrUserQuota(id, int64(quota))
-		if err != nil {
-			common.SysLog("failed to decrease user quota: " + err.Error())
-		}
-	})
-	if common.BatchUpdateEnabled {
-		addNewRecord(BatchUpdateTypeUserQuota, id, -quota)
+	if quota == 0 {
 		return nil
 	}
-	return decreaseUserQuota(id, quota)
+	return adjustUnattributedWalletQuota(id, -quota, "unattributed_debit")
 }
 
-func decreaseUserQuota(id int, quota int) (err error) {
-	err = DB.Model(&User{}).Where("id = ?", id).Update("quota", gorm.Expr("quota - ?", quota)).Error
-	if err != nil {
-		return err
-	}
-	return err
-}
+func decreaseUserQuota(id int, quota int) error { return DecreaseUserQuota(id, quota) }
 
 func DeltaUpdateUserQuota(id int, delta int) (err error) {
 	if delta == 0 {

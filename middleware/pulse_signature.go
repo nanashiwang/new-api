@@ -43,9 +43,29 @@ var (
 // deliberately read at request time so operators can rotate it without
 // rebuilding the binary. Redis is the production nonce authority; an
 // in-memory fallback is allowed only outside production.
-func PulseServiceAuth() gin.HandlerFunc {
+func PulseServiceAuth() gin.HandlerFunc { return pulseServiceAuthForRoles("pulse-settlement") }
+
+func PulseBenefitQueryAuth() gin.HandlerFunc {
+	return pulseServiceAuthForRoles("pulse-settlement", "pulse-rollback")
+}
+
+func PulseRollbackAuth() gin.HandlerFunc { return pulseServiceAuthForRoles("pulse-rollback") }
+
+func pulseServiceAuthForRoles(allowedRoles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if !verifyPulseServiceRequestWithSecrets(c.Request, pulseServiceHMACSecrets()) {
+		role := strings.TrimSpace(c.GetHeader(pulseRoleHeader))
+		allowed := false
+		for _, candidate := range allowedRoles {
+			if role == candidate {
+				allowed = true
+				break
+			}
+		}
+		secrets := pulseServiceHMACSecrets()
+		if role == "pulse-rollback" {
+			secrets = pulseRollbackHMACSecrets()
+		}
+		if !allowed || !verifyPulseServiceRequestForRole(c.Request, secrets, role) {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			return
 		}
@@ -70,6 +90,20 @@ func verifyPulseServiceRequest(req *http.Request, secret string) bool {
 
 func pulseServiceHMACSecrets() []string {
 	return pulseHMACSecrets(os.Getenv("PULSE_SERVICE_HMAC_SECRET"), os.Getenv("PULSE_SERVICE_HMAC_SECRET_PREVIOUS"))
+}
+
+// Rollback credentials are never usable by the settlement worker. Fail closed
+// when operators accidentally reuse any current/previous settlement key.
+func pulseRollbackHMACSecrets() []string {
+	secrets := pulseHMACSecrets(os.Getenv("PULSE_ROLLBACK_HMAC_SECRET"), os.Getenv("PULSE_ROLLBACK_HMAC_SECRET_PREVIOUS"))
+	for _, candidate := range secrets {
+		for _, worker := range []string{os.Getenv("PULSE_SERVICE_HMAC_SECRET"), os.Getenv("PULSE_SERVICE_HMAC_SECRET_PREVIOUS")} {
+			if candidate == strings.TrimSpace(worker) {
+				return nil
+			}
+		}
+	}
+	return secrets
 }
 
 // pulseHMACSecrets returns the active key first and, during rotation, the
@@ -100,6 +134,10 @@ func pulseSecretUsable(secret string) bool {
 }
 
 func verifyPulseServiceRequestWithSecrets(req *http.Request, secrets []string) bool {
+	return verifyPulseServiceRequestForRole(req, secrets, "pulse-settlement")
+}
+
+func verifyPulseServiceRequestForRole(req *http.Request, secrets []string, expectedRole string) bool {
 	configured := false
 	for _, secret := range secrets {
 		if strings.TrimSpace(secret) != "" {
@@ -115,7 +153,7 @@ func verifyPulseServiceRequestWithSecrets(req *http.Request, secrets []string) b
 		return false
 	}
 	role := strings.TrimSpace(req.Header.Get(pulseRoleHeader))
-	if role != "pulse-settlement" {
+	if role != expectedRole || (role != "pulse-settlement" && role != "pulse-rollback") {
 		return false
 	}
 	nonce := strings.TrimSpace(req.Header.Get(pulseNonceHeader))
@@ -131,7 +169,7 @@ func verifyPulseServiceRequestWithSecrets(req *http.Request, secrets []string) b
 		return false
 	}
 	if req.Body == nil {
-		return false
+		req.Body = http.NoBody
 	}
 	body, err := io.ReadAll(io.LimitReader(req.Body, pulseMaxRequestBodyBytes+1))
 	if err != nil || len(body) > pulseMaxRequestBodyBytes {

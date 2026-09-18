@@ -235,6 +235,10 @@ func QueryPulseBenefit(c *gin.Context) {
 // RollbackPulseBenefit creates a reversal for the original source_ref. It
 // never accepts a replacement source reference and remains safe to retry.
 func RollbackPulseBenefit(c *gin.Context) {
+	if c.GetString("pulse_service_role") != "pulse-rollback" {
+		c.JSON(http.StatusForbidden, gin.H{"success": false, "message": "需要独立的奖励撤销权限"})
+		return
+	}
 	var request struct {
 		SourceRef string `json:"source_ref"`
 		Reason    string `json:"reason"`
@@ -253,6 +257,14 @@ func RollbackPulseBenefit(c *gin.Context) {
 
 func writePulseBenefitError(c *gin.Context, err error) {
 	switch {
+	case errors.Is(err, model.ErrPulseBenefitPaused), errors.Is(err, model.ErrPulseBenefitPolicy):
+		c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "code": "benefit_paused", "message": "奖励发放暂时关闭，已有奖励仍可查询"})
+	case errors.Is(err, model.ErrPulseBenefitLimit):
+		c.JSON(http.StatusTooManyRequests, gin.H{"success": false, "code": "benefit_limit", "message": "奖励额度达到接收端限额，等待审核或稍后重试"})
+	case errors.Is(err, model.ErrPulseBenefitUserUnavailable):
+		c.JSON(http.StatusForbidden, gin.H{"success": false, "code": "user_unavailable", "message": "奖励接收账号不可用"})
+	case errors.Is(err, model.ErrPulseBenefitInsufficientBalance):
+		c.JSON(http.StatusConflict, gin.H{"success": false, "code": "insufficient_balance", "message": "当前余额不足以撤销奖励，需要人工处理"})
 	case errors.Is(err, model.ErrPulseBenefitConflict):
 		c.JSON(http.StatusConflict, gin.H{"success": false, "code": "payload_conflict", "message": "source_ref 对应的请求内容不一致"})
 	case errors.Is(err, model.ErrPulseBenefitNotFound):

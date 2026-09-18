@@ -9,7 +9,7 @@ import (
 )
 
 func TestGrantPulseBenefitIsIdempotentAndConflictsOnPayloadChange(t *testing.T) {
-	setupPaymentRiskCaseTestDB(t)
+	setupPulseBenefitTestDB(t)
 	user := createPaymentRiskCaseTestUser(t, "pulse-benefit-idempotent")
 	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Updates(map[string]any{
 		"quota": 100, "transferable_quota": 100,
@@ -50,14 +50,14 @@ func TestGrantPulseBenefitIsIdempotentAndConflictsOnPayloadChange(t *testing.T) 
 }
 
 func TestRollbackPulseBenefitUsesOriginalSourceAndIsIdempotent(t *testing.T) {
-	setupPaymentRiskCaseTestDB(t)
+	setupPulseBenefitTestDB(t)
 	user := createPaymentRiskCaseTestUser(t, "pulse-benefit-rollback")
 	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Updates(map[string]any{
 		"quota": 100, "transferable_quota": 100,
 	}).Error)
 	request := PulseBenefitGrantRequest{
 		GrantID: "pulse-grant-rollback", UserID: user.Id, Amount: 40,
-		SourceRef: "pulse-grant-rollback", RewardType: "content",
+		SourceRef: "pulse-grant-rollback", RewardType: "newapi_quota",
 	}
 	require.NoError(t, func() error { _, err := GrantPulseBenefit(request); return err }())
 
@@ -99,11 +99,11 @@ func TestRollbackPulseBenefitUsesOriginalSourceAndIsIdempotent(t *testing.T) {
 }
 
 func TestGrantPulseBenefitReplayOneHundredTimesAddsQuotaOnce(t *testing.T) {
-	setupPaymentRiskCaseTestDB(t)
+	setupPulseBenefitTestDB(t)
 	user := createPaymentRiskCaseTestUser(t, "pulse-benefit-replay-100")
 	request := PulseBenefitGrantRequest{
 		GrantID: "pulse-grant-replay-100", UserID: user.Id, Amount: 25,
-		SourceRef: "pulse-grant-replay-100", RewardType: "period",
+		SourceRef: "pulse-grant-replay-100", RewardType: "newapi_quota",
 	}
 	for i := 0; i < 100; i++ {
 		result, err := GrantPulseBenefit(request)
@@ -123,11 +123,11 @@ func TestGrantPulseBenefitReplayOneHundredTimesAddsQuotaOnce(t *testing.T) {
 }
 
 func TestGrantPulseBenefitRejectsInvalidPayloadHashAndIdentity(t *testing.T) {
-	setupPaymentRiskCaseTestDB(t)
+	setupPulseBenefitTestDB(t)
 	user := createPaymentRiskCaseTestUser(t, "pulse-benefit-invalid")
 	request := PulseBenefitGrantRequest{
 		GrantID: "pulse-grant-invalid", UserID: user.Id, Amount: 10,
-		SourceRef: "pulse-grant-invalid", RewardType: "period",
+		SourceRef: "pulse-grant-invalid", RewardType: "newapi_quota",
 		PayloadHash: "not-the-server-fingerprint",
 	}
 	_, err := GrantPulseBenefit(request)
@@ -142,11 +142,11 @@ func TestGrantPulseBenefitRejectsInvalidPayloadHashAndIdentity(t *testing.T) {
 func TestPulseBenefitFingerprintMatchesSettlementPayload(t *testing.T) {
 	request := PulseBenefitGrantRequest{
 		GrantID: "grant-fingerprint", UserID: 42, Amount: 99,
-		SourceRef: "grant-fingerprint", RewardType: "period",
+		SourceRef: "grant-fingerprint", RewardType: "newapi_quota",
 	}
 	fingerprint, err := pulseBenefitFingerprint(request)
 	require.NoError(t, err)
-	digest := sha256.Sum256([]byte(`{"amount":99,"grant_id":"grant-fingerprint","reward_type":"period","source_ref":"grant-fingerprint","transferable_quota":false,"user_id":42}`))
+	digest := sha256.Sum256([]byte(`{"amount":99,"grant_id":"grant-fingerprint","reward_type":"newapi_quota","source_ref":"grant-fingerprint","transferable_quota":false,"user_id":42}`))
 	require.Equal(t, fmt.Sprintf("%x", digest[:]), fingerprint)
 }
 

@@ -63,6 +63,8 @@ func setupPaymentRiskCaseTestDB(t *testing.T) {
 		&UserSubscription{},
 		&BenefitChangeRecord{},
 		&PulseBenefitReceipt{},
+		&PulseFundingLedger{},
+		&PulseWalletReservation{},
 		&BenefitRollbackOperation{},
 		&Redemption{},
 		&WalletTransferLock{},

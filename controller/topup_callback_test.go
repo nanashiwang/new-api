@@ -62,6 +62,8 @@ func setupTopupCallbackTestDB(t *testing.T) {
 		&model.PaymentRiskCase{},
 		&model.SubscriptionOrder{},
 		&model.BenefitChangeRecord{},
+		&model.PulseFundingLedger{},
+		&model.PulseWalletReservation{},
 		&model.Log{},
 	))
 }

@@ -569,7 +569,7 @@ func recordQuotaBenefitGrantTx(tx *gorm.DB, topUp *TopUp, quotaDelta int, contex
 	if tx == nil || topUp == nil || quotaDelta <= 0 {
 		return nil
 	}
-	return createBenefitChangeRecordTx(tx, &BenefitChangeRecord{
+	if err := createBenefitChangeRecordTx(tx, &BenefitChangeRecord{
 		BenefitType: BenefitTypeQuota,
 		Action:      BenefitActionGrant,
 		SourceType:  BenefitSourceTopUpOrder,
@@ -582,7 +582,10 @@ func recordQuotaBenefitGrantTx(tx *gorm.DB, topUp *TopUp, quotaDelta int, contex
 			PaymentMethod: topUp.PaymentMethod,
 			Context:       context,
 		}),
-	})
+	}); err != nil {
+		return err
+	}
+	return creditOnlinePaidFundingTx(tx, topUp, quotaDelta, context)
 }
 
 func CompleteTopUpByTradeNo(tradeNo string, source string, callerIp string, adminExtras map[string]interface{}) error {

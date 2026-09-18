@@ -46,6 +46,14 @@ func (s *BillingSession) Settle(actualQuota int) error {
 	if s.settled {
 		return nil
 	}
+	// Tracked wallets finalize even when actual == reserved. The reservation
+	// becomes a committed immutable proof before any token/cache adjustments.
+	if wallet, ok := s.funding.(*WalletFunding); ok && wallet.requestID != "" && !s.fundingSettled {
+		if err := wallet.resize(actualQuota, "settled"); err != nil {
+			return err
+		}
+		s.fundingSettled = true
+	}
 	delta := actualQuota - s.preConsumedQuota
 	if delta == 0 {
 		s.settled = true
@@ -256,6 +264,9 @@ func (s *BillingSession) preConsume(c *gin.Context, quota int) *types.NewAPIErro
 func (s *BillingSession) reserveFunding(delta int) error {
 	switch funding := s.funding.(type) {
 	case *WalletFunding:
+		if funding.requestID != "" {
+			return funding.PreConsume(delta)
+		}
 		if funding.requireAvailableQuota {
 			if err := funding.PreConsume(delta); err != nil {
 				return types.NewErrorWithStatusCode(err, types.ErrorCodeInsufficientUserQuota, http.StatusForbidden, types.ErrOptionWithSkipRetry())
@@ -289,6 +300,12 @@ func (s *BillingSession) reserveFunding(delta int) error {
 func (s *BillingSession) rollbackFundingReserve(delta int) {
 	switch funding := s.funding.(type) {
 	case *WalletFunding:
+		if funding.requestID != "" {
+			if err := funding.resize(funding.consumed-delta, "reserved"); err != nil {
+				common.SysLog("error refunding tracked reserve: " + err.Error())
+			}
+			return
+		}
 		if err := model.IncreaseUserQuota(funding.userId, delta, funding.requireAvailableQuota); err != nil {
 			common.SysLog("error rolling back wallet funding reserve: " + err.Error())
 		} else {
@@ -414,7 +431,7 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 
 		session := &BillingSession{
 			relayInfo: relayInfo,
-			funding:   &WalletFunding{userId: relayInfo.UserId, requireAvailableQuota: relayInfo.ImageRequestCount > 0},
+			funding:   &WalletFunding{userId: relayInfo.UserId, requireAvailableQuota: relayInfo.ImageRequestCount > 0, requestID: synchronousFundingRequestID(relayInfo)},
 		}
 		if apiErr := session.preConsume(c, preConsumedQuota); apiErr != nil {
 			return nil, apiErr
@@ -477,4 +494,13 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 		}
 		return session, nil
 	}
+}
+
+// Async, realtime and forced image reservations remain unproven until their
+// full later settlement/refund lifecycle has an attributable durable contract.
+func synchronousFundingRequestID(info *relaycommon.RelayInfo) string {
+	if info == nil || info.TaskRelayInfo != nil || info.ForcePreConsume || info.RelayFormat == types.RelayFormatOpenAIRealtime {
+		return ""
+	}
+	return info.RequestId
 }

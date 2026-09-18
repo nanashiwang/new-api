@@ -130,3 +130,91 @@ func TestPulseServiceAuthStoresVerifiedServiceIdentity(t *testing.T) {
 	require.Equal(t, "pulse-settlement", role)
 	require.False(t, ctx.IsAborted())
 }
+
+func signedPulseRoleRequest(t *testing.T, path, role, secret, nonce string) *http.Request {
+	t.Helper()
+	body := `{"source_ref":"grant-admin"}`
+	timestamp := time.Now().Unix()
+	req := httptest.NewRequest(http.MethodPost, "http://example.test"+path, strings.NewReader(body))
+	req.Header.Set(pulseUserHeader, "42")
+	req.Header.Set(pulseRoleHeader, role)
+	req.Header.Set(pulseTimestampHeader, strconv.FormatInt(timestamp, 10))
+	req.Header.Set(pulseNonceHeader, nonce)
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, err := mac.Write([]byte(pulseCanonicalPayload(req.Method, req.URL.EscapedPath(), "42", role, timestamp, nonce, []byte(body))))
+	require.NoError(t, err)
+	req.Header.Set(pulseSignatureHeader, hex.EncodeToString(mac.Sum(nil)))
+	return req
+}
+
+func TestPulseRollbackRoleAndCredentialsAreIsolated(t *testing.T) {
+	oldRedisEnabled := common.RedisEnabled
+	common.RedisEnabled = false
+	t.Cleanup(func() { common.RedisEnabled = oldRedisEnabled })
+	t.Setenv("PULSE_ENV", "test")
+	t.Setenv("PULSE_SERVICE_HMAC_SECRET", "worker-secret")
+	t.Setenv("PULSE_SERVICE_HMAC_SECRET_PREVIOUS", "old-worker-secret")
+	t.Setenv("PULSE_ROLLBACK_HMAC_SECRET", "operator-secret")
+	t.Setenv("PULSE_ROLLBACK_HMAC_SECRET_PREVIOUS", "old-operator-secret")
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	ok := func(c *gin.Context) { c.Status(http.StatusNoContent) }
+	router.POST("/grant", PulseServiceAuth(), ok)
+	router.POST("/query", PulseBenefitQueryAuth(), ok)
+	router.POST("/rollback", PulseRollbackAuth(), ok)
+	for _, test := range []struct {
+		name, path, role, key string
+		status                int
+	}{
+		{"worker-grant", "/grant", "pulse-settlement", "worker-secret", 204},
+		{"worker-query", "/query", "pulse-settlement", "worker-secret", 204},
+		{"worker-rollback", "/rollback", "pulse-settlement", "worker-secret", 401},
+		{"forged-worker-role", "/rollback", "pulse-rollback", "worker-secret", 401},
+		{"old-forged-worker-role", "/rollback", "pulse-rollback", "old-worker-secret", 401},
+		{"operator-rollback", "/rollback", "pulse-rollback", "operator-secret", 204},
+		{"old-operator-rollback", "/rollback", "pulse-rollback", "old-operator-secret", 204},
+		{"operator-query", "/query", "pulse-rollback", "operator-secret", 204},
+		{"operator-grant", "/grant", "pulse-rollback", "operator-secret", 401},
+		{"forged-operator-role", "/grant", "pulse-settlement", "operator-secret", 401},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, signedPulseRoleRequest(t, test.path, test.role, test.key, "isolated-"+test.name))
+			require.Equal(t, test.status, recorder.Code)
+		})
+	}
+}
+
+func TestPulseRollbackKeysFailClosedWhenReusedOrMissing(t *testing.T) {
+	t.Setenv("PULSE_ENV", "test")
+	t.Setenv("PULSE_SERVICE_HMAC_SECRET", "worker-key")
+	t.Setenv("PULSE_SERVICE_HMAC_SECRET_PREVIOUS", "old-worker-key")
+	t.Setenv("PULSE_ROLLBACK_HMAC_SECRET_PREVIOUS", "")
+	for _, key := range []string{"", "worker-key", "old-worker-key"} {
+		t.Setenv("PULSE_ROLLBACK_HMAC_SECRET", key)
+		require.Empty(t, pulseRollbackHMACSecrets())
+	}
+	t.Setenv("PULSE_ROLLBACK_HMAC_SECRET", "operator-key")
+	t.Setenv("PULSE_ROLLBACK_HMAC_SECRET_PREVIOUS", "old-worker-key")
+	require.Empty(t, pulseRollbackHMACSecrets())
+}
+
+func TestPulseBenefitGETQueryAcceptsSignedEmptyBody(t *testing.T) {
+	oldRedisEnabled := common.RedisEnabled
+	common.RedisEnabled = false
+	t.Cleanup(func() { common.RedisEnabled = oldRedisEnabled })
+	t.Setenv("PULSE_ENV", "test")
+	timestamp := time.Now().Unix()
+	const nonce = "query-get-empty-body"
+	req := httptest.NewRequest(http.MethodGet, "http://example.test/api/internal/pulse/benefits/query/grant-1", nil)
+	req.Body = nil // Real net/http GET requests may have no body at all.
+	req.Header.Set(pulseUserHeader, "1")
+	req.Header.Set(pulseRoleHeader, "pulse-settlement")
+	req.Header.Set(pulseTimestampHeader, strconv.FormatInt(timestamp, 10))
+	req.Header.Set(pulseNonceHeader, nonce)
+	mac := hmac.New(sha256.New, []byte("query-secret"))
+	_, err := mac.Write([]byte(pulseCanonicalPayload(req.Method, req.URL.EscapedPath(), "1", "pulse-settlement", timestamp, nonce, nil)))
+	require.NoError(t, err)
+	req.Header.Set(pulseSignatureHeader, hex.EncodeToString(mac.Sum(nil)))
+	require.True(t, verifyPulseServiceRequest(req, "query-secret"))
+}

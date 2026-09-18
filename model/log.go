@@ -89,6 +89,7 @@ func formatUserLogs(logs []*Log, startIdx int) {
 			delete(otherMap, "admin_info")
 			delete(otherMap, "reject_reason")
 			delete(otherMap, "po")
+			delete(otherMap, "pulse_funding")
 		}
 		if logs[i].Type == LogTypeError {
 			// Error payloads used to include channel and upstream diagnostics at
@@ -316,7 +317,13 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	logger.LogInfo(c, fmt.Sprintf("record consume log: userId=%d, params=%s", userId, common.GetJsonString(params)))
 	username := c.GetString("username")
 	requestId := c.GetString(common.RequestIdKey)
-	otherStr := common.MapToJsonStr(params.Other)
+	snapshot := unknownPulseFunding(params.Quota)
+	if raw, exists := c.Get(PulseFundingContextKey); exists {
+		if verified, ok := raw.(PulseFundingSnapshot); ok && verified.Status == "verified" && verified.UserID == userId && verified.RequestID == requestId && verified.PaidQuota > 0 && verified.PaidQuota <= int64(params.Quota) && verified.PaidQuota+verified.UnknownQuota == int64(params.Quota) {
+			snapshot = verified
+		}
+	}
+	otherStr := common.MapToJsonStr(withPulseFunding(params.Other, snapshot))
 	// 判断是否需要记录 IP
 	needRecordIp := false
 	if settingMap, err := GetUserSetting(userId, false); err == nil {
@@ -399,7 +406,7 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 		TokenId:   params.TokenId,
 		Group:     params.Group,
 		RequestId: params.RequestId,
-		Other:     common.MapToJsonStr(params.Other),
+		Other:     common.MapToJsonStr(withPulseFunding(params.Other, unknownPulseFunding(params.Quota))),
 	}
 	err := LOG_DB.Create(log).Error
 	if err != nil {

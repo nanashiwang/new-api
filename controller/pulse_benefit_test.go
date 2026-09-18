@@ -49,3 +49,14 @@ func TestPulseBenefitRejectsTrailingJSON(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	require.Contains(t, recorder.Body.String(), "参数错误")
 }
+
+func TestRollbackPulseBenefitRejectsSettlementRole(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/internal/pulse/benefits/rollback", bytes.NewBufferString(`{"source_ref":"grant-1","reason":"test"}`))
+	ctx.Set("pulse_service_user_id", uint64(42))
+	ctx.Set("pulse_service_role", "pulse-settlement")
+	RollbackPulseBenefit(ctx)
+	require.Equal(t, http.StatusForbidden, recorder.Code)
+}

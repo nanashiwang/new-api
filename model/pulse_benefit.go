@@ -83,6 +83,9 @@ func GrantPulseBenefit(req PulseBenefitGrantRequest) (PulseBenefitResult, error)
 
 	result := PulseBenefitResult{SourceRef: req.SourceRef, PayloadHash: fingerprint}
 	err = DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockPulseBenefitReceiverTx(tx); err != nil {
+			return err
+		}
 		receipt, findErr := findPulseReceiptTx(tx, req.SourceRef)
 		if findErr != nil {
 			return findErr
@@ -124,6 +127,19 @@ func GrantPulseBenefit(req PulseBenefitGrantRequest) (PulseBenefitResult, error)
 			}
 			return nil
 		}
+		policy, policyErr := loadPulseBenefitPolicy()
+		if policyErr != nil {
+			return policyErr
+		}
+		if req.RewardType != "newapi_quota" {
+			return errors.New("invalid pulse benefit reward_type")
+		}
+		if err := validatePulseBenefitRecipientTx(tx, req.UserID, req.Amount); err != nil {
+			return err
+		}
+		if err := reservePulseBenefitQuotaTx(tx, req, policy); err != nil {
+			return err
+		}
 		if err := createPulseReceiptTx(tx, req.SourceRef, fingerprint, req.UserID); err != nil {
 			return err
 		}
@@ -154,7 +170,11 @@ func GrantPulseBenefit(req PulseBenefitGrantRequest) (PulseBenefitResult, error)
 	})
 	if err == nil {
 		if result.Status == PulseBenefitStatusApplied {
-			_ = cacheIncrUserQuota(req.UserID, int64(req.Amount))
+			// Invalidate instead of incrementing: a concurrent reader can have
+			// loaded the committed balance already, making HINCRBY count twice.
+			if cacheErr := invalidateUserCache(req.UserID); cacheErr != nil {
+				common.SysError("failed to invalidate Pulse grant recipient cache: " + cacheErr.Error())
+			}
 		}
 		return result, nil
 	}
@@ -237,6 +257,9 @@ func RollbackPulseBenefit(sourceRef, reason string) (PulseBenefitResult, error) 
 	_, _, err = rollbackBenefitsBySource("pulse_reward", grant.Id, BenefitSourcePulseReward, sourceRef, reason)
 	if err != nil {
 		return PulseBenefitResult{}, err
+	}
+	if cacheErr := invalidateUserCache(grant.UserId); cacheErr != nil {
+		common.SysError("failed to invalidate Pulse rollback recipient cache: " + cacheErr.Error())
 	}
 	result, err := QueryPulseBenefit(sourceRef)
 	if err != nil {

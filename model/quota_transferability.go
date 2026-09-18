@@ -115,6 +115,9 @@ func RevokeQuotaGrantTx(tx *gorm.DB, userID int, quota int) error {
 	if err := query.First(&user).Error; err != nil {
 		return err
 	}
+	if err := InvalidatePulsePaidFundingTx(tx, userID, "benefit_clawback"); err != nil {
+		return err
+	}
 	user.Quota -= quota
 	if user.Quota <= 0 {
 		user.TransferableQuota = 0
@@ -353,6 +356,12 @@ func RevokeTransferableQuotaGrantTx(tx *gorm.DB, userID int, quota int) error {
 		user := userByID[id]
 		if user == nil {
 			continue
+		}
+		if err := InvalidatePulsePaidFundingTx(tx, id, "paid_benefit_clawback"); err != nil {
+			return err
+		}
+		if err := tx.Unscoped().Model(&User{}).Where("id = ?", id).Update("pulse_reward_hold", true).Error; err != nil {
+			return err
 		}
 		if err := tx.Unscoped().Model(&User{}).Where("id = ?", id).Updates(map[string]any{
 			"quota":              user.Quota,

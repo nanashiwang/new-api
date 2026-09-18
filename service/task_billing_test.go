@@ -39,6 +39,8 @@ func TestMain(m *testing.M) {
 	if err := db.AutoMigrate(
 		&model.Task{},
 		&model.User{},
+		&model.PulseFundingLedger{},
+		&model.PulseWalletReservation{},
 		&model.Token{},
 		&model.Log{},
 		&model.Channel{},

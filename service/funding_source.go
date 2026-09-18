@@ -30,6 +30,8 @@ type WalletFunding struct {
 	requireAvailableQuota bool
 	userId                int
 	consumed              int // 实际预扣的用户额度
+	requestID             string
+	reservation           model.PulseWalletReservation
 }
 
 func (w *WalletFunding) Source() string { return BillingSourceWallet }
@@ -37,6 +39,9 @@ func (w *WalletFunding) Source() string { return BillingSourceWallet }
 func (w *WalletFunding) PreConsume(amount int) error {
 	if amount <= 0 {
 		return nil
+	}
+	if w.requestID != "" {
+		return w.resize(w.consumed+amount, "reserved")
 	}
 	var err error
 	if w.requireAvailableQuota {
@@ -52,6 +57,9 @@ func (w *WalletFunding) PreConsume(amount int) error {
 }
 
 func (w *WalletFunding) Settle(delta int) error {
+	if w.requestID != "" {
+		return w.resize(w.consumed+delta, "settled")
+	}
 	if delta == 0 {
 		return nil
 	}
@@ -63,6 +71,9 @@ func (w *WalletFunding) Settle(delta int) error {
 }
 
 func (w *WalletFunding) Refund() error {
+	if w.requestID != "" {
+		return w.resize(0, "refunded")
+	}
 	if w.consumed <= 0 {
 		return nil
 	}
@@ -70,6 +81,16 @@ func (w *WalletFunding) Refund() error {
 	// 订阅的 RefundSubscriptionPreConsume 有 requestId 幂等保护所以可以重试。
 	// 失败退款必须尽快生效，避免“先扣后还”窗口被批量更新放大。
 	return model.IncreaseUserQuota(w.userId, w.consumed, true)
+}
+
+func (w *WalletFunding) resize(target int, state string) error {
+	receipt, err := model.AdjustPulseWalletReservation(w.userId, w.requestID, target, state, w.requireAvailableQuota)
+	if err != nil {
+		return err
+	}
+	w.consumed = target
+	w.reservation = receipt
+	return nil
 }
 
 // ---------------------------------------------------------------------------

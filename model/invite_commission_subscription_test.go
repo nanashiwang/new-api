@@ -58,6 +58,8 @@ func setupInviteCommissionSubscriptionTest(t *testing.T) {
 		&SubscriptionIssuance{},
 		&UserSubscription{},
 		&BenefitChangeRecord{},
+		&PulseFundingLedger{},
+		&PulseWalletReservation{},
 		&BenefitRollbackOperation{},
 		&TopUp{},
 		&Log{},
