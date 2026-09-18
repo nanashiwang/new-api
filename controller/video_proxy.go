@@ -2,16 +2,21 @@ package controller
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 
@@ -104,12 +109,45 @@ func VideoProxy(c *gin.Context) {
 			return
 		}
 		req.Header.Set("x-goog-api-key", apiKey)
+	case constant.ChannelTypeVertexAi:
+		adaptor := relay.GetTaskAdaptor(constant.TaskPlatform(strconv.Itoa(channel.Type)))
+		videoURL, err = getVertexVideoURL(c, channel, task, adaptor)
+		if err != nil {
+			logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to resolve Vertex video URL for task %s: %s", taskID, err.Error()))
+			var apiErr *types.NewAPIError
+			if errors.As(err, &apiErr) {
+				if apiErr.RetryAfter > 0 {
+					c.Header("Retry-After", fmt.Sprintf("%d", int((apiErr.RetryAfter+time.Second-1)/time.Second)))
+				}
+				videoProxyError(c, apiErr.StatusCode, "server_error", apiErr.Error())
+			} else {
+				videoProxyError(c, http.StatusBadGateway, "server_error", "Failed to resolve Vertex video URL")
+			}
+			return
+		}
 	case constant.ChannelTypeOpenAI, constant.ChannelTypeSora:
 		videoURL = fmt.Sprintf("%s/v1/videos/%s/content", baseURL, task.GetUpstreamTaskID())
 		req.Header.Set("Authorization", "Bearer "+channel.Key)
 	default:
 		// Video URL is stored in PrivateData.ResultURL (fallback to FailReason for old data)
 		videoURL = task.GetResultURL()
+	}
+
+	videoURL = strings.TrimSpace(videoURL)
+	if videoURL == "" {
+		videoProxyError(c, http.StatusBadGateway, "server_error", "Failed to fetch video content")
+		return
+	}
+	if strings.HasPrefix(videoURL, "data:") {
+		mimeType, videoBytes, decodeErr := decodeVideoDataURL(videoURL)
+		if decodeErr != nil {
+			videoProxyError(c, http.StatusBadGateway, "server_error", "Failed to decode video content")
+			return
+		}
+		c.Header("Cache-Control", "public, max-age=86400")
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Data(http.StatusOK, mimeType, videoBytes)
+		return
 	}
 
 	req.URL, err = url.Parse(videoURL)
@@ -120,7 +158,7 @@ func VideoProxy(c *gin.Context) {
 	}
 
 	var releaseSlot func()
-	if channel.Type == constant.ChannelTypeGemini || channel.Type == constant.ChannelTypeOpenAI || channel.Type == constant.ChannelTypeSora {
+	if channel.Type == constant.ChannelTypeGemini || channel.Type == constant.ChannelTypeVertexAi || channel.Type == constant.ChannelTypeOpenAI || channel.Type == constant.ChannelTypeSora {
 		var capacityErr *types.NewAPIError
 		releaseSlot, capacityErr = acquireFixedChannelCapacityWithWait(c, channel)
 		if capacityErr != nil {
@@ -173,4 +211,28 @@ func VideoProxy(c *gin.Context) {
 	if _, err = io.Copy(c.Writer, resp.Body); err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to stream video content: %s", err.Error()))
 	}
+}
+
+// Decode before writing headers so malformed payloads produce an error response.
+func decodeVideoDataURL(dataURL string) (string, []byte, error) {
+	header, payload, ok := strings.Cut(dataURL, ",")
+	if !ok || !strings.HasPrefix(header, "data:") || !strings.HasSuffix(header, ";base64") {
+		return "", nil, fmt.Errorf("unsupported video data url")
+	}
+	mimeType := strings.TrimSuffix(strings.TrimPrefix(header, "data:"), ";base64")
+	if mimeType == "" {
+		mimeType = "video/mp4"
+	}
+	mediaType, _, err := mime.ParseMediaType(mimeType)
+	if err != nil || !strings.HasPrefix(mediaType, "video/") {
+		return "", nil, fmt.Errorf("invalid video media type")
+	}
+	videoBytes, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		videoBytes, err = base64.RawStdEncoding.DecodeString(payload)
+	}
+	if err != nil || len(videoBytes) == 0 {
+		return "", nil, fmt.Errorf("invalid video base64 payload")
+	}
+	return mimeType, videoBytes, nil
 }

@@ -478,7 +478,8 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 			task.FinishTime = now
 		}
 		if strings.HasPrefix(taskResult.Url, "data:") {
-			// data: URI (e.g. Vertex base64 encoded video) — keep in Data, not in ResultURL
+			// The response body is redacted before persistence. Fetch the bytes again via the content proxy.
+			task.PrivateData.ResultURL = taskcommon.BuildProxyURL(task.TaskID)
 		} else if taskResult.Url != "" {
 			// Direct upstream URL (e.g. Kling, Ali, Doubao, etc.)
 			task.PrivateData.ResultURL = taskResult.Url
