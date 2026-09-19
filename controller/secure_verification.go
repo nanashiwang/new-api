@@ -21,7 +21,9 @@ const (
 	secureVerificationMethod2FA        = "2fa"
 	secureVerificationMethodPasskey    = "passkey"
 	// PasskeyReadySessionKey Passkey 验证完成后的中转标记，供 /api/verify 晋升为正式安全验证会话
-	PasskeyReadySessionKey = "secure_passkey_ready_at"
+	PasskeyReadySessionKey      = "secure_passkey_ready_at"
+	passkeyReadyProofSessionKey = "secure_passkey_ready_proof"
+	passkeyReadyProofPurpose    = "passkey:secure-ready"
 	// SecureVerificationTimeout 验证有效期（秒）
 	SecureVerificationTimeout = 300 // 5分钟
 )
@@ -67,7 +69,11 @@ func UniversalVerify(c *gin.Context) {
 	}
 
 	// 检查用户的验证方式
-	twoFA, _ := model.GetTwoFAByUserId(userId)
+	twoFA, err := model.GetTwoFAByUserId(userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	has2FA := twoFA != nil && twoFA.IsEnabled
 
 	passkey, passkeyErr := model.GetPasskeyByUserID(userId)
@@ -100,10 +106,21 @@ func UniversalVerify(c *gin.Context) {
 			common.ApiError(c, fmt.Errorf("用户未启用Passkey"))
 			return
 		}
-		// Passkey 验证需要先调用 PasskeyVerifyBegin 和 PasskeyVerifyFinish
-		// 这里只是验证 Passkey 验证流程是否已经完成
-		// 实际上，前端应该先调用这两个接口，然后再调用本接口
-		verified = true // Passkey 验证逻辑已在 PasskeyVerifyFinish 中完成
+		// A signed timestamp alone is replayable. Consume the proof minted only
+		// after FinishLogin succeeds, binding it to this user and this purpose.
+		session := sessions.Default(c)
+		proof, _ := session.Get(passkeyReadyProofSessionKey).(string)
+		session.Delete(passkeyReadyProofSessionKey)
+		session.Delete(PasskeyReadySessionKey)
+		if err := session.Save(); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		verified, err = model.ConsumeVerificationProof(proof, userId, passkeyReadyProofPurpose)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
 		verifyMethod = "Passkey"
 
 	default:
@@ -122,6 +139,7 @@ func UniversalVerify(c *gin.Context) {
 	session.Set(SecureVerificationSessionKey, now)
 	session.Set(secureVerificationMethodSessionKey, req.Method)
 	session.Delete(PasskeyReadySessionKey)
+	session.Delete(passkeyReadyProofSessionKey)
 	if err := session.Save(); err != nil {
 		common.ApiError(c, fmt.Errorf("保存验证状态失败: %v", err))
 		return
@@ -142,13 +160,14 @@ func UniversalVerify(c *gin.Context) {
 
 // PasskeyVerifyAndSetSession Passkey 验证完成后设置 session
 // 这是一个辅助函数，供 PasskeyVerifyFinish 调用
-func PasskeyVerifyAndSetSession(c *gin.Context) {
+func PasskeyVerifyAndSetSession(c *gin.Context) error {
 	session := sessions.Default(c)
 	now := time.Now().Unix()
 	session.Set(SecureVerificationSessionKey, now)
 	session.Set(secureVerificationMethodSessionKey, secureVerificationMethodPasskey)
 	session.Delete(PasskeyReadySessionKey)
-	_ = session.Save()
+	session.Delete(passkeyReadyProofSessionKey)
+	return session.Save()
 }
 
 // PasskeyVerifyForSecure 用于安全验证的 Passkey 验证流程
@@ -219,7 +238,10 @@ func PasskeyVerifyForSecure(c *gin.Context) {
 	}
 
 	// 验证成功，设置 session
-	PasskeyVerifyAndSetSession(c)
+	if err := PasskeyVerifyAndSetSession(c); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 
 	// 记录日志
 	model.RecordLog(userId, model.LogTypeSystem, "Passkey 安全验证成功")

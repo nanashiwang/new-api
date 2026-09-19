@@ -484,7 +484,13 @@ func PasskeyVerifyFinish(c *gin.Context) {
 
 	session := sessions.Default(c)
 	// Mark passkey as ready; /api/verify will convert this into the final secure verification session.
+	proof, err := model.IssueVerificationProof(user.Id, passkeyReadyProofPurpose, SecureVerificationTimeout*time.Second)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	session.Set(PasskeyReadySessionKey, time.Now().Unix())
+	session.Set(passkeyReadyProofSessionKey, proof)
 	session.Delete(SecureVerificationSessionKey)
 	session.Delete(secureVerificationMethodSessionKey)
 	if err := session.Save(); err != nil {
@@ -559,7 +565,7 @@ func requirePasskeyDeleteVerification(c *gin.Context, userID int) bool {
 func requireSecureVerificationMethod(c *gin.Context, method string) bool {
 	session := sessions.Default(c)
 	verifiedAt, ok := session.Get(SecureVerificationSessionKey).(int64)
-	if !ok || time.Now().Unix()-verifiedAt >= SecureVerificationTimeout {
+	if !ok || verifiedAt > time.Now().Unix() || time.Now().Unix()-verifiedAt >= SecureVerificationTimeout {
 		session.Delete(SecureVerificationSessionKey)
 		session.Delete(secureVerificationMethodSessionKey)
 		_ = session.Save()
