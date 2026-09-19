@@ -133,10 +133,10 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, error) {
 			} else {
 				common.LogSqlType = common.DatabaseTypePostgreSQL
 			}
-			return gorm.Open(postgres.New(postgres.Config{
+			return gorm.Open(postgresMigrationDialector{postgres.Dialector{Config: &postgres.Config{
 				DSN:                  dsn,
 				PreferSimpleProtocol: true, // disables implicit prepared statement usage
-			}), &gorm.Config{
+			}}}, &gorm.Config{
 				PrepareStmt: false, // named statements are unsafe with transaction-pooling proxies
 			})
 		}
@@ -170,7 +170,7 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, error) {
 		} else {
 			common.LogSqlType = common.DatabaseTypeMySQL
 		}
-		return gorm.Open(mysql.Open(dsn), &gorm.Config{
+		return gorm.Open(mysqlMigrationDialector{mysql.Dialector{Config: &mysql.Config{DSN: dsn}}}, &gorm.Config{
 			PrepareStmt: true, // precompile SQL
 		})
 	}

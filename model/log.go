@@ -684,10 +684,14 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 		common.SysError("failed to query log stat: " + err.Error())
 		return stat, errors.New("查询统计数据失败")
 	}
-	if err := rpmTpmQuery.Scan(&stat).Error; err != nil {
+	// Scan resets its destination in newer GORM versions. Keep the quota
+	// aggregate separate from the recent-minute throughput aggregate.
+	var throughput Stat
+	if err := rpmTpmQuery.Scan(&throughput).Error; err != nil {
 		common.SysError("failed to query rpm/tpm stat: " + err.Error())
 		return stat, errors.New("查询统计数据失败")
 	}
+	stat.Rpm, stat.Tpm = throughput.Rpm, throughput.Tpm
 	stat.CacheHitRate, stat.CacheGlobalRate, err = scanCacheRates(cacheRateQuery)
 	if err != nil {
 		return stat, err
@@ -1015,10 +1019,12 @@ func SumUsedQuotaByTokenIDs(tokenIDs []int, startTimestamp int64, endTimestamp i
 		common.SysError("failed to query log stat by token ids: " + err.Error())
 		return stat, errors.New("查询统计数据失败")
 	}
-	if err := rpmTpmQuery.Scan(&stat).Error; err != nil {
+	var throughput Stat
+	if err := rpmTpmQuery.Scan(&throughput).Error; err != nil {
 		common.SysError("failed to query rpm/tpm stat by token ids: " + err.Error())
 		return stat, errors.New("查询统计数据失败")
 	}
+	stat.Rpm, stat.Tpm = throughput.Rpm, throughput.Tpm
 
 	return stat, nil
 }

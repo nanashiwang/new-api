@@ -2,6 +2,7 @@ package model
 
 import (
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -115,6 +116,18 @@ func TestSumUsedQuota_FuzzyUsernameSearch(t *testing.T) {
 	}
 	if stat.Quota != 440 {
 		t.Fatalf("expected quota 440, got %d", stat.Quota)
+	}
+}
+
+func TestSumUsedQuotaByTokenIDsPreservesQuotaAndThroughput(t *testing.T) {
+	db := setupLogQueryTestDB(t)
+	row := Log{TokenId: 42, Type: LogTypeConsume, Quota: 123, PromptTokens: 17, CompletionTokens: 9, CreatedAt: time.Now().Unix()}
+	if err := db.Create(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	stat, err := SumUsedQuotaByTokenIDs([]int{42}, 0, 0)
+	if err != nil || stat.Quota != 123 || stat.Rpm != 1 || stat.Tpm != 26 {
+		t.Fatalf("independent aggregates lost fields: stat=%+v err=%v", stat, err)
 	}
 }
 
