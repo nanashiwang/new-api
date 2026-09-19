@@ -28,6 +28,7 @@ type ollamaChatStreamChunk struct {
 		Content   string          `json:"content"`
 		Thinking  json.RawMessage `json:"thinking"`
 		ToolCalls []struct {
+			ID       string `json:"id,omitempty"`
 			Function struct {
 				Name      string      `json:"name"`
 				Arguments interface{} `json:"arguments"`
@@ -87,7 +88,7 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 			continue
 		}
 		var chunk ollamaChatStreamChunk
-		if err := json.Unmarshal([]byte(line), &chunk); err != nil {
+		if err := common.Unmarshal([]byte(line), &chunk); err != nil {
 			logger.LogError(c, "ollama stream json decode error: "+err.Error()+" line="+line)
 			return usage, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 		}
@@ -96,7 +97,10 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		}
 		created = toUnix(chunk.CreatedAt)
 
-		if !chunk.Done {
+		// Ollama may put its only payload (especially tool calls) on done=true.
+		// Emit that payload before the terminal/usage frames, exactly once.
+		if !chunk.Done || chunk.Response != "" || (chunk.Message != nil &&
+			(chunk.Message.Content != "" || len(chunk.Message.Thinking) > 0 || len(chunk.Message.ToolCalls) > 0)) {
 			// delta content
 			var content string
 			if chunk.Message != nil {
@@ -122,7 +126,7 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 				if raw != "" && raw != "null" {
 					// Unmarshal the JSON string to get the actual content without quotes
 					var thinkingContent string
-					if err := json.Unmarshal(chunk.Message.Thinking, &thinkingContent); err == nil {
+					if err := common.Unmarshal(chunk.Message.Thinking, &thinkingContent); err == nil {
 						delta.Choices[0].Delta.SetReasoningContent(thinkingContent)
 					} else {
 						// Fallback to raw string if it's not a JSON string
@@ -135,8 +139,11 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 				delta.Choices[0].Delta.ToolCalls = make([]dto.ToolCallResponse, 0, len(chunk.Message.ToolCalls))
 				for _, tc := range chunk.Message.ToolCalls {
 					// arguments -> string
-					argBytes, _ := json.Marshal(tc.Function.Arguments)
-					toolId := fmt.Sprintf("call_%d", toolCallIndex)
+					argBytes, _ := common.Marshal(tc.Function.Arguments)
+					toolId := tc.ID
+					if toolId == "" {
+						toolId = fmt.Sprintf("call_%d", toolCallIndex)
+					}
 					tr := dto.ToolCallResponse{ID: toolId, Type: "function", Function: dto.FunctionResponse{Name: tc.Function.Name, Arguments: string(argBytes)}}
 					tr.SetIndex(toolCallIndex)
 					toolCallIndex++
@@ -146,6 +153,8 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 			if data, err := common.Marshal(delta); err == nil {
 				_ = helper.StringData(c, string(data))
 			}
+		}
+		if !chunk.Done {
 			continue
 		}
 		// done frame
@@ -156,6 +165,9 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		finishReason := chunk.DoneReason
 		if finishReason == "" {
 			finishReason = "stop"
+		}
+		if toolCallIndex > 0 && finishReason == "stop" {
+			finishReason = "tool_calls"
 		}
 		// emit stop delta
 		if stop := helper.GenerateStopResponse(responseId, created, model, finishReason); stop != nil {
