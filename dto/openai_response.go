@@ -225,6 +225,7 @@ type CompletionsStreamResponse struct {
 type Usage struct {
 	// InputTokensEstimated distinguishes local fallback counts from upstream usage.
 	InputTokensEstimated bool            `json:"-"`
+	InterruptedOutput    bool            `json:"-"` // billable partial output, not a successful response
 	PromptTokens         int             `json:"prompt_tokens"`
 	CompletionTokens     int             `json:"completion_tokens"`
 	TotalTokens          int             `json:"total_tokens"`

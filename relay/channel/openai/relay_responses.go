@@ -260,6 +260,8 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 
 	var usage = &dto.Usage{}
 	var responseTextBuilder strings.Builder
+	var billableDeltaBuilder strings.Builder
+	hasUpstreamUsage := false
 	completed := false
 	var terminalError *types.NewAPIError
 	hasEffectiveOutput := false
@@ -271,6 +273,25 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 	preludeCommitted := false
 	bufferedPreludeBytes := 0
 	bufferedPrelude := make([]bufferedResponsesStreamEvent, 0, 4)
+	interruptedUsage := func() *dto.Usage {
+		// No output means no charge, even if a failed prelude reported input usage.
+		if !hasEffectiveOutput {
+			return nil
+		}
+		if !hasUpstreamUsage {
+			usage.CompletionTokens = service.CountTextToken(billableDeltaBuilder.String(), info.UpstreamModelName)
+			if usage.CompletionTokens > 0 {
+				usage.PromptTokens = info.GetEstimatePromptTokens()
+				usage.InputTokensEstimated = true
+			}
+			usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+		}
+		if usage.TotalTokens <= 0 && usage.WebSearchRequests == 0 {
+			return nil
+		}
+		usage.InterruptedOutput = true
+		return usage
+	}
 	flushBufferedPrelude := func() {
 		if len(bufferedPrelude) == 0 {
 			return
@@ -313,6 +334,19 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 				info.SetFirstEffectiveOutputTime()
 			}
 			if streamResponse.Response != nil {
+				if reported := streamResponse.Response.Usage; reported != nil {
+					// Terminal failed/incomplete events can carry authoritative usage.
+					// Snapshots replace counts; never add cumulative event usage.
+					captured := buildResponsesUsage(c, info, streamResponse.Response)
+					if captured.TotalTokens == 0 {
+						captured.TotalTokens = captured.PromptTokens + captured.CompletionTokens
+					}
+					if service.ValidUsage(captured) {
+						captured.WebSearchRequests = max(captured.WebSearchRequests, usage.WebSearchRequests)
+						usage = captured
+						hasUpstreamUsage = true
+					}
+				}
 				if streamResponse.Response.ID != "" {
 					responseID = streamResponse.Response.ID
 				}
@@ -410,6 +444,9 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 			case "response.output_text.delta":
 				// 处理输出文本
 				responseTextBuilder.WriteString(streamResponse.Delta)
+				billableDeltaBuilder.WriteString(streamResponse.Delta)
+			case "response.reasoning_text.delta", "response.reasoning_summary_text.delta", "response.refusal.delta", "response.function_call_arguments.delta":
+				billableDeltaBuilder.WriteString(streamResponse.Delta)
 			case dto.ResponsesOutputTypeItemDone:
 				// 函数调用处理
 				if streamResponse.Item != nil {
@@ -435,19 +472,19 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 		if info != nil && info.StreamStatus != nil {
 			info.StreamStatus.RecordError("responses stream terminated with explicit failure: " + string(terminalError.GetErrorCode()))
 		}
-		return nil, terminalError
+		return interruptedUsage(), terminalError
 	}
 
 	if info != nil && info.StreamStatus != nil && info.StreamStatus.EndReason == relaycommon.StreamEndReasonClientGone {
 		info.StreamStatus.MarkOutcome(relaycommon.ResponseOutcomeCancelled)
-		return nil, types.NewError(context.Canceled, types.ErrorCodeDoRequestFailed,
+		return interruptedUsage(), types.NewError(context.Canceled, types.ErrorCodeDoRequestFailed,
 			types.ErrOptionWithSkipRetry(),
 			types.ErrOptionWithHideErrMsg("client canceled while receiving responses stream"))
 	}
 
-	if usage.CompletionTokens == 0 {
+	if usage.CompletionTokens == 0 && !hasUpstreamUsage {
 		// 计算输出文本的 token 数量
-		tempStr := responseTextBuilder.String()
+		tempStr := billableDeltaBuilder.String()
 		if len(tempStr) > 0 {
 			// 非正常结束，使用输出文本的 token 数量
 			completionTokens := service.CountTextToken(tempStr, info.UpstreamModelName)
@@ -455,7 +492,7 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 		}
 	}
 
-	if usage.PromptTokens == 0 && usage.CompletionTokens != 0 {
+	if usage.PromptTokens == 0 && usage.CompletionTokens != 0 && !hasUpstreamUsage {
 		usage.InputTokensEstimated = true
 		usage.PromptTokens = info.GetEstimatePromptTokens()
 	}
@@ -485,13 +522,19 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 				EndReason:          info.StreamStatus.EndReason,
 				EndError:           info.StreamStatus.EndError,
 			})
+			mergeResponsesStreamUsage(usage, continuedUsage)
 			if continued {
-				mergeResponsesStreamUsage(usage, continuedUsage)
 				return usage, nil
 			}
 		}
 		sendSyntheticResponsesFailed(c, info, usage, reason, responseID, responseModel, responseCreatedAt)
 		info.StreamStatus.MarkOutcome(relaycommon.ResponseOutcomeIncomplete)
+		// Estimates were finalized before continuation; do not overwrite the
+		// merged usage with the first attempt's delta buffer.
+		if hasEffectiveOutput && (usage.TotalTokens > 0 || usage.WebSearchRequests > 0) {
+			usage.InterruptedOutput = true
+			return usage, types.NewOpenAIError(errors.New(reason), types.ErrorCodeBadResponseBody, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
+		}
 		return nil, types.NewOpenAIError(errors.New(reason), types.ErrorCodeBadResponseBody, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
 	}
 
@@ -561,6 +604,8 @@ func mergeResponsesStreamUsage(dst *dto.Usage, src *dto.Usage) {
 	dst.CompletionTokens += src.CompletionTokens
 	dst.TotalTokens += src.TotalTokens
 	dst.WebSearchRequests += src.WebSearchRequests
+	dst.InputTokensEstimated = dst.InputTokensEstimated || src.InputTokensEstimated
+	dst.InterruptedOutput = dst.InterruptedOutput || src.InterruptedOutput
 	dst.PromptTokensDetails.Add(src.PromptTokensDetails)
 	if dst.TotalTokens == 0 {
 		dst.TotalTokens = dst.PromptTokens + dst.CompletionTokens

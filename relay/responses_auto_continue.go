@@ -101,7 +101,7 @@ func continueResponsesStream(c *gin.Context, info *relaycommon.RelayInfo, origin
 			}
 		}
 		logger.LogError(c, "responses auto-continue failed: "+err.Error())
-		return nil, false
+		return usage, false
 	}
 	logger.LogInfo(c, fmt.Sprintf("responses auto-continue finished: from_channel=%d to_channel=%d", originalChannelID, channel.Id))
 	return usage, true

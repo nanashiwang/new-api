@@ -176,7 +176,8 @@ func TestOaiResponsesStreamHandler_OverloadAfterOutputIsForwardedWithoutRetry(t 
 
 	usage, err := OaiResponsesStreamHandlerWithOptions(c, info, newResponsesStreamHTTPResponse(body), opts)
 
-	require.Nil(t, usage)
+	require.NotNil(t, usage)
+	require.True(t, usage.InterruptedOutput)
 	require.Error(t, err)
 	require.Equal(t, http.StatusServiceUnavailable, err.StatusCode)
 	require.True(t, types.IsSkipRetryError(err))
@@ -344,7 +345,8 @@ func TestOaiResponsesStreamHandler_FailsInsteadOfSynthesizingCompletedWhenOutput
 
 	opts, cooldowns := newResponsesStreamCooldownCounter()
 	usage, err := OaiResponsesStreamHandlerWithOptions(c, info, newResponsesStreamHTTPResponse(body), opts)
-	require.Nil(t, usage)
+	require.NotNil(t, usage)
+	require.True(t, usage.InterruptedOutput)
 	require.Error(t, err)
 	require.True(t, types.IsSkipRetryError(err))
 	require.Equal(t, 1, *cooldowns)
@@ -406,7 +408,8 @@ func TestOaiResponsesStreamHandler_DoesNotSynthesizeCompletedWhenOutputExistsAft
 
 	opts, cooldowns := newResponsesStreamCooldownCounter()
 	usage, err := OaiResponsesStreamHandlerWithOptions(c, info, newResponsesStreamHTTPResponseWithReadError(body, errors.New("upstream read timeout")), opts)
-	require.Nil(t, usage)
+	require.NotNil(t, usage)
+	require.True(t, usage.InterruptedOutput)
 	require.Error(t, err)
 	require.True(t, types.IsSkipRetryError(err))
 	require.Equal(t, 1, *cooldowns)

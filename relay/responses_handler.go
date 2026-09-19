@@ -216,6 +216,12 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		usage, newAPIError = adaptor.DoResponse(c, httpResp, info)
 	}
 	if newAPIError != nil {
+		if partial, ok := usage.(*dto.Usage); ok && partial != nil && partial.InterruptedOutput {
+			// BillingSession.Settle is idempotent; the outer error defer cannot
+			// refund a settled wallet/subscription/token-only reservation.
+			postConsumeQuota(c, info, partial, "流式响应中断，按已交付用量结算")
+			newAPIError = types.NewError(newAPIError, newAPIError.GetErrorCode(), types.ErrOptionWithSkipRetry())
+		}
 		// reset status code 重置状态码
 		service.ResetStatusCode(newAPIError, statusCodeMappingStr)
 		return newAPIError
