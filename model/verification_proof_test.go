@@ -1,13 +1,42 @@
 package model
 
 import (
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
+
+func TestVerificationProofDatabaseMatrix(t *testing.T) {
+	for _, tc := range []struct {
+		name, env string
+	}{{"mysql", "TEST_MYSQL_DSN"}, {"postgres", "TEST_POSTGRES_DSN"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			dsn := os.Getenv(tc.env)
+			if dsn == "" {
+				t.Skip("disposable database DSN not configured")
+			}
+			var dialect gorm.Dialector = mysql.Open(dsn)
+			if tc.name == "postgres" {
+				dialect = postgres.New(postgres.Config{DSN: dsn, PreferSimpleProtocol: true})
+			}
+			db, err := gorm.Open(dialect, &gorm.Config{})
+			require.NoError(t, err)
+			sqlDB, err := db.DB()
+			require.NoError(t, err)
+			previous := DB
+			DB = db
+			t.Cleanup(func() { DB = previous; _ = sqlDB.Close() })
+			TestVerificationProofScopeExpiryAndSingleUse(t)
+		})
+	}
+}
 
 func TestVerificationProofScopeExpiryAndSingleUse(t *testing.T) {
 	require.NoError(t, DB.AutoMigrate(&VerificationProof{}))
