@@ -431,6 +431,7 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 	})
 
 	if terminalError != nil {
+		info.StreamStatus.MarkOutcome(relaycommon.ResponseOutcomeFailed)
 		if info != nil && info.StreamStatus != nil {
 			info.StreamStatus.RecordError("responses stream terminated with explicit failure: " + string(terminalError.GetErrorCode()))
 		}
@@ -438,6 +439,7 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 	}
 
 	if info != nil && info.StreamStatus != nil && info.StreamStatus.EndReason == relaycommon.StreamEndReasonClientGone {
+		info.StreamStatus.MarkOutcome(relaycommon.ResponseOutcomeCancelled)
 		return nil, types.NewError(context.Canceled, types.ErrorCodeDoRequestFailed,
 			types.ErrOptionWithSkipRetry(),
 			types.ErrOptionWithHideErrMsg("client canceled while receiving responses stream"))
@@ -489,9 +491,11 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 			}
 		}
 		sendSyntheticResponsesFailed(c, info, usage, reason, responseID, responseModel, responseCreatedAt)
+		info.StreamStatus.MarkOutcome(relaycommon.ResponseOutcomeIncomplete)
 		return nil, types.NewOpenAIError(errors.New(reason), types.ErrorCodeBadResponseBody, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
 	}
 
+	info.StreamStatus.MarkOutcome(relaycommon.ResponseOutcomeCompleted)
 	return usage, nil
 }
 

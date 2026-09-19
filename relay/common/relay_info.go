@@ -225,11 +225,12 @@ type RelayInfo struct {
 	ForcePreConsume bool
 	// Billing 是计费会话，封装了预扣费/结算/退款的统一生命周期。
 	// 免费模型时为 nil。
-	Billing               BillingSettler
-	ImageRequestCount     int
-	ImageResponseCount    *int // nil means the adapter did not report an actual payload count
-	ImageBasePriceData    *types.PriceData
-	ImageBaseBillingInput *billingexpr.RequestInput
+	Billing                 BillingSettler
+	ImageRequestCount       int
+	ImageResponseCount      *int  // nil means the adapter did not report an actual payload count
+	PerformanceOutputTokens int64 // observed usage only; samples are recorded once at request completion
+	ImageBasePriceData      *types.PriceData
+	ImageBaseBillingInput   *billingexpr.RequestInput
 	// BillingSource indicates whether this request is billed from wallet quota or subscription.
 	// "" or "wallet" => wallet; "subscription" => subscription
 	BillingSource string

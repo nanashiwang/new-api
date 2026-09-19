@@ -216,7 +216,12 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 		return true
 	})
 	if terminalError != nil {
+		info.StreamStatus.MarkOutcome(relaycommon.ResponseOutcomeFailed)
 		return nil, terminalError
+	}
+	info.StreamStatus.RequireTerminal()
+	if completed || (info.StreamStatus != nil && info.StreamStatus.EndReason == relaycommon.StreamEndReasonDone) {
+		info.StreamStatus.MarkOutcome(relaycommon.ResponseOutcomeCompleted)
 	}
 	if !completed && info.StreamStatus != nil && info.StreamStatus.EndReason != relaycommon.StreamEndReasonDone {
 		info.StreamStatus.RecordError("OpenAI stream ended without a completion marker")

@@ -1349,6 +1349,10 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	if !completed && info.StreamStatus != nil {
 		info.StreamStatus.RecordError("Gemini stream ended without a completion marker")
 	}
+	info.StreamStatus.RequireTerminal()
+	if completed {
+		info.StreamStatus.MarkOutcome(relaycommon.ResponseOutcomeCompleted)
+	}
 
 	if imageCount != 0 {
 		if usage.CompletionTokens == 0 {

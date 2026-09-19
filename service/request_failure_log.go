@@ -17,6 +17,20 @@ import (
 const requestFailureKey = "final_request_failure"
 const requestFailureAttemptsKey = "request_failure_attempts"
 const RequestLogStreamKey = "request_log_stream"
+const RequestOutcomeKey = "relay_request_succeeded"
+
+func RequestSucceeded(c *gin.Context) bool {
+	if c == nil || c.Writer.Status() >= 400 || (c.Request != nil && c.Request.Context().Err() != nil) {
+		return false
+	}
+	if _, failed := c.Get(requestFailureKey); failed {
+		return false
+	}
+	if outcome, exists := c.Get(RequestOutcomeKey); exists {
+		return outcome == true
+	}
+	return true
+}
 
 // MarkRequestFailure is only called for the final client-facing error. Channel
 // retries remain diagnostic attempts and must not become failed user requests.

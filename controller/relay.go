@@ -137,6 +137,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 
 	c.Set(service.RequestLogStreamKey, relayInfo.IsStream)
+	defer func() {
+		success := newAPIError == nil && c.Request.Context().Err() == nil && c.Writer.Status() < 400 && relayInfo.StreamStatus.IsSuccessful()
+		c.Set(service.RequestOutcomeKey, success)
+		// Record synchronously so a retry/continuation cannot mutate the sampled
+		// relay state and partial billing cannot create a second success sample.
+		perfmetrics.RecordRelaySample(relayInfo, success, relayInfo.PerformanceOutputTokens)
+	}()
 
 	// Enforce a user-scoped cooling-off period before token counting, billing,
 	// channel selection, or any upstream request. Local rejections never create
@@ -405,11 +412,6 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	if len(useChannel) > 1 {
 		retryLogStr := fmt.Sprintf("重试：%s", strings.Trim(strings.Join(strings.Fields(fmt.Sprint(useChannel)), "->"), "[]"))
 		logger.LogInfo(c, retryLogStr)
-	}
-	if newAPIError != nil {
-		gopool.Go(func() {
-			perfmetrics.RecordRelaySample(relayInfo, false, 0)
-		})
 	}
 }
 

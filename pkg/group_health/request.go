@@ -32,7 +32,7 @@ func (r *Request) Observe(info *relaycommon.RelayInfo, success bool, now time.Ti
 	if r == nil || info == nil || info.UsingGroup == "" || info.UsingGroup == "auto" {
 		return
 	}
-	if info.StreamStatus != nil && (info.StreamStatus.HasErrors() || info.StreamStatus.EndError != nil || !info.StreamStatus.IsNormalEnd()) {
+	if !info.StreamStatus.IsSuccessful() {
 		success = false
 	}
 	sample := Sample{Group: info.UsingGroup, Model: r.model, Success: success}

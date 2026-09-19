@@ -9,6 +9,15 @@ import (
 
 type StreamEndReason string
 
+type ResponseOutcome string
+
+const (
+	ResponseOutcomeCompleted  ResponseOutcome = "completed"
+	ResponseOutcomeFailed     ResponseOutcome = "failed"
+	ResponseOutcomeIncomplete ResponseOutcome = "incomplete"
+	ResponseOutcomeCancelled  ResponseOutcome = "cancelled"
+)
+
 const (
 	StreamEndReasonNone        StreamEndReason = ""
 	StreamEndReasonDone        StreamEndReason = "done"
@@ -33,9 +42,11 @@ type StreamStatus struct {
 	EndError  error
 	endOnce   sync.Once
 
-	mu         sync.Mutex
-	Errors     []StreamErrorEntry
-	ErrorCount int
+	mu              sync.Mutex
+	Errors          []StreamErrorEntry
+	ErrorCount      int
+	response        ResponseOutcome
+	expectsTerminal bool
 }
 
 func NewStreamStatus() *StreamStatus {
@@ -47,9 +58,51 @@ func (s *StreamStatus) SetEndReason(reason StreamEndReason, err error) {
 		return
 	}
 	s.endOnce.Do(func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
 		s.EndReason = reason
 		s.EndError = err
 	})
+}
+
+func (s *StreamStatus) RequireTerminal() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.expectsTerminal = true
+}
+
+// Keep the first terminal result; an explicit failure always takes precedence.
+func (s *StreamStatus) MarkOutcome(outcome ResponseOutcome) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.response == "" || outcome == ResponseOutcomeFailed {
+		s.response = outcome
+	}
+}
+
+// IsSuccessful separates protocol success from HTTP 200 / transport EOF.
+func (s *StreamStatus) IsSuccessful() bool {
+	if s == nil {
+		return true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ErrorCount > 0 || s.EndError != nil {
+		return false
+	}
+	if s.response != "" {
+		return s.response == ResponseOutcomeCompleted && s.EndReason != StreamEndReasonClientGone
+	}
+	if s.expectsTerminal {
+		return false
+	}
+	return s.EndReason == StreamEndReasonDone || s.EndReason == StreamEndReasonEOF || s.EndReason == StreamEndReasonHandlerStop
 }
 
 func (s *StreamStatus) RecordError(msg string) {
