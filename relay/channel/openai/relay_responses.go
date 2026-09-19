@@ -454,6 +454,7 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 	}
 
 	if usage.PromptTokens == 0 && usage.CompletionTokens != 0 {
+		usage.InputTokensEstimated = true
 		usage.PromptTokens = info.GetEstimatePromptTokens()
 	}
 

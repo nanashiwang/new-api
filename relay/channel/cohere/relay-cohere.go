@@ -227,6 +227,7 @@ func cohereRerankHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 	}
 	usage := dto.Usage{}
 	if cohereResp.Meta.BilledUnits.InputTokens == 0 {
+		usage.InputTokensEstimated = true
 		usage.PromptTokens = info.GetEstimatePromptTokens()
 		usage.CompletionTokens = 0
 		usage.TotalTokens = info.GetEstimatePromptTokens()

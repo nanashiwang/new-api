@@ -49,8 +49,9 @@
   color: var(--semi-color-danger);
 }
 .group-health-metrics {
+  container-type: inline-size;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
   margin-bottom: 20px;
 }
@@ -65,7 +66,7 @@
   color: var(--semi-color-text-2);
 }
 .group-health-number {
-  font-size: 26px;
+  font-size: clamp(18px, 7cqi, 26px);
   line-height: 1.2;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
@@ -280,7 +281,7 @@
     padding: 14px;
   }
   .group-health-number {
-    font-size: 23px;
+    font-size: clamp(18px, 7cqi, 23px);
   }
   .group-health-bars {
     gap: 2px;

@@ -5729,7 +5729,10 @@
     "生图显示成功同步请求的完成耗时，异步提交不计入完成样本。": "Pour les images, la durée de traitement concerne les requêtes synchrones réussies. Les soumissions asynchrones sont exclues des échantillons de traitement.",
     "部分统计采集延迟或缺失，当前数据仅供参考。": "Certaines statistiques sont retardées ou manquantes. Les données actuelles sont fournies à titre indicatif.",
     "当前小时尚未结束": "L’heure actuelle n’est pas terminée",
-    "最近采样": "Dernier échantillon"
+    "最近采样": "Dernier échantillon",
+    "缓存": "Cache",
+    "缓存命中率": "Taux de cache",
+    "缓存命中率为成功请求的缓存读取 Token 总量除以输入 Token 总量，包含未命中请求，缓存写入不算命中；无有效用量时显示 —。": "Total des tokens lus en cache divisé par le total des tokens en entrée des requêtes réussies, y compris sans cache. Les écritures ne sont pas des accès en cache. Sans données valides : —."
   },
   "?????? 0 ??? 7 ????": {},
   "?????? 0 ???????": {},

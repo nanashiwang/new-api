@@ -51,6 +51,9 @@ function TokenGroupHealthMetrics({ stats, metric }) {
         {metric === 'completion' ? t('平均完成') : t('首字')}{' '}
         <strong>{formatHealthLatency(latency.value)}</strong>
       </span>
+      <span title={t('缓存命中率')}>
+        {t('缓存')} <strong>{formatHealthRate(stats?.cache_hit_rate)}</strong>
+      </span>
     </span>
   );
 }

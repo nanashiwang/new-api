@@ -6024,7 +6024,10 @@
     "生图显示成功同步请求的完成耗时，异步提交不计入完成样本。": "Tạo ảnh hiển thị thời gian hoàn tất của yêu cầu đồng bộ thành công. Các lần gửi bất đồng bộ không được tính vào mẫu hoàn tất.",
     "部分统计采集延迟或缺失，当前数据仅供参考。": "Một số thống kê bị trễ hoặc thiếu. Dữ liệu hiện tại chỉ mang tính tham khảo.",
     "当前小时尚未结束": "Giờ hiện tại chưa kết thúc",
-    "最近采样": "Mẫu gần nhất"
+    "最近采样": "Mẫu gần nhất",
+    "缓存": "Bộ nhớ đệm",
+    "缓存命中率": "Tỷ lệ trúng bộ nhớ đệm",
+    "缓存命中率为成功请求的缓存读取 Token 总量除以输入 Token 总量，包含未命中请求，缓存写入不算命中；无有效用量时显示 —。": "Tổng token đầu vào đọc từ bộ nhớ đệm chia cho tổng token đầu vào của các yêu cầu thành công, gồm cả lần không trúng. Ghi bộ nhớ đệm không tính là trúng; thiếu dữ liệu hiển thị —."
   },
   "?????? 0 ??? 7 ????": {},
   "?????? 0 ???????": {},

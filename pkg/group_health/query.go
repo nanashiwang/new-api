@@ -12,14 +12,16 @@ import (
 const MetricScope = "per_request_per_group_final_outcome"
 
 type Metrics struct {
-	RequestCount    int64    `json:"request_count"`
-	SuccessCount    int64    `json:"success_count"`
-	FailureCount    int64    `json:"failure_count"`
-	SuccessRate     *float64 `json:"success_rate"`
-	AvgTTFTMs       *float64 `json:"avg_ttft_ms"`
-	TTFTCount       int64    `json:"ttft_count"`
-	AvgCompletionMs *float64 `json:"avg_completion_ms"`
-	CompletionCount int64    `json:"completion_count"`
+	CacheHitRate     *float64 `json:"cache_hit_rate"`
+	CacheSampleCount int64    `json:"cache_sample_count"`
+	RequestCount     int64    `json:"request_count"`
+	SuccessCount     int64    `json:"success_count"`
+	FailureCount     int64    `json:"failure_count"`
+	SuccessRate      *float64 `json:"success_rate"`
+	AvgTTFTMs        *float64 `json:"avg_ttft_ms"`
+	TTFTCount        int64    `json:"ttft_count"`
+	AvgCompletionMs  *float64 `json:"avg_completion_ms"`
+	CompletionCount  int64    `json:"completion_count"`
 }
 
 type Bucket struct {
@@ -100,6 +102,9 @@ func buildResult(groups []string, rows []model.GroupHealthMetric, start, end int
 }
 
 func add(dst *model.GroupHealthMetric, src model.GroupHealthMetric) {
+	dst.CacheReadTokens += src.CacheReadTokens
+	dst.CacheInputTokens += src.CacheInputTokens
+	dst.CacheSampleCount += src.CacheSampleCount
 	dst.RequestCount += src.RequestCount
 	dst.SuccessCount += src.SuccessCount
 	dst.TTFTSumMs += src.TTFTSumMs
@@ -110,6 +115,11 @@ func add(dst *model.GroupHealthMetric, src model.GroupHealthMetric) {
 
 func summarize(row model.GroupHealthMetric) Metrics {
 	result := Metrics{RequestCount: row.RequestCount, SuccessCount: row.SuccessCount, FailureCount: row.RequestCount - row.SuccessCount, TTFTCount: row.TTFTCount, CompletionCount: row.CompletionCount}
+	result.CacheSampleCount = row.CacheSampleCount
+	if row.CacheInputTokens > 0 && row.CacheSampleCount > 0 {
+		value := float64(row.CacheReadTokens) / float64(row.CacheInputTokens) * 100
+		result.CacheHitRate = &value
+	}
 	if row.RequestCount > 0 {
 		value := float64(row.SuccessCount) / float64(row.RequestCount) * 100
 		result.SuccessRate = &value

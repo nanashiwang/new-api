@@ -1274,6 +1274,7 @@ const EditTokenModal = (props) => {
                           dropdownMatchSelectWidth={false}
                           dropdownStyle={{
                             minWidth: 0,
+                            width: 440,
                             maxWidth: 'calc(100vw - 24px)',
                           }}
                           renderSelectedItem={(optionNode) =>

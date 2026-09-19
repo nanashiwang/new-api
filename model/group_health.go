@@ -12,17 +12,20 @@ import (
 // database timeout; other replicas have separate IDs and are summed at query time.
 // No channel, account, token, user, prompt, or request identifier is stored.
 type GroupHealthMetric struct {
-	ID              string `gorm:"type:varchar(36);primaryKey"`
-	GroupName       string `gorm:"size:64;index:idx_group_health_window,priority:1"`
-	ModelName       string `gorm:"size:255;index:idx_group_health_model,priority:1"`
-	BucketTs        int64  `gorm:"index:idx_group_health_window,priority:2;index:idx_group_health_model,priority:2;index"`
-	RequestCount    int64
-	SuccessCount    int64
-	TTFTSumMs       int64
-	TTFTCount       int64
-	CompletionSumMs int64
-	CompletionCount int64
-	UpdatedAt       int64 `gorm:"autoUpdateTime:false"`
+	ID               string `gorm:"type:varchar(36);primaryKey"`
+	GroupName        string `gorm:"size:64;index:idx_group_health_window,priority:1"`
+	ModelName        string `gorm:"size:255;index:idx_group_health_model,priority:1"`
+	BucketTs         int64  `gorm:"index:idx_group_health_window,priority:2;index:idx_group_health_model,priority:2;index"`
+	RequestCount     int64
+	SuccessCount     int64
+	TTFTSumMs        int64
+	TTFTCount        int64
+	CompletionSumMs  int64
+	CompletionCount  int64
+	CacheReadTokens  int64 `gorm:"default:0"`
+	CacheInputTokens int64 `gorm:"default:0"`
+	CacheSampleCount int64 `gorm:"default:0"`
+	UpdatedAt        int64 `gorm:"autoUpdateTime:false"`
 }
 
 func SaveGroupHealthSnapshots(ctx context.Context, rows []GroupHealthMetric) error {
@@ -33,7 +36,7 @@ func SaveGroupHealthSnapshots(ctx context.Context, rows []GroupHealthMetric) err
 		Columns: []clause.Column{{Name: "id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"request_count", "success_count", "ttft_sum_ms", "ttft_count",
-			"completion_sum_ms", "completion_count", "updated_at",
+			"completion_sum_ms", "completion_count", "cache_read_tokens", "cache_input_tokens", "cache_sample_count", "updated_at",
 		}),
 	}).CreateInBatches(&rows, 100).Error
 }
@@ -44,7 +47,7 @@ func QueryGroupHealthMetrics(ctx context.Context, groups []string, modelName str
 		return rows, nil
 	}
 	query := DB.WithContext(ctx).Model(&GroupHealthMetric{}).
-		Select("group_name, model_name, bucket_ts, SUM(request_count) AS request_count, SUM(success_count) AS success_count, SUM(ttft_sum_ms) AS ttft_sum_ms, SUM(ttft_count) AS ttft_count, SUM(completion_sum_ms) AS completion_sum_ms, SUM(completion_count) AS completion_count, MAX(updated_at) AS updated_at").
+		Select("group_name, model_name, bucket_ts, SUM(request_count) AS request_count, SUM(success_count) AS success_count, SUM(ttft_sum_ms) AS ttft_sum_ms, SUM(ttft_count) AS ttft_count, SUM(completion_sum_ms) AS completion_sum_ms, SUM(completion_count) AS completion_count, SUM(cache_read_tokens) AS cache_read_tokens, SUM(cache_input_tokens) AS cache_input_tokens, SUM(cache_sample_count) AS cache_sample_count, MAX(updated_at) AS updated_at").
 		Where("group_name IN ? AND bucket_ts >= ? AND bucket_ts <= ?", groups, start, end)
 	if modelName != "" {
 		query = query.Where("model_name = ?", modelName)

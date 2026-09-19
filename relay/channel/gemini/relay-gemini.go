@@ -1039,9 +1039,10 @@ func buildUsageFromGeminiMetadata(metadata dto.GeminiUsageMetadata, fallbackProm
 	}
 
 	usage := dto.Usage{
-		PromptTokens:     promptTokens,
-		CompletionTokens: metadata.CandidatesTokenCount + metadata.ThoughtsTokenCount,
-		TotalTokens:      metadata.TotalTokenCount,
+		InputTokensEstimated: metadata.PromptTokenCount+metadata.ToolUsePromptTokenCount <= 0,
+		PromptTokens:         promptTokens,
+		CompletionTokens:     metadata.CandidatesTokenCount + metadata.ThoughtsTokenCount,
+		TotalTokens:          metadata.TotalTokenCount,
 	}
 	usage.CompletionTokenDetails.ReasoningTokens = metadata.ThoughtsTokenCount
 	usage.PromptTokensDetails.CachedTokens = metadata.CachedContentTokenCount

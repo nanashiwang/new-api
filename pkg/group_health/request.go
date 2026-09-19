@@ -36,6 +36,10 @@ func (r *Request) Observe(info *relaycommon.RelayInfo, success bool, now time.Ti
 		success = false
 	}
 	sample := Sample{Group: info.UsingGroup, Model: r.model, Success: success}
+	if success && info.GroupHealthCacheUsage != nil {
+		usage := *info.GroupHealthCacheUsage
+		sample.CacheUsage = &usage
+	}
 	isImage := info.RelayMode == relayconstant.RelayModeImagesGenerations || info.RelayMode == relayconstant.RelayModeImagesEdits
 	if success && !info.StartTime.IsZero() {
 		if r.clientStream && !isImage && !info.GroupHealthFirstOutputTime.IsZero() &&
@@ -91,4 +95,5 @@ func SupportsRequest(method, path string) bool {
 func ResetAttempt(info *relaycommon.RelayInfo) {
 	info.GroupHealthFirstOutputTime = time.Time{}
 	info.StreamStatus = nil
+	info.GroupHealthCacheUsage = nil
 }

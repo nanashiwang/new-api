@@ -331,9 +331,10 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 			}
 		}
 		simpleResponse.Usage = dto.Usage{
-			PromptTokens:     info.GetEstimatePromptTokens(),
-			CompletionTokens: completionTokens,
-			TotalTokens:      info.GetEstimatePromptTokens() + completionTokens,
+			InputTokensEstimated: true,
+			PromptTokens:         info.GetEstimatePromptTokens(),
+			CompletionTokens:     completionTokens,
+			TotalTokens:          info.GetEstimatePromptTokens() + completionTokens,
 		}
 		usageModified = true
 	}

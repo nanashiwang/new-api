@@ -33,6 +33,12 @@ const (
 	LastMessageTypeThinking = "thinking"
 )
 
+// GroupHealthCacheUsage is a normalized snapshot captured before billing mutates usage.
+type GroupHealthCacheUsage struct {
+	ReadTokens  int64
+	InputTokens int64
+}
+
 type ClaudeConvertInfo struct {
 	LastMessagesType string
 	Index            int
@@ -176,6 +182,7 @@ type RelayInfo struct {
 	FirstEffectiveOutputTime time.Time
 	// Group health observes more providers without changing the existing slow
 	// TTFT routing guard's sampling coverage or first-channel attribution.
+	GroupHealthCacheUsage          *GroupHealthCacheUsage
 	GroupHealthFirstOutputTime     time.Time
 	FirstEffectiveOutputChannelId  int
 	FirstEffectiveOutputChannelTag string

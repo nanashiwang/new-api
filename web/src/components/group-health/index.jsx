@@ -78,7 +78,10 @@ export function GroupHealthScopeNote() {
       {t(
         '同组重试合并统计；跨组重试分别记录各组结果。首字均值仅统计成功流式请求，含排队和重试等待。',
       )}{' '}
-      {t('生图显示成功同步请求的完成耗时，异步提交不计入完成样本。')}
+      {t('生图显示成功同步请求的完成耗时，异步提交不计入完成样本。')}{' '}
+      {t(
+        '缓存命中率为成功请求的缓存读取 Token 总量除以输入 Token 总量，包含未命中请求，缓存写入不算命中；无有效用量时显示 —。',
+      )}
     </p>
   );
 }
@@ -120,6 +123,10 @@ export function GroupHealthSummary({
               {metric === 'completion' ? t('平均完成') : t('首字均值')}{' '}
               <strong>{formatHealthLatency(latency.value)}</strong>
             </span>
+            <span title={t('缓存命中率')}>
+              {t('缓存')}{' '}
+              <strong>{formatHealthRate(stats.cache_hit_rate)}</strong>
+            </span>
             {(limited ||
               (latency.count > 0 && latency.count < HEALTH_MIN_SAMPLES)) && (
               <span className='group-health-muted'>{t('样本不足')}</span>
@@ -156,6 +163,15 @@ export function GroupHealthSummary({
           {latency.count > 0 && latency.count < HEALTH_MIN_SAMPLES
             ? ` · ${t('样本不足')}`
             : ''}
+        </span>
+      </div>
+      <div>
+        <span className='group-health-label'>{t('缓存命中率')}</span>
+        <strong className='group-health-number'>
+          {formatHealthRate(stats?.cache_hit_rate)}
+        </strong>
+        <span className='group-health-caption'>
+          {t('{{count}} 个有效样本', { count: stats?.cache_sample_count || 0 })}
         </span>
       </div>
     </div>

@@ -12,6 +12,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/google/uuid"
 )
 
@@ -26,6 +27,7 @@ type Sample struct {
 	Success      bool
 	TTFTMs       *int64
 	CompletionMs *int64
+	CacheUsage   *relaycommon.GroupHealthCacheUsage
 	At           time.Time
 }
 
@@ -84,6 +86,11 @@ func (c *collector) record(sample Sample) {
 	row.RequestCount++
 	if sample.Success {
 		row.SuccessCount++
+		if usage := sample.CacheUsage; usage != nil && usage.InputTokens > 0 && usage.ReadTokens >= 0 && usage.ReadTokens <= usage.InputTokens {
+			row.CacheReadTokens += usage.ReadTokens
+			row.CacheInputTokens += usage.InputTokens
+			row.CacheSampleCount++
+		}
 		if sample.TTFTMs != nil && *sample.TTFTMs >= 0 {
 			row.TTFTCount++
 			row.TTFTSumMs += *sample.TTFTMs

@@ -41,6 +41,45 @@ func TestRequestFoldsRetriesByActualGroup(t *testing.T) {
 	require.Len(t, r.Samples(now), 2)
 }
 
+func TestCacheUsageWeightsTokensAndExcludesFailedAttempts(t *testing.T) {
+	now := time.Unix(1800000000, 0)
+	r := NewRequest("m", false)
+	info := &relaycommon.RelayInfo{UsingGroup: "failed", GroupHealthCacheUsage: &relaycommon.GroupHealthCacheUsage{ReadTokens: 999, InputTokens: 999}}
+	r.Observe(info, false, now)
+	ResetAttempt(info)
+	require.Nil(t, info.GroupHealthCacheUsage)
+	info.UsingGroup = "g"
+	info.GroupHealthCacheUsage = &relaycommon.GroupHealthCacheUsage{ReadTokens: 900, InputTokens: 1000}
+	r.Observe(info, false, now)
+	ResetAttempt(info)
+	info.GroupHealthCacheUsage = &relaycommon.GroupHealthCacheUsage{ReadTokens: 80, InputTokens: 100}
+	r.Observe(info, true, now)
+	info.GroupHealthCacheUsage.ReadTokens = 99 // retained samples must be copies
+	c := newCollector(func(context.Context, []model.GroupHealthMetric) error { return nil })
+	for _, sample := range r.Samples(now) {
+		c.record(sample)
+	}
+	c.record(Sample{Group: "g", Model: "m", Success: true, At: now.Add(time.Hour), CacheUsage: &relaycommon.GroupHealthCacheUsage{ReadTokens: 30, InputTokens: 60}})
+	c.record(Sample{Group: "g", Model: "m", Success: true, At: now.Add(time.Hour), CacheUsage: &relaycommon.GroupHealthCacheUsage{InputTokens: 110}})
+	c.record(Sample{Group: "g", Model: "m", Success: true, At: now}) // legacy/missing usage
+	c.record(Sample{Group: "g", Model: "m", Success: false, At: now, CacheUsage: &relaycommon.GroupHealthCacheUsage{ReadTokens: 999, InputTokens: 999}})
+	var rows []model.GroupHealthMetric
+	for _, row := range c.buckets {
+		rows = append(rows, row)
+	}
+	start := now.Unix() / BucketSeconds * BucketSeconds
+	result := buildResult([]string{"g", "failed"}, rows, start, start+23*BucketSeconds)
+	require.Nil(t, result.Groups[0].CacheHitRate)
+	g := result.Groups[1]
+	require.EqualValues(t, 3, g.CacheSampleCount)
+	require.InDelta(t, 110.0/270*100, *g.CacheHitRate, 0.00001)
+	require.Equal(t, 80.0, *g.Series[0].CacheHitRate)
+	require.Nil(t, g.Series[2].CacheHitRate)
+	zero := summarize(model.GroupHealthMetric{CacheInputTokens: 110, CacheSampleCount: 1})
+	require.NotNil(t, zero.CacheHitRate)
+	require.Zero(t, *zero.CacheHitRate)
+}
+
 func TestFailedOrMissingEffectiveStreamNeverContributesLatency(t *testing.T) {
 	start := time.Now().Add(-time.Second)
 	for _, reason := range []relaycommon.StreamEndReason{relaycommon.StreamEndReasonScannerErr, relaycommon.StreamEndReasonTimeout, relaycommon.StreamEndReasonClientGone} {
