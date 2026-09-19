@@ -12,6 +12,11 @@ import (
 )
 
 func GetAllLogs(c *gin.Context) {
+	scope, err := parseAdminLogScope(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	pageInfo := common.GetPageQuery(c)
 	logType, _ := strconv.Atoi(c.Query("type"))
 	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
@@ -22,7 +27,7 @@ func GetAllLogs(c *gin.Context) {
 	channel, _ := strconv.Atoi(c.Query("channel"))
 	group := c.Query("group")
 	requestId := c.Query("request_id")
-	logs, total, err := model.GetAllLogs(logType, startTimestamp, endTimestamp, modelName, username, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), channel, group, requestId)
+	logs, total, err := model.GetAllLogs(logType, startTimestamp, endTimestamp, modelName, username, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), channel, group, requestId, scope)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -95,6 +100,11 @@ func GetLogByKey(c *gin.Context) {
 }
 
 func GetLogsStat(c *gin.Context) {
+	scope, err := parseAdminLogScope(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	logType, _ := strconv.Atoi(c.Query("type"))
 	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
 	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
@@ -104,7 +114,7 @@ func GetLogsStat(c *gin.Context) {
 	channel, _ := strconv.Atoi(c.Query("channel"))
 	group := c.Query("group")
 	requestID := c.Query("request_id")
-	stat, err := model.SumUsedQuota(logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, group, requestID, true)
+	stat, err := model.SumUsedQuota(logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, group, requestID, true, scope)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -156,6 +166,11 @@ func GetLogsSelfStat(c *gin.Context) {
 }
 
 func GetTopUsers(c *gin.Context) {
+	scope, err := parseAdminLogScope(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
 	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
 	modelName := c.Query("model_name")
@@ -170,6 +185,7 @@ func GetTopUsers(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
 
 	filters := model.AdminLogQueryFilters{
+		Scope:          scope,
 		LogType:        model.LogTypeConsume,
 		StartTimestamp: startTimestamp,
 		EndTimestamp:   endTimestamp,

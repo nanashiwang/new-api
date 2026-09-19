@@ -9,6 +9,7 @@ import (
 )
 
 type AdminLogQueryFilters struct {
+	Scope          LogScope
 	LogType        int
 	StartTimestamp int64
 	EndTimestamp   int64
@@ -101,7 +102,7 @@ func applyAdminLogFilters(tx *gorm.DB, filters AdminLogQueryFilters, fuzzyUserna
 	if filters.Group != "" {
 		tx = tx.Where("logs."+logGroupCol+" = ?", filters.Group)
 	}
-	return tx, nil
+	return applyLogScope(tx, filters.Scope), nil
 }
 
 func normalizeRankingOrder(order string) string {

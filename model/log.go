@@ -414,7 +414,7 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	}
 }
 
-func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string) (logs []*Log, total int64, err error) {
+func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, scopes ...LogScope) (logs []*Log, total int64, err error) {
 	filters := AdminLogQueryFilters{
 		LogType:        logType,
 		StartTimestamp: startTimestamp,
@@ -426,7 +426,7 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 		Group:          group,
 		RequestID:      requestId,
 	}
-	tx, err := applyAdminLogFilters(LOG_DB, filters, true)
+	tx, err := applyAdminLogFilters(applyLogScope(LOG_DB, scopes...), filters, true)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -605,7 +605,7 @@ func calculateCacheRates(rows []logCacheRateRow) (cacheHitRate float64, cacheGlo
 	return accumulator.rates()
 }
 
-func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string, requestID string, fuzzyUsername bool) (stat Stat, err error) {
+func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string, requestID string, fuzzyUsername bool, scopes ...LogScope) (stat Stat, err error) {
 	tx := LOG_DB.Table("logs").Select("sum(quota) quota")
 
 	// 为rpm和tpm创建单独的查询
@@ -662,6 +662,16 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 		cacheRateQuery = cacheRateQuery.Where("request_id = ?", requestID)
 	}
 
+	tx = applyLogScope(tx, scopes...)
+	rpmTpmQuery = applyLogScope(rpmTpmQuery, scopes...)
+	cacheRateQuery = applyLogScope(cacheRateQuery, scopes...)
+	// RPM/TPM remain a recent-minute metric, intersected with the selected range.
+	if startTimestamp != 0 {
+		rpmTpmQuery = rpmTpmQuery.Where("created_at >= ?", startTimestamp)
+	}
+	if endTimestamp != 0 {
+		rpmTpmQuery = rpmTpmQuery.Where("created_at <= ?", endTimestamp)
+	}
 	tx = tx.Where("type = ?", LogTypeConsume)
 	rpmTpmQuery = rpmTpmQuery.Where("type = ?", LogTypeConsume)
 	cacheRateQuery = cacheRateQuery.Where("type = ?", LogTypeConsume)

@@ -1,5 +1,17 @@
 {
   "translation": {
+    "全部厂商": "All providers",
+    "渠道名称 / ID（多选）": "Channel name / ID (multiple)",
+    "按当前名称查找，选中后参与查询；含禁用渠道，旧渠道可输入 ID。": "Search current names, then select. Includes disabled channels; enter an ID for historical channels.",
+    "匹配超过 200 个，请缩小关键词。": "Over 200 matches. Refine your search.",
+    "选择全部匹配渠道": "Select all matching channels",
+    "请先选择匹配渠道，或清空渠道搜索。": "Select matching channels or clear the channel search first.",
+    "分组用量汇总": "Usage by group",
+    "分组汇总": "Group summary",
+    "消费记录数": "Consumption records",
+    "未分组": "Ungrouped",
+    "按当前筛选和完整时间范围汇总消费记录，不受日志分页影响；失败、退款等记录不计入。": "Summarizes consumption records for current filters and the entire time range, independent of pagination. Failure and refund records are excluded.",
+    "额度与缓存率仅统计消费记录；缓存率可能取最近样本，RPM/TPM 为所选范围内最近一分钟。": "Quota and cache rates use consumption records only. Cache rates may be sampled. RPM/TPM measure the last 60 seconds intersected with the selected range.",
     "统计说明": "Statistics details",
     "首字": "TTFT",
     "Pulse 奖励撤销密钥": "Pulse reward rollback secret",

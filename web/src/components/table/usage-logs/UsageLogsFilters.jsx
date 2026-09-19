@@ -17,11 +17,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Button, Form } from '@douyinfe/semi-ui';
 import { IconSearch } from '@douyinfe/semi-icons';
 
 import { DATE_RANGE_PRESETS } from '../../../constants/console.constants';
+import {
+  buildTokenGroupVendorOptions,
+  filterTokenGroupsByVendor,
+} from '../tokens/tokenGroupUtils';
+import LogChannelPicker from './components/LogChannelPicker';
 
 const LogsFilters = ({
   formInitValues,
@@ -35,11 +40,21 @@ const LogsFilters = ({
   isAdminUser,
   t,
 }) => {
+  const [vendor, setVendor] = useState('');
+  const [vendorSearch, setVendorSearch] = useState('');
+  const [groupSearch, setGroupSearch] = useState('');
+  const withHistoricalOption = (options, search) => {
+    const value = search.trim();
+    return value && !options.some((option) => option.value === value)
+      ? [...options, { value, label: value }]
+      : options;
+  };
   return (
     <Form
       initValues={formInitValues}
       getFormApi={(api) => setFormApi(api)}
       onSubmit={refresh}
+      onValueChange={(values) => setVendor(values.group_vendor || '')}
       allowEmpty={true}
       autoComplete='off'
       layout='vertical'
@@ -85,14 +100,42 @@ const LogsFilters = ({
             size='small'
           />
 
-          <Form.Select
-            field='group'
-            placeholder={t('选择分组')}
-            optionList={groupOptions}
-            showClear
-            pure
-            size='small'
-          />
+          <div className={isAdminUser ? 'grid grid-cols-2 gap-2 min-w-0' : ''}>
+            {isAdminUser && (
+              <Form.Select
+                field='group_vendor'
+                placeholder={t('全部厂商')}
+                optionList={withHistoricalOption(
+                  buildTokenGroupVendorOptions(groupOptions, t('多厂商通用')),
+                  vendorSearch,
+                )}
+                onSearch={setVendorSearch}
+                onChange={() => {
+                  formApi?.setValue('group', '');
+                  setGroupSearch('');
+                }}
+                filter
+                showClear
+                pure
+                size='small'
+              />
+            )}
+            <Form.Select
+              field='group'
+              placeholder={t('选择分组')}
+              optionList={withHistoricalOption(
+                isAdminUser && vendor
+                  ? filterTokenGroupsByVendor(groupOptions, vendor)
+                  : groupOptions,
+                isAdminUser ? groupSearch : '',
+              )}
+              onSearch={setGroupSearch}
+              filter
+              showClear
+              pure
+              size='small'
+            />
+          </div>
 
           <Form.Input
             field='request_id'
@@ -105,14 +148,7 @@ const LogsFilters = ({
 
           {isAdminUser && (
             <>
-              <Form.Input
-                field='channel'
-                prefix={<IconSearch />}
-                placeholder={t('渠道 ID')}
-                showClear
-                pure
-                size='small'
-              />
+              <LogChannelPicker formApi={formApi} t={t} />
               <Form.Input
                 field='username'
                 prefix={<IconSearch />}

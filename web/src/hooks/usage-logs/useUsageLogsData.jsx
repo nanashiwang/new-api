@@ -94,6 +94,7 @@ export const useLogsData = () => {
     quota: 0,
     token: 0,
   });
+  const [statError, setStatError] = useState('');
 
   // Form state
   const [formApi, setFormApi] = useState(null);
@@ -103,6 +104,9 @@ export const useLogsData = () => {
     token_name: '',
     model_name: '',
     channel: '',
+    channel_ids: [],
+    channel_keyword: '',
+    group_vendor: '',
     group: '',
     request_id: '',
     dateRange: [
@@ -271,6 +275,8 @@ export const useLogsData = () => {
       start_timestamp,
       end_timestamp,
       channel: formValues.channel || '',
+      channel_ids: (formValues.channel_ids || []).join(','),
+      group_vendor: formValues.group_vendor || '',
       group: formValues.group || '',
       request_id: formValues.request_id || '',
       logType: formValues.logType ? parseInt(formValues.logType) : 0,
@@ -348,6 +354,7 @@ export const useLogsData = () => {
     if (!isAdminUser) {
       return;
     }
+    if (!validateChannelSelection()) return;
     const reqId = ++topUsersRequestCounter.current;
     const {
       username,
@@ -356,6 +363,8 @@ export const useLogsData = () => {
       startTimestamp,
       endTimestamp,
       channel,
+      channel_ids,
+      group_vendor,
       group,
       request_id,
     } = normalizeLogQueryValues();
@@ -369,6 +378,8 @@ export const useLogsData = () => {
         start_timestamp: String(startTimestamp),
         end_timestamp: String(endTimestamp),
         channel: String(channel),
+        channel_ids,
+        group_vendor,
         group,
         request_id,
         view_mode: topUsersViewMode,
@@ -414,6 +425,47 @@ export const useLogsData = () => {
     await refresh();
   };
 
+  const [groupSummaryVisible, setGroupSummaryVisible] = useState(false);
+  const [groupSummaryLoading, setGroupSummaryLoading] = useState(false);
+  const [groupSummaryRows, setGroupSummaryRows] = useState([]);
+  const [groupSummaryError, setGroupSummaryError] = useState('');
+  const groupSummaryRequest = useRef(0);
+  const openGroupSummary = async () => {
+    if (!isAdminUser) return;
+    if (!validateChannelSelection()) return;
+    const id = ++groupSummaryRequest.current;
+    const values = normalizeLogQueryValues();
+    setGroupSummaryVisible(true);
+    setGroupSummaryLoading(true);
+    setGroupSummaryRows([]);
+    setGroupSummaryError('');
+    try {
+      const params = {
+        username: values.username,
+        token_name: values.token_name,
+        model_name: values.model_name,
+        group: values.group,
+        group_vendor: values.group_vendor,
+        channel: values.channel,
+        channel_ids: values.channel_ids,
+        request_id: values.request_id,
+        start_timestamp: values.startTimestamp,
+        end_timestamp: values.endTimestamp,
+      };
+      const { data } = await API.get(
+        `/api/log/group-summary?${buildQueryString(params)}`,
+      );
+      if (id !== groupSummaryRequest.current) return;
+      if (!data.success) throw new Error(data.message);
+      setGroupSummaryRows(data.data || []);
+    } catch (error) {
+      if (id === groupSummaryRequest.current)
+        setGroupSummaryError(error.message);
+    } finally {
+      if (id === groupSummaryRequest.current) setGroupSummaryLoading(false);
+    }
+  };
+
   // Statistics functions
   const getLogSelfStat = async (reqId) => {
     const {
@@ -443,7 +495,7 @@ export const useLogsData = () => {
     if (success) {
       setStat(data);
     } else {
-      showError(message);
+      throw new Error(message || t('加载统计失败'));
     }
   };
 
@@ -455,6 +507,8 @@ export const useLogsData = () => {
       startTimestamp,
       endTimestamp,
       channel,
+      channel_ids,
+      group_vendor,
       group,
       request_id,
       logType: currentLogType,
@@ -467,6 +521,8 @@ export const useLogsData = () => {
       start_timestamp: startTimestamp,
       end_timestamp: endTimestamp,
       channel,
+      channel_ids,
+      group_vendor,
       group,
       request_id,
     });
@@ -479,13 +535,23 @@ export const useLogsData = () => {
     if (success) {
       setStat(data);
     } else {
-      showError(message);
+      throw new Error(message || t('加载统计失败'));
     }
   };
 
   const handleEyeClick = async () => {
+    if (!validateChannelSelection()) return;
     const reqId = ++statRequestCounter.current;
     setLoadingStat(true);
+    setStatError('');
+    setShowStat(false);
+    setStat({
+      quota: 0,
+      rpm: 0,
+      tpm: 0,
+      cache_hit_rate: 0,
+      cache_global_rate: 0,
+    });
     try {
       if (isAdminUser) {
         await getLogStat(reqId);
@@ -497,6 +563,7 @@ export const useLogsData = () => {
       }
     } catch (error) {
       if (reqId === statRequestCounter.current) {
+        setStatError(error?.message || t('加载统计失败'));
         showError(error?.message || t('加载统计失败'));
       }
     } finally {
@@ -837,8 +904,11 @@ export const useLogsData = () => {
 
   // Load logs function
   const loadLogs = async (startIdx, pageSize, customLogType = null) => {
+    if (!validateChannelSelection()) return;
     const reqId = ++logsRequestCounter.current;
     setLoading(true);
+    setLogs([]);
+    setLogCount(0);
 
     const {
       username,
@@ -847,6 +917,8 @@ export const useLogsData = () => {
       startTimestamp,
       endTimestamp,
       channel,
+      channel_ids,
+      group_vendor,
       group,
       request_id,
       logType: currentLogType,
@@ -866,6 +938,8 @@ export const useLogsData = () => {
     if (isAdminUser) {
       queryParams.username = username;
       queryParams.channel = channel;
+      queryParams.channel_ids = channel_ids;
+      queryParams.group_vendor = group_vendor;
     }
 
     const url = `${
@@ -917,7 +991,20 @@ export const useLogsData = () => {
   };
 
   // Refresh function
+  const validateChannelSelection = () => {
+    if (
+      isAdminUser &&
+      formApi?.getValue('channel_keyword')?.trim() &&
+      !formApi?.getValue('channel_ids')?.length
+    ) {
+      showError(t('请先选择匹配渠道，或清空渠道搜索。'));
+      return false;
+    }
+    return true;
+  };
+
   const refresh = async () => {
+    if (!validateChannelSelection()) return;
     setActivePage(1);
     handleEyeClick();
     await loadLogs(1, pageSize);
@@ -978,6 +1065,12 @@ export const useLogsData = () => {
   };
 
   return {
+    groupSummaryVisible,
+    setGroupSummaryVisible,
+    groupSummaryLoading,
+    groupSummaryRows,
+    groupSummaryError,
+    openGroupSummary,
     // Basic state
     logs,
     expandData,
@@ -989,6 +1082,7 @@ export const useLogsData = () => {
     pageSize,
     logType,
     stat,
+    statError,
     isAdminUser,
     groupOptions,
 

@@ -34,16 +34,18 @@ function formatPercent(value) {
 
 const LogsActions = ({
   stat,
+  statError,
   loadingStat,
   showStat,
   compactMode,
   setCompactMode,
   isAdminUser,
   openTopUsersDrawer,
+  openGroupSummary,
   t,
 }) => {
   const showSkeleton = useMinimumLoadingTime(loadingStat);
-  const needSkeleton = !showStat || showSkeleton;
+  const needSkeleton = !statError && (!showStat || showSkeleton);
 
   const placeholder = (
     <Space>
@@ -58,67 +60,80 @@ const LogsActions = ({
   return (
     <div className='flex flex-col md:flex-row justify-between items-start md:items-center gap-2 w-full'>
       <Skeleton loading={needSkeleton} active placeholder={placeholder}>
-        <Space>
-          <Tag
-            color='blue'
-            style={{
-              fontWeight: 500,
-              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
-              padding: 13,
-            }}
-            className='!rounded-lg'
+        {statError ? (
+          <Tag color='red'>{statError}</Tag>
+        ) : (
+          <Space
+            title={t(
+              '额度与缓存率仅统计消费记录；缓存率可能取最近样本，RPM/TPM 为所选范围内最近一分钟。',
+            )}
           >
-            {t('消耗额度')}: {renderQuota(stat.quota)}
-          </Tag>
-          <Tag
-            color='pink'
-            style={{
-              fontWeight: 500,
-              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
-              padding: 13,
-            }}
-            className='!rounded-lg'
-          >
-            RPM: {stat.rpm}
-          </Tag>
-          <Tag
-            color='white'
-            style={{
-              border: 'none',
-              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
-              fontWeight: 500,
-              padding: 13,
-            }}
-            className='!rounded-lg'
-          >
-            TPM: {stat.tpm}
-          </Tag>
-          <Tag
-            color='green'
-            style={{
-              fontWeight: 500,
-              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
-              padding: 13,
-            }}
-            className='!rounded-lg'
-          >
-            {t('命中缓存率')}: {formatPercent(stat.cache_hit_rate)}
-          </Tag>
-          <Tag
-            color='teal'
-            style={{
-              fontWeight: 500,
-              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
-              padding: 13,
-            }}
-            className='!rounded-lg'
-          >
-            {t('全局缓存率')}: {formatPercent(stat.cache_global_rate)}
-          </Tag>
-        </Space>
+            <Tag
+              color='blue'
+              style={{
+                fontWeight: 500,
+                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+                padding: 13,
+              }}
+              className='!rounded-lg'
+            >
+              {t('消耗额度')}: {renderQuota(stat.quota)}
+            </Tag>
+            <Tag
+              color='pink'
+              style={{
+                fontWeight: 500,
+                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+                padding: 13,
+              }}
+              className='!rounded-lg'
+            >
+              RPM: {stat.rpm}
+            </Tag>
+            <Tag
+              color='white'
+              style={{
+                border: 'none',
+                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+                fontWeight: 500,
+                padding: 13,
+              }}
+              className='!rounded-lg'
+            >
+              TPM: {stat.tpm}
+            </Tag>
+            <Tag
+              color='green'
+              style={{
+                fontWeight: 500,
+                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+                padding: 13,
+              }}
+              className='!rounded-lg'
+            >
+              {t('命中缓存率')}: {formatPercent(stat.cache_hit_rate)}
+            </Tag>
+            <Tag
+              color='teal'
+              style={{
+                fontWeight: 500,
+                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+                padding: 13,
+              }}
+              className='!rounded-lg'
+            >
+              {t('全局缓存率')}: {formatPercent(stat.cache_global_rate)}
+            </Tag>
+          </Space>
+        )}
       </Skeleton>
 
       <div className='flex items-center gap-2 self-end md:self-auto'>
+        {isAdminUser && (
+          <Button type='tertiary' size='small' onClick={openGroupSummary}>
+            {t('分组汇总')}
+          </Button>
+        )}
         {isAdminUser ? (
           <Button
             type='tertiary'

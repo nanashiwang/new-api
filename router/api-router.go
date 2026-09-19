@@ -454,6 +454,8 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.DELETE("/", middleware.AdminAuth(), controller.DeleteHistoryLogs)
 		logRoute.GET("/stat", middleware.AdminAuth(), controller.GetLogsStat)
 		logRoute.GET("/top-users", middleware.AdminAuth(), controller.GetTopUsers)
+		logRoute.GET("/channel-options", middleware.AdminAuth(), controller.GetLogChannelOptions)
+		logRoute.GET("/group-summary", middleware.AdminAuth(), controller.GetLogGroupSummary)
 		logRoute.GET("/self/stat", middleware.UserAuth(), controller.GetLogsSelfStat)
 		logRoute.GET("/channel_affinity_usage_cache", middleware.AdminAuth(), controller.GetChannelAffinityUsageCacheStats)
 		logRoute.GET("/search", middleware.AdminAuth(), controller.SearchAllLogs)
