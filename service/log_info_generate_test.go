@@ -43,8 +43,21 @@ func TestGenerateTextOtherInfoIncludesParamOverrideAuditAndStreamStatus(t *testi
 
 	other := GenerateTextOtherInfo(ctx, info, 1, 1, 1, 0, 1, 1, 1)
 	observed, ok := other["response_model"].(relaycommon.ResponseModel)
-	if !ok || observed.ReturnedModel != "provider-declared" || !observed.Mismatch {
+	if !ok || observed.ReturnedModel != "provider-declared" || !observed.Mismatch() {
 		t.Fatalf("missing model diagnostics: %#v", other["response_model"])
+	}
+	serialized, err := common.Marshal(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted struct {
+		Observation map[string]interface{} `json:"response_model"`
+	}
+	if err := common.Unmarshal(serialized, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if len(persisted.Observation) != 3 || persisted.Observation["returned_model"] != "provider-declared" {
+		t.Fatalf("persist only model names: %#v", persisted.Observation)
 	}
 	info.ResponseModel.ReturnedModel = "later-change"
 	if other["response_model"].(relaycommon.ResponseModel).ReturnedModel != "provider-declared" {

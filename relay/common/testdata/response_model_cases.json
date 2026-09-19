@@ -1,0 +1,392 @@
+[
+  {
+    "name": "exact",
+    "observation": {
+      "requested_model": "gpt-4o",
+      "upstream_model": "",
+      "returned_model": "gpt-4o",
+      "mismatch": true
+    },
+    "mismatch": false
+  },
+  {
+    "name": "case",
+    "observation": {
+      "requested_model": "gpt-4o",
+      "upstream_model": "",
+      "returned_model": "GPT-4O",
+      "mismatch": true
+    },
+    "mismatch": false
+  },
+  {
+    "name": "whitespace",
+    "observation": {
+      "requested_model": " gpt-4o ",
+      "upstream_model": "",
+      "returned_model": " GPT-4O ",
+      "mismatch": true
+    },
+    "mismatch": false
+  },
+  {
+    "name": "mapped name",
+    "observation": {
+      "requested_model": "alias",
+      "upstream_model": "gpt-4o",
+      "returned_model": "gpt-4o",
+      "mismatch": true
+    },
+    "mismatch": false
+  },
+  {
+    "name": "requested name",
+    "observation": {
+      "requested_model": "alias",
+      "upstream_model": "gpt-4o",
+      "returned_model": "alias",
+      "mismatch": true
+    },
+    "mismatch": false
+  },
+  {
+    "name": "provider path",
+    "observation": {
+      "requested_model": "gpt-4o",
+      "upstream_model": "",
+      "returned_model": "vendor/GPT-4O",
+      "mismatch": true
+    },
+    "mismatch": false
+  },
+  {
+    "name": "nested provider path",
+    "observation": {
+      "requested_model": "gpt-4o",
+      "upstream_model": "",
+      "returned_model": "accounts/vendor/models/gpt-4o",
+      "mismatch": true
+    },
+    "mismatch": false
+  },
+  {
+    "name": "hyphenated date",
+    "observation": {
+      "requested_model": "gpt-4o",
+      "upstream_model": "",
+      "returned_model": "GPT-4O-2024-08-06",
+      "mismatch": true
+    },
+    "mismatch": false
+  },
+  {
+    "name": "compact date",
+    "observation": {
+      "requested_model": "claude-sonnet-4",
+      "upstream_model": "",
+      "returned_model": "claude-sonnet-4-20250514",
+      "mismatch": true
+    },
+    "mismatch": false
+  },
+  {
+    "name": "provider path and date",
+    "observation": {
+      "requested_model": "gpt-4o",
+      "upstream_model": "",
+      "returned_model": "vendor/gpt-4o-2024-08-06",
+      "mismatch": true
+    },
+    "mismatch": false
+  },
+  {
+    "name": "qualified exact",
+    "observation": {
+      "requested_model": "vendor/gpt-4o",
+      "upstream_model": "",
+      "returned_model": "vendor/gpt-4o",
+      "mismatch": true
+    },
+    "mismatch": false
+  },
+  {
+    "name": "qualified date",
+    "observation": {
+      "requested_model": "vendor/gpt-4o",
+      "upstream_model": "",
+      "returned_model": "vendor/gpt-4o-2024-08-06",
+      "mismatch": true
+    },
+    "mismatch": false
+  },
+  {
+    "name": "qualified provider differs",
+    "observation": {
+      "requested_model": "vendor/gpt-4o",
+      "upstream_model": "",
+      "returned_model": "other/gpt-4o",
+      "mismatch": false
+    },
+    "mismatch": true
+  },
+  {
+    "name": "qualified prefix injection",
+    "observation": {
+      "requested_model": "vendor/gpt-4o",
+      "upstream_model": "",
+      "returned_model": "other/vendor/gpt-4o",
+      "mismatch": false
+    },
+    "mismatch": true
+  },
+  {
+    "name": "qualified name not stripped",
+    "observation": {
+      "requested_model": "vendor/gpt-4o",
+      "upstream_model": "",
+      "returned_model": "gpt-4o",
+      "mismatch": false
+    },
+    "mismatch": true
+  },
+  {
+    "name": "arbitrary suffix",
+    "observation": {
+      "requested_model": "gpt-4o",
+      "upstream_model": "",
+      "returned_model": "gpt-4o-mini",
+      "mismatch": false
+    },
+    "mismatch": true
+  },
+  {
+    "name": "nano variant",
+    "observation": {
+      "requested_model": "gpt-4o",
+      "upstream_model": "",
+      "returned_model": "gpt-4o-nano",
+      "mismatch": false
+    },
+    "mismatch": true
+  },
+  {
+    "name": "pro variant",
+    "observation": {
+      "requested_model": "gpt-4o",
+      "upstream_model": "",
+      "returned_model": "gpt-4o-pro",
+      "mismatch": false
+    },
+    "mismatch": true
+  },
+  {
+    "name": "mapped variant allowed explicitly",
+    "observation": {
+      "requested_model": "alias",
+      "upstream_model": "gpt-4o-mini",
+      "returned_model": "gpt-4o-mini",
+      "mismatch": true
+    },
+    "mismatch": false
+  },
+  {
+    "name": "arbitrary prefix",
+    "observation": {
+      "requested_model": "gpt-4o",
+      "upstream_model": "",
+      "returned_model": "not-gpt-4o",
+      "mismatch": false
+    },
+    "mismatch": true
+  },
+  {
+    "name": "suffix without boundary",
+    "observation": {
+      "requested_model": "gpt-4o",
+      "upstream_model": "",
+      "returned_model": "gpt-4other",
+      "mismatch": false
+    },
+    "mismatch": true
+  },
+  {
+    "name": "shorter returned name",
+    "observation": {
+      "requested_model": "gpt-4o-mini",
+      "upstream_model": "",
+      "returned_model": "gpt-4o",
+      "mismatch": false
+    },
+    "mismatch": true
+  },
+  {
+    "name": "provider different model",
+    "observation": {
+      "requested_model": "gpt-4o",
+      "upstream_model": "",
+      "returned_model": "vendor/gpt-4o-mini",
+      "mismatch": false
+    },
+    "mismatch": true
+  },
+  {
+    "name": "provider fake prefix",
+    "observation": {
+      "requested_model": "gpt-4o",
+      "upstream_model": "",
+      "returned_model": "vendor/not-gpt-4o",
+      "mismatch": false
+    },
+    "mismatch": true
+  },
+  {
+    "name": "trailing path",
+    "observation": {
+      "requested_model": "gpt-4o",
+      "upstream_model": "",
+      "returned_model": "vendor/",
+      "mismatch": false
+    },
+    "mismatch": true
+  },
+  {
+    "name": "leading slash",
+    "observation": {
+      "requested_model": "gpt-4o",
+      "upstream_model": "",
+      "returned_model": "/gpt-4o",
+      "mismatch": false
+    },
+    "mismatch": true
+  },
+  {
+    "name": "empty path segment",
+    "observation": {
+      "requested_model": "gpt-4o",
+      "upstream_model": "",
+      "returned_model": "vendor//gpt-4o",
+      "mismatch": false
+    },
+    "mismatch": true
+  },
+  {
+    "name": "dot path segment",
+    "observation": {
+      "requested_model": "gpt-4o",
+      "upstream_model": "",
+      "returned_model": "vendor/../gpt-4o",
+      "mismatch": false
+    },
+    "mismatch": true
+  },
+  {
+    "name": "date trailing garbage",
+    "observation": {
+      "requested_model": "gpt-4o",
+      "upstream_model": "",
+      "returned_model": "gpt-4o-2024-08-06-mini",
+      "mismatch": false
+    },
+    "mismatch": true
+  },
+  {
+    "name": "invalid date",
+    "observation": {
+      "requested_model": "gpt-4o",
+      "upstream_model": "",
+      "returned_model": "gpt-4o-2024-02-30",
+      "mismatch": false
+    },
+    "mismatch": true
+  },
+  {
+    "name": "non leap day",
+    "observation": {
+      "requested_model": "gpt-4o",
+      "upstream_model": "",
+      "returned_model": "gpt-4o-2023-02-29",
+      "mismatch": false
+    },
+    "mismatch": true
+  },
+  {
+    "name": "leap day",
+    "observation": {
+      "requested_model": "gpt-4o",
+      "upstream_model": "",
+      "returned_model": "gpt-4o-2024-02-29",
+      "mismatch": true
+    },
+    "mismatch": false
+  },
+  {
+    "name": "unseparated date",
+    "observation": {
+      "requested_model": "gpt-4o",
+      "upstream_model": "",
+      "returned_model": "gpt-4o20240806",
+      "mismatch": false
+    },
+    "mismatch": true
+  },
+  {
+    "name": "mixed date separator",
+    "observation": {
+      "requested_model": "gpt-4o",
+      "upstream_model": "",
+      "returned_model": "gpt-4o-2024-0806",
+      "mismatch": false
+    },
+    "mismatch": true
+  },
+  {
+    "name": "short date",
+    "observation": {
+      "requested_model": "gpt-4o",
+      "upstream_model": "",
+      "returned_model": "gpt-4o-2024-8-6",
+      "mismatch": false
+    },
+    "mismatch": true
+  },
+  {
+    "name": "no names",
+    "observation": {
+      "requested_model": "",
+      "upstream_model": "",
+      "returned_model": "gpt-4o",
+      "mismatch": false
+    },
+    "mismatch": true
+  },
+  {
+    "name": "upstream only",
+    "observation": {
+      "requested_model": "",
+      "upstream_model": "gpt-4o",
+      "returned_model": "gpt-4o",
+      "mismatch": true
+    },
+    "mismatch": false
+  },
+  {
+    "name": "empty response",
+    "observation": {
+      "requested_model": "gpt-4o",
+      "upstream_model": "",
+      "returned_model": "",
+      "mismatch": true
+    },
+    "mismatch": false
+  },
+  {
+    "name": "blank response",
+    "observation": {
+      "requested_model": "gpt-4o",
+      "upstream_model": "",
+      "returned_model": " \t ",
+      "mismatch": true
+    },
+    "mismatch": false
+  }
+]

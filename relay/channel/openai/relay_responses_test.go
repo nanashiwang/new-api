@@ -62,7 +62,7 @@ func TestResponsesUsageObservesDeclaredModelWithoutChangingBilling(t *testing.T)
 	response := &dto.OpenAIResponsesResponse{Model: "declared"}
 	buildResponsesUsage(c, info, response)
 	require.Equal(t, "declared", info.ResponseModel.ReturnedModel)
-	require.True(t, info.ResponseModel.Mismatch)
+	require.True(t, info.ResponseModel.Mismatch())
 	require.Equal(t, "requested", info.OriginModelName)
 	require.Equal(t, "mapped", info.UpstreamModelName)
 	require.Equal(t, "declared", response.Model)
