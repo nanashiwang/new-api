@@ -40,9 +40,12 @@ WORKDIR /build
 
 ADD go.mod go.sum ./
 RUN go mod download
-# Block the GORM combination that turns MySQL unique indexes into invalid foreign-key drops.
-RUN test "$(go list -m -f '{{if .Replace}}{{.Replace.Version}}{{else}}{{.Version}}{{end}}' github.com/glebarez/sqlite)" = "v1.10.0" \
-    && test "$(go list -m -f '{{if .Replace}}{{.Replace.Version}}{{else}}{{.Version}}{{end}}' gorm.io/gorm)" = "v1.25.5"
+# Keep the entire cross-database-tested driver set paired; mixing old dialect
+# drivers with newer GORM can misclassify MySQL unique indexes during migration.
+RUN test "$(go list -m -f '{{if .Replace}}{{.Replace.Version}}{{else}}{{.Version}}{{end}}' github.com/glebarez/sqlite)" = "v1.11.0" \
+    && test "$(go list -m -f '{{if .Replace}}{{.Replace.Version}}{{else}}{{.Version}}{{end}}' gorm.io/gorm)" = "v1.25.12" \
+    && test "$(go list -m -f '{{if .Replace}}{{.Replace.Version}}{{else}}{{.Version}}{{end}}' gorm.io/driver/mysql)" = "v1.5.7" \
+    && test "$(go list -m -f '{{if .Replace}}{{.Replace.Version}}{{else}}{{.Version}}{{end}}' gorm.io/driver/postgres)" = "v1.5.9"
 
 COPY . .
 COPY --from=builder /build/dist ./web/dist
