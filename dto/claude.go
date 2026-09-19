@@ -555,6 +555,8 @@ func (c *ClaudeResponse) GetClaudeError() *types.ClaudeError {
 }
 
 type ClaudeUsage struct {
+	inputTokensPresent       bool
+	outputTokensPresent      bool
 	InputTokens              int                       `json:"input_tokens"`
 	CacheCreationInputTokens int                       `json:"cache_creation_input_tokens"`
 	CacheReadInputTokens     int                       `json:"cache_read_input_tokens"`

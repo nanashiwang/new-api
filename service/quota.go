@@ -353,7 +353,9 @@ func PostClaudeConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, 
 		quota = tieredQuota
 	}
 
-	totalTokens := promptTokens + completionTokens
+	// Claude input_tokens excludes cache reads/writes. A cache-only response
+	// still has billable usage even when input_tokens and output_tokens are zero.
+	totalTokens := promptTokens + completionTokens + cacheTokens + cacheCreationTokens
 
 	var logContent string
 	if timeRatioContent := FormatTimeRatioContent(relayInfo.PriceData); timeRatioContent != "" {
@@ -361,11 +363,11 @@ func PostClaudeConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, 
 	}
 	// record all the consume log even if quota is 0
 	if totalTokens == 0 {
-		// in this case, must be some error happened
-		// we cannot just return, because we may have to return the pre-consumed quota
+		// Usage availability alone does not determine whether the request failed.
+		// Settle zero to release any reservation when no billable usage is known.
 		quota = 0
-		logContent += fmt.Sprintf("（可能是上游出错）")
-		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, "+
+		logContent += "（可计费用量为 0，未扣费）"
+		logger.LogInfo(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, "+
 			"tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, modelName, relayInfo.FinalPreConsumedQuota))
 	}
 

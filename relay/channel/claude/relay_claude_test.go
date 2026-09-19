@@ -199,7 +199,8 @@ func TestFormatClaudeResponseInfo_MessageDelta_FullUsage(t *testing.T) {
 
 	// message_delta 带完整 usage（原生 Anthropic 场景）
 	claudeResponse := &dto.ClaudeResponse{
-		Type: "message_delta",
+		Type:  "message_delta",
+		Delta: &dto.ClaudeMediaMessage{StopReason: common.GetPointer("end_turn")},
 		Usage: &dto.ClaudeUsage{
 			InputTokens:              100,
 			OutputTokens:             200,
@@ -243,7 +244,8 @@ func TestFormatClaudeResponseInfo_MessageDelta_OnlyOutputTokens(t *testing.T) {
 
 	// Bedrock 的 message_delta 只有 output_tokens，缺少 input_tokens 和 cache 字段
 	claudeResponse := &dto.ClaudeResponse{
-		Type: "message_delta",
+		Type:  "message_delta",
+		Delta: &dto.ClaudeMediaMessage{StopReason: common.GetPointer("end_turn")},
 		Usage: &dto.ClaudeUsage{
 			OutputTokens: 200,
 			// InputTokens, CacheCreationInputTokens, CacheReadInputTokens 都是 0

@@ -646,6 +646,8 @@ type ClaudeResponseInfo struct {
 	Model                string
 	ResponseText         strings.Builder
 	Usage                *dto.Usage
+	HasInputUsage        bool
+	HasFinalOutputUsage  bool
 	Done                 bool
 	ToolCallStreamStates map[int]*ToolCallStreamState
 	NextToolCallIndex    int
@@ -743,53 +745,21 @@ func FormatClaudeResponseInfo(claudeResponse *dto.ClaudeResponse, oaiResponse *d
 			claudeInfo.Model = claudeResponse.Message.Model
 		}
 
-		// message_start, 获取usage
-		if claudeResponse.Message != nil && claudeResponse.Message.Usage != nil {
-			claudeInfo.Usage.PromptTokens = claudeResponse.Message.Usage.InputTokens
-			claudeInfo.Usage.PromptTokensDetails.CachedTokens = claudeResponse.Message.Usage.CacheReadInputTokens
-			claudeInfo.Usage.PromptTokensDetails.CachedCreationTokens = claudeResponse.Message.Usage.CacheCreationInputTokens
-			claudeInfo.Usage.ClaudeCacheCreation5mTokens = claudeResponse.Message.Usage.GetCacheCreation5mTokens()
-			claudeInfo.Usage.ClaudeCacheCreation1hTokens = claudeResponse.Message.Usage.GetCacheCreation1hTokens()
-			claudeInfo.Usage.CompletionTokens = claudeResponse.Message.Usage.OutputTokens
+		if claudeResponse.Message != nil {
+			mergeClaudeUsage(claudeInfo, claudeResponse.Message.Usage, false)
 		}
 	} else if claudeResponse.Type == "content_block_delta" {
-		if claudeResponse.Delta != nil {
-			if claudeResponse.Delta.Text != nil {
-				claudeInfo.ResponseText.WriteString(*claudeResponse.Delta.Text)
-			}
-			if claudeResponse.Delta.Thinking != nil {
-				claudeInfo.ResponseText.WriteString(*claudeResponse.Delta.Thinking)
-			}
+		appendClaudeUsageText(claudeInfo, claudeResponse.Delta)
+	} else if claudeResponse.Type == "message_delta" || claudeResponse.Type == "message_stop" {
+		// Some compatible providers attach their final usage to message_stop.
+		mergeClaudeUsage(claudeInfo, claudeResponse.Usage, true)
+		if claudeResponse.Type == "message_stop" ||
+			(claudeResponse.Delta != nil && claudeResponse.Delta.StopReason != nil && *claudeResponse.Delta.StopReason != "") {
+			claudeInfo.Done = true
 		}
-	} else if claudeResponse.Type == "message_delta" {
-		// 最终的usage获取
-		if claudeResponse.Usage != nil {
-			if claudeResponse.Usage.InputTokens > 0 {
-				// 不叠加，只取最新的
-				claudeInfo.Usage.PromptTokens = claudeResponse.Usage.InputTokens
-			}
-			if claudeResponse.Usage.CacheReadInputTokens > 0 {
-				claudeInfo.Usage.PromptTokensDetails.CachedTokens = claudeResponse.Usage.CacheReadInputTokens
-			}
-			if claudeResponse.Usage.CacheCreationInputTokens > 0 {
-				claudeInfo.Usage.PromptTokensDetails.CachedCreationTokens = claudeResponse.Usage.CacheCreationInputTokens
-			}
-			if cacheCreation5m := claudeResponse.Usage.GetCacheCreation5mTokens(); cacheCreation5m > 0 {
-				claudeInfo.Usage.ClaudeCacheCreation5mTokens = cacheCreation5m
-			}
-			if cacheCreation1h := claudeResponse.Usage.GetCacheCreation1hTokens(); cacheCreation1h > 0 {
-				claudeInfo.Usage.ClaudeCacheCreation1hTokens = cacheCreation1h
-			}
-			if claudeResponse.Usage.OutputTokens > 0 {
-				claudeInfo.Usage.CompletionTokens = claudeResponse.Usage.OutputTokens
-			}
-			claudeInfo.Usage.TotalTokens = claudeInfo.Usage.PromptTokens + claudeInfo.Usage.CompletionTokens
-		}
-
-		// 判断是否完整
-		claudeInfo.Done = true
-	} else if claudeResponse.Type == "content_block_start" || claudeResponse.Type == "content_block_stop" {
-	} else {
+	} else if claudeResponse.Type == "content_block_start" {
+		appendClaudeUsageText(claudeInfo, claudeResponse.ContentBlock)
+	} else if claudeResponse.Type != "content_block_stop" {
 		return false
 	}
 	if oaiResponse != nil {
@@ -846,14 +816,17 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		}
 		helper.ClaudeChunkData(c, claudeResponse, data)
 	} else if info.RelayFormat == types.RelayFormatOpenAI {
+		// Account for terminal frames even when they produce no OpenAI chunk.
+		if !FormatClaudeResponseInfo(&claudeResponse, nil, claudeInfo) {
+			return nil
+		}
 		response := StreamResponseClaude2OpenAI(&claudeResponse, claudeInfo)
 		if response == nil {
 			return nil
 		}
-
-		if !FormatClaudeResponseInfo(&claudeResponse, response, claudeInfo) {
-			return nil
-		}
+		response.Id = claudeInfo.ResponseId
+		response.Created = claudeInfo.Created
+		response.Model = claudeInfo.Model
 
 		err = helper.ObjectData(c, response)
 		if err != nil {
@@ -874,15 +847,7 @@ func isEffectiveClaudeStreamOutput(response *dto.ClaudeResponse) bool {
 }
 
 func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo) {
-	if claudeInfo.Usage.PromptTokens == 0 {
-		//上游出错
-	}
-	if claudeInfo.Usage.CompletionTokens == 0 || !claudeInfo.Done {
-		if common.DebugEnabled {
-			common.SysLog("claude response usage is not complete, maybe upstream error")
-		}
-		claudeInfo.Usage = service.ResponseText2Usage(c, claudeInfo.ResponseText.String(), info.UpstreamModelName, claudeInfo.Usage.PromptTokens)
-	}
+	completeClaudeUsage(c, info, claudeInfo)
 
 	if info.RelayFormat == types.RelayFormatClaude {
 		//
@@ -915,6 +880,7 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 		return true
 	})
 	if err != nil {
+		info.StreamStatus.MarkOutcome(relaycommon.ResponseOutcomeFailed)
 		return nil, err
 	}
 
@@ -949,21 +915,20 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	if claudeInfo.Usage == nil {
 		claudeInfo.Usage = &dto.Usage{}
 	}
-	if claudeResponse.Usage != nil {
-		claudeInfo.Usage.PromptTokens = claudeResponse.Usage.InputTokens
-		claudeInfo.Usage.CompletionTokens = claudeResponse.Usage.OutputTokens
-		claudeInfo.Usage.TotalTokens = claudeResponse.Usage.InputTokens + claudeResponse.Usage.OutputTokens
-		claudeInfo.Usage.PromptTokensDetails.CachedTokens = claudeResponse.Usage.CacheReadInputTokens
-		claudeInfo.Usage.PromptTokensDetails.CachedCreationTokens = claudeResponse.Usage.CacheCreationInputTokens
-		claudeInfo.Usage.ClaudeCacheCreation5mTokens = claudeResponse.Usage.GetCacheCreation5mTokens()
-		claudeInfo.Usage.ClaudeCacheCreation1hTokens = claudeResponse.Usage.GetCacheCreation1hTokens()
+	mergeClaudeUsage(claudeInfo, claudeResponse.Usage, true)
+	for i := range claudeResponse.Content {
+		appendClaudeUsageText(claudeInfo, &claudeResponse.Content[i])
+	}
+	if claudeResponse.Type == "message" || len(claudeResponse.Content) > 0 {
+		claudeInfo.Done = claudeResponse.StopReason != ""
+		completeClaudeUsage(c, info, claudeInfo)
 	}
 	var responseData []byte
 	switch info.RelayFormat {
 	case types.RelayFormatOpenAI:
 		openaiResponse := ResponseClaude2OpenAI(&claudeResponse)
 		openaiResponse.Usage = *claudeInfo.Usage
-		responseData, err = json.Marshal(openaiResponse)
+		responseData, err = common.Marshal(openaiResponse)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeBadResponseBody)
 		}
