@@ -61,7 +61,7 @@ func buildResponsesUsage(c *gin.Context, info *relaycommon.RelayInfo, responsesR
 		usage.CompletionTokens = responsesResponse.Usage.OutputTokens
 		usage.TotalTokens = responsesResponse.Usage.TotalTokens
 		if responsesResponse.Usage.InputTokensDetails != nil {
-			usage.PromptTokensDetails.CachedTokens = responsesResponse.Usage.InputTokensDetails.CachedTokens
+			usage.PromptTokensDetails = responsesResponse.Usage.InputTokensDetails.Clone()
 		}
 	}
 	for _, output := range responsesResponse.Output {
@@ -381,7 +381,7 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 							usage.TotalTokens = streamResponse.Response.Usage.TotalTokens
 						}
 						if streamResponse.Response.Usage.InputTokensDetails != nil {
-							usage.PromptTokensDetails.CachedTokens = streamResponse.Response.Usage.InputTokensDetails.CachedTokens
+							usage.PromptTokensDetails = streamResponse.Response.Usage.InputTokensDetails.Clone()
 						}
 					}
 					if streamResponse.Response.HasImageGenerationCall() {
@@ -557,10 +557,7 @@ func mergeResponsesStreamUsage(dst *dto.Usage, src *dto.Usage) {
 	dst.CompletionTokens += src.CompletionTokens
 	dst.TotalTokens += src.TotalTokens
 	dst.WebSearchRequests += src.WebSearchRequests
-	dst.PromptTokensDetails.CachedTokens += src.PromptTokensDetails.CachedTokens
-	dst.PromptTokensDetails.CachedCreationTokens += src.PromptTokensDetails.CachedCreationTokens
-	dst.PromptTokensDetails.ImageTokens += src.PromptTokensDetails.ImageTokens
-	dst.PromptTokensDetails.AudioTokens += src.PromptTokensDetails.AudioTokens
+	dst.PromptTokensDetails.Add(src.PromptTokensDetails)
 	if dst.TotalTokens == 0 {
 		dst.TotalTokens = dst.PromptTokens + dst.CompletionTokens
 	}
@@ -761,6 +758,11 @@ func normalizeResponsesUsage(usage *dto.Usage) dto.Usage {
 		usage = &dto.Usage{}
 	}
 	responseUsage := *usage
+	responseUsage.PromptTokensDetails = usage.PromptTokensDetails.Clone()
+	if usage.InputTokensDetails != nil {
+		details := usage.InputTokensDetails.Clone()
+		responseUsage.InputTokensDetails = &details
+	}
 	if responseUsage.InputTokens == 0 {
 		responseUsage.InputTokens = responseUsage.PromptTokens
 	}
@@ -770,10 +772,9 @@ func normalizeResponsesUsage(usage *dto.Usage) dto.Usage {
 	if responseUsage.TotalTokens == 0 {
 		responseUsage.TotalTokens = responseUsage.InputTokens + responseUsage.OutputTokens
 	}
-	if responseUsage.InputTokensDetails == nil && usage.PromptTokensDetails.CachedTokens != 0 {
-		responseUsage.InputTokensDetails = &dto.InputTokenDetails{
-			CachedTokens: usage.PromptTokensDetails.CachedTokens,
-		}
+	if responseUsage.InputTokensDetails == nil && (usage.PromptTokensDetails.CachedTokens != 0 || usage.PromptTokensDetails.CachedTokensDetails != nil) {
+		details := usage.PromptTokensDetails.Clone()
+		responseUsage.InputTokensDetails = &details
 	}
 	return responseUsage
 }

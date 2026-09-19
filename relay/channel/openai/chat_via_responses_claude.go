@@ -430,9 +430,7 @@ func OaiResponsesToClaudeStreamHandler(c *gin.Context, info *relaycommon.RelayIn
 						finalUsage.TotalTokens = finalUsage.PromptTokens + finalUsage.CompletionTokens
 					}
 					if streamResp.Response.Usage.InputTokensDetails != nil {
-						finalUsage.PromptTokensDetails.CachedTokens = streamResp.Response.Usage.InputTokensDetails.CachedTokens
-						finalUsage.PromptTokensDetails.ImageTokens = streamResp.Response.Usage.InputTokensDetails.ImageTokens
-						finalUsage.PromptTokensDetails.AudioTokens = streamResp.Response.Usage.InputTokensDetails.AudioTokens
+						finalUsage.PromptTokensDetails = streamResp.Response.Usage.InputTokensDetails.Clone()
 					}
 					if streamResp.Response.Usage.CompletionTokenDetails.ReasoningTokens != 0 {
 						finalUsage.CompletionTokenDetails.ReasoningTokens = streamResp.Response.Usage.CompletionTokenDetails.ReasoningTokens

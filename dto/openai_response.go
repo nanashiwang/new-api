@@ -278,8 +278,9 @@ type OpenAIChatCompletionsUsage struct {
 }
 
 type OpenAIChatPromptTokensDetails struct {
-	CachedTokens int `json:"cached_tokens"`
-	AudioTokens  int `json:"audio_tokens"`
+	CachedTokens        int                 `json:"cached_tokens"`
+	AudioTokens         int                 `json:"audio_tokens"`
+	CachedTokensDetails *CachedTokenDetails `json:"cached_tokens_details,omitempty"`
 }
 
 type OpenAIChatCompletionTokensDetails struct {
@@ -296,8 +297,9 @@ func NewOpenAIChatCompletionsUsage(usage *Usage) *OpenAIChatCompletionsUsage {
 		CompletionTokens: usage.CompletionTokens,
 		TotalTokens:      usage.TotalTokens,
 		PromptTokensDetails: OpenAIChatPromptTokensDetails{
-			CachedTokens: usage.PromptTokensDetails.CachedTokens,
-			AudioTokens:  usage.PromptTokensDetails.AudioTokens,
+			CachedTokens:        usage.PromptTokensDetails.CachedTokens,
+			AudioTokens:         usage.PromptTokensDetails.AudioTokens,
+			CachedTokensDetails: usage.PromptTokensDetails.CachedTokensDetails.Clone(),
 		},
 		CompletionTokensDetails: OpenAIChatCompletionTokensDetails{
 			ReasoningTokens: usage.CompletionTokenDetails.ReasoningTokens,
@@ -372,11 +374,12 @@ type OpenAIVideoResponse struct {
 }
 
 type InputTokenDetails struct {
-	CachedTokens         int `json:"cached_tokens"`
-	CachedCreationTokens int `json:"-"`
-	TextTokens           int `json:"text_tokens"`
-	AudioTokens          int `json:"audio_tokens"`
-	ImageTokens          int `json:"image_tokens"`
+	CachedTokens         int                 `json:"cached_tokens"`
+	CachedTokensDetails  *CachedTokenDetails `json:"cached_tokens_details,omitempty"`
+	CachedCreationTokens int                 `json:"-"`
+	TextTokens           int                 `json:"text_tokens"`
+	AudioTokens          int                 `json:"audio_tokens"`
+	ImageTokens          int                 `json:"image_tokens"`
 }
 
 type OutputTokenDetails struct {
