@@ -147,7 +147,11 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, error) {
 			} else {
 				common.LogSqlType = common.DatabaseTypeSQLite
 			}
-			return gorm.Open(sqlite.Open(common.SQLitePath), &gorm.Config{
+			dsn, err := common.SQLiteDSN(common.SQLitePath)
+			if err != nil {
+				return nil, err
+			}
+			return gorm.Open(sqlite.Open(dsn), &gorm.Config{
 				PrepareStmt: true, // precompile SQL
 			})
 		}
@@ -173,7 +177,11 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, error) {
 	// Use SQLite
 	common.SysLog("SQL_DSN not set, using SQLite as database")
 	common.UsingSQLite = true
-	return gorm.Open(sqlite.Open(common.SQLitePath), &gorm.Config{
+	sqliteDSN, err := common.SQLiteDSN(common.SQLitePath)
+	if err != nil {
+		return nil, err
+	}
+	return gorm.Open(sqlite.Open(sqliteDSN), &gorm.Config{
 		PrepareStmt: true, // precompile SQL
 	})
 }
