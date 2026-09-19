@@ -7,10 +7,46 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
 )
+
+func TestImagesOutputModalityUsageAcrossFormats(t *testing.T) {
+	const rawUsage = `{"input_tokens":15,"output_tokens":1352,"output_tokens_details":{"image_tokens":1120,"text_tokens":232}}`
+	for _, format := range []string{"json", "sse", "json-to-sse"} {
+		t.Run(format, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest("POST", "/v1/images/generations", nil)
+			body := `{"data":[{"b64_json":"image"}],"usage":` + rawUsage + `}`
+			contentType := "application/json"
+			handler := OpenaiHandlerWithUsage
+			if format == "sse" {
+				body = "data: {\"type\":\"image_generation.completed\",\"usage\":" + rawUsage + "}\n\ndata: [DONE]\n\n"
+				contentType, handler = "text/event-stream", OpenaiImageStreamHandler
+			} else if format == "json-to-sse" {
+				handler = OpenaiImageJSONAsStreamHandler
+			}
+			resp := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {contentType}}, Body: io.NopCloser(strings.NewReader(body))}
+			usage, apiErr := handler(c, &relaycommon.RelayInfo{}, resp)
+			require.Nil(t, apiErr)
+			require.Equal(t, 1120, usage.CompletionTokenDetails.ImageTokens)
+			require.Equal(t, 232, usage.CompletionTokenDetails.TextTokens)
+			require.Equal(t, 1367, usage.TotalTokens)
+			normalizeOpenAIUsage(usage)
+			require.Equal(t, 1120, usage.CompletionTokenDetails.ImageTokens, "normalization must be idempotent")
+		})
+	}
+	var usage dto.Usage
+	require.NoError(t, common.Unmarshal([]byte(`{"completion_tokens_details":{"image_tokens":7}}`), &usage))
+	normalizeOpenAIUsage(&usage)
+	require.Equal(t, 7, usage.CompletionTokenDetails.ImageTokens, "missing alias must preserve canonical usage")
+	require.NoError(t, common.Unmarshal([]byte(`{"output_tokens_details":{"image_tokens":0}}`), &usage))
+	normalizeOpenAIUsage(&usage)
+	require.Zero(t, usage.CompletionTokenDetails.ImageTokens, "explicit zero is authoritative")
+}
 
 func TestOpenaiHandlerWithUsagePassesThroughImageEventStream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
