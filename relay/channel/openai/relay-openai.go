@@ -671,6 +671,16 @@ func OpenaiHandlerWithUsage(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 	}
 
 	// 写入新的 response body
+	if info != nil && info.RelayFormat == types.RelayFormatOpenAIImage {
+		_, images, present, err := parseOpenAIImagePayloads(responseBody)
+		if err != nil {
+			return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+		}
+		if present {
+			count := len(images)
+			info.ImageResponseCount = &count
+		}
+	}
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 
 	normalizeOpenAIUsage(&usageResp.Usage)
@@ -824,8 +834,8 @@ func OpenaiImageJSONAsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo,
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
 
-	var imageResp dto.ImageResponse
-	if err := common.Unmarshal(responseBody, &imageResp); err != nil {
+	created, images, present, err := parseOpenAIImagePayloads(responseBody)
+	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 
@@ -837,17 +847,23 @@ func OpenaiImageJSONAsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo,
 	normalizeOpenAIUsage(&usageResp.Usage)
 	applyUsagePostProcessing(info, &usageResp.Usage, responseBody)
 
+	if !present {
+		return nil, types.NewOpenAIError(fmt.Errorf("missing image data"), types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+	}
+	if info != nil {
+		count := len(images)
+		info.ImageResponseCount = &count
+	}
 	helper.SetEventStreamHeaders(c)
 	c.Status(http.StatusOK)
 
-	created := imageResp.Created
 	if created == 0 {
 		created = time.Now().Unix()
 	}
 	if info != nil {
 		info.SetFirstResponseTime()
 	}
-	for _, image := range imageResp.Data {
+	for _, image := range images {
 		payload := map[string]any{
 			"type":       "image_generation.completed",
 			"created_at": created,
@@ -878,7 +894,7 @@ func OpenaiImageJSONAsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo,
 		return &usageResp.Usage, nil
 	}
 	if info != nil {
-		info.ReceivedResponseCount += len(imageResp.Data)
+		info.ReceivedResponseCount += len(images)
 		if info.StreamStatus == nil {
 			info.StreamStatus = relaycommon.NewStreamStatus()
 		}

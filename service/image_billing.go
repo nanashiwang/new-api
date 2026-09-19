@@ -39,6 +39,7 @@ func PrepareImageBilling(c *gin.Context, info *relaycommon.RelayInfo, count int,
 	}
 	base := info.ImageBasePriceData
 	info.ImageRequestCount = count
+	info.ImageResponseCount = nil
 	// Remove only image-specific multipliers; other local billing settings stay.
 	info.PriceData.AddOtherRatio("n", 1)
 	info.PriceData.AddOtherRatio("prompt_extend", 1)
@@ -125,4 +126,39 @@ func PrepareImageBilling(c *gin.Context, info *relaycommon.RelayInfo, count int,
 		return types.NewErrorWithStatusCode(err, types.ErrorCodeInsufficientUserQuota, http.StatusForbidden, types.ErrOptionWithSkipRetry())
 	}
 	return nil
+}
+
+// ApplyImageResponseQuantity changes only settlement inputs, never the frozen
+// request used to reserve quota. Unknown adapter counts retain request billing.
+func ApplyImageResponseQuantity(info *relaycommon.RelayInfo) (int, error) {
+	count := info.ImageRequestCount
+	if info.ImageResponseCount == nil {
+		return count, nil
+	}
+	count = *info.ImageResponseCount
+	if count < 1 {
+		return 0, errors.New("upstream returned no image payload")
+	}
+	if info.TieredBillingSnapshot == nil {
+		if info.PriceData.UsePrice || info.ChannelType == constant.ChannelTypeAli {
+			info.PriceData.AddOtherRatio("n", float64(count))
+		}
+	} else if info.BillingRequestInput != nil {
+		input := *info.BillingRequestInput
+		body, err := sjson.SetBytes(bytes.Clone(input.Body), "n", count)
+		if err != nil {
+			return 0, err
+		}
+		for _, path := range []string{"parameters.n", "parameters.sampleCount"} {
+			if gjson.GetBytes(body, path).Exists() {
+				body, err = sjson.SetBytes(body, path, count)
+				if err != nil {
+					return 0, err
+				}
+			}
+		}
+		input.Body = body
+		info.BillingRequestInput = &input
+	}
+	return count, nil
 }

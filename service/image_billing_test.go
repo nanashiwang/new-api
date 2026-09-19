@@ -44,6 +44,15 @@ func TestImageBillingQuantityRetryAndLocalRatios(t *testing.T) {
 	require.Equal(t, float64(1), info.PriceData.OtherRatios["prompt_extend"])
 	require.Equal(t, float64(2), info.PriceData.OtherRatios["n"])
 	require.Equal(t, 600, reserve.quota) // retain reservation; settlement refunds the excess
+	actual := 1
+	info.ImageResponseCount = &actual
+	count, err := ApplyImageResponseQuantity(info)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	require.Equal(t, float64(1), info.PriceData.OtherRatios["n"])
+	require.Equal(t, 600, reserve.quota)
+	require.Nil(t, PrepareImageBilling(c, info, 2, false))
+	require.Nil(t, info.ImageResponseCount, "response quantities must not leak into retries")
 }
 
 func TestImageBillingTokenExpressionsAndBounds(t *testing.T) {
@@ -76,6 +85,13 @@ func TestImageExpressionUsesOutboundCountWithoutChangingOtherInputs(t *testing.T
 	used, quota, _ := TryTieredSettle(info, billingexpr.TokenParams{})
 	require.True(t, used)
 	require.Equal(t, 400, quota)
+	actual := 1
+	info.ImageResponseCount = &actual
+	_, err := ApplyImageResponseQuantity(info)
+	require.NoError(t, err)
+	used, quota, _ = TryTieredSettle(info, billingexpr.TokenParams{})
+	require.True(t, used)
+	require.Equal(t, 100, quota)
 	require.Equal(t, `{"n":1,"service_tier":"keep"}`, string(input.Body))
 	require.Contains(t, string(info.BillingRequestInput.Body), `"service_tier":"keep"`)
 	require.Nil(t, PrepareImageBilling(c, info, 2, false))

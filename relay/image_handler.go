@@ -157,7 +157,11 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		return newAPIError
 	}
 
-	imageN := uint(imageCount)
+	actualCount, err := service.ApplyImageResponseQuantity(info)
+	if err != nil {
+		return types.NewErrorWithStatusCode(err, types.ErrorCodeBadResponseBody, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
+	}
+	imageN := uint(actualCount)
 
 	// n is handled via OtherRatio so it is applied exactly once in quota
 	// calculation (both price-based and ratio-based paths).

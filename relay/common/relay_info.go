@@ -227,6 +227,7 @@ type RelayInfo struct {
 	// 免费模型时为 nil。
 	Billing               BillingSettler
 	ImageRequestCount     int
+	ImageResponseCount    *int // nil means the adapter did not report an actual payload count
 	ImageBasePriceData    *types.PriceData
 	ImageBaseBillingInput *billingexpr.RequestInput
 	// BillingSource indicates whether this request is billed from wallet quota or subscription.
