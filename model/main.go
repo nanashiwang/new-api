@@ -260,6 +260,9 @@ func InitLogDB() (err error) {
 }
 
 func migrateDB() error {
+	if err := migratePrefillGroupUniqueness(DB); err != nil {
+		return err
+	}
 	// Migrate price_amount column from float/double to decimal for existing tables
 	migrateSubscriptionPlanPriceAmount()
 	err := DB.AutoMigrate(
@@ -361,6 +364,9 @@ func migrateDB() error {
 }
 
 func migrateDBFast() error {
+	if err := migratePrefillGroupUniqueness(DB); err != nil {
+		return err
+	}
 	var wg sync.WaitGroup
 
 	migrations := []struct {

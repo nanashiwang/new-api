@@ -24,7 +24,8 @@ func (j JSONValue) Value() (driver.Value, error) {
 	if j == nil {
 		return nil, nil
 	}
-	return []byte(j), nil
+	// JSON is text, not a bytea parameter in PostgreSQL simple protocol.
+	return string(j), nil
 }
 
 // Scan 实现 sql.Scanner 接口，兼容不同驱动返回的类型
