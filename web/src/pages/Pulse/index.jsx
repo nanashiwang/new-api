@@ -29,7 +29,7 @@ import {
   Tag,
   Typography,
 } from '@douyinfe/semi-ui';
-import { Activity, Award, RefreshCw, Ticket, TrendingUp } from 'lucide-react';
+import { Award, RefreshCw, Ticket, TrendingUp } from 'lucide-react';
 import { API } from '../../helpers/apiCore';
 
 const { Text, Title } = Typography;
@@ -37,7 +37,7 @@ const { Text, Title } = Typography;
 const formatInteger = (value) =>
   new Intl.NumberFormat().format(Number.isFinite(Number(value)) ? value : 0);
 
-const formatContribution = (milli) => {
+const formatExperience = (milli) => {
   const value = Number(milli);
   if (!Number.isFinite(value)) return '0';
   return new Intl.NumberFormat(undefined, {
@@ -57,12 +57,6 @@ const formatDateTime = (value) => {
     hour: '2-digit',
     minute: '2-digit',
   }).format(date);
-};
-
-const assetLabel = (assetType, t) => {
-  if (assetType === 'contribution') return t('贡献值');
-  if (assetType === 'ticket') return t('奖励券');
-  return assetType || '-';
 };
 
 const statusColor = (status) => {
@@ -154,40 +148,6 @@ const Pulse = () => {
     };
   }, [reloadKey, t]);
 
-  const ledgerColumns = useMemo(
-    () => [
-      {
-        title: t('资产'),
-        dataIndex: 'asset_type',
-        render: (value) => assetLabel(value, t),
-      },
-      { title: t('类型'), dataIndex: 'operation' },
-      {
-        title: t('变动'),
-        dataIndex: 'amount',
-        render: (value, record) =>
-          record.asset_type === 'contribution'
-            ? formatContribution(value)
-            : formatInteger(value),
-      },
-      {
-        title: t('变动后余额'),
-        dataIndex: 'balance_after',
-        render: (value, record) =>
-          record.asset_type === 'contribution'
-            ? formatContribution(value)
-            : formatInteger(value),
-      },
-      { title: t('来源'), dataIndex: 'source_type' },
-      {
-        title: t('时间'),
-        dataIndex: 'created_at',
-        render: formatDateTime,
-      },
-    ],
-    [t],
-  );
-
   const rewardColumns = useMemo(
     () => [
       { title: t('奖励类型'), dataIndex: 'reward_type' },
@@ -219,7 +179,7 @@ const Pulse = () => {
               {t('Meta Pulse')}
             </Title>
             <Text type='secondary'>
-              {t('基于真实付费调用的贡献、等级与权益记录')}
+              {t('基于真实付费调用的经验值、等级与权益记录')}
             </Text>
           </div>
           <Tag color='blue' size='large'>
@@ -257,7 +217,7 @@ const Pulse = () => {
           </Card>
         ) : (
           <>
-            <div className='mb-5 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4'>
+            <div className='mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3'>
               <StatCard
                 icon={<Award size={20} />}
                 label={t('等级')}
@@ -266,13 +226,8 @@ const Pulse = () => {
               />
               <StatCard
                 icon={<TrendingUp size={20} />}
-                label={t('终身贡献值')}
-                value={formatContribution(summary?.lifetime_contribution_milli)}
-              />
-              <StatCard
-                icon={<Activity size={20} />}
-                label={t('本期贡献值')}
-                value={formatContribution(summary?.current_contribution_milli)}
+                label={t('经验值')}
+                value={formatExperience(summary?.lifetime_contribution_milli)}
               />
               <StatCard
                 icon={<Ticket size={20} />}
@@ -280,44 +235,6 @@ const Pulse = () => {
                 value={formatInteger(summary?.available_tickets)}
               />
             </div>
-
-            <Card className='mb-5 !rounded-2xl border-0 shadow-sm'>
-              <div className='flex flex-wrap items-center justify-between gap-3'>
-                <div>
-                  <Text type='tertiary' size='small'>
-                    {t('当前周期')}
-                  </Text>
-                  <div className='mt-1 text-lg font-medium'>
-                    {summary?.current_period?.key || t('暂无活动周期')}
-                  </div>
-                </div>
-                {summary?.current_period ? (
-                  <div className='text-sm text-[var(--semi-color-text-2)]'>
-                    {formatDateTime(summary.current_period.starts_at)} —{' '}
-                    {formatDateTime(summary.current_period.ends_at)}
-                    <span className='ml-2'>
-                      ({summary.current_period.timezone})
-                    </span>
-                  </div>
-                ) : null}
-              </div>
-            </Card>
-
-            <Card
-              className='mb-5 !rounded-2xl border-0 shadow-sm'
-              title={t('本期账本')}
-            >
-              <Table
-                rowKey='id'
-                columns={ledgerColumns}
-                dataSource={
-                  Array.isArray(summary?.ledger) ? summary.ledger : []
-                }
-                pagination={false}
-                empty={<Empty description={t('暂无账本记录')} />}
-                scroll={{ x: 760 }}
-              />
-            </Card>
 
             <Card
               className='!rounded-2xl border-0 shadow-sm'
