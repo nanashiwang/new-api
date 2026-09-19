@@ -1,6 +1,11 @@
 package middleware
 
 import (
+	"github.com/QuantumNous/new-api/common/limiter"
+	"github.com/QuantumNous/new-api/service"
+	"github.com/alicebob/miniredis/v2"
+	"github.com/go-redis/redis/v8"
+	"github.com/stretchr/testify/require"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,6 +15,36 @@ import (
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/gin-gonic/gin"
 )
+
+func TestModelSuccessRateLimitReleasesHTTPAndStreamFailures(t *testing.T) {
+	for _, useRedis := range []bool{false, true} {
+		srv := miniredis.RunT(t)
+		client := redis.NewClient(&redis.Options{Addr: srv.Addr()})
+		previous := common.RDB
+		common.RDB = client
+		modelSuccessWindow = limiter.SuccessWindow{}
+		r := gin.New()
+		r.Use(func(c *gin.Context) { c.Set("id", 919); c.Next() })
+		handler := memoryRateLimitHandler(int64(60), 0, 1)
+		if useRedis {
+			handler = redisRateLimitHandler(60, 0, 1)
+		}
+		r.Use(handler)
+		r.GET("/fail", func(c *gin.Context) { c.Status(502) })
+		r.GET("/stream-fail", func(c *gin.Context) { c.Set(service.RequestOutcomeKey, false); c.String(200, "data: error\n\n") })
+		r.GET("/ok", func(c *gin.Context) { c.Status(200) })
+		for _, path := range []string{"/fail", "/fail", "/stream-fail", "/stream-fail", "/ok"} {
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+			require.NotEqual(t, 429, w.Code)
+		}
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest("GET", "/ok", nil))
+		require.Equal(t, 429, w.Code)
+		common.RDB = previous
+		require.NoError(t, client.Close())
+	}
+}
 
 func TestModelRequestRateLimitMemory_AllowsZeroSuccessLimit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
