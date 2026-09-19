@@ -276,6 +276,7 @@ export const useLogsData = () => {
       end_timestamp,
       channel: formValues.channel || '',
       channel_ids: (formValues.channel_ids || []).join(','),
+      channel_keyword: formValues.channel_keyword || '',
       group_vendor: formValues.group_vendor || '',
       group: formValues.group || '',
       request_id: formValues.request_id || '',
@@ -354,7 +355,6 @@ export const useLogsData = () => {
     if (!isAdminUser) {
       return;
     }
-    if (!validateChannelSelection()) return;
     const reqId = ++topUsersRequestCounter.current;
     const {
       username,
@@ -364,6 +364,7 @@ export const useLogsData = () => {
       endTimestamp,
       channel,
       channel_ids,
+      channel_keyword,
       group_vendor,
       group,
       request_id,
@@ -379,6 +380,7 @@ export const useLogsData = () => {
         end_timestamp: String(endTimestamp),
         channel: String(channel),
         channel_ids,
+        channel_keyword,
         group_vendor,
         group,
         request_id,
@@ -432,7 +434,6 @@ export const useLogsData = () => {
   const groupSummaryRequest = useRef(0);
   const openGroupSummary = async () => {
     if (!isAdminUser) return;
-    if (!validateChannelSelection()) return;
     const id = ++groupSummaryRequest.current;
     const values = normalizeLogQueryValues();
     setGroupSummaryVisible(true);
@@ -448,6 +449,7 @@ export const useLogsData = () => {
         group_vendor: values.group_vendor,
         channel: values.channel,
         channel_ids: values.channel_ids,
+        channel_keyword: values.channel_keyword,
         request_id: values.request_id,
         start_timestamp: values.startTimestamp,
         end_timestamp: values.endTimestamp,
@@ -508,6 +510,7 @@ export const useLogsData = () => {
       endTimestamp,
       channel,
       channel_ids,
+      channel_keyword,
       group_vendor,
       group,
       request_id,
@@ -522,6 +525,7 @@ export const useLogsData = () => {
       end_timestamp: endTimestamp,
       channel,
       channel_ids,
+      channel_keyword,
       group_vendor,
       group,
       request_id,
@@ -540,7 +544,6 @@ export const useLogsData = () => {
   };
 
   const handleEyeClick = async () => {
-    if (!validateChannelSelection()) return;
     const reqId = ++statRequestCounter.current;
     setLoadingStat(true);
     setStatError('');
@@ -904,7 +907,6 @@ export const useLogsData = () => {
 
   // Load logs function
   const loadLogs = async (startIdx, pageSize, customLogType = null) => {
-    if (!validateChannelSelection()) return;
     const reqId = ++logsRequestCounter.current;
     setLoading(true);
     setLogs([]);
@@ -918,6 +920,7 @@ export const useLogsData = () => {
       endTimestamp,
       channel,
       channel_ids,
+      channel_keyword,
       group_vendor,
       group,
       request_id,
@@ -939,6 +942,7 @@ export const useLogsData = () => {
       queryParams.username = username;
       queryParams.channel = channel;
       queryParams.channel_ids = channel_ids;
+      queryParams.channel_keyword = channel_keyword;
       queryParams.group_vendor = group_vendor;
     }
 
@@ -991,20 +995,7 @@ export const useLogsData = () => {
   };
 
   // Refresh function
-  const validateChannelSelection = () => {
-    if (
-      isAdminUser &&
-      formApi?.getValue('channel_keyword')?.trim() &&
-      !formApi?.getValue('channel_ids')?.length
-    ) {
-      showError(t('请先选择匹配渠道，或清空渠道搜索。'));
-      return false;
-    }
-    return true;
-  };
-
   const refresh = async () => {
-    if (!validateChannelSelection()) return;
     setActivePage(1);
     handleEyeClick();
     await loadLogs(1, pageSize);

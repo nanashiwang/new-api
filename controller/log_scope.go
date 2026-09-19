@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -10,32 +11,84 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+var logChannelIDsPattern = regexp.MustCompile(`^[0-9,\s，+-]+$`)
+
 func parseAdminLogScope(c *gin.Context) (model.LogScope, error) {
 	scope := model.LogScope{Vendor: strings.TrimSpace(c.Query("group_vendor"))}
 	if len(scope.Vendor) > 128 {
 		return scope, errors.New("厂商名称过长")
 	}
-	raw, supplied := c.GetQuery("channel_ids")
-	if !supplied || strings.TrimSpace(raw) == "" {
+	if raw := strings.TrimSpace(c.Query("channel_ids")); raw != "" {
+		ids, err := parseLogChannelIDs(raw)
+		if err != nil {
+			return scope, err
+		}
+		scope.ChannelIDs = ids
+	}
+	keyword := strings.TrimSpace(c.Query("channel_keyword"))
+	if keyword == "" {
 		return scope, nil
 	}
+	var matched []int
+	if logChannelIDsPattern.MatchString(keyword) {
+		ids, err := parseLogChannelIDs(strings.ReplaceAll(keyword, "，", ","))
+		if err != nil {
+			return scope, err
+		}
+		matched = ids
+	} else {
+		if len(keyword) > 128 {
+			return scope, errors.New("搜索关键词过长")
+		}
+		rows, err := model.FindLogChannels(keyword)
+		if err != nil {
+			return scope, err
+		}
+		if len(rows) > 200 {
+			return scope, errors.New("匹配超过 200 个，请缩小关键词。")
+		}
+		// Keep a non-nil empty slice: no name matches must never mean all channels.
+		matched = make([]int, 0, len(rows))
+		for _, row := range rows {
+			matched = append(matched, row.ID)
+		}
+	}
+	if scope.ChannelIDs == nil {
+		scope.ChannelIDs = matched
+	} else {
+		allowed := make(map[int]bool, len(matched))
+		for _, id := range matched {
+			allowed[id] = true
+		}
+		intersection := []int{}
+		for _, id := range scope.ChannelIDs {
+			if allowed[id] {
+				intersection = append(intersection, id)
+			}
+		}
+		scope.ChannelIDs = intersection
+	}
+	return scope, nil
+}
+
+func parseLogChannelIDs(raw string) ([]int, error) {
 	parts := strings.Split(raw, ",")
 	if len(parts) > 200 {
-		return scope, errors.New("最多选择 200 个渠道")
+		return nil, errors.New("最多选择 200 个渠道")
 	}
-	scope.ChannelIDs = []int{}
+	ids := []int{}
 	seen := map[int]bool{}
 	for _, part := range parts {
 		id, err := strconv.Atoi(strings.TrimSpace(part))
 		if err != nil || id <= 0 {
-			return scope, errors.New("渠道 ID 必须是正整数")
+			return nil, errors.New("渠道 ID 必须是正整数")
 		}
 		if !seen[id] {
-			scope.ChannelIDs = append(scope.ChannelIDs, id)
+			ids = append(ids, id)
 			seen[id] = true
 		}
 	}
-	return scope, nil
+	return ids, nil
 }
 
 func GetLogChannelOptions(c *gin.Context) {

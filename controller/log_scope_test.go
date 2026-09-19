@@ -120,4 +120,47 @@ func TestLogScopeEndpointsUseSameSelection(t *testing.T) {
 	if quota != 30 {
 		t.Fatalf("top-users scope mismatch: %+v", top)
 	}
+	// Plain text input resolves all matching names, including disabled channels.
+	for _, tc := range []struct {
+		input string
+		count float64
+		quota float64
+	}{
+		{"MUZE", 2, 30},
+		{"1，2", 2, 30},
+		{"9999", 0, 0},
+		{"no-such-upstream", 0, 0},
+		{"%_", 0, 0},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			values, err := url.ParseQuery(query)
+			if err != nil {
+				t.Fatal(err)
+			}
+			values.Del("channel_ids")
+			values.Set("channel_keyword", tc.input)
+			query = values.Encode()
+			list := call(GetAllLogs)["data"].(map[string]interface{})
+			stat := call(GetLogsStat)["data"].(map[string]interface{})
+			if list["total"] != tc.count || stat["quota"] != tc.quota {
+				t.Fatalf("name/ID scope mismatch: list=%+v stat=%+v", list, stat)
+			}
+			rows := call(GetLogGroupSummary)["data"].([]interface{})
+			sum := float64(0)
+			for _, row := range rows {
+				sum += row.(map[string]interface{})["quota"].(float64)
+			}
+			if sum != tc.quota {
+				t.Fatalf("summary scope mismatch: %+v", rows)
+			}
+			users := call(GetTopUsers)["data"].(map[string]interface{})["by_quota"].([]interface{})
+			sum = 0
+			for _, row := range users {
+				sum += row.(map[string]interface{})["quota"].(float64)
+			}
+			if sum != tc.quota {
+				t.Fatalf("top-users scope mismatch: %+v", users)
+			}
+		})
+	}
 }
