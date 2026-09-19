@@ -1,5 +1,10 @@
 {
   "translation": {
+    "映射后模型": "Mapped model",
+    "上游声明模型": "Provider-declared model",
+    "模型声明不匹配": "Model declaration mismatch",
+    "上游声明与请求或映射模型不匹配，仅供排查，不影响计费。": "The provider declaration does not match the requested or mapped model. Diagnostic only; billing is unchanged.",
+    "模型名称来自上游声明，不能据此验证实际模型身份。": "The model name is declared by the provider and does not verify the underlying model identity.",
     "渠道名称 / ID": "Channel name / ID",
     "输入渠道名称关键词，或用逗号分隔多个渠道 ID": "Enter a channel name keyword, or separate multiple channel IDs with commas",
     "全部厂商": "All providers",

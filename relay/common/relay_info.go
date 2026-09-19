@@ -194,6 +194,7 @@ type RelayInfo struct {
 	UsePrice                bool
 	RelayMode               int
 	OriginModelName         string
+	ResponseModel           *ResponseModel
 	UpstreamRequestBodySize int64
 	RequestURLPath          string
 	RequestHeaders          map[string]string
@@ -287,6 +288,8 @@ type RelayInfo struct {
 }
 
 func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
+	// Observations belong to this attempt, not an earlier failed channel.
+	info.ResponseModel = nil
 	channelType := common.GetContextKeyInt(c, constant.ContextKeyChannelType)
 	paramOverride := common.GetContextKeyStringMap(c, constant.ContextKeyChannelParamOverride)
 	headerOverride := common.GetContextKeyStringMap(c, constant.ContextKeyChannelHeaderOverride)

@@ -55,6 +55,7 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 // buildResponsesUsage 从一个完整的 Responses 响应对象计算 *dto.Usage(含内置工具用量),
 // 供非流式直连 handler 与聚合 handler 共用,保证两条路径计费口径完全一致。
 func buildResponsesUsage(c *gin.Context, info *relaycommon.RelayInfo, responsesResponse *dto.OpenAIResponsesResponse) *dto.Usage {
+	info.ObserveResponseModel(responsesResponse.Model)
 	usage := dto.Usage{}
 	if responsesResponse.Usage != nil {
 		usage.PromptTokens = responsesResponse.Usage.InputTokens
@@ -136,6 +137,9 @@ func aggregateResponsesStream(c *gin.Context, info *relaycommon.RelayInfo, resp 
 		if err := common.UnmarshalJsonStr(data, &streamResponse); err != nil {
 			logger.LogError(c, "aggregate responses stream: failed to unmarshal event: "+err.Error())
 			return true
+		}
+		if streamResponse.Response != nil {
+			info.ObserveResponseModel(streamResponse.Response.Model)
 		}
 		switch streamResponse.Type {
 		case "response.completed":
@@ -320,6 +324,9 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 		// 检查当前数据是否包含 completed 状态和 usage 信息
 		var streamResponse dto.ResponsesStreamResponse
 		if err := common.UnmarshalJsonStr(data, &streamResponse); err == nil {
+			if streamResponse.Response != nil {
+				info.ObserveResponseModel(streamResponse.Response.Model)
+			}
 			explicitFailure := isResponsesStreamFailureEvent(streamResponse)
 			if explicitFailure {
 				data = decorateResponsesPolicyFailureData(streamResponse, data)

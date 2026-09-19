@@ -56,6 +56,18 @@ func newResponsesStreamHTTPResponse(body string) *http.Response {
 	}
 }
 
+func TestResponsesUsageObservesDeclaredModelWithoutChangingBilling(t *testing.T) {
+	c, _ := newResponsesStreamTestContext()
+	info := &relaycommon.RelayInfo{OriginModelName: "requested", ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "mapped"}}
+	response := &dto.OpenAIResponsesResponse{Model: "declared"}
+	buildResponsesUsage(c, info, response)
+	require.Equal(t, "declared", info.ResponseModel.ReturnedModel)
+	require.True(t, info.ResponseModel.Mismatch)
+	require.Equal(t, "requested", info.OriginModelName)
+	require.Equal(t, "mapped", info.UpstreamModelName)
+	require.Equal(t, "declared", response.Model)
+}
+
 type errorAfterBodyReadCloser struct {
 	reader *strings.Reader
 	err    error

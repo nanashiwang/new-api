@@ -31,6 +31,7 @@ func TestGenerateTextOtherInfoIncludesParamOverrideAuditAndStreamStatus(t *testi
 		ChannelMeta:              &relaycommon.ChannelMeta{},
 		ChatToolProtocol:         dto.ChatToolProtocolLegacy,
 		ChatToolCount:            3,
+		OriginModelName:          "requested",
 		ParamOverrideAudit: []string{
 			"copy metadata.target_model -> model",
 		},
@@ -38,8 +39,17 @@ func TestGenerateTextOtherInfoIncludesParamOverrideAuditAndStreamStatus(t *testi
 	info.StreamStatus = relaycommon.NewStreamStatus()
 	info.StreamStatus.RecordError("soft failure")
 	info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonTimeout, nil)
+	info.ObserveResponseModel("provider-declared")
 
 	other := GenerateTextOtherInfo(ctx, info, 1, 1, 1, 0, 1, 1, 1)
+	observed, ok := other["response_model"].(relaycommon.ResponseModel)
+	if !ok || observed.ReturnedModel != "provider-declared" || !observed.Mismatch {
+		t.Fatalf("missing model diagnostics: %#v", other["response_model"])
+	}
+	info.ResponseModel.ReturnedModel = "later-change"
+	if other["response_model"].(relaycommon.ResponseModel).ReturnedModel != "provider-declared" {
+		t.Fatal("log observation must be a detached snapshot")
+	}
 	if other["first_effective_output_ms"] != float64(500) {
 		t.Fatalf("unexpected first_effective_output_ms: %#v", other["first_effective_output_ms"])
 	}

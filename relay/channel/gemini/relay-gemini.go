@@ -1306,6 +1306,7 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 			info.StreamStatus.RecordError("invalid Gemini stream event")
 			return false
 		}
+		info.ObserveResponseModel(geminiResponse.ModelVersion)
 		var envelope struct {
 			Error any `json:"error"`
 		}
@@ -1484,6 +1485,7 @@ func GeminiChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
+	info.ObserveResponseModel(geminiResponse.ModelVersion)
 	if len(geminiResponse.Candidates) == 0 {
 		usage := buildUsageFromGeminiMetadata(geminiResponse.UsageMetadata, info.GetEstimatePromptTokens())
 

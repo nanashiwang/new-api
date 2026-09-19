@@ -38,6 +38,7 @@ import {
 } from '../../../helpers';
 import { IconHelpCircle } from '@douyinfe/semi-icons';
 import { CircleAlert, Route, Sparkles } from 'lucide-react';
+import { getResponseModelInfo } from '../../../helpers/responseModel';
 
 const colors = [
   'amber',
@@ -264,12 +265,13 @@ function renderBillingTag(record, t) {
 
 function renderModelName(record, copyText, t) {
   const other = getLogOther(record.other);
+  const observed = getResponseModelInfo(other, record.model_name);
   const modelMapped =
     other?.is_model_mapped &&
     other?.upstream_model_name &&
     other?.upstream_model_name !== '';
 
-  if (!modelMapped) {
+  if (!modelMapped && !observed) {
     return renderModelTag(record.model_name, {
       onClick: (event) => {
         copyText(event, record.model_name).then(() => {});
@@ -295,14 +297,40 @@ function renderModelName(record, copyText, t) {
               </div>
               <div className='flex items-center'>
                 <Typography.Text strong style={{ marginRight: 8 }}>
-                  {t('实际模型')}:
+                  {t('映射后模型')}:
                 </Typography.Text>
-                {renderModelTag(other.upstream_model_name, {
-                  onClick: (event) => {
-                    copyText(event, other.upstream_model_name).then(() => {});
+                {renderModelTag(
+                  observed?.upstream || other.upstream_model_name,
+                  {
+                    onClick: (event) => {
+                      copyText(
+                        event,
+                        observed?.upstream || other.upstream_model_name,
+                      ).then(() => {});
+                    },
                   },
-                })}
+                )}
               </div>
+              {observed && (
+                <>
+                  <div className='flex items-center gap-2'>
+                    <Typography.Text strong>
+                      {t('上游声明模型')}:
+                    </Typography.Text>
+                    {renderModelTag(observed.returned)}
+                  </div>
+                  <Typography.Text
+                    type={observed.mismatch ? 'warning' : 'tertiary'}
+                    style={{ maxWidth: 320 }}
+                  >
+                    {t(
+                      observed.mismatch
+                        ? '上游声明与请求或映射模型不匹配，仅供排查，不影响计费。'
+                        : '模型名称来自上游声明，不能据此验证实际模型身份。',
+                    )}
+                  </Typography.Text>
+                </>
+              )}
             </Space>
           </div>
         }
@@ -311,7 +339,16 @@ function renderModelName(record, copyText, t) {
           onClick: (event) => {
             copyText(event, record.model_name).then(() => {});
           },
-          suffixIcon: (
+          suffixIcon: observed?.mismatch ? (
+            <CircleAlert
+              aria-label={t('模型声明不匹配')}
+              style={{
+                width: '0.9em',
+                height: '0.9em',
+                color: 'var(--semi-color-warning)',
+              }}
+            />
+          ) : (
             <Route style={{ width: '0.9em', height: '0.9em', opacity: 0.75 }} />
           ),
         })}

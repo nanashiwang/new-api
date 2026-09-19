@@ -1,5 +1,10 @@
 {
   "translation": {
+    "映射后模型": "Modèle après mappage",
+    "上游声明模型": "Modèle déclaré par le fournisseur",
+    "模型声明不匹配": "Déclaration de modèle différente",
+    "上游声明与请求或映射模型不匹配，仅供排查，不影响计费。": "Le modèle déclaré ne correspond pas au modèle demandé ou mappé. Diagnostic uniquement ; facturation inchangée.",
+    "模型名称来自上游声明，不能据此验证实际模型身份。": "Le nom déclaré par le fournisseur ne permet pas de vérifier l’identité du modèle réel.",
     "统计说明": "Détails des statistiques",
     "首字": "TTFT",
     "Pulse 奖励撤销密钥": "Secret d’annulation des récompenses Pulse",

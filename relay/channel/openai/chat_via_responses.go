@@ -155,6 +155,7 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 // 供「上游非流式直连」(OaiResponsesToChatHandler)与「上游强制流式后聚合」
 // (OaiResponsesToChatAggregateHandler)两条路径共用,保证转换与计费口径完全一致。
 func finishResponsesToChatConversion(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response, responsesResp *dto.OpenAIResponsesResponse) (*dto.Usage, *types.NewAPIError) {
+	info.ObserveResponseModel(responsesResp.Model)
 	chatId := helper.GetResponseID(c)
 	chatResp, usage, err := service.ResponsesResponseToChatCompletionsResponseWithToolProtocol(responsesResp, chatId, info.ChatToolProtocol)
 	if err != nil {
@@ -485,6 +486,9 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			return true
 		}
 
+		if streamResp.Response != nil {
+			info.ObserveResponseModel(streamResp.Response.Model)
+		}
 		switch streamResp.Type {
 		case "response.created":
 			if streamResp.Response != nil {

@@ -40,6 +40,7 @@ import {
   renderTieredModelPrice,
 } from '../../helpers';
 import { getRequestFailureDetails } from '../../helpers/requestFailure';
+import { getResponseModelInfo } from '../../helpers/responseModel';
 import { ITEMS_PER_PAGE } from '../../constants';
 import { useTableCompactMode } from '../common/useTableCompactMode';
 
@@ -751,8 +752,24 @@ export const useLogsData = () => {
             value: logs[i].model_name,
           });
           expandDataLocal.push({
-            key: t('实际模型'),
+            key: t('映射后模型'),
             value: other.upstream_model_name,
+          });
+        }
+
+        const observed = getResponseModelInfo(other, logs[i].model_name);
+        if (observed) {
+          expandDataLocal.push({
+            key: t('上游声明模型'),
+            value: observed.returned,
+          });
+          expandDataLocal.push({
+            key: t('统计说明'),
+            value: t(
+              observed.mismatch
+                ? '上游声明与请求或映射模型不匹配，仅供排查，不影响计费。'
+                : '模型名称来自上游声明，不能据此验证实际模型身份。',
+            ),
           });
         }
 

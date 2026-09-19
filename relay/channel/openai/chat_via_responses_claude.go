@@ -231,6 +231,9 @@ func OaiResponsesToClaudeStreamHandler(c *gin.Context, info *relaycommon.RelayIn
 			return true
 		}
 
+		if streamResp.Response != nil {
+			info.ObserveResponseModel(streamResp.Response.Model)
+		}
 		switch streamResp.Type {
 		case "response.created":
 			if streamResp.Response != nil {

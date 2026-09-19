@@ -453,6 +453,7 @@ type GeminiChatPromptFeedback struct {
 }
 
 type GeminiChatResponse struct {
+	ModelVersion   string                    `json:"modelVersion,omitempty"`
 	Candidates     []GeminiChatCandidate     `json:"candidates"`
 	PromptFeedback *GeminiChatPromptFeedback `json:"promptFeedback,omitempty"`
 	UsageMetadata  GeminiUsageMetadata       `json:"usageMetadata"`

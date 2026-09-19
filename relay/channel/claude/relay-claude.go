@@ -825,6 +825,10 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	if isEffectiveClaudeStreamOutput(&claudeResponse) {
 		info.SetFirstEffectiveOutputTime()
 	}
+	info.ObserveResponseModel(claudeResponse.Model)
+	if claudeResponse.Message != nil {
+		info.ObserveResponseModel(claudeResponse.Message.Model)
+	}
 	if info.RelayFormat == types.RelayFormatClaude {
 		FormatClaudeResponseInfo(&claudeResponse, nil, claudeInfo)
 
@@ -941,6 +945,7 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		return types.WithClaudeError(*claudeError, statusCode)
 	}
 	maybeMarkClaudeRefusal(c, claudeResponse.StopReason)
+	info.ObserveResponseModel(claudeResponse.Model)
 	if claudeInfo.Usage == nil {
 		claudeInfo.Usage = &dto.Usage{}
 	}

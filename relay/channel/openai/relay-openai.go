@@ -195,6 +195,7 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 			info.ObserveOpenAIStreamOutput(data)
 			var event dto.ChatCompletionsStreamResponse
 			if common.UnmarshalJsonStr(data, &event) == nil {
+				info.ObserveResponseModel(event.Model)
 				for _, choice := range event.Choices {
 					completed = completed || (choice.FinishReason != nil && *choice.FinishReason != "")
 				}
@@ -310,6 +311,7 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 	if oaiError := simpleResponse.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
+	info.ObserveResponseModel(simpleResponse.Model)
 
 	for _, choice := range simpleResponse.Choices {
 		if choice.FinishReason == constant.FinishReasonContentFilter {
