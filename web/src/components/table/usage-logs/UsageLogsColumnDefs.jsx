@@ -37,7 +37,7 @@ import {
   renderTieredModelPriceSimple,
 } from '../../../helpers';
 import { IconHelpCircle } from '@douyinfe/semi-icons';
-import { CircleAlert, Route, Sparkles } from 'lucide-react';
+import { CircleAlert, Route, Sparkles, BadgeCheck } from 'lucide-react';
 import { getResponseModelInfo } from '../../../helpers/responseModel';
 
 const colors = [
@@ -249,18 +249,6 @@ function renderFirstUseTime(type) {
       {time} s{' '}
     </Tag>
   );
-}
-
-function renderBillingTag(record, t) {
-  const other = getLogOther(record.other);
-  if (other?.billing_source === 'subscription') {
-    return (
-      <Tag color='green' shape='circle'>
-        {t('订阅抵扣')}
-      </Tag>
-    );
-  }
-  return null;
 }
 
 function renderModelName(record, copyText, t) {
@@ -855,9 +843,19 @@ export const getLogsColumns = ({
         const other = getLogOther(record.other);
         if (other?.billing_source === 'subscription') {
           return (
-            <Tooltip content={`${t('由订阅抵扣')}：${renderQuota(text, 6)}`}>
-              <span>{renderBillingTag(record, t)}</span>
-            </Tooltip>
+            <span
+              className='inline-flex items-center gap-1'
+              style={{ whiteSpace: 'nowrap' }}
+            >
+              {renderQuota(text, 6)}
+              <Tooltip content={t('由订阅抵扣')}>
+                <BadgeCheck
+                  aria-label={t('由订阅抵扣')}
+                  size={14}
+                  style={{ color: 'var(--semi-color-success)', flexShrink: 0 }}
+                />
+              </Tooltip>
+            </span>
           );
         }
         return (
