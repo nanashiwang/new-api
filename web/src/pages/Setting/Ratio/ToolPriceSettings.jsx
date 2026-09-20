@@ -171,7 +171,8 @@ export default function ToolPriceSettings({ options }) {
         <InputNumber
           value={val}
           min={0}
-          step={0.5}
+          step={0.0001}
+          precision={4}
           onChange={(v) => updateRow(record.id, 'price', v ?? 0)}
           style={{ width: '100%' }}
         />

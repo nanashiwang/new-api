@@ -1669,3 +1669,11 @@ html.dark .with-pastel-balls::before {
 .semi-datepicker-range-input {
   border-radius: 10px !important;
 }
+
+/* Select popups are portaled outside the usage-log filter form. */
+.usage-log-group-private,
+.usage-log-group-private input,
+.usage-log-group-private .semi-select-option,
+.usage-log-group-private .semi-select-selection {
+  -webkit-text-security: disc;
+}

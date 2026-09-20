@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useState } from 'react';
-import { Button, Form } from '@douyinfe/semi-ui';
+import { Button, Form, Switch } from '@douyinfe/semi-ui';
 import { IconSearch } from '@douyinfe/semi-icons';
 
 import { DATE_RANGE_PRESETS } from '../../../constants/console.constants';
@@ -40,6 +40,14 @@ const LogsFilters = ({
   isAdminUser,
   t,
 }) => {
+  const [groupPrivacy, setGroupPrivacy] = useState(() => {
+    try {
+      return localStorage.getItem('usage-logs-group-privacy') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const sensitiveClass = groupPrivacy ? 'usage-log-group-private' : undefined;
   const [vendor, setVendor] = useState('');
   const [vendorSearch, setVendorSearch] = useState('');
   const [groupSearch, setGroupSearch] = useState('');
@@ -104,6 +112,8 @@ const LogsFilters = ({
             {isAdminUser && (
               <Form.Select
                 field='group_vendor'
+                className={sensitiveClass}
+                dropdownClassName={sensitiveClass}
                 placeholder={t('全部厂商')}
                 optionList={withHistoricalOption(
                   buildTokenGroupVendorOptions(groupOptions, t('多厂商通用')),
@@ -122,6 +132,8 @@ const LogsFilters = ({
             )}
             <Form.Select
               field='group'
+              className={sensitiveClass}
+              dropdownClassName={sensitiveClass}
               placeholder={t('选择分组')}
               optionList={withHistoricalOption(
                 isAdminUser && vendor
@@ -189,7 +201,26 @@ const LogsFilters = ({
             </Form.Select>
           </div>
 
-          <div className='flex gap-2 w-full sm:w-auto justify-end'>
+          <div className='flex gap-2 w-full sm:w-auto justify-end items-center flex-wrap'>
+            <label className='flex items-center gap-2 text-sm'>
+              <Switch
+                size='small'
+                aria-label={t('分组隐私模式')}
+                checked={groupPrivacy}
+                onChange={(checked) => {
+                  setGroupPrivacy(checked);
+                  try {
+                    localStorage.setItem(
+                      'usage-logs-group-privacy',
+                      String(checked),
+                    );
+                  } catch {
+                    // Privacy still works when browser storage is unavailable.
+                  }
+                }}
+              />
+              {t('分组隐私模式')}
+            </label>
             <Button
               type='tertiary'
               htmlType='submit'
