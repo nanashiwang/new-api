@@ -71,9 +71,6 @@ func GetUserPaymentRecordsByParams(userId int, params PaymentRecordSearchParams,
 	if userId <= 0 {
 		return []*PaymentRecord{}, 0, nil
 	}
-	if err := ValidateUserTopUpQueryRange(params.StartTimestamp); err != nil {
-		return nil, 0, err
-	}
 
 	topupTotal, err := countTopUpPaymentRecords(&userId, params, false)
 	if err != nil {
@@ -189,7 +186,7 @@ func paymentRecordLess(left *PaymentRecord, right *PaymentRecord) bool {
 func countTopUpPaymentRecords(userId *int, params PaymentRecordSearchParams, includeUser bool) (int64, error) {
 	query := DB.Model(&TopUp{})
 	if userId != nil {
-		query = query.Where("user_id = ? AND top_ups.create_time >= ?", *userId, topUpUserQueryCutoff())
+		query = query.Where("user_id = ?", *userId)
 	}
 	var err error
 	query, err = applyTopUpSearch(query, toTopUpSearchParams(params), includeUser)
@@ -209,7 +206,7 @@ func countTopUpPaymentRecords(userId *int, params PaymentRecordSearchParams, inc
 func listTopUpPaymentRecords(userId *int, params PaymentRecordSearchParams, limit int, includeUser bool) ([]*PaymentRecord, error) {
 	query := topUpBaseQuery(DB, includeUser)
 	if userId != nil {
-		query = query.Where("top_ups.user_id = ? AND top_ups.create_time >= ?", *userId, topUpUserQueryCutoff())
+		query = query.Where("top_ups.user_id = ?", *userId)
 	}
 	var err error
 	query, err = applyTopUpSearch(query, toTopUpSearchParams(params), includeUser)
@@ -257,7 +254,7 @@ func listTopUpPaymentRecords(userId *int, params PaymentRecordSearchParams, limi
 func countSellableTokenPaymentRecords(userId *int, params PaymentRecordSearchParams, includeUser bool) (int64, error) {
 	query := sellableTokenPaymentQuery(includeUser)
 	if userId != nil {
-		query = query.Where("sellable_token_orders.user_id = ? AND sellable_token_orders.create_time >= ?", *userId, topUpUserQueryCutoff())
+		query = query.Where("sellable_token_orders.user_id = ?", *userId)
 	}
 	var err error
 	query, err = applySellableTokenPaymentSearch(query, params, includeUser)
@@ -274,7 +271,7 @@ func countSellableTokenPaymentRecords(userId *int, params PaymentRecordSearchPar
 func listSellableTokenPaymentRecords(userId *int, params PaymentRecordSearchParams, limit int, includeUser bool) ([]*PaymentRecord, error) {
 	query := sellableTokenPaymentSelectQuery(includeUser)
 	if userId != nil {
-		query = query.Where("sellable_token_orders.user_id = ? AND sellable_token_orders.create_time >= ?", *userId, topUpUserQueryCutoff())
+		query = query.Where("sellable_token_orders.user_id = ?", *userId)
 	}
 	var err error
 	query, err = applySellableTokenPaymentSearch(query, params, includeUser)

@@ -397,27 +397,9 @@ func topUpBaseQuery(tx *gorm.DB, includeUser bool) *gorm.DB {
 	return tx.Model(&TopUp{})
 }
 
-// topUpUserQueryWindowSeconds 限制普通用户查询充值记录的时间窗口（90 天）。
-// 管理员路径（GetAllTopUps / countTopUpPaymentRecords(nil, ...)）不受限。
-const topUpUserQueryWindowSeconds int64 = 90 * 24 * 60 * 60
-
 // searchUserTopUpCountHardLimit 普通用户 COUNT 的安全上限，
 // 防止对表执行无界 COUNT 触发 DoS。
 const searchUserTopUpCountHardLimit = 500
-
-// topUpUserQueryCutoff 返回普通用户允许查询的最早 create_time（秒级 Unix 时间戳）。
-func topUpUserQueryCutoff() int64 {
-	return common.GetTimestamp() - topUpUserQueryWindowSeconds
-}
-
-// ValidateUserTopUpQueryRange 校验普通用户传入的查询起始时间是否在 90 天窗口内。
-// 管理员调用不需要此校验。
-func ValidateUserTopUpQueryRange(startTimestamp int64) error {
-	if startTimestamp > 0 && startTimestamp < topUpUserQueryCutoff() {
-		return errors.New("查询时间范围不能超过 90 天")
-	}
-	return nil
-}
 
 func applyTopUpSearch(query *gorm.DB, params TopUpSearchParams, includeUsername bool) (*gorm.DB, error) {
 	if params.Keyword != "" {
@@ -448,11 +430,6 @@ func GetUserTopUps(userId int, pageInfo *common.PageInfo) (topups []*TopUp, tota
 }
 
 func GetUserTopUpsByParams(userId int, params TopUpSearchParams, pageInfo *common.PageInfo) (topups []*TopUp, total int64, err error) {
-	if err = ValidateUserTopUpQueryRange(params.StartTimestamp); err != nil {
-		return nil, 0, err
-	}
-	cutoff := topUpUserQueryCutoff()
-
 	tx := DB.Begin()
 	if tx.Error != nil {
 		return nil, 0, tx.Error
@@ -463,7 +440,7 @@ func GetUserTopUpsByParams(userId int, params TopUpSearchParams, pageInfo *commo
 		}
 	}()
 
-	countQuery, err := applyTopUpSearch(tx.Model(&TopUp{}).Where("user_id = ? AND top_ups.create_time >= ?", userId, cutoff), params, false)
+	countQuery, err := applyTopUpSearch(tx.Model(&TopUp{}).Where("user_id = ?", userId), params, false)
 	if err != nil {
 		tx.Rollback()
 		return nil, 0, err
@@ -473,7 +450,7 @@ func GetUserTopUpsByParams(userId int, params TopUpSearchParams, pageInfo *commo
 		return nil, 0, err
 	}
 
-	dataQuery, err := applyTopUpSearch(tx.Model(&TopUp{}).Where("user_id = ? AND top_ups.create_time >= ?", userId, cutoff), params, false)
+	dataQuery, err := applyTopUpSearch(tx.Model(&TopUp{}).Where("user_id = ?", userId), params, false)
 	if err != nil {
 		tx.Rollback()
 		return nil, 0, err

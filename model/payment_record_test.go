@@ -159,7 +159,7 @@ func TestGetUserPaymentRecordsByParams_MergesAndSortsSources(t *testing.T) {
 	setupPaymentRecordTestDB(t)
 
 	user := createPaymentRecordTestUser(t, "alice")
-	base := topUpUserQueryCutoff() + 100
+	base := (common.GetTimestamp() - 180*24*60*60) + 100
 	createPaymentRecordTopUp(t, user.Id, "T-001", base+100, common.TopUpStatusSuccess)
 	createPaymentRecordSellablePurchase(t, user.Id, "Alpha", base+250, SellableTokenIssuanceStatusIssued)
 	createPaymentRecordSellablePurchase(t, user.Id, "Beta", base+200, SellableTokenIssuanceStatusPending)
@@ -197,7 +197,7 @@ func TestGetUserPaymentRecordsByParams_UsesPersistedSellableTokenTradeNoForNewOr
 		PriceQuota: 200,
 	}
 	require.NoError(t, DB.Create(order).Error)
-	createTime := topUpUserQueryCutoff() + 250
+	createTime := (common.GetTimestamp() - 180*24*60*60) + 250
 	require.NoError(t, DB.Model(&SellableTokenOrder{}).Where("id = ?", order.Id).Updates(map[string]any{
 		"create_time":   createTime,
 		"complete_time": createTime,
@@ -516,7 +516,7 @@ func TestPaymentRecords_SeparatesGrantedSettlementAndPresentmentAmounts(t *testi
 	setupPaymentRecordTestDB(t)
 
 	user := createPaymentRecordTestUser(t, "stripe-presentment")
-	base := topUpUserQueryCutoff() + 100
+	base := (common.GetTimestamp() - 180*24*60*60) + 100
 	topup := &TopUp{
 		UserId:              user.Id,
 		Amount:              100,
@@ -587,7 +587,7 @@ func TestPaymentRecords_HistoricalStripeWithoutCurrencyIsUnknown(t *testing.T) {
 	setupPaymentRecordTestDB(t)
 
 	user := createPaymentRecordTestUser(t, "legacy-stripe")
-	base := topUpUserQueryCutoff() + 100
+	base := (common.GetTimestamp() - 180*24*60*60) + 100
 	topup := &TopUp{
 		UserId: user.Id, Amount: 100, Money: 100, PaidMoney: 20, TradeNo: "T-LEGACY-STRIPE",
 		PaymentMethod: PaymentMethodStripe, PaymentProvider: PaymentProviderStripe,
@@ -607,4 +607,52 @@ func TestPaymentRecords_HistoricalStripeWithoutCurrencyIsUnknown(t *testing.T) {
 	require.Zero(t, stats.Totals.Money)
 	require.Empty(t, stats.Totals.Amounts)
 	require.Equal(t, int64(1), stats.Totals.OrderCount)
+}
+
+// Historical orders remain available without weakening ownership or pagination.
+func TestUserOrderHistoryBeyond90Days(t *testing.T) {
+	setupPaymentRecordTestDB(t)
+	user := createPaymentRecordTestUser(t, "history-owner")
+	other := createPaymentRecordTestUser(t, "history-other")
+	old := common.GetTimestamp() - 180*24*60*60
+	createPaymentRecordTopUp(t, user.Id, "HISTORY-OLD", old, common.TopUpStatusSuccess)
+	createPaymentRecordSellablePurchase(t, user.Id, "History purchase", old+10, SellableTokenIssuanceStatusIssued)
+	createPaymentRecordTopUp(t, other.Id, "OTHER-OLD", old+20, common.TopUpStatusSuccess)
+	createPaymentRecordSellablePurchase(t, other.Id, "Other purchase", old+30, SellableTokenIssuanceStatusIssued)
+	createPaymentRecordTopUp(t, user.Id, "HISTORY-NEW", common.GetTimestamp(), common.TopUpStatusSuccess)
+
+	records, total, err := GetUserPaymentRecordsByParams(user.Id, PaymentRecordSearchParams{}, &common.PageInfo{Page: 1, PageSize: 2})
+	require.NoError(t, err)
+	require.EqualValues(t, 3, total)
+	require.Len(t, records, 2)
+	require.Equal(t, "HISTORY-NEW", records[0].TradeNo)
+	require.Equal(t, PaymentRecordTypeSellableTokenPurchase, records[1].RecordType)
+	for _, record := range records {
+		require.Equal(t, user.Id, record.UserId)
+	}
+	records, total, err = GetUserPaymentRecordsByParams(user.Id, PaymentRecordSearchParams{}, &common.PageInfo{Page: 2, PageSize: 2})
+	require.NoError(t, err)
+	require.EqualValues(t, 3, total)
+	require.Len(t, records, 1)
+	require.Equal(t, "HISTORY-OLD", records[0].TradeNo)
+
+	records, total, err = GetUserPaymentRecordsByParams(user.Id, PaymentRecordSearchParams{StartTimestamp: old - 1, EndTimestamp: old + 60}, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, total)
+	require.Len(t, records, 2)
+	for _, record := range records {
+		require.Equal(t, user.Id, record.UserId)
+	}
+
+	topups, total, err := GetUserTopUpsByParams(user.Id, TopUpSearchParams{}, &common.PageInfo{Page: 2, PageSize: 1})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, total)
+	require.Len(t, topups, 1)
+	require.Equal(t, "HISTORY-OLD", topups[0].TradeNo)
+	topups, total, err = GetUserTopUpsByParams(user.Id, TopUpSearchParams{StartTimestamp: old - 1, EndTimestamp: old + 60, Keyword: "HISTORY", Status: common.TopUpStatusSuccess}, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, topups, 1)
+	require.Equal(t, "HISTORY-OLD", topups[0].TradeNo)
+	require.Equal(t, user.Id, topups[0].UserId)
 }
