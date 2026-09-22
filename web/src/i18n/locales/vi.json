@@ -4715,6 +4715,8 @@
     "用户密码": "Mật khẩu người dùng",
     "用户名": "Tên người dùng",
     "用户名称": "Tên người dùng",
+    "用户名称 / ID": "Tên người dùng / ID",
+    "纯数字精确匹配用户 ID；纯数字用户名请使用 name:用户名": "Chỉ số sẽ khớp chính xác ID; dùng name:tên cho tên người dùng dạng số",
     "用户名或邮箱": "Tên người dùng hoặc email",
     "用户名字段": "用户名字段",
     "用户名字段（可选）": "用户名字段（可选）",

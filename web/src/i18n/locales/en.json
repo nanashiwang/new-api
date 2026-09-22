@@ -4432,6 +4432,8 @@
     "用户每周期最多请求完成次数": "User max successful request times per period",
     "用户名": "Username",
     "用户名称": "User Name",
+    "用户名称 / ID": "Username / ID",
+    "纯数字精确匹配用户 ID；纯数字用户名请使用 name:用户名": "Digits match an exact user ID; use name:username for numeric usernames",
     "用户名或邮箱": "Username or email",
     "用户名字段": "Username Field",
     "用户名字段（可选）": "用户名字段（可选）",

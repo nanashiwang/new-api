@@ -423,7 +423,7 @@ export const useLogsData = () => {
     if (!formApi || !username) {
       return;
     }
-    formApi.setValue('username', username);
+    formApi.setValue('username', `name:${username}`);
     setShowTopUsersDrawer(false);
     await refresh();
   };

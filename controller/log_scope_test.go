@@ -76,9 +76,17 @@ func TestLogScopeEndpointsUseSameSelection(t *testing.T) {
 	}
 	query := url.Values{
 		"group_vendor": {"OpenAI"}, "channel_ids": {"1,2"}, "type": {"2"},
+		"username":        {" 001 "},
 		"start_timestamp": {strconv.FormatInt(now-20, 10)}, "end_timestamp": {strconv.FormatInt(now, 10)},
 		"page_size": {"1"}, "p": {"1"},
 	}.Encode()
+	// A numeric username must not leak into an exact user-ID query.
+	if err := db.Create(&model.Log{
+		UserId: 10, Username: "1", CreatedAt: now - 2, Type: model.LogTypeConsume,
+		ChannelId: 1, Group: "OpenAI · 优质", Quota: 999,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
 	call := func(handler gin.HandlerFunc) map[string]interface{} {
 		t.Helper()
 		w := httptest.NewRecorder()
