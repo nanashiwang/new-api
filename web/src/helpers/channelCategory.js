@@ -22,8 +22,30 @@ export const CHANNEL_CATEGORY_MIMO = 'vendor:mimo';
 
 export const channelTypeCategoryKey = (channelType) => `type:${channelType}`;
 
+export const CHANNEL_DISPLAY_VENDORS = [
+  { value: 'deepseek', label: 'DeepSeek', type: 43, groups: ['DeepSeek'] },
+  { value: 'openai', label: 'OpenAI', type: 1, groups: ['OpenAI'] },
+  {
+    value: 'anthropic',
+    label: 'Claude',
+    type: 14,
+    groups: ['Claude', 'Anthropic'],
+  },
+  { value: 'google', label: 'Gemini', type: 24, groups: ['Gemini', 'Google'] },
+  { value: 'qwen', label: 'Qwen', type: 17, groups: ['Qwen'] },
+  { value: 'moonshot', label: 'Kimi', type: 25, groups: ['Kimi', 'Moonshot'] },
+  { value: 'zhipu', label: 'GLM', type: 26, groups: ['GLM'] },
+  { value: 'xai', label: 'Grok', type: 48, groups: ['Grok', 'xAI'] },
+  { value: 'minimax', label: 'MiniMax', type: 35, groups: ['MiniMax'] },
+  { value: 'mistral', label: 'Mistral', type: 42, groups: ['Mistral'] },
+  { value: 'mimo', label: '小米 MiMo', groups: ['MiMo'] },
+];
+
 const CATEGORY_GROUP_VENDOR_CANDIDATES = new Map([
-  [CHANNEL_CATEGORY_MIMO, ['MiMo']],
+  ...CHANNEL_DISPLAY_VENDORS.map((vendor) => [
+    `vendor:${vendor.value}`,
+    vendor.groups,
+  ]),
   [channelTypeCategoryKey(1), ['OpenAI']],
   [channelTypeCategoryKey(3), ['OpenAI']],
   [channelTypeCategoryKey(57), ['OpenAI']],

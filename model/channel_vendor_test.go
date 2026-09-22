@@ -74,13 +74,15 @@ func TestChannelCategoriesSeparateVendorFromProtocol(t *testing.T) {
 
 	counts := CountChannelCategories(channels)
 	require.EqualValues(t, 4, counts[ChannelCategoryAll])
-	require.EqualValues(t, 2, counts[ChannelCategoryTypePrefix+"1"])
+	require.EqualValues(t, 1, counts[ChannelCategoryTypePrefix+"1"])
+	require.EqualValues(t, 1, counts["vendor:openai"])
 	require.EqualValues(t, 2, counts[ChannelCategoryVendorPrefix+ChannelVendorMiMo])
 
 	openAICategory, err := ParseChannelCategory("type:1")
 	require.NoError(t, err)
 	filtered := FilterChannelsByCategory(channels, openAICategory)
-	require.Equal(t, []int{2, 3}, []int{filtered[0].Id, filtered[1].Id})
+	require.Len(t, filtered, 1)
+	require.Equal(t, 3, filtered[0].Id)
 
 	mimoCategory, err := ParseChannelCategory("vendor:mimo")
 	require.NoError(t, err)
@@ -91,4 +93,42 @@ func TestChannelCategoriesSeparateVendorFromProtocol(t *testing.T) {
 	require.Error(t, err)
 	_, err = ParseChannelCategory("vendor:unknown")
 	require.Error(t, err)
+}
+
+func TestDisplayVendorInference(t *testing.T) {
+	tests := []struct{ models, mapping, want string }{
+		{"deepseek-ai/DeepSeek-V4.1-Flash", "", "deepseek"},
+		{"gpt-4o,o3-mini", "", "openai"},
+		{"anthropic/claude-sonnet-4", "", "anthropic"},
+		{"gemini-2.5-pro", "", "google"},
+		{"Qwen/Qwen3-32B", "", "qwen"},
+		{"moonshotai/Kimi-K2", "", "moonshot"},
+		{"z-ai/GLM-4.5", "", "zhipu"},
+		{"grok-4", "", "xai"},
+		{"MiniMaxAI/MiniMax-M2", "", "minimax"},
+		{"mistralai/Mistral-Small", "", "mistral"},
+		{"alias", `{"alias":"deepseek-ai/DeepSeek-V4.1-Flash"}`, "deepseek"},
+		{"deepseek-chat,claude-sonnet-4", "", ""},
+		{"deepseek-chat,unknown", "", ""},
+		{"notdeepseek-model", "", ""},
+		{"deepseek-ai/DeepSeek-R1-Distill-Qwen-32B", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.models, func(t *testing.T) {
+			c := &Channel{Type: constant.ChannelTypeCustom, Models: tt.models, ModelMapping: &tt.mapping}
+			require.Equal(t, tt.want, InferChannelVendor(c))
+			require.Equal(t, constant.ChannelTypeCustom, c.Type)
+		})
+	}
+	for vendor := range channelVendorSegments {
+		t.Run("explicit/"+vendor, func(t *testing.T) {
+			c := &Channel{Type: constant.ChannelTypeCustom, Models: "unknown,mixed", ChannelVendor: &vendor}
+			category, err := ParseChannelCategory("vendor:" + vendor)
+			require.NoError(t, err)
+			require.Equal(t, vendor, ResolveChannelVendor(c))
+			require.Len(t, FilterChannelsByCategory([]*Channel{c}, category), 1)
+			require.EqualValues(t, 1, CountChannelCategories([]*Channel{c})[category.Key])
+			require.EqualValues(t, 1, CountChannelVendors([]*Channel{c})[vendor])
+		})
+	}
 }

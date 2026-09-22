@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import { CHANNEL_DISPLAY_VENDORS } from '../../../../helpers/channelCategory';
 import {
   API,
   showError,
@@ -2540,7 +2541,10 @@ const EditChannelModal = (props) => {
                       optionList={[
                         { label: t('自动识别'), value: 'auto' },
                         { label: t('跟随渠道类型'), value: 'protocol' },
-                        { label: t('小米 MiMo'), value: 'mimo' },
+                        ...CHANNEL_DISPLAY_VENDORS.map(({ label, value }) => ({
+                          label: t(label),
+                          value,
+                        })),
                       ]}
                       style={{ width: '100%' }}
                       onChange={(value) =>

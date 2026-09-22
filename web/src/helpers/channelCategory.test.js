@@ -21,6 +21,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   buildChannelCategoryQuery,
   CHANNEL_CATEGORY_ALL,
+  CHANNEL_DISPLAY_VENDORS,
   CHANNEL_CATEGORY_MIMO,
   channelTypeCategoryKey,
   resolveChannelCategoryGroupVendor,
@@ -69,4 +70,19 @@ describe('channel category query', () => {
       '',
     );
   });
+});
+
+test('all display vendors support category queries and matching group filters', () => {
+  for (const vendor of CHANNEL_DISPLAY_VENDORS) {
+    const key = `vendor:${vendor.value}`;
+    expect(buildChannelCategoryQuery(key, false)).toBe(
+      `&category=vendor%3A${vendor.value}`,
+    );
+    expect(resolveChannelCategoryGroupVendor(key, vendor.groups)).toBe(
+      vendor.groups[0],
+    );
+    expect(resolveChannelCategoryGroupVendor(key, vendor.groups, true)).toBe(
+      '',
+    );
+  }
 });

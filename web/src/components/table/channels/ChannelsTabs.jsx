@@ -23,7 +23,7 @@ import { CHANNEL_OPTIONS } from '../../../constants';
 import { getChannelIcon, getLobeHubIcon } from '../../../helpers';
 import {
   CHANNEL_CATEGORY_ALL,
-  CHANNEL_CATEGORY_MIMO,
+  CHANNEL_DISPLAY_VENDORS,
   channelTypeCategoryKey,
 } from '../../../helpers/channelCategory';
 
@@ -41,60 +41,52 @@ const ChannelsTabs = ({
     handleCategoryChange(key);
   };
 
-  const mimoCategoryKey = CHANNEL_CATEGORY_MIMO;
-  const mimoCount = Number(categoryCounts?.[mimoCategoryKey] || 0);
-  const showMiMo = mimoCount > 0 || activeCategoryKey === mimoCategoryKey;
+  const visibleVendors = CHANNEL_DISPLAY_VENDORS.filter(
+    ({ value }) =>
+      Number(categoryCounts?.[`vendor:${value}`] || 0) > 0 ||
+      activeCategoryKey === `vendor:${value}`,
+  );
   const visibleTypeOptions = CHANNEL_OPTIONS.filter(
     (opt) =>
       availableCategoryKeys.includes(channelTypeCategoryKey(opt.value)) ||
       activeCategoryKey === channelTypeCategoryKey(opt.value),
   );
-  const hasOpenAIType = visibleTypeOptions.some((option) => option.value === 1);
-
-  const renderMiMoTab = () => (
+  const renderTab = (key, label, icon) => (
     <TabPane
-      key='vendor:mimo'
-      itemKey={mimoCategoryKey}
+      key={key}
+      itemKey={key}
       tab={
         <span className='flex items-center gap-2'>
-          {getLobeHubIcon("Xiaomi.color='#FF6900'", 16)}
-          {t('小米 MiMo')}
+          {icon}
+          {label}
           <Tag
-            color={activeCategoryKey === mimoCategoryKey ? 'red' : 'grey'}
+            color={activeCategoryKey === key ? 'red' : 'grey'}
             shape='circle'
           >
-            {mimoCount}
+            {categoryCounts[key] || 0}
           </Tag>
         </span>
       }
     />
   );
-  const typeTabs = visibleTypeOptions.flatMap((option) => {
-    const key = channelTypeCategoryKey(option.value);
-    const count = categoryCounts[key] || 0;
-    const tabs = [
-      <TabPane
-        key={key}
-        itemKey={key}
-        tab={
-          <span className='flex items-center gap-2'>
-            {getChannelIcon(option.value)}
-            {option.label}
-            <Tag
-              color={activeCategoryKey === key ? 'red' : 'grey'}
-              shape='circle'
-            >
-              {count}
-            </Tag>
-          </span>
-        }
-      />,
-    ];
-    if (showMiMo && option.value === 1) {
-      tabs.push(renderMiMoTab());
-    }
-    return tabs;
-  });
+  const vendorTabs = visibleVendors.map((vendor) =>
+    renderTab(
+      `vendor:${vendor.value}`,
+      t(vendor.label),
+      vendor.type
+        ? getChannelIcon(vendor.type)
+        : getLobeHubIcon("Xiaomi.color='#FF6900'", 16),
+    ),
+  );
+  const typeTabs = visibleTypeOptions.map((option) =>
+    renderTab(
+      channelTypeCategoryKey(option.value),
+      visibleVendors.some((vendor) => vendor.type === option.value)
+        ? `${option.label} (${t('渠道类型')})`
+        : option.label,
+      getChannelIcon(option.value),
+    ),
+  );
 
   return (
     <div className='mb-2 flex flex-col gap-1'>
@@ -124,8 +116,8 @@ const ChannelsTabs = ({
           }
         />
 
+        {vendorTabs}
         {typeTabs}
-        {showMiMo && !hasOpenAIType ? renderMiMoTab() : null}
       </Tabs>
     </div>
   );

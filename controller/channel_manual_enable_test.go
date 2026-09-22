@@ -88,26 +88,30 @@ func TestUpdateChannel_ManualEnableClearsTemporaryUnavailableState(t *testing.T)
 }
 
 func TestUpdateChannel_UpdatesExplicitChannelVendor(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	setupChannelSearchControllerTestDB(t)
-	seedManualEnableMultiKeyChannel(t, 104, "vendor-setting")
+	for _, vendor := range []string{"protocol", "deepseek", "openai", "anthropic", "google", "qwen", "moonshot", "zhipu", "xai", "minimax", "mistral", "mimo", "auto"} {
+		t.Run(vendor, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			setupChannelSearchControllerTestDB(t)
+			seedManualEnableMultiKeyChannel(t, 104, "vendor-setting")
 
-	body, err := common.Marshal(map[string]any{
-		"id":             104,
-		"channel_vendor": model.ChannelVendorProtocol,
-	})
-	require.NoError(t, err)
+			body, err := common.Marshal(map[string]any{
+				"id":             104,
+				"channel_vendor": vendor,
+			})
+			require.NoError(t, err)
 
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodPut, "/api/channel/", bytes.NewReader(body))
-	ctx.Request.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(http.MethodPut, "/api/channel/", bytes.NewReader(body))
+			ctx.Request.Header.Set("Content-Type", "application/json")
 
-	UpdateChannel(ctx)
-	require.Equal(t, http.StatusOK, recorder.Code)
+			UpdateChannel(ctx)
+			require.Equal(t, http.StatusOK, recorder.Code)
 
-	channel := loadChannelForAssertion(t, 104)
-	require.Equal(t, model.ChannelVendorProtocol, channel.GetChannelVendorSetting())
+			channel := loadChannelForAssertion(t, 104)
+			require.Equal(t, vendor, channel.GetChannelVendorSetting())
+		})
+	}
 }
 
 func TestEnableTagChannels_ManualEnableClearsTemporaryUnavailableState(t *testing.T) {

@@ -19,6 +19,21 @@ const (
 	ChannelCategoryVendorPrefix = "vendor:"
 )
 
+// Display vendors only affect management classification, never relay routing.
+var channelVendorSegments = map[string][]string{
+	"mimo":      {"mimo"},
+	"deepseek":  {"deepseek"},
+	"openai":    {"gpt", "chatgpt", "o1", "o3", "o4", "dall", "whisper"},
+	"anthropic": {"claude"},
+	"google":    {"gemini", "gemma"},
+	"qwen":      {"qwen", "qwen2", "qwen3", "qwq", "qvq"},
+	"moonshot":  {"kimi", "moonshot"},
+	"zhipu":     {"glm", "chatglm"},
+	"xai":       {"grok"},
+	"minimax":   {"minimax"},
+	"mistral":   {"mistral", "mixtral", "codestral", "pixtral", "ministral", "devstral"},
+}
+
 type ChannelCategory struct {
 	Key    string
 	Type   int
@@ -36,6 +51,16 @@ func NormalizeChannelVendorSetting(vendor string) string {
 		return ChannelVendorAuto
 	case ChannelVendorProtocol:
 		return ChannelVendorProtocol
+	case "claude":
+		return "anthropic"
+	case "gemini":
+		return "google"
+	case "kimi":
+		return "moonshot"
+	case "glm":
+		return "zhipu"
+	case "grok":
+		return "xai"
 	case ChannelVendorMiMo, strings.ToLower(defaultMiMoVendorName), "xiaomi", "xiaomi mimo":
 		return ChannelVendorMiMo
 	default:
@@ -44,12 +69,12 @@ func NormalizeChannelVendorSetting(vendor string) string {
 }
 
 func IsSupportedChannelVendorSetting(vendor string) bool {
-	switch NormalizeChannelVendorSetting(vendor) {
-	case ChannelVendorAuto, ChannelVendorProtocol, ChannelVendorMiMo:
+	vendor = NormalizeChannelVendorSetting(vendor)
+	if vendor == ChannelVendorAuto || vendor == ChannelVendorProtocol {
 		return true
-	default:
-		return false
 	}
+	_, ok := channelVendorSegments[vendor]
+	return ok
 }
 
 func (channel *Channel) GetChannelVendorSetting() string {
@@ -63,15 +88,10 @@ func (channel *Channel) GetChannelVendorSetting() string {
 // internal key. Unknown values are kept so they fail closed instead of
 // accidentally returning every channel.
 func NormalizeChannelVendorFilter(vendor string) string {
-	vendor = strings.ToLower(strings.TrimSpace(vendor))
-	switch vendor {
-	case "", ChannelVendorAll:
+	if strings.TrimSpace(vendor) == "" {
 		return ChannelVendorAll
-	case ChannelVendorMiMo, strings.ToLower(defaultMiMoVendorName), "xiaomi", "xiaomi mimo":
-		return ChannelVendorMiMo
-	default:
-		return vendor
 	}
+	return NormalizeChannelVendorSetting(vendor)
 }
 
 func ParseChannelCategory(value string) (ChannelCategory, error) {
@@ -111,26 +131,37 @@ func resolveMappedChannelModel(channel *Channel, modelName string) string {
 	return modelName
 }
 
+func inferModelDisplayVendor(modelName string) string {
+	vendor := ""
+	for candidate, segments := range channelVendorSegments {
+		if hasModelNameSegment(modelName, segments...) {
+			// Distilled or namespaced models can name more than one vendor.
+			if vendor != "" {
+				return ""
+			}
+			vendor = candidate
+		}
+	}
+	return vendor
+}
+
 func InferChannelVendor(channel *Channel) string {
 	if channel == nil {
 		return ""
 	}
-	modelCount := 0
+	vendor := ""
 	for _, modelName := range channel.GetModels() {
 		modelName = strings.TrimSpace(modelName)
 		if modelName == "" {
 			continue
 		}
-		modelCount++
-		resolvedModel := resolveMappedChannelModel(channel, modelName)
-		if getDefaultVendorName(resolvedModel) != defaultMiMoVendorName {
+		candidate := inferModelDisplayVendor(resolveMappedChannelModel(channel, modelName))
+		if candidate == "" || (vendor != "" && vendor != candidate) {
 			return ""
 		}
+		vendor = candidate
 	}
-	if modelCount > 0 {
-		return ChannelVendorMiMo
-	}
-	return ""
+	return vendor
 }
 
 func ResolveChannelVendor(channel *Channel) string {
@@ -187,8 +218,8 @@ func CountChannelVendors(channels []*Channel) map[string]int64 {
 			continue
 		}
 		counts[ChannelVendorAll]++
-		if ChannelMatchesVendor(channel, ChannelVendorMiMo) {
-			counts[ChannelVendorMiMo]++
+		if vendor := ResolveChannelVendor(channel); vendor != "" {
+			counts[vendor]++
 		}
 	}
 	return counts

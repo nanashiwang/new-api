@@ -173,8 +173,9 @@ func TestSearchChannels_CategoryCountsIgnoreGroupFilter(t *testing.T) {
 	require.True(t, resp.Success)
 	require.Equal(t, 2, resp.Data.Total)
 	require.Len(t, resp.Data.Items, 2)
-	require.EqualValues(t, 2, resp.Data.CategoryCounts["type:1"])
-	require.EqualValues(t, 1, resp.Data.CategoryCounts["type:2"])
+	require.EqualValues(t, 1, resp.Data.CategoryCounts["type:1"])
+	require.EqualValues(t, 1, resp.Data.CategoryCounts["vendor:openai"])
+	require.EqualValues(t, 1, resp.Data.CategoryCounts["vendor:google"])
 }
 
 func seedChannelVendorControllerTestData(t *testing.T) {
