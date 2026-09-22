@@ -64,7 +64,7 @@ export function healthTone(stats) {
   if (!stats?.request_count || stats?.success_rate == null) return 'empty';
   if (stats.request_count < HEALTH_MIN_SAMPLES) return 'limited';
   if (stats.success_rate >= 99) return 'healthy';
-  if (stats.success_rate >= 95) return 'warning';
+  if (stats.success_rate >= 90) return 'warning';
   return 'degraded';
 }
 

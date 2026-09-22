@@ -70,6 +70,8 @@ func describeRequestFailure(err *types.NewAPIError, upstream bool) (category, re
 	code := string(err.GetErrorCode())
 	message := strings.ToLower(err.Error())
 	switch {
+	case types.ClassifyFailure(err) == types.FailureClientCanceled:
+		return "client_canceled", "客户端取消请求", "客户端已断开连接；请检查是否主动停止、客户端超时或网络中断。"
 	case IsContentSafetyPolicyError(err) || code == "content_safety_cooldown" || code == string(types.ErrorCodeSensitiveWordsDetected):
 		return "content_policy", "请求被内容安全策略拒绝", "请调整请求内容，遵守使用政策；处于冷静期时请等待结束。"
 	case code == string(types.ErrorCodeConversationStateNotFound):
@@ -124,6 +126,7 @@ func RecordFinalRequestFailure(c *gin.Context, elapsed time.Duration) {
 		code = category
 	}
 	other := map[string]interface{}{
+		"failure_class":   types.ClassifyFailure(apiErr),
 		"request_failure": true, "failure_category": category, "failure_reason": reason, "failure_hint": hint,
 		"error_code": code, "status_code": apiErr.StatusCode, "http_status": httpStatus, "latency_ms": elapsed.Milliseconds(),
 	}

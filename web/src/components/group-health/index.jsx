@@ -286,11 +286,11 @@ export function GroupHealthLegend() {
       </span>
       <span>
         <i className='group-health-bar-warning' />
-        {t('95%–99%')}
+        {t('90%–99%')}
       </span>
       <span>
         <i className='group-health-bar-degraded' />
-        {t('成功率 < 95%')}
+        {t('成功率 < 90%')}
       </span>
       <span>
         <i className='group-health-bar-limited' />

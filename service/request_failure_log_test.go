@@ -100,3 +100,10 @@ func TestFinalFailureCapturesLocalCooldownAndHonorsDisabledSetting(t *testing.T)
 	require.EqualValues(t, 3, other["retry_after_seconds"])
 	require.Equal(t, "content_policy", other["failure_category"])
 }
+
+func TestDescribeClientCancellation(t *testing.T) {
+	err := types.NewErrorWithStatusCode(fmt.Errorf("client canceled while receiving responses stream"), types.ErrorCodeDoRequestFailed, 500)
+	category, reason, _ := describeRequestFailure(err, true)
+	require.Equal(t, "client_canceled", category)
+	require.Equal(t, "客户端取消请求", reason)
+}

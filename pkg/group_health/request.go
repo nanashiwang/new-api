@@ -7,6 +7,7 @@ import (
 
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/types"
 )
 
 // Request folds retries within one concrete group, not across fallback groups.
@@ -26,6 +27,15 @@ func (r *Request) Failure(group string) {
 		return
 	}
 	r.groups[group] = Sample{Group: group, Model: r.model}
+}
+
+// ObserveResult keeps earlier service failures when a later retry is rejected
+// for a user request problem; an excluded attempt never creates a success.
+func (r *Request) ObserveResult(info *relaycommon.RelayInfo, err *types.NewAPIError, connected bool, now time.Time) {
+	if types.ClassifyFailure(err) == types.FailureUserRequest {
+		return
+	}
+	r.Observe(info, err == nil && connected, now)
 }
 
 func (r *Request) Observe(info *relaycommon.RelayInfo, success bool, now time.Time) {

@@ -310,7 +310,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if breakLoop {
 			break
 		}
-		healthRequest.Observe(relayInfo, newAPIError == nil && c.Request.Context().Err() == nil, time.Now())
+		healthRequest.ObserveResult(relayInfo, newAPIError, c.Request.Context().Err() == nil, time.Now())
 
 		if newAPIError == nil {
 			service.ClearUserScopedCircuit(c, channel)

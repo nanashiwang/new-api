@@ -55,11 +55,11 @@ describe('group health display semantics', () => {
       'warning',
     );
     assert.equal(
-      healthTone({ request_count: 30, success_rate: 95 }),
+      healthTone({ request_count: 30, success_rate: 90 }),
       'warning',
     );
     assert.equal(
-      healthTone({ request_count: 30, success_rate: 94.99 }),
+      healthTone({ request_count: 30, success_rate: 89.99 }),
       'degraded',
     );
     assert.equal(

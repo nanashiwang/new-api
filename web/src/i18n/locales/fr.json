@@ -1,5 +1,7 @@
 {
   "translation": {
+    "客户端取消请求": "Requête annulée par le client",
+    "客户端已断开连接；请检查是否主动停止、客户端超时或网络中断。": "Le client a été déconnecté ; vérifiez un arrêt manuel, un délai client ou une coupure réseau.",
     "分组隐私模式": "Confidentialité des groupes",
     "映射后模型": "Modèle après mappage",
     "上游声明模型": "Modèle déclaré par le fournisseur",
@@ -5679,7 +5681,7 @@
     "生成密钥失败": "Échec de la génération de la clé",
     "复制失败，请手动选中复制": "Échec de la copie, veuillez sélectionner et copier manuellement",
     "已填入，请记得保存并同步到 Pulse 服务端": "Rempli. Pensez à enregistrer et à synchroniser avec le serveur Pulse",
-    "95%–99%": "95 %–99 %",
+    "90%–99%": "90 %–99 %",
     "{{count}} 个有效样本": "{{count}} échantillons valides",
     "{{count}} 次调用": "{{count}} appels",
     "不足 30 次": "Moins de 30 appels",
@@ -5702,7 +5704,7 @@
     "当前模型没有可用分组": "Aucun groupe disponible pour ce modèle",
     "当前筛选下没有可用分组": "Aucun groupe ne correspond aux filtres actuels",
     "成功 {{success}} · 失败 {{failure}}": "Réussis {{success}} · Échecs {{failure}}",
-    "成功率 < 95%": "Taux de réussite < 95 %",
+    "成功率 < 90%": "Taux de réussite < 90 %",
     "成功率 ≥ 99%": "Taux de réussite ≥ 99 %",
     "收起趋势": "Masquer la tendance",
     "暂无样本": "Aucun échantillon",
