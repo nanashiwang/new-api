@@ -612,17 +612,14 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	rpmTpmQuery := LOG_DB.Table("logs").Select("count(*) rpm, sum(prompt_tokens) + sum(completion_tokens) tpm")
 	cacheRateQuery := LOG_DB.Table("logs").Select("prompt_tokens, other")
 
-	if username != "" {
-		if fuzzyUsername {
-			usernamePattern := buildContainsLikePattern(username)
-			tx = tx.Where("username LIKE ? ESCAPE '!'", usernamePattern)
-			rpmTpmQuery = rpmTpmQuery.Where("username LIKE ? ESCAPE '!'", usernamePattern)
-			cacheRateQuery = cacheRateQuery.Where("username LIKE ? ESCAPE '!'", usernamePattern)
-		} else {
-			tx = tx.Where("username = ?", username)
-			rpmTpmQuery = rpmTpmQuery.Where("username = ?", username)
-			cacheRateQuery = cacheRateQuery.Where("username = ?", username)
-		}
+	if tx, err = applyLogUserFilter(tx, username, fuzzyUsername); err != nil {
+		return stat, err
+	}
+	if rpmTpmQuery, err = applyLogUserFilter(rpmTpmQuery, username, fuzzyUsername); err != nil {
+		return stat, err
+	}
+	if cacheRateQuery, err = applyLogUserFilter(cacheRateQuery, username, fuzzyUsername); err != nil {
+		return stat, err
 	}
 	if tokenName != "" {
 		tx = tx.Where("token_name = ?", tokenName)

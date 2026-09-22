@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -69,6 +70,43 @@ func applyExplicitLogTextFilter(tx *gorm.DB, column string, value string) (*gorm
 	return tx.Where(column+" = ?", value), nil
 }
 
+// Numeric admin searches target the immutable user ID, not historical usernames.
+// Self-service queries retain exact username semantics and never interpret IDs.
+func applyLogUserFilter(tx *gorm.DB, keyword string, admin bool) (*gorm.DB, error) {
+	if !admin {
+		if keyword != "" {
+			tx = tx.Where("logs.username = ?", keyword)
+		}
+		return tx, nil
+	}
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return tx, nil
+	}
+	if strings.HasPrefix(keyword, "name:") {
+		name := strings.TrimSpace(strings.TrimPrefix(keyword, "name:"))
+		if name == "" {
+			return nil, errors.New("用户名不能为空")
+		}
+		return tx.Where("logs.username = ?", name), nil
+	}
+	numeric := true
+	for _, ch := range keyword {
+		if ch < '0' || ch > '9' {
+			numeric = false
+			break
+		}
+	}
+	if numeric {
+		id, err := strconv.Atoi(keyword)
+		if err != nil || id <= 0 {
+			return nil, errors.New("用户 ID 必须是有效的正整数")
+		}
+		return tx.Where("logs.user_id = ?", id), nil
+	}
+	return tx.Where("logs.username LIKE ? ESCAPE '!'", buildContainsLikePattern(keyword)), nil
+}
+
 func applyAdminLogFilters(tx *gorm.DB, filters AdminLogQueryFilters, fuzzyUsername bool) (*gorm.DB, error) {
 	if filters.LogType != LogTypeUnknown {
 		tx = tx.Where("logs.type = ?", filters.LogType)
@@ -77,12 +115,8 @@ func applyAdminLogFilters(tx *gorm.DB, filters AdminLogQueryFilters, fuzzyUserna
 	if tx, err = applyExplicitLogTextFilter(tx, "logs.model_name", filters.ModelName); err != nil {
 		return nil, err
 	}
-	if filters.Username != "" {
-		if fuzzyUsername {
-			tx = tx.Where("logs.username LIKE ? ESCAPE '!'", buildContainsLikePattern(filters.Username))
-		} else {
-			tx = tx.Where("logs.username = ?", filters.Username)
-		}
+	if tx, err = applyLogUserFilter(tx, filters.Username, fuzzyUsername); err != nil {
+		return nil, err
 	}
 	if filters.TokenName != "" {
 		tx = tx.Where("logs.token_name = ?", filters.TokenName)

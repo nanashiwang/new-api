@@ -164,7 +164,10 @@ const LogsFilters = ({
               <Form.Input
                 field='username'
                 prefix={<IconSearch />}
-                placeholder={t('用户名称')}
+                placeholder={t('用户名称 / ID')}
+                extraText={t(
+                  '纯数字精确匹配用户 ID；纯数字用户名请使用 name:用户名',
+                )}
                 showClear
                 pure
                 size='small'

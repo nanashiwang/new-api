@@ -4526,6 +4526,8 @@
     "用户每周期最多请求完成次数": "Nombre maximal de requêtes utilisateur réussies par période",
     "用户名": "Nom d'utilisateur",
     "用户名称": "Nom d'utilisateur",
+    "用户名称 / ID": "Nom d'utilisateur / ID",
+    "纯数字精确匹配用户 ID；纯数字用户名请使用 name:用户名": "Les chiffres ciblent un ID exact ; utilisez name:nom pour un nom numérique",
     "用户名或邮箱": "Nom d'utilisateur ou e-mail",
     "用户名字段": "用户名字段",
     "用户名字段（可选）": "用户名字段（可选）",
