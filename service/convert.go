@@ -147,6 +147,15 @@ func ClaudeToOpenAIRequest(c *gin.Context, claudeRequest dto.ClaudeRequest, info
 	}
 	toolNames := make(map[string]string)
 	var unnamedToolResults []unnamedToolResult
+	var pendingToolMedia []dto.MediaContent
+	flushToolMedia := func() {
+		if len(pendingToolMedia) > 0 {
+			message := dto.Message{Role: "user"}
+			message.SetMediaContent(pendingToolMedia)
+			openAIMessages = append(openAIMessages, message)
+			pendingToolMedia = nil
+		}
+	}
 	for _, claudeMessage := range claudeRequest.Messages {
 		openAIMessage := dto.Message{
 			Role: claudeMessage.Role,
@@ -154,6 +163,7 @@ func ClaudeToOpenAIRequest(c *gin.Context, claudeRequest dto.ClaudeRequest, info
 
 		//log.Printf("claudeMessage.Content: %v", claudeMessage.Content)
 		if claudeMessage.IsStringContent() {
+			flushToolMedia()
 			openAIMessage.SetStringContent(claudeMessage.GetStringContent())
 		} else {
 			content, err := claudeMessage.ParseContent()
@@ -161,6 +171,16 @@ func ClaudeToOpenAIRequest(c *gin.Context, claudeRequest dto.ClaudeRequest, info
 				return nil, err
 			}
 			contents := content
+			hasToolResults := false
+			for _, block := range contents {
+				if block.Type == "tool_result" {
+					hasToolResults = true
+					break
+				}
+			}
+			if claudeMessage.Role != "user" || !hasToolResults {
+				flushToolMedia()
+			}
 			var toolCalls []dto.ToolCallRequest
 			mediaMessages := make([]dto.MediaContent, 0, len(contents))
 
@@ -214,9 +234,12 @@ func ClaudeToOpenAIRequest(c *gin.Context, claudeRequest dto.ClaudeRequest, info
 					if mediaMsg.IsStringContent() {
 						oaiToolMessage.SetStringContent(mediaMsg.GetStringContent())
 					} else {
-						mediaContents := mediaMsg.ParseMediaContent()
-						encodeJSON, _ := common.Marshal(mediaContents)
-						oaiToolMessage.SetStringContent(string(encodeJSON))
+						text, media, err := claudeToolResultToChat(c, mediaMsg.Content)
+						if err != nil {
+							return nil, fmt.Errorf("convert claude tool result: %w", err)
+						}
+						oaiToolMessage.SetStringContent(text)
+						mediaMessages = append(mediaMessages, media...)
 					}
 					openAIMessages = append(openAIMessages, oaiToolMessage)
 				}
@@ -227,13 +250,20 @@ func ClaudeToOpenAIRequest(c *gin.Context, claudeRequest dto.ClaudeRequest, info
 			}
 
 			if len(mediaMessages) > 0 && len(toolCalls) == 0 {
-				openAIMessage.SetMediaContent(mediaMessages)
+				if claudeMessage.Role == "user" && hasToolResults {
+					// Keep all tool replies contiguous, even when Claude sends
+					// their results in several adjacent user messages.
+					pendingToolMedia = append(pendingToolMedia, mediaMessages...)
+				} else {
+					openAIMessage.SetMediaContent(mediaMessages)
+				}
 			}
 		}
 		if len(openAIMessage.ParseContent()) > 0 || len(openAIMessage.ToolCalls) > 0 {
 			openAIMessages = append(openAIMessages, openAIMessage)
 		}
 	}
+	flushToolMedia()
 
 	for _, result := range unnamedToolResults {
 		*openAIMessages[result.index].Name = toolNames[result.id]
@@ -241,6 +271,48 @@ func ClaudeToOpenAIRequest(c *gin.Context, claudeRequest dto.ClaudeRequest, info
 	openAIRequest.Messages = openAIMessages
 
 	return &openAIRequest, nil
+}
+
+// Chat tool messages carry text. Move recognized images to a following user
+// message, using the same data/bridge transport as ordinary Claude images.
+// Keep unrecognized payloads intact instead of dropping unknown block fields.
+func claudeToolResultToChat(c *gin.Context, content any) (string, []dto.MediaContent, error) {
+	blocks, err := common.Any2Type[[]dto.ClaudeMediaMessage](content)
+	fallback := func() (string, []dto.MediaContent, error) {
+		encoded, err := common.Marshal(content)
+		return string(encoded), nil, err
+	}
+	if err != nil || len(blocks) == 0 {
+		return fallback()
+	}
+	for _, block := range blocks {
+		if block.Type != "text" && block.Type != "input_text" &&
+			(block.Type != "image" || block.Source == nil) {
+			return fallback()
+		}
+	}
+	var texts []string
+	var media []dto.MediaContent
+	for _, block := range blocks {
+		if block.Type != "image" {
+			if text := block.GetText(); text != "" {
+				texts = append(texts, text)
+			}
+			continue
+		}
+		imageURL, err := ClaudeImageSourceToMessageImageURL(c, block.Source)
+		if err != nil {
+			return "", nil, err
+		}
+		if imageURL == nil {
+			return fallback()
+		}
+		media = append(media, dto.MediaContent{Type: "image_url", ImageUrl: imageURL})
+	}
+	if len(texts) == 0 && len(media) > 0 {
+		return "[image]", media, nil
+	}
+	return strings.Join(texts, "\n"), media, nil
 }
 
 func mapClaudeThinkingToOpenAIReasoningEffort(thinking *dto.Thinking) string {
