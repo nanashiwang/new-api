@@ -44,6 +44,7 @@ import axios from 'axios';
 import { useTranslation } from 'react-i18next';
 import CustomOAuthSetting from './CustomOAuthSetting';
 import PulseSetting from './PulseSetting';
+import { prepareOIDCSettingsUpdate } from '../../helpers/oidcSettings';
 
 const SystemSetting = () => {
   const { t } = useTranslation();
@@ -115,6 +116,8 @@ const SystemSetting = () => {
 
   const [originInputs, setOriginInputs] = useState({});
   const [loading, setLoading] = useState(false);
+  const [oidcSaving, setOidcSaving] = useState(false);
+  const oidcSaveInFlight = useRef(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const formApiRef = useRef(null);
   const [emailDomainWhitelist, setEmailDomainWhitelist] = useState([]);
@@ -259,7 +262,7 @@ const SystemSetting = () => {
         });
         if (!res.data.success) {
           showError(res.data.message);
-          return;
+          return false;
         }
       }
 
@@ -280,19 +283,25 @@ const SystemSetting = () => {
         errorResults.forEach((res) => {
           showError(res.data.message);
         });
+        if (errorResults.length > 0) return false;
       }
 
       showSuccess(t('更新成功'));
       // 更新本地状态
-      const newInputs = { ...inputs };
-      options.forEach((opt) => {
-        newInputs[opt.key] = opt.value;
+      setInputs((previous) => {
+        const next = { ...previous };
+        options.forEach((opt) => {
+          next[opt.key] = opt.value;
+        });
+        return next;
       });
-      setInputs(newInputs);
+      return true;
     } catch (error) {
       showError(t('更新失败'));
+      return false;
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleFormChange = (values) => {
@@ -506,77 +515,34 @@ const SystemSetting = () => {
   };
 
   const submitOIDCSettings = async () => {
-    if (inputs['oidc.well_known'] && inputs['oidc.well_known'] !== '') {
-      if (
-        !inputs['oidc.well_known'].startsWith('http://') &&
-        !inputs['oidc.well_known'].startsWith('https://')
-      ) {
-        showError(t('Well-Known URL 必须以 http:// 或 https:// 开头'));
-        return;
-      }
-      try {
-        const res = await axios.create().get(inputs['oidc.well_known']);
-        inputs['oidc.authorization_endpoint'] =
-          res.data['authorization_endpoint'];
-        inputs['oidc.token_endpoint'] = res.data['token_endpoint'];
-        inputs['oidc.user_info_endpoint'] = res.data['userinfo_endpoint'];
-        showSuccess(t('获取 OIDC 配置成功！'));
-      } catch (err) {
-        console.error(err);
-        showError(
-          t('获取 OIDC 配置失败，请检查网络状况和 Well-Known URL 是否正确'),
+    if (oidcSaveInFlight.current) return;
+    oidcSaveInFlight.current = true;
+    setOidcSaving(true);
+    try {
+      const { options, discovered } = await prepareOIDCSettingsUpdate(
+        inputs,
+        originInputs,
+        async (url) => (await axios.create().get(url, { timeout: 10000 })).data,
+      );
+      if (discovered) showSuccess(t('获取 OIDC 配置成功！'));
+      if (options.length > 0 && (await updateOptions(options))) {
+        const saved = Object.fromEntries(
+          options.map(({ key, value }) => [key, value]),
         );
-        return;
+        setOriginInputs((previous) => ({ ...previous, ...saved }));
+        // Reflect normalized/discovered values in Semi's own form state too.
+        if (formApiRef.current) {
+          formApiRef.current.setValues({
+            ...formApiRef.current.getValues(),
+            ...saved,
+          });
+        }
       }
-    }
-
-    const options = [];
-
-    if (originInputs['oidc.well_known'] !== inputs['oidc.well_known']) {
-      options.push({
-        key: 'oidc.well_known',
-        value: inputs['oidc.well_known'],
-      });
-    }
-    if (originInputs['oidc.client_id'] !== inputs['oidc.client_id']) {
-      options.push({ key: 'oidc.client_id', value: inputs['oidc.client_id'] });
-    }
-    if (
-      originInputs['oidc.client_secret'] !== inputs['oidc.client_secret'] &&
-      inputs['oidc.client_secret'] !== ''
-    ) {
-      options.push({
-        key: 'oidc.client_secret',
-        value: inputs['oidc.client_secret'],
-      });
-    }
-    if (
-      originInputs['oidc.authorization_endpoint'] !==
-      inputs['oidc.authorization_endpoint']
-    ) {
-      options.push({
-        key: 'oidc.authorization_endpoint',
-        value: inputs['oidc.authorization_endpoint'],
-      });
-    }
-    if (originInputs['oidc.token_endpoint'] !== inputs['oidc.token_endpoint']) {
-      options.push({
-        key: 'oidc.token_endpoint',
-        value: inputs['oidc.token_endpoint'],
-      });
-    }
-    if (
-      originInputs['oidc.user_info_endpoint'] !==
-      inputs['oidc.user_info_endpoint']
-    ) {
-      options.push({
-        key: 'oidc.user_info_endpoint',
-        value: inputs['oidc.user_info_endpoint'],
-      });
-    }
-
-    if (options.length > 0) {
-      await updateOptions(options);
+    } catch (error) {
+      showError(t(error.message));
+    } finally {
+      oidcSaveInFlight.current = false;
+      setOidcSaving(false);
     }
   };
 
@@ -1425,7 +1391,7 @@ const SystemSetting = () => {
                       />
                     </Col>
                   </Row>
-                  <Button onClick={submitOIDCSettings}>
+                  <Button onClick={submitOIDCSettings} loading={oidcSaving}>
                     {t('保存 OIDC 设置')}
                   </Button>
                 </Form.Section>
