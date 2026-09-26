@@ -60,7 +60,7 @@ func sanitizeClaudeRequestEmptyThinking(request *dto.ClaudeRequest) (claudeThink
 		}
 
 		result.RemovedBlocks += removedFromMessage
-		if len(filtered) == 0 {
+		if len(filtered) == 0 && len(message.OutputConfig) == 0 {
 			result.RemovedMessages++
 			continue
 		}
@@ -71,7 +71,8 @@ func sanitizeClaudeRequestEmptyThinking(request *dto.ClaudeRequest) (claudeThink
 	cleaned := make([]dto.ClaudeMessage, 0, len(retained))
 	lastOriginalIndex := -1
 	for _, item := range retained {
-		if len(cleaned) > 0 && lastOriginalIndex+1 < item.originalIndex && cleaned[len(cleaned)-1].Role == item.message.Role {
+		if len(cleaned) > 0 && lastOriginalIndex+1 < item.originalIndex && cleaned[len(cleaned)-1].Role == item.message.Role &&
+			len(cleaned[len(cleaned)-1].OutputConfig) == 0 && len(item.message.OutputConfig) == 0 {
 			merged, err := mergeClaudeMessageContent(cleaned[len(cleaned)-1], item.message)
 			if err != nil {
 				return result, err
@@ -164,7 +165,7 @@ func sanitizeEmptyClaudeThinkingJSON(requestJSON []byte) ([]byte, claudeThinking
 		}
 
 		result.RemovedBlocks += removedFromMessage
-		if len(filtered) == 0 {
+		if _, hasOutputConfig := message["output_config"]; len(filtered) == 0 && !hasOutputConfig {
 			result.RemovedMessages++
 			continue
 		}
@@ -177,7 +178,9 @@ func sanitizeEmptyClaudeThinkingJSON(requestJSON []byte) ([]byte, claudeThinking
 	for _, item := range retained {
 		if len(cleaned) > 0 && lastOriginalIndex+1 < item.originalIndex {
 			previous, previousOK := cleaned[len(cleaned)-1].(map[string]any)
-			if previousOK && strings.TrimSpace(fmt.Sprint(previous["role"])) == strings.TrimSpace(fmt.Sprint(item.message["role"])) {
+			_, previousHasConfig := previous["output_config"]
+			_, currentHasConfig := item.message["output_config"]
+			if previousOK && !previousHasConfig && !currentHasConfig && strings.TrimSpace(fmt.Sprint(previous["role"])) == strings.TrimSpace(fmt.Sprint(item.message["role"])) {
 				previous["content"] = append(claudeJSONContentBlocks(previous["content"]), claudeJSONContentBlocks(item.message["content"])...)
 				result.MergedMessages++
 				lastOriginalIndex = item.originalIndex

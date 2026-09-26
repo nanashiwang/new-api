@@ -5,7 +5,48 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/stretchr/testify/require"
 )
+
+func TestSanitizeClaudeThinkingPreservesMessageOutputConfig(t *testing.T) {
+	for _, content := range []string{`[]`, `[{"type":"thinking","thinking":""}]`} {
+		body := `{"messages":[{"role":"system","content":` + content + `,"output_config":{"effort":"high"}}]}`
+		var request dto.ClaudeRequest
+		require.NoError(t, common.UnmarshalJsonStr(body, &request))
+		_, err := sanitizeClaudeRequestEmptyThinking(&request)
+		require.NoError(t, err)
+		payload, err := common.Marshal(request.Messages)
+		require.NoError(t, err)
+		expected := `[{"role":"system","content":[],"output_config":{"effort":"high"}}]`
+		require.JSONEq(t, expected, string(payload))
+
+		payload, _, err = sanitizeEmptyClaudeThinkingJSON([]byte(body))
+		require.NoError(t, err)
+		require.JSONEq(t, `{"messages":`+expected+`}`, string(payload))
+	}
+}
+
+func TestSanitizeClaudeThinkingDoesNotMergeAcrossMessageConfig(t *testing.T) {
+	body := `{"messages":[
+		{"role":"user","content":"before","output_config":{"effort":"low"}},
+		{"role":"assistant","content":[{"type":"thinking","thinking":""}]},
+		{"role":"user","content":"after","output_config":{"effort":"high"}}
+	]}`
+	expected := `[{"role":"user","content":"before","output_config":{"effort":"low"}},
+		{"role":"user","content":"after","output_config":{"effort":"high"}}]`
+	var request dto.ClaudeRequest
+	require.NoError(t, common.UnmarshalJsonStr(body, &request))
+	result, err := sanitizeClaudeRequestEmptyThinking(&request)
+	require.NoError(t, err)
+	require.Zero(t, result.MergedMessages)
+	payload, err := common.Marshal(request.Messages)
+	require.NoError(t, err)
+	require.JSONEq(t, expected, string(payload))
+	payload, result, err = sanitizeEmptyClaudeThinkingJSON([]byte(body))
+	require.NoError(t, err)
+	require.Zero(t, result.MergedMessages)
+	require.JSONEq(t, `{"messages":`+expected+`}`, string(payload))
+}
 
 func TestSanitizeClaudeRequestEmptyThinkingPreservesValidBlocks(t *testing.T) {
 	empty := "  "
