@@ -1,5 +1,9 @@
 {
   "translation": {
+    "拖动手柄调整顺序，也可使用上下按钮或方向键。": "Drag the handle to reorder, or use the up/down buttons or arrow keys.",
+    "调整分组顺序": "Reorder group",
+    "上移分组": "Move group up",
+    "下移分组": "Move group down",
     "API 地址": "API Addresses",
     "默认 API 地址": "Default API address",
     "当前域名": "Current domain",

@@ -1,5 +1,9 @@
 {
   "translation": {
+    "拖动手柄调整顺序，也可使用上下按钮或方向键。": "Faites glisser la poignée ou utilisez les boutons haut/bas ou les touches fléchées.",
+    "调整分组顺序": "Réordonner le groupe",
+    "上移分组": "Monter le groupe",
+    "下移分组": "Descendre le groupe",
     "API 地址": "Adresses API",
     "默认 API 地址": "Adresse API par défaut",
     "当前域名": "Domaine actuel",
