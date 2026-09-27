@@ -2,10 +2,12 @@ package controller
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"html"
 	"io"
 	"mime/multipart"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -195,28 +197,22 @@ func reviewInvoiceRequest(c *gin.Context, action string) {
 
 	var request *model.InvoiceRequest
 	if action == "approve" {
-		req, err := parseInvoiceApprovePayload(c, id)
-		if err != nil {
-			common.ApiError(c, err)
+		req, parseErr := parseInvoiceApprovePayload(c, id)
+		if parseErr != nil {
+			common.ApiError(c, parseErr)
 			return
 		}
-		extraAttachments := make([]*common.EmailAttachment, 0, 2)
-		if req.SendEmail && req.SendDetailBill {
-			detailBillAttachment, readErr := readInvoiceDetailBillAttachment(req.DetailBillFileHeader)
-			if readErr != nil {
-				common.ApiError(c, readErr)
-				return
-			}
-			extraAttachments = append(extraAttachments, detailBillAttachment)
+		attachments, prepareErr := prepareInvoiceEmailAttachments(&model.InvoiceRequest{Id: id}, invoiceEmailPayload{
+			SendDetailBill:                req.SendEmail && req.SendDetailBill,
+			SendServiceConfirmation:       req.SendEmail && req.SendServiceConfirmation,
+			DetailBillFileHeader:          req.DetailBillFileHeader,
+			ServiceConfirmationFileHeader: req.ServiceConfirmationFileHeader,
+		})
+		if prepareErr != nil {
+			common.ApiError(c, prepareErr)
+			return
 		}
-		if req.SendEmail && req.SendServiceConfirmation {
-			serviceConfirmationAttachment, readErr := readInvoiceServiceConfirmationAttachment(req.ServiceConfirmationFileHeader)
-			if readErr != nil {
-				common.ApiError(c, readErr)
-				return
-			}
-			extraAttachments = append(extraAttachments, serviceConfirmationAttachment)
-		}
+		defer attachments.cleanup()
 		fileName := ""
 		filePath := ""
 		cleanupFile := false
@@ -234,19 +230,21 @@ func reviewInvoiceRequest(c *gin.Context, action string) {
 			}()
 		}
 		request, err = model.ApproveInvoiceRequest(id, c.GetInt("id"), model.InvoiceReviewInput{
-			InvoiceNo:         req.InvoiceNo,
-			InvoiceUrl:        req.InvoiceUrl,
-			InvoiceFileName:   fileName,
-			InvoiceFilePath:   filePath,
-			InvoiceSentTo:     req.InvoiceSentTo,
-			InvoiceSendStatus: model.InvoiceSendStatusPending,
-			AdminRemark:       req.AdminRemark,
+			InvoiceEmailAttachments: attachments.files,
+			InvoiceNo:               req.InvoiceNo,
+			InvoiceUrl:              req.InvoiceUrl,
+			InvoiceFileName:         fileName,
+			InvoiceFilePath:         filePath,
+			InvoiceSentTo:           req.InvoiceSentTo,
+			InvoiceSendStatus:       model.InvoiceSendStatusPending,
+			AdminRemark:             req.AdminRemark,
 		})
 		if err == nil {
 			cleanupFile = false
+			attachments.retain()
 		}
 		if err == nil && req.SendEmail {
-			request, err = sendInvoiceFileAndUpdateStatus(request, extraAttachments...)
+			request, err = sendInvoiceFileAndUpdateStatus(request, attachments.email...)
 		}
 	} else {
 		var req reviewInvoiceRequestPayload
@@ -300,24 +298,18 @@ func ResendInvoiceEmail(c *gin.Context) {
 		return
 	}
 	request.InvoiceSentTo = recipient
-	extraAttachments := make([]*common.EmailAttachment, 0, 2)
-	if payload.SendDetailBill {
-		detailBillAttachment, readErr := readInvoiceDetailBillAttachment(payload.DetailBillFileHeader)
-		if readErr != nil {
-			common.ApiError(c, readErr)
-			return
-		}
-		extraAttachments = append(extraAttachments, detailBillAttachment)
+	attachments, err := prepareInvoiceEmailAttachments(request, payload)
+	if err != nil {
+		common.ApiError(c, err)
+		return
 	}
-	if payload.SendServiceConfirmation {
-		serviceConfirmationAttachment, readErr := readInvoiceServiceConfirmationAttachment(payload.ServiceConfirmationFileHeader)
-		if readErr != nil {
-			common.ApiError(c, readErr)
-			return
-		}
-		extraAttachments = append(extraAttachments, serviceConfirmationAttachment)
+	defer attachments.cleanup()
+	if err := model.UpdateInvoiceEmailAttachments(id, attachments.files); err != nil {
+		common.ApiError(c, err)
+		return
 	}
-	request, err = sendInvoiceFileAndUpdateStatus(request, extraAttachments...)
+	attachments.retain()
+	request, err = sendInvoiceFileAndUpdateStatus(request, attachments.email...)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -444,15 +436,15 @@ func parseInvoiceEmailPayload(c *gin.Context) (invoiceEmailPayload, error) {
 		if payload.SendDetailBill {
 			if fileHeader, err := c.FormFile("detail_bill_file"); err == nil {
 				payload.DetailBillFileHeader = fileHeader
-			} else {
-				return payload, fmt.Errorf("请上传明细账单 PDF")
+			} else if !errors.Is(err, http.ErrMissingFile) {
+				return payload, err
 			}
 		}
 		if payload.SendServiceConfirmation {
 			if fileHeader, err := c.FormFile("service_confirmation_file"); err == nil {
 				payload.ServiceConfirmationFileHeader = fileHeader
-			} else {
-				return payload, fmt.Errorf("请上传产品明细清单 PDF")
+			} else if !errors.Is(err, http.ErrMissingFile) {
+				return payload, err
 			}
 		}
 		return payload, nil
@@ -467,12 +459,6 @@ func parseInvoiceEmailPayload(c *gin.Context) (invoiceEmailPayload, error) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil && err != io.EOF {
 		return payload, err
-	}
-	if req.SendDetailBill {
-		return payload, fmt.Errorf("请上传明细账单 PDF")
-	}
-	if req.SendServiceConfirmation {
-		return payload, fmt.Errorf("请上传产品明细清单 PDF")
 	}
 	payload.InvoiceSentTo = strings.TrimSpace(req.InvoiceSentTo)
 	payload.SendDetailBill = req.SendDetailBill
@@ -543,14 +529,6 @@ func sanitizeInvoiceFilename(filename string) string {
 	return filename
 }
 
-func readInvoiceDetailBillAttachment(fileHeader *multipart.FileHeader) (*common.EmailAttachment, error) {
-	return readInvoicePDFAttachment(fileHeader, "明细账单", "明细账单.pdf")
-}
-
-func readInvoiceServiceConfirmationAttachment(fileHeader *multipart.FileHeader) (*common.EmailAttachment, error) {
-	return readInvoicePDFAttachment(fileHeader, "产品明细清单", "产品明细清单.pdf")
-}
-
 func readInvoicePDFAttachment(fileHeader *multipart.FileHeader, label string, defaultFilename string) (*common.EmailAttachment, error) {
 	if fileHeader == nil {
 		return nil, fmt.Errorf("请上传%s PDF", label)
@@ -573,6 +551,12 @@ func readInvoicePDFAttachment(fileHeader *multipart.FileHeader, label string, de
 	}
 	if len(data) == 0 || len(data) > maxInvoiceDetailBillSize {
 		return nil, fmt.Errorf("%s PDF 大小不能超过 10MB", label)
+	}
+	if !bytes.HasPrefix(bytes.TrimSpace(data), []byte("%PDF-")) {
+		return nil, fmt.Errorf("%s附件仅支持有效 PDF 文件", label)
+	}
+	if len([]rune(fileHeader.Filename)) > 255 {
+		return nil, fmt.Errorf("%s文件名不能超过 255 个字符", label)
 	}
 	return &common.EmailAttachment{
 		Filename:    sanitizeInvoicePDFAttachmentFilename(fileHeader.Filename, defaultFilename),

@@ -51,7 +51,17 @@ var (
 	ErrInsufficientQuotaForInvoiceFee = errors.New("余额不足，无法支付发票手续费")
 )
 
+// InvoiceEmailAttachments retains the exact PDFs uploaded for later resends.
+// Storage paths are private; clients only need filenames to offer reuse.
+type InvoiceEmailAttachments struct {
+	DetailBillFileName          string `json:"detail_bill_file_name" gorm:"type:varchar(255);not null;default:''"`
+	DetailBillFilePath          string `json:"-" gorm:"type:text"`
+	ServiceConfirmationFileName string `json:"service_confirmation_file_name" gorm:"type:varchar(255);not null;default:''"`
+	ServiceConfirmationFilePath string `json:"-" gorm:"type:text"`
+}
+
 type InvoiceRequest struct {
+	InvoiceEmailAttachments `gorm:"embedded"`
 	Id                      int     `json:"id"`
 	UserId                  int     `json:"user_id" gorm:"index;not null"`
 	InvoiceType             string  `json:"invoice_type" gorm:"type:varchar(16);not null;default:'normal'"`
@@ -183,6 +193,7 @@ type InvoiceRequestSearchParams struct {
 }
 
 type InvoiceReviewInput struct {
+	InvoiceEmailAttachments
 	InvoiceNo         string
 	InvoiceUrl        string
 	InvoiceFileName   string
@@ -1096,6 +1107,9 @@ func reviewInvoiceRequest(id int, reviewerUserID int, targetStatus string, input
 			updates["invoice_url"] = input.InvoiceUrl
 			updates["invoice_file_name"] = input.InvoiceFileName
 			updates["invoice_file_path"] = input.InvoiceFilePath
+			for key, value := range invoiceEmailAttachmentUpdates(input.InvoiceEmailAttachments) {
+				updates[key] = value
+			}
 			updates["invoice_sent_to"] = input.InvoiceSentTo
 			updates["invoice_send_status"] = input.InvoiceSendStatus
 			updates["invoice_send_error"] = ""
@@ -1116,6 +1130,7 @@ func reviewInvoiceRequest(id int, reviewerUserID int, targetStatus string, input
 			request.InvoiceUrl = input.InvoiceUrl
 			request.InvoiceFileName = input.InvoiceFileName
 			request.InvoiceFilePath = input.InvoiceFilePath
+			request.InvoiceEmailAttachments = input.InvoiceEmailAttachments
 			request.InvoiceSentTo = input.InvoiceSentTo
 			request.InvoiceSendStatus = input.InvoiceSendStatus
 			request.InvoiceSendError = ""
@@ -1151,6 +1166,43 @@ func reviewInvoiceRequest(id int, reviewerUserID int, targetStatus string, input
 			"发票申请（ID %d）被驳回，退还手续费 %d 额度", request.Id, request.ServiceFeeQuota))
 	}
 	return &request, nil
+}
+
+func invoiceEmailAttachmentUpdates(files InvoiceEmailAttachments) map[string]interface{} {
+	updates := make(map[string]interface{})
+	if files.DetailBillFilePath != "" {
+		updates["detail_bill_file_name"] = files.DetailBillFileName
+		updates["detail_bill_file_path"] = files.DetailBillFilePath
+	}
+	if files.ServiceConfirmationFilePath != "" {
+		updates["service_confirmation_file_name"] = files.ServiceConfirmationFileName
+		updates["service_confirmation_file_path"] = files.ServiceConfirmationFilePath
+	}
+	return updates
+}
+
+// UpdateInvoiceEmailAttachments stores uploads before sending, so an SMTP failure
+// can be retried without uploading again. Unselected attachments are preserved.
+func UpdateInvoiceEmailAttachments(id int, files InvoiceEmailAttachments) error {
+	updates := invoiceEmailAttachmentUpdates(files)
+	if len(updates) == 0 {
+		return nil
+	}
+	result := DB.Model(&InvoiceRequest{}).
+		Where("id = ? AND status = ?", id, InvoiceStatusInvoiced).Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		var matched int64
+		if err := DB.Model(&InvoiceRequest{}).Where("id = ? AND status = ?", id, InvoiceStatusInvoiced).Count(&matched).Error; err != nil {
+			return err
+		}
+		if matched == 0 {
+			return ErrInvoiceRequestNotFound
+		}
+	}
+	return nil
 }
 
 func UpdateInvoiceSendStatus(id int, status string, errorMessage string) (*InvoiceRequest, error) {

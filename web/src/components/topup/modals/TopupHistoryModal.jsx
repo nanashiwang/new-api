@@ -2210,8 +2210,8 @@ const TopupHistoryModal = ({
       visible: true,
       record,
       invoiceSentTo: record?.invoice_sent_to || record?.email || '',
-      sendDetailBill: false,
-      sendServiceConfirmation: false,
+      sendDetailBill: Boolean(record?.detail_bill_file_name),
+      sendServiceConfirmation: Boolean(record?.service_confirmation_file_name),
       detailBillFile: null,
       serviceConfirmationFile: null,
       submitting: false,
@@ -2238,7 +2238,11 @@ const TopupHistoryModal = ({
       Toast.error({ content: t('发票接收邮箱不能为空') });
       return;
     }
-    if (invoiceEmailState.sendDetailBill && !invoiceEmailState.detailBillFile) {
+    if (
+      invoiceEmailState.sendDetailBill &&
+      !invoiceEmailState.detailBillFile &&
+      !invoiceEmailState.record?.detail_bill_file_name
+    ) {
       Toast.error({
         content: t(
           '请上传明细账单 PDF（可在当前弹窗点击【生成明细账单】打印并另存为 PDF）',
@@ -2248,7 +2252,8 @@ const TopupHistoryModal = ({
     }
     if (
       invoiceEmailState.sendServiceConfirmation &&
-      !invoiceEmailState.serviceConfirmationFile
+      !invoiceEmailState.serviceConfirmationFile &&
+      !invoiceEmailState.record?.service_confirmation_file_name
     ) {
       Toast.error({
         content: t(
@@ -2269,10 +2274,16 @@ const TopupHistoryModal = ({
         'send_service_confirmation',
         String(invoiceEmailState.sendServiceConfirmation),
       );
-      if (invoiceEmailState.sendDetailBill) {
+      if (
+        invoiceEmailState.sendDetailBill &&
+        invoiceEmailState.detailBillFile
+      ) {
         payload.append('detail_bill_file', invoiceEmailState.detailBillFile);
       }
-      if (invoiceEmailState.sendServiceConfirmation) {
+      if (
+        invoiceEmailState.sendServiceConfirmation &&
+        invoiceEmailState.serviceConfirmationFile
+      ) {
         payload.append(
           'service_confirmation_file',
           invoiceEmailState.serviceConfirmationFile,
@@ -5535,7 +5546,7 @@ const TopupHistoryModal = ({
         <div className='space-y-3'>
           <Text type='secondary'>
             {t(
-              '邮件误删或未收到时，可重新发送已保存的发票 PDF，支持修改收件邮箱。如需附带明细账单或产品明细清单，请勾选并上传对应 PDF。',
+              '可直接重发已保存的发票、明细账单和产品明细清单，支持修改收件邮箱。未保存的附件需补传一次，之后即可复用。',
             )}
           </Text>
           <Input
@@ -5572,7 +5583,11 @@ const TopupHistoryModal = ({
             >
               <div className='mb-2 flex flex-wrap items-center justify-between gap-2'>
                 <Text type='tertiary' size='small'>
-                  {t('上传明细账单 PDF：可先生成打印并“另存为 PDF”，再上传')}
+                  {t(
+                    invoiceEmailState.record?.detail_bill_file_name
+                      ? '将复用已保存的 PDF；如需更换，可上传新文件。'
+                      : '尚未保存此附件，请上传一次；之后重发可直接复用。',
+                  )}
                 </Text>
                 <Button
                   size='small'
@@ -5586,6 +5601,7 @@ const TopupHistoryModal = ({
               </div>
               <input
                 type='file'
+                className='max-w-full'
                 accept='application/pdf,.pdf'
                 onChange={(event) =>
                   setInvoiceEmailState((prev) => ({
@@ -5594,14 +5610,19 @@ const TopupHistoryModal = ({
                   }))
                 }
               />
-              <div className='mt-2'>
+              <div className='mt-2 break-all'>
                 {invoiceEmailState.detailBillFile ? (
                   <Text size='small'>
                     {invoiceEmailState.detailBillFile.name}
                   </Text>
                 ) : (
                   <Text type='tertiary' size='small'>
-                    {t('尚未选择明细账单 PDF')}
+                    {invoiceEmailState.record?.detail_bill_file_name
+                      ? t('已保存：{{filename}}', {
+                          filename:
+                            invoiceEmailState.record.detail_bill_file_name,
+                        })
+                      : t('尚未选择明细账单 PDF')}
                   </Text>
                 )}
               </div>
@@ -5629,7 +5650,9 @@ const TopupHistoryModal = ({
               <div className='mb-2 flex flex-wrap items-center justify-between gap-2'>
                 <Text type='tertiary' size='small'>
                   {t(
-                    '上传产品明细清单 PDF：可先生成打印并“另存为 PDF”，再上传',
+                    invoiceEmailState.record?.service_confirmation_file_name
+                      ? '将复用已保存的 PDF；如需更换，可上传新文件。'
+                      : '尚未保存此附件，请上传一次；之后重发可直接复用。',
                   )}
                 </Text>
                 <Button
@@ -5646,6 +5669,7 @@ const TopupHistoryModal = ({
               </div>
               <input
                 type='file'
+                className='max-w-full'
                 accept='application/pdf,.pdf'
                 onChange={(event) =>
                   setInvoiceEmailState((prev) => ({
@@ -5654,14 +5678,20 @@ const TopupHistoryModal = ({
                   }))
                 }
               />
-              <div className='mt-2'>
+              <div className='mt-2 break-all'>
                 {invoiceEmailState.serviceConfirmationFile ? (
                   <Text size='small'>
                     {invoiceEmailState.serviceConfirmationFile.name}
                   </Text>
                 ) : (
                   <Text type='tertiary' size='small'>
-                    {t('尚未选择产品明细清单 PDF')}
+                    {invoiceEmailState.record?.service_confirmation_file_name
+                      ? t('已保存：{{filename}}', {
+                          filename:
+                            invoiceEmailState.record
+                              .service_confirmation_file_name,
+                        })
+                      : t('尚未选择产品明细清单 PDF')}
                   </Text>
                 )}
               </div>
