@@ -2209,8 +2209,8 @@ const TopupHistoryModal = ({
       visible: true,
       record,
       invoiceSentTo: record?.invoice_sent_to || record?.email || '',
-      sendDetailBill: record?.need_detail_bill !== false,
-      sendServiceConfirmation: Boolean(record?.need_service_confirmation),
+      sendDetailBill: false,
+      sendServiceConfirmation: false,
       detailBillFile: null,
       serviceConfirmationFile: null,
       submitting: false,
@@ -2232,7 +2232,7 @@ const TopupHistoryModal = ({
 
   const submitResendInvoiceEmail = async () => {
     const id = Number(invoiceEmailState.record?.id || 0);
-    if (!id) return;
+    if (!id || invoiceEmailState.submitting) return;
     if (!invoiceEmailState.invoiceSentTo.trim()) {
       Toast.error({ content: t('发票接收邮箱不能为空') });
       return;
@@ -3781,16 +3781,14 @@ const TopupHistoryModal = ({
                 </Button>
               </>
             ) : null}
-            {record?.status === 'invoiced' &&
-            record?.invoice_file_name &&
-            record?.invoice_send_status !== 'sent' ? (
+            {record?.status === 'invoiced' && record?.invoice_file_name ? (
               <Button
                 size='small'
                 type='warning'
                 theme='outline'
                 onClick={() => openResendInvoiceEmailModal(record)}
               >
-                {t('修改邮箱并重发')}
+                {t('重新发送')}
               </Button>
             ) : null}
           </Space>
@@ -5501,16 +5499,21 @@ const TopupHistoryModal = ({
 
       <Modal
         title={t('重发发票邮件')}
+        size={isMobile ? 'full-width' : 'small'}
         visible={invoiceEmailState.visible}
         onOk={submitResendInvoiceEmail}
         onCancel={closeResendInvoiceEmailModal}
+        okText={t('重新发送')}
         confirmLoading={invoiceEmailState.submitting}
+        cancelButtonProps={{ disabled: invoiceEmailState.submitting }}
+        closable={!invoiceEmailState.submitting}
+        closeOnEsc={!invoiceEmailState.submitting}
         maskClosable={false}
       >
         <div className='space-y-3'>
           <Text type='secondary'>
             {t(
-              '将重新发送已上传的发票 PDF 到指定邮箱；如原邮箱填写错误，可在此修正后重发。',
+              '邮件误删或未收到时，可重新发送已保存的发票 PDF，支持修改收件邮箱。如需附带明细账单或产品明细清单，请勾选并上传对应 PDF。',
             )}
           </Text>
           <Input
