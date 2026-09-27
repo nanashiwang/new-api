@@ -1,5 +1,6 @@
 {
   "translation": {
+    "Stripe 最低支付金额为 US$0.50，请调整充值数量，使预计支付金额不低于 US$0.50。": "Le paiement minimum par Stripe est de 0,50 USD. Ajustez la quantité de recharge pour que le paiement estimé soit d’au moins 0,50 USD.",
     "客户端取消请求": "Requête annulée par le client",
     "客户端已断开连接；请检查是否主动停止、客户端超时或网络中断。": "Le client a été déconnecté ; vérifiez un arrêt manuel, un délai client ou une coupure réseau.",
     "分组隐私模式": "Confidentialité des groupes",

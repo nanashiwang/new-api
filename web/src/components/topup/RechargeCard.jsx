@@ -280,6 +280,22 @@ const RechargeCard = ({
                                 : t('请选择支付方式')}
                             </span>
                           </Text>
+                          {payWay === 'stripe' && (
+                            <div
+                              className='mt-2 rounded-lg border px-3 py-2'
+                              style={{
+                                backgroundColor:
+                                  'var(--semi-color-danger-light-default)',
+                                borderColor: 'var(--semi-color-danger)',
+                              }}
+                            >
+                              <Text type='danger' strong>
+                                {t(
+                                  'Stripe 最低支付金额为 US$0.50，请调整充值数量，使预计支付金额不低于 US$0.50。',
+                                )}
+                              </Text>
+                            </div>
+                          )}
                           <div className='mt-1 h-5 flex items-center'>
                             {amountLoading ? (
                               <>
