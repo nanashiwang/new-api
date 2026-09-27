@@ -16,19 +16,21 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-export function moveGroup(items, from, to) {
-  if (
-    !Number.isInteger(from) ||
-    !Number.isInteger(to) ||
-    from < 0 ||
-    to < 0 ||
-    from >= items.length ||
-    to >= items.length ||
-    from === to
-  )
-    return items;
-  const next = [...items];
-  const [item] = next.splice(from, 1);
-  next.splice(to, 0, item);
-  return next;
+const componentPath =
+  /(?:^|\/)@lobehub\/icons\/es\/([^/]+)\/components\/(Mono|Avatar|Brand|BrandColor|Color|Combine|Text|TextCn|TextColor|Simple|Morden)\.js$/;
+
+export function createProviderIconRegistry(loaders) {
+  const registry = new Map();
+  for (const [path, loader] of Object.entries(loaders)) {
+    const match = path.replaceAll('\\', '/').match(componentPath);
+    if (match) registry.set(`${match[1]}.${match[2]}`, loader);
+  }
+  return registry;
+}
+
+export function resolveProviderIcon(registry, name, variant = 'Mono') {
+  const preferred = `${name}.${variant}`;
+  if (registry.has(preferred)) return preferred;
+  const fallback = `${name}.Mono`;
+  return registry.has(fallback) ? fallback : null;
 }

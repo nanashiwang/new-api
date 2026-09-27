@@ -48,7 +48,7 @@ import {
   Mistral,
   OpenAI,
   Qwen,
-} from '@lobehub/icons';
+} from '../../helpers/providerIcons';
 import './EnterpriseHome.css';
 
 const providerCards = [

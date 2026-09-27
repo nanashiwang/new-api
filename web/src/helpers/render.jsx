@@ -32,7 +32,7 @@ import {
   BILLING_VAR_REGEX,
 } from '../constants';
 import { visit } from 'unist-util-visit';
-import * as LobeIcons from '@lobehub/icons';
+import { getProviderIconComponent } from './providerIcons';
 import {
   OpenAI,
   Claude,
@@ -66,7 +66,7 @@ import {
   Jimeng,
   Perplexity,
   Replicate,
-} from '@lobehub/icons';
+} from './providerIcons';
 
 import {
   LayoutDashboard,
@@ -452,18 +452,12 @@ export function getLobeHubIcon(iconName, size = 14) {
   // 解析组件路径与点号链式属性
   const segments = String(iconName).split('.');
   const baseKey = segments[0];
-  const BaseIcon = customLobeIconMap[baseKey] || LobeIcons[baseKey];
-
-  let IconComponent = undefined;
-  let propStartIndex = 1;
-
-  if (BaseIcon && segments.length > 1 && BaseIcon[segments[1]]) {
-    IconComponent = BaseIcon[segments[1]];
-    propStartIndex = 2;
-  } else {
-    IconComponent = BaseIcon;
-    propStartIndex = 1;
-  }
+  const hasVariant =
+    segments.length > 1 && /^[A-Z][A-Za-z]*$/.test(segments[1]);
+  const IconComponent =
+    customLobeIconMap[baseKey] ||
+    getProviderIconComponent(baseKey, hasVariant ? segments[1] : 'Mono');
+  const propStartIndex = hasVariant ? 2 : 1;
 
   // 失败兜底
   if (

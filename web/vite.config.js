@@ -180,6 +180,9 @@ export default defineConfig({
     stripNonCriticalHtmlAssets(),
   ],
   optimizeDeps: {
+    // Avatar variants now enter through lazy SVG modules, outside the initial
+    // dependency scan. Prebundle their CommonJS helper for the dev server.
+    include: ['hoist-non-react-statics'],
     esbuildOptions: {
       loader: {
         '.js': 'jsx',
