@@ -17,26 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { API, showError, showInfo, showSuccess } from '../../helpers';
-import { normalizeModelList } from './upstreamUpdateUtils';
-
-const getManualIgnoredModelCountFromSettings = (settings) => {
-  let parsed = null;
-  if (settings && typeof settings === 'object') {
-    parsed = settings;
-  } else if (typeof settings === 'string') {
-    try {
-      parsed = JSON.parse(settings);
-    } catch (error) {
-      parsed = null;
-    }
-  }
-  if (!parsed || typeof parsed !== 'object') {
-    return 0;
-  }
-  return normalizeModelList(parsed.upstream_model_update_ignored_models).length;
-};
+import { normalizeModelList, selectPendingModels } from './upstreamUpdateUtils';
 
 export const useChannelUpstreamUpdates = ({ t, refresh }) => {
   const [showUpstreamUpdateModal, setShowUpstreamUpdateModal] = useState(false);
@@ -48,15 +31,31 @@ export const useChannelUpstreamUpdates = ({ t, refresh }) => {
   const [upstreamUpdatePreferredTab, setUpstreamUpdatePreferredTab] =
     useState('add');
   const [upstreamApplyLoading, setUpstreamApplyLoading] = useState(false);
+  const [upstreamPreviewLoading, setUpstreamPreviewLoading] = useState(false);
+  const [upstreamPreviewError, setUpstreamPreviewError] = useState('');
   const [detectAllUpstreamUpdatesLoading, setDetectAllUpstreamUpdatesLoading] =
     useState(false);
   const [applyAllUpstreamUpdatesLoading, setApplyAllUpstreamUpdatesLoading] =
     useState(false);
 
   const applyUpstreamUpdatesInFlightRef = useRef(false);
-  const detectChannelUpstreamUpdatesInFlightRef = useRef(false);
+  const previewRequestRef = useRef(0);
   const detectAllUpstreamUpdatesInFlightRef = useRef(false);
   const applyAllUpstreamUpdatesInFlightRef = useRef(false);
+  useEffect(
+    () => () => {
+      previewRequestRef.current++;
+    },
+    [],
+  );
+
+  const refreshAfterSuccess = async () => {
+    try {
+      await refresh();
+    } catch {
+      showInfo(t('操作已成功，但列表刷新失败，请手动刷新'));
+    }
+  };
 
   const openUpstreamUpdateModal = (
     record,
@@ -66,13 +65,10 @@ export const useChannelUpstreamUpdates = ({ t, refresh }) => {
   ) => {
     const normalizedAddModels = normalizeModelList(pendingAddModels);
     const normalizedRemoveModels = normalizeModelList(pendingRemoveModels);
-    if (
-      !record?.id ||
-      (normalizedAddModels.length === 0 && normalizedRemoveModels.length === 0)
-    ) {
-      showInfo(t('该渠道暂无可处理的上游模型更新'));
-      return;
-    }
+    if (!record?.id || applyUpstreamUpdatesInFlightRef.current) return;
+    previewRequestRef.current++;
+    setUpstreamPreviewLoading(false);
+    setUpstreamPreviewError('');
     setUpstreamUpdateChannel(record);
     setUpstreamUpdateAddModels(normalizedAddModels);
     setUpstreamUpdateRemoveModels(normalizedRemoveModels);
@@ -81,12 +77,18 @@ export const useChannelUpstreamUpdates = ({ t, refresh }) => {
     setShowUpstreamUpdateModal(true);
   };
 
-  const closeUpstreamUpdateModal = () => {
+  const resetUpstreamUpdateModal = () => {
+    previewRequestRef.current++;
+    setUpstreamPreviewLoading(false);
+    setUpstreamPreviewError('');
     setShowUpstreamUpdateModal(false);
     setUpstreamUpdateChannel(null);
     setUpstreamUpdateAddModels([]);
     setUpstreamUpdateRemoveModels([]);
     setUpstreamUpdatePreferredTab('add');
+  };
+  const closeUpstreamUpdateModal = () => {
+    if (!applyUpstreamUpdatesInFlightRef.current) resetUpstreamUpdateModal();
   };
 
   const applyUpstreamUpdates = async ({
@@ -97,28 +99,35 @@ export const useChannelUpstreamUpdates = ({ t, refresh }) => {
       showInfo(t('正在处理，请稍候'));
       return;
     }
+    if (upstreamPreviewLoading || upstreamPreviewError) return;
     if (!upstreamUpdateChannel?.id) {
       closeUpstreamUpdateModal();
       return;
     }
+    const normalizedSelectedAddModels = selectPendingModels(
+      selectedAddModels,
+      upstreamUpdateAddModels,
+    );
+    const normalizedSelectedRemoveModels = selectPendingModels(
+      selectedRemoveModels,
+      upstreamUpdateRemoveModels,
+    );
+    if (
+      !normalizedSelectedAddModels.length &&
+      !normalizedSelectedRemoveModels.length
+    )
+      return;
     applyUpstreamUpdatesInFlightRef.current = true;
     setUpstreamApplyLoading(true);
+    const requestId = previewRequestRef.current;
 
     try {
-      const normalizedSelectedAddModels = normalizeModelList(selectedAddModels);
-      const normalizedSelectedRemoveModels =
-        normalizeModelList(selectedRemoveModels);
-      const selectedAddSet = new Set(normalizedSelectedAddModels);
-      const ignoreModels = upstreamUpdateAddModels.filter(
-        (model) => !selectedAddSet.has(model),
-      );
-
       const res = await API.post(
         '/api/channel/upstream_updates/apply',
         {
           id: upstreamUpdateChannel.id,
           add_models: normalizedSelectedAddModels,
-          ignore_models: ignoreModels,
+          ignore_models: [],
           remove_models: normalizedSelectedRemoveModels,
         },
         { skipErrorHandler: true },
@@ -131,23 +140,19 @@ export const useChannelUpstreamUpdates = ({ t, refresh }) => {
 
       const addedCount = data?.added_models?.length || 0;
       const removedCount = data?.removed_models?.length || 0;
-      const totalIgnoredCount = getManualIgnoredModelCountFromSettings(
-        data?.settings,
-      );
-      const ignoredCount = normalizeModelList(ignoreModels).length;
       showSuccess(
         t(
-          '已处理上游模型更新：加入 {{added}} 个，删除 {{removed}} 个，本次忽略 {{ignored}} 个，当前已忽略模型 {{totalIgnored}} 个',
+          '已处理上游模型更新：加入 {{added}} 个，删除 {{removed}} 个；未勾选项保留待处理',
           {
             added: addedCount,
             removed: removedCount,
-            ignored: ignoredCount,
-            totalIgnored: totalIgnoredCount,
           },
         ),
       );
-      closeUpstreamUpdateModal();
-      await refresh();
+      if (requestId === previewRequestRef.current) {
+        resetUpstreamUpdateModal();
+      }
+      await refreshAfterSuccess();
     } catch (error) {
       showError(
         error?.response?.data?.message || error?.message || t('操作失败'),
@@ -192,7 +197,7 @@ export const useChannelUpstreamUpdates = ({ t, refresh }) => {
           },
         ),
       );
-      await refresh();
+      await refreshAfterSuccess();
     } catch (error) {
       showError(
         error?.response?.data?.message || error?.message || t('批量处理失败'),
@@ -204,14 +209,10 @@ export const useChannelUpstreamUpdates = ({ t, refresh }) => {
   };
 
   const detectChannelUpstreamUpdates = async (channel) => {
-    if (detectChannelUpstreamUpdatesInFlightRef.current) {
-      showInfo(t('正在检测，请稍候'));
-      return;
-    }
-    if (!channel?.id) {
-      return;
-    }
-    detectChannelUpstreamUpdatesInFlightRef.current = true;
+    if (!channel?.id || applyUpstreamUpdatesInFlightRef.current) return;
+    openUpstreamUpdateModal(channel);
+    const requestId = previewRequestRef.current;
+    setUpstreamPreviewLoading(true);
     try {
       const res = await API.post(
         '/api/channel/upstream_updates/detect',
@@ -220,27 +221,23 @@ export const useChannelUpstreamUpdates = ({ t, refresh }) => {
         },
         { skipErrorHandler: true },
       );
+      if (requestId !== previewRequestRef.current) return;
       const { success, message, data } = res.data || {};
       if (!success) {
-        showError(message || t('检测失败'));
+        setUpstreamPreviewError(message || t('检测失败'));
         return;
       }
-
-      const addCount = data?.add_models?.length || 0;
-      const removeCount = data?.remove_models?.length || 0;
-      showSuccess(
-        t('检测完成：新增 {{add}} 个，删除 {{remove}} 个', {
-          add: addCount,
-          remove: removeCount,
-        }),
-      );
-      await refresh();
+      setUpstreamUpdateAddModels(normalizeModelList(data?.add_models));
+      setUpstreamUpdateRemoveModels(normalizeModelList(data?.remove_models));
+      await refreshAfterSuccess();
     } catch (error) {
-      showError(
+      if (requestId !== previewRequestRef.current) return;
+      setUpstreamPreviewError(
         error?.response?.data?.message || error?.message || t('检测失败'),
       );
     } finally {
-      detectChannelUpstreamUpdatesInFlightRef.current = false;
+      if (requestId === previewRequestRef.current)
+        setUpstreamPreviewLoading(false);
     }
   };
 
@@ -278,7 +275,7 @@ export const useChannelUpstreamUpdates = ({ t, refresh }) => {
           },
         ),
       );
-      await refresh();
+      await refreshAfterSuccess();
     } catch (error) {
       showError(
         error?.response?.data?.message || error?.message || t('批量检测失败'),
@@ -291,12 +288,13 @@ export const useChannelUpstreamUpdates = ({ t, refresh }) => {
 
   return {
     showUpstreamUpdateModal,
-    setShowUpstreamUpdateModal,
     upstreamUpdateChannel,
     upstreamUpdateAddModels,
     upstreamUpdateRemoveModels,
     upstreamUpdatePreferredTab,
     upstreamApplyLoading,
+    upstreamPreviewLoading,
+    upstreamPreviewError,
     detectAllUpstreamUpdatesLoading,
     applyAllUpstreamUpdatesLoading,
     openUpstreamUpdateModal,

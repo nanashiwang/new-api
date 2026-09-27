@@ -26,6 +26,8 @@ import {
   Input,
   Tabs,
   Typography,
+  Banner,
+  Spin,
 } from '@douyinfe/semi-ui';
 import {
   IllustrationNoResult,
@@ -59,6 +61,8 @@ const ChannelUpstreamUpdateModal = ({
   removeModels = [],
   preferredTab = 'add',
   confirmLoading = false,
+  previewLoading = false,
+  previewError = '',
   onConfirm,
   onCancel,
 }) => {
@@ -163,9 +167,9 @@ const ChannelUpstreamUpdateModal = ({
   };
 
   const handleSubmit = () => {
+    if (previewLoading || previewError || confirmLoading) return;
     const hasAnySelected = selectedAddCount > 0 || selectedRemoveCount > 0;
     if (!hasAnySelected) {
-      submitSelectedChanges();
       return;
     }
 
@@ -214,98 +218,123 @@ const ChannelUpstreamUpdateModal = ({
       cancelText={t('取消')}
       size={isMobile ? 'full-width' : 'medium'}
       centered
-      closeOnEsc
-      maskClosable
+      closeOnEsc={!confirmLoading}
+      maskClosable={!confirmLoading}
+      closable={!confirmLoading}
+      cancelButtonProps={{ disabled: confirmLoading }}
+      okButtonProps={{
+        disabled:
+          previewLoading ||
+          !!previewError ||
+          selectedAddCount + selectedRemoveCount === 0,
+      }}
       confirmLoading={confirmLoading}
       onCancel={onCancel}
       onOk={handleSubmit}
     >
-      <div className='flex flex-col gap-3'>
-        <Typography.Text type='secondary' size='small'>
-          {t(
-            '可勾选需要执行的变更：新增会加入渠道模型列表，删除会从渠道模型列表移除。',
-          )}
-        </Typography.Text>
-
-        <Tabs
-          type='slash'
-          size='small'
-          tabList={tabList}
-          activeKey={activeTab}
-          onChange={(key) => setActiveTab(key)}
-        />
-        <div className='flex items-center gap-3 text-xs text-gray-500'>
-          <span>
-            {t('新增已选 {{selected}} / {{total}}', {
-              selected: selectedAddCount,
-              total: normalizedAddModels.length,
-            })}
-          </span>
-          <span>
-            {t('删除已选 {{selected}} / {{total}}', {
-              selected: selectedRemoveCount,
-              total: normalizedRemoveModels.length,
-            })}
-          </span>
+      {previewLoading ? (
+        <div className='p-8 text-center'>
+          <Spin tip={t('正在检测，请稍候')} />
         </div>
-
-        <Input
-          prefix={<IconSearch size={14} />}
-          placeholder={t('搜索模型')}
-          value={keyword}
-          onChange={(value) => setKeyword(value)}
-          showClear
-        />
-
-        <div style={{ maxHeight: 320, overflowY: 'auto', paddingRight: 8 }}>
-          {currentModels.length === 0 ? (
-            <Empty
-              image={
-                <IllustrationNoResult style={{ width: 150, height: 150 }} />
-              }
-              darkModeImage={
-                <IllustrationNoResultDark style={{ width: 150, height: 150 }} />
-              }
-              description={t('暂无匹配模型')}
-              style={{ padding: 24 }}
-            />
-          ) : (
-            <Checkbox.Group
-              value={currentSelectedModels}
-              onChange={(values) =>
-                currentSetSelectedModels(normalizeModels(values))
-              }
-            >
-              <div className='grid grid-cols-1 md:grid-cols-2 gap-x-4'>
-                {(currentModels || []).map((model) => (
-                  <Checkbox
-                    key={`${activeTab}:${model}`}
-                    value={model}
-                    className='my-1'
-                  >
-                    {model}
-                  </Checkbox>
-                ))}
-              </div>
-            </Checkbox.Group>
-          )}
-        </div>
-
-        <div className='flex items-center justify-end gap-2'>
+      ) : previewError ? (
+        <Banner type='danger' description={previewError} />
+      ) : (
+        <div className='flex flex-col gap-3'>
           <Typography.Text type='secondary' size='small'>
-            {t('已选择 {{selected}} / {{total}}', {
-              selected: checkedCount,
-              total: currentModels.length,
-            })}
+            {t(
+              '可勾选需要执行的变更：新增会加入渠道模型列表，删除会从渠道模型列表移除。',
+            )}
           </Typography.Text>
-          <Checkbox
-            checked={isAllChecked}
-            indeterminate={isIndeterminate}
-            aria-label={t('全选当前列表模型')}
-            onChange={(e) => handleToggleAllCurrent(e.target.checked)}
+          <Typography.Text type='secondary' size='small'>
+            {t('未勾选的模型保持待处理，不会自动忽略。')}
+          </Typography.Text>
+
+          <Tabs
+            type='slash'
+            size='small'
+            tabList={tabList}
+            activeKey={activeTab}
+            onChange={(key) => setActiveTab(key)}
           />
+          <div className='flex items-center gap-3 text-xs text-gray-500'>
+            <span>
+              {t('新增已选 {{selected}} / {{total}}', {
+                selected: selectedAddCount,
+                total: normalizedAddModels.length,
+              })}
+            </span>
+            <span>
+              {t('删除已选 {{selected}} / {{total}}', {
+                selected: selectedRemoveCount,
+                total: normalizedRemoveModels.length,
+              })}
+            </span>
+          </div>
+
+          <Input
+            prefix={<IconSearch size={14} />}
+            placeholder={t('搜索模型')}
+            value={keyword}
+            onChange={(value) => setKeyword(value)}
+            showClear
+          />
+
+          <div style={{ maxHeight: 320, overflowY: 'auto', paddingRight: 8 }}>
+            {currentModels.length === 0 ? (
+              <Empty
+                image={
+                  <IllustrationNoResult style={{ width: 150, height: 150 }} />
+                }
+                darkModeImage={
+                  <IllustrationNoResultDark
+                    style={{ width: 150, height: 150 }}
+                  />
+                }
+                description={t(
+                  addTabEnabled || removeTabEnabled
+                    ? '暂无匹配模型'
+                    : '该渠道暂无可处理的上游模型更新',
+                )}
+                style={{ padding: 24 }}
+              />
+            ) : (
+              <Checkbox.Group
+                value={currentSelectedModels}
+                onChange={(values) =>
+                  currentSetSelectedModels(normalizeModels(values))
+                }
+              >
+                <div className='grid grid-cols-1 md:grid-cols-2 gap-x-4'>
+                  {(currentModels || []).map((model) => (
+                    <Checkbox
+                      key={`${activeTab}:${model}`}
+                      value={model}
+                      className='my-1'
+                    >
+                      {model}
+                    </Checkbox>
+                  ))}
+                </div>
+              </Checkbox.Group>
+            )}
+          </div>
+
+          <div className='flex items-center justify-end gap-2'>
+            <Typography.Text type='secondary' size='small'>
+              {t('已选择 {{selected}} / {{total}}', {
+                selected: checkedCount,
+                total: currentModels.length,
+              })}
+            </Typography.Text>
+            <Checkbox
+              checked={isAllChecked}
+              indeterminate={isIndeterminate}
+              aria-label={t('全选当前列表模型')}
+              onChange={(e) => handleToggleAllCurrent(e.target.checked)}
+            />
+          </div>
         </div>
-      </div>
+      )}
     </Modal>
   );
 };

@@ -69,9 +69,7 @@ const ChannelsPage = () => {
         tagTestLoading={channelsData.tagTestLoading}
         tagTestSubmitting={channelsData.tagTestSubmitting}
         selectedTagTestChannelIds={channelsData.selectedTagTestChannelIds}
-        setSelectedTagTestChannelIds={
-          channelsData.setSelectedTagTestChannelIds
-        }
+        setSelectedTagTestChannelIds={channelsData.setSelectedTagTestChannelIds}
         tagTestModelOptions={channelsData.tagTestModelOptions}
         selectedTagTestModel={channelsData.selectedTagTestModel}
         setSelectedTagTestModel={channelsData.setSelectedTagTestModel}
@@ -90,6 +88,9 @@ const ChannelsPage = () => {
         addModels={channelsData.upstreamUpdateAddModels}
         removeModels={channelsData.upstreamUpdateRemoveModels}
         preferredTab={channelsData.upstreamUpdatePreferredTab}
+        key={channelsData.upstreamUpdateChannel?.id || 'closed'}
+        previewLoading={channelsData.upstreamPreviewLoading}
+        previewError={channelsData.upstreamPreviewError}
         confirmLoading={channelsData.upstreamApplyLoading}
         onConfirm={channelsData.applyUpstreamUpdates}
         onCancel={channelsData.closeUpstreamUpdateModal}

@@ -1,6 +1,16 @@
 {
   "translation": {
     "Stripe 最低支付金额为 US$0.50，请调整充值数量，使预计支付金额不低于 US$0.50。": "Số tiền thanh toán tối thiểu qua Stripe là 0,50 USD. Vui lòng điều chỉnh số lượng nạp để số tiền thanh toán dự kiến đạt ít nhất 0,50 USD.",
+    "拖动手柄调整顺序，也可使用上下按钮或方向键。": "Kéo tay nắm hoặc dùng nút lên/xuống hay phím mũi tên để đổi thứ tự.",
+    "调整分组顺序": "Đổi thứ tự nhóm",
+    "上移分组": "Di chuyển nhóm lên",
+    "下移分组": "Di chuyển nhóm xuống",
+    "API 地址": "Địa chỉ API",
+    "默认 API 地址": "Địa chỉ API mặc định",
+    "当前域名": "Tên miền hiện tại",
+    "操作已成功，但列表刷新失败，请手动刷新": "Thao tác thành công nhưng không thể làm mới danh sách. Vui lòng làm mới thủ công.",
+    "已处理上游模型更新：加入 {{added}} 个，删除 {{removed}} 个；未勾选项保留待处理": "Đã cập nhật mô hình: thêm {{added}}, xóa {{removed}}; mục chưa chọn vẫn đang chờ.",
+    "未勾选的模型保持待处理，不会自动忽略。": "Mô hình chưa chọn vẫn đang chờ và không tự động bị bỏ qua.",
     "客户端取消请求": "Máy khách đã hủy yêu cầu",
     "客户端已断开连接；请检查是否主动停止、客户端超时或网络中断。": "Máy khách đã ngắt kết nối; kiểm tra thao tác dừng, thời gian chờ hoặc gián đoạn mạng.",
     "分组隐私模式": "Chế độ riêng tư nhóm",

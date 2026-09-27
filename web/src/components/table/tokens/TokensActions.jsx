@@ -22,6 +22,7 @@ import { Button } from '@douyinfe/semi-ui';
 import { showError } from '../../../helpers';
 import CopyTokensModal from './modals/CopyTokensModal';
 import DeleteTokensModal from './modals/DeleteTokensModal';
+import ApiAddressesButton from './ApiAddressesButton';
 
 const TokensActions = ({
   selectedKeys,
@@ -83,6 +84,7 @@ const TokensActions = ({
         >
           {t('添加令牌')}
         </Button>
+        <ApiAddressesButton copyText={copyText} t={t} />
 
         <Button
           type='tertiary'

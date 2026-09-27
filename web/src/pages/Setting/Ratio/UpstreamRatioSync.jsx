@@ -49,6 +49,7 @@ import {
   IllustrationNoResultDark,
 } from '@douyinfe/semi-illustrations';
 import ChannelSelectorModal from '../../../components/settings/ChannelSelectorModal';
+import ExpressionDiff from './components/ExpressionDiff';
 
 const OFFICIAL_RATIO_PRESET_ID = -100;
 const OFFICIAL_RATIO_PRESET_NAME = '官方倍率预设';
@@ -68,12 +69,20 @@ function ConflictConfirmModal({ t, visible, items, loading, onOk, onCancel }) {
     {
       title: t('当前计费'),
       dataIndex: 'current',
-      render: (text) => <div style={{ whiteSpace: 'pre-wrap' }}>{text}</div>,
+      render: (text) => (
+        <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+          {text}
+        </div>
+      ),
     },
     {
       title: t('修改为'),
       dataIndex: 'newVal',
-      render: (text) => <div style={{ whiteSpace: 'pre-wrap' }}>{text}</div>,
+      render: (text) => (
+        <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+          {text}
+        </div>
+      ),
     },
   ];
 
@@ -797,7 +806,12 @@ export default function UpstreamRatioSync(props) {
               <Tag color={stringToColor(ratioType)} shape='circle'>
                 {getSyncFieldLabel(ratioType)}
               </Tag>
-              {renderValueTag(record.ratioTypes[ratioType]?.current, 'blue')}
+              {ratioType === 'billing_expr' &&
+              typeof record.ratioTypes[ratioType]?.current === 'string' ? (
+                <ExpressionDiff value={record.ratioTypes[ratioType].current} />
+              ) : (
+                renderValueTag(record.ratioTypes[ratioType]?.current, 'blue')
+              )}
             </div>
           ))}
         </div>
@@ -824,6 +838,10 @@ export default function UpstreamRatioSync(props) {
       }
 
       const text = String(upstreamVal);
+      const expressionNode =
+        ratioType === 'billing_expr' ? (
+          <ExpressionDiff value={text} baseline={diff.current} />
+        ) : null;
       const isSelected =
         isPreferredField &&
         resolutions[record.model]?.[ratioType] === upstreamVal;
@@ -844,20 +862,24 @@ export default function UpstreamRatioSync(props) {
             }
           }}
         >
-          <Tooltip content={text}>
-            <span className='inline-block max-w-[360px] truncate align-bottom'>
-              {text}
-            </span>
-          </Tooltip>
+          {expressionNode || (
+            <Tooltip content={text}>
+              <span className='inline-block max-w-[360px] truncate align-bottom'>
+                {text}
+              </span>
+            </Tooltip>
+          )}
         </Checkbox>
       ) : (
-        <Tooltip content={text}>
-          <Tag color='default' shape='circle' type='light'>
-            <span className='inline-block max-w-[360px] truncate align-bottom'>
-              {text}
-            </span>
-          </Tag>
-        </Tooltip>
+        expressionNode || (
+          <Tooltip content={text}>
+            <Tag color='default' shape='circle' type='light'>
+              <span className='inline-block max-w-[360px] truncate align-bottom'>
+                {text}
+              </span>
+            </Tag>
+          </Tooltip>
+        )
       );
 
       return (
@@ -952,6 +974,7 @@ export default function UpstreamRatioSync(props) {
       },
       {
         title: t('当前价格'),
+        width: 360,
         dataIndex: 'current',
         render: (_, record) => renderCurrentFields(record),
       },
@@ -1034,6 +1057,7 @@ export default function UpstreamRatioSync(props) {
             <span>{upName}</span>
           ),
           dataIndex: upName,
+          width: 360,
           render: (_, record) => renderUpstreamFields(record, upName),
         };
       }),
