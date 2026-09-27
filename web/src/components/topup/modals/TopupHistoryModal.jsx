@@ -52,6 +52,7 @@ import {
 } from '../../../helpers';
 import { isAdmin } from '../../../helpers/utils';
 import { getQuotaPerUnit } from '../../../helpers/quota';
+import { openInvoicePdf } from '../../../helpers/invoicePdf';
 import { UserContext } from '../../../context/User';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 import PaymentRiskCaseDetailModal from './PaymentRiskCaseDetailModal';
@@ -2592,6 +2593,21 @@ const TopupHistoryModal = ({
       : `/api/user/invoices/self/${id}/file`;
   };
 
+  const viewInvoicePdf = async (record) => {
+    const url = getInvoiceFileUrl(record);
+    if (!url) return;
+    try {
+      await openInvoicePdf(API, url, {
+        title: record.invoice_file_name || t('发票 PDF'),
+        loading: t('正在加载发票 PDF...'),
+        popupBlocked: t('浏览器阻止了发票窗口，请允许弹出窗口后重试'),
+        failed: t('加载发票 PDF 失败，请重试'),
+      });
+    } catch (error) {
+      Toast.error({ content: t(error.message || '加载发票 PDF 失败，请重试') });
+    }
+  };
+
   const renderInvoiceRecordStatus = (record) => {
     if (record?.status !== 'success') {
       return <Text type='tertiary'>-</Text>;
@@ -3691,9 +3707,14 @@ const TopupHistoryModal = ({
               {!hasInvoiceInfo ? <Text type='tertiary'>-</Text> : null}
               <Space wrap spacing={4}>
                 {fileUrl ? (
-                  <a href={fileUrl} target='_blank' rel='noreferrer'>
+                  <Button
+                    size='small'
+                    theme='borderless'
+                    style={{ padding: 0 }}
+                    onClick={() => viewInvoicePdf(record)}
+                  >
                     {t('查看 PDF')}
-                  </a>
+                  </Button>
                 ) : null}
                 {record?.invoice_url ? (
                   <a href={record.invoice_url} target='_blank' rel='noreferrer'>
@@ -4621,13 +4642,14 @@ const TopupHistoryModal = ({
             {renderInvoiceDetailValue(
               '发票 PDF',
               getInvoiceFileUrl(detail) ? (
-                <a
-                  href={getInvoiceFileUrl(detail)}
-                  target='_blank'
-                  rel='noreferrer'
+                <Button
+                  size='small'
+                  theme='borderless'
+                  style={{ padding: 0 }}
+                  onClick={() => viewInvoicePdf(detail)}
                 >
                   {detail?.invoice_file_name || t('查看 PDF')}
-                </a>
+                </Button>
               ) : (
                 '-'
               ),

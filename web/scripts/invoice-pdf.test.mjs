@@ -1,0 +1,166 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { loadInvoicePdf, openInvoicePdf } from '../src/helpers/invoicePdf.js';
+
+const fallback = '加载发票 PDF 失败，请重试';
+const pdf = new Blob(['%PDF-1.4\ninvoice'], { type: 'application/pdf' });
+const jsonError = (message) =>
+  new Blob([JSON.stringify({ success: false, message })], {
+    type: 'application/json',
+  });
+
+test('loads admin and self PDFs through the supplied authenticated client', async () => {
+  for (const url of [
+    '/api/user/invoices/1/file',
+    '/api/user/invoices/self/1/file',
+  ]) {
+    const api = {
+      async get(actualUrl, options) {
+        assert.equal(actualUrl, url);
+        assert.equal(options.responseType, 'blob');
+        assert.equal(options.skipErrorHandler, true);
+        return { data: pdf };
+      },
+    };
+    const result = await loadInvoicePdf(api, url, fallback);
+    assert.equal(result.type, 'application/pdf');
+    assert.equal(await result.text(), await pdf.text());
+  }
+});
+
+test('HTTP 200 business errors are shown instead of opening a fake PDF', async () => {
+  const api = { get: async () => ({ data: jsonError('发票 PDF 不存在') }) };
+  await assert.rejects(
+    loadInvoicePdf(api, '/file', fallback),
+    /发票 PDF 不存在/,
+  );
+});
+
+test('HTTP auth errors retain the server message from the blob response', async () => {
+  const api = {
+    async get() {
+      throw { response: { status: 401, data: jsonError('登录已过期') } };
+    },
+  };
+  await assert.rejects(loadInvoicePdf(api, '/file', fallback), /登录已过期/);
+});
+
+test('empty files, HTML errors and network failures use a readable fallback', async () => {
+  for (const data of [new Blob([]), new Blob(['<html>502</html>']), null]) {
+    await assert.rejects(
+      loadInvoicePdf({ get: async () => ({ data }) }, '/file', fallback),
+      { message: fallback },
+    );
+  }
+  await assert.rejects(
+    loadInvoicePdf(
+      {
+        get: async () => {
+          throw new Error('Network Error');
+        },
+      },
+      '/file',
+      fallback,
+    ),
+    { message: fallback },
+  );
+});
+
+function mockWindow(t, { blocked = false } = {}) {
+  let interval;
+  const revoked = [];
+  const locations = [];
+  const preview = {
+    opener: {},
+    closed: false,
+    document: { body: {} },
+    location: { replace: (url) => locations.push(url) },
+    close() {
+      this.closed = true;
+    },
+  };
+  const oldWindow = globalThis.window;
+  globalThis.window = {
+    open: () => (blocked ? null : preview),
+    setInterval: (callback) => {
+      interval = callback;
+      return 123;
+    },
+    clearInterval: (id) => assert.equal(id, 123),
+  };
+  t.after(() => {
+    if (oldWindow === undefined) delete globalThis.window;
+    else globalThis.window = oldWindow;
+  });
+  t.mock.method(URL, 'createObjectURL', () => 'blob:invoice');
+  t.mock.method(URL, 'revokeObjectURL', (url) => revoked.push(url));
+  return { preview, revoked, locations, tick: () => interval() };
+}
+const messages = {
+  title: '<img src=x onerror=alert(1)>.pdf',
+  loading: '正在加载',
+  popupBlocked: '请允许弹出窗口',
+  failed: fallback,
+};
+
+test('preopens a safe preview and retains the blob until the viewer is closed', async (t) => {
+  const state = mockWindow(t);
+  await openInvoicePdf({ get: async () => ({ data: pdf }) }, '/file', messages);
+  assert.equal(state.preview.opener, null);
+  assert.equal(state.preview.document.title, messages.title);
+  assert.equal(state.preview.document.body.textContent, messages.loading);
+  assert.deepEqual(state.locations, ['blob:invoice']);
+  state.tick();
+  assert.deepEqual(state.revoked, []);
+  state.preview.close();
+  state.tick();
+  assert.deepEqual(state.revoked, ['blob:invoice']);
+});
+
+test('popup blocking prevents the request', async (t) => {
+  mockWindow(t, { blocked: true });
+  let fetched = false;
+  await assert.rejects(
+    openInvoicePdf(
+      {
+        get: async () => {
+          fetched = true;
+        },
+      },
+      '/file',
+      messages,
+    ),
+    /请允许弹出窗口/,
+  );
+  assert.equal(fetched, false);
+});
+
+test('closing the preview during download prevents blob creation', async (t) => {
+  const state = mockWindow(t);
+  await openInvoicePdf(
+    {
+      get: async () => {
+        state.preview.close();
+        return { data: pdf };
+      },
+    },
+    '/file',
+    messages,
+  );
+  assert.deepEqual(state.locations, []);
+  assert.deepEqual(state.revoked, []);
+});
+
+test('download failure closes the blank preview and propagates the message', async (t) => {
+  const state = mockWindow(t);
+  await assert.rejects(
+    openInvoicePdf(
+      { get: async () => ({ data: jsonError('无权限') }) },
+      '/file',
+      messages,
+    ),
+    /无权限/,
+  );
+  assert.equal(state.preview.closed, true);
+  assert.deepEqual(state.locations, []);
+});
