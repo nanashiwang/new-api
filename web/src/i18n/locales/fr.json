@@ -1,5 +1,8 @@
 {
   "translation": {
+    "操作已成功，但列表刷新失败，请手动刷新": "L’opération a réussi, mais la liste n’a pas pu être actualisée. Actualisez-la manuellement.",
+    "已处理上游模型更新：加入 {{added}} 个，删除 {{removed}} 个；未勾选项保留待处理": "Modèles mis à jour : {{added}} ajoutés, {{removed}} supprimés ; les éléments non cochés restent en attente.",
+    "未勾选的模型保持待处理，不会自动忽略。": "Les modèles non cochés restent en attente et ne sont pas ignorés automatiquement.",
     "客户端取消请求": "Requête annulée par le client",
     "客户端已断开连接；请检查是否主动停止、客户端超时或网络中断。": "Le client a été déconnecté ; vérifiez un arrêt manuel, un délai client ou une coupure réseau.",
     "分组隐私模式": "Confidentialité des groupes",

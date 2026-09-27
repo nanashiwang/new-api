@@ -24,6 +24,12 @@ export const normalizeModelList = (models = []) =>
     ),
   );
 
+// A selection may outlive its preview; only submit models from that preview.
+export const selectPendingModels = (selected, pending) => {
+  const allowed = new Set(normalizeModelList(pending));
+  return normalizeModelList(selected).filter((model) => allowed.has(model));
+};
+
 export const parseUpstreamUpdateMeta = (settings) => {
   let parsed = null;
   if (settings && typeof settings === 'object') {
