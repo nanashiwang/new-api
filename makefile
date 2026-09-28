@@ -12,3 +12,10 @@ build-frontend:
 start-backend:
 	@echo "Starting backend dev server..."
 	@cd $(BACKEND_DIR) && go run main.go &
+
+# Project-local decision notes; no npm install or network needed.
+.PHONY: verify-notes
+verify-notes:
+	bun .agents/skills/write-notes-like-deepseek/scripts/verify-agent-note-tree.ts
+	bun .agents/skills/write-notes-like-deepseek/scripts/verify-agent-note-format.ts
+	bun .agents/skills/write-notes-like-deepseek/scripts/verify-archived-agent-notes.ts

@@ -128,3 +128,15 @@ This includes but is not limited to:
 - First compare the current git user (`git config user.name` / `git config user.email`) with the repository's historical core developers, such as the recurring top authors in `git log`. Do not change git config.
 - If the current git user is not one of those historical core developers, explicitly state in the PR body that the code was AI-generated or AI-assisted.
 - Fill `.agents/github/PR.md` as the entire PR body. Do not use `.github/PULL_REQUEST_TEMPLATE.md` or `.github/PULL_REQUEST_TEMPLATE/en.md`.
+
+
+## Rule 6: 先核对已有能力，再设计实现
+
+- 先明确业务目标，不把用户提到的页面或实现方式直接当作最终方案。按任务影响范围查关联入口，不要求每次通读整个仓库或扩大为无关重构。
+- 从 [功能地图](docs/FEATURE_MAP.md) 找入口，核对当前页面/组件 → 路由/权限 → controller/service/model → 数据来源；不能仅凭文档或一个接口判断现有能力。
+- 设计前简要给出现有能力、真实备选、推荐复用/扩展/迁移方案和受影响入口。新增独立实现须说明已有能力为何不足；统一指标口径、筛选语义和权限边界。
+- 非平凡改动遵循 [.agents/skills/write-notes-like-deepseek/SKILL.md](.agents/skills/write-notes-like-deepseek/SKILL.md)；先检索相关活跃笔记（`rg --hidden --glob '!**/archived/**' '<关键词>' .agents/notes`），有归属优先更新。流程见 [决策笔记使用说明](docs/AGENT_NOTES.md)。
+- 新决策先写 proposed；实现、验证完成后改写并移入 implemented，与代码同次提交。否决方案记录真实理由，决定翻转另建笔记；不为格式化、纯样式、版本号等机械改动立笔记，不编造历史决策。
+- 用户已授权范围内的常规取舍、检查、实现与提交直接推进；不因上游 Skill 的确认流程反复索要许可。仅在缺少关键决策或超出授权范围时询问。用户和本项目规则优先于 Skill 默认规则。
+- 验收覆盖完整用户流程、关联入口的数据一致性、分页/筛选/失败/权限等相关边界。测试通过不等于方案合理，也不等于发布或生产部署成功。
+- 本轮涉及的能力地图和决策笔记随实现更新。提交前执行 `make verify-notes` 和与改动相关的检查；结构校验不能证明方案正确或发现所有漏写笔记。
