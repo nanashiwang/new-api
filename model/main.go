@@ -282,6 +282,7 @@ func migrateDB() error {
 		&SellableTokenIssuance{},
 		&Ability{},
 		&Log{},
+		&PulseBenefitLogReceipt{},
 		&Midjourney{},
 		&TopUp{},
 		&PaymentRiskCase{},
@@ -389,6 +390,7 @@ func migrateDBFast() error {
 		{&SellableTokenIssuance{}, "SellableTokenIssuance"},
 		{&Ability{}, "Ability"},
 		{&Log{}, "Log"},
+		{&PulseBenefitLogReceipt{}, "PulseBenefitLogReceipt"},
 		{&Midjourney{}, "Midjourney"},
 		{&TopUp{}, "TopUp"},
 		{&PaymentRiskCase{}, "PaymentRiskCase"},
@@ -491,7 +493,7 @@ func migrateDBFast() error {
 
 func migrateLOGDB() error {
 	var err error
-	if err = LOG_DB.AutoMigrate(&Log{}); err != nil {
+	if err = LOG_DB.AutoMigrate(&Log{}, &PulseBenefitLogReceipt{}); err != nil {
 		return err
 	}
 	return nil

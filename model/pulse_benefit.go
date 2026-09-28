@@ -176,6 +176,7 @@ func GrantPulseBenefit(req PulseBenefitGrantRequest) (PulseBenefitResult, error)
 				common.SysError("failed to invalidate Pulse grant recipient cache: " + cacheErr.Error())
 			}
 		}
+		syncPulseBenefitLogsAfterCommit(req.SourceRef)
 		return result, nil
 	}
 	if !errors.Is(err, errPulseBenefitDuplicate) {
@@ -200,7 +201,11 @@ func GrantPulseBenefit(req PulseBenefitGrantRequest) (PulseBenefitResult, error)
 	if grant == nil || grant.PayloadHash != fingerprint || grant.UserId != req.UserID {
 		return PulseBenefitResult{}, errors.New("pulse benefit receipt has no matching grant")
 	}
-	return pulseBenefitResultTx(DB, grant, PulseBenefitStatusAlreadyApplied)
+	result, err = pulseBenefitResultTx(DB, grant, PulseBenefitStatusAlreadyApplied)
+	if err == nil {
+		syncPulseBenefitLogsAfterCommit(req.SourceRef)
+	}
+	return result, err
 }
 
 // QueryPulseBenefit returns the state for a stable source_ref. It is safe to
@@ -261,6 +266,7 @@ func RollbackPulseBenefit(sourceRef, reason string) (PulseBenefitResult, error) 
 	if cacheErr := invalidateUserCache(grant.UserId); cacheErr != nil {
 		common.SysError("failed to invalidate Pulse rollback recipient cache: " + cacheErr.Error())
 	}
+	syncPulseBenefitLogsAfterCommit(sourceRef)
 	result, err := QueryPulseBenefit(sourceRef)
 	if err != nil {
 		return PulseBenefitResult{}, err

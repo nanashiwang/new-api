@@ -622,6 +622,13 @@ export const useLogsData = () => {
       let other = getLogOther(logs[i].other);
       let expandDataLocal = [];
 
+      if (logs[i].type === 4 && other?.pulse_reward && logs[i].content) {
+        expandDataLocal.push({
+          key: t('详情'),
+          value: logs[i].content,
+        });
+      }
+
       if (
         isAdminUser &&
         (logs[i].type === 0 || logs[i].type === 2 || logs[i].type === 6)

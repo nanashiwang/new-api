@@ -19,7 +19,7 @@ import (
 func setupPulseBenefitTestDB(t *testing.T) {
 	t.Helper()
 	setupPaymentRiskCaseTestDB(t)
-	require.NoError(t, DB.AutoMigrate(&PulseBenefitQuotaCounter{}))
+	require.NoError(t, DB.AutoMigrate(&PulseBenefitQuotaCounter{}, &PulseBenefitLogReceipt{}))
 	t.Setenv("PULSE_BENEFIT_ENABLED", "true")
 	t.Setenv("PULSE_BENEFIT_MAX_GRANT_QUOTA", "1000000")
 	t.Setenv("PULSE_BENEFIT_USER_DAILY_QUOTA", "1000000")

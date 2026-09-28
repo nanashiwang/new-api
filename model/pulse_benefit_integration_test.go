@@ -59,7 +59,7 @@ func TestPulseBenefitExternalDatabaseSafety(t *testing.T) {
 			t.Setenv("PULSE_BENEFIT_USER_DAILY_QUOTA", "1000")
 			t.Setenv("PULSE_BENEFIT_DAILY_QUOTA", "1000")
 
-			models := []any{&PulseBenefitReceipt{}, &PulseBenefitQuotaCounter{}, &BenefitChangeRecord{},
+			models := []any{&PulseBenefitReceipt{}, &PulseBenefitQuotaCounter{}, &BenefitChangeRecord{}, &PulseBenefitLogReceipt{}, &Log{},
 				&BenefitRollbackOperation{}, &PulseFundingLedger{}, &PulseWalletReservation{}, &SubscriptionIssuance{}, &User{}}
 			reset := func(t *testing.T) {
 				t.Helper()
@@ -67,6 +67,38 @@ func TestPulseBenefitExternalDatabaseSafety(t *testing.T) {
 				require.NoError(t, db.AutoMigrate(models...))
 			}
 			t.Cleanup(func() { require.NoError(t, db.Migrator().DropTable(models...)) })
+
+			t.Run("usage_log_concurrent_replay", func(t *testing.T) {
+				reset(t)
+				user := createPaymentRiskCaseTestUser(t, "receiver-log-replay")
+				request := pulseTestRequest("receiver-log-replay", user.Id, 10)
+				requests := make([]PulseBenefitGrantRequest, 20)
+				for i := range requests {
+					requests[i] = request
+				}
+				for _, result := range runConcurrentPulseGrants(requests) {
+					require.NoError(t, result.err)
+				}
+				_, err := RollbackPulseBenefit(request.SourceRef, "test")
+				require.NoError(t, err)
+				require.NoError(t, SyncPulseBenefitLogs(""))
+				logs, total, err := GetUserLogs(user.Id, LogTypeSystem, 0, 0, "", "", 0, 10, "", "")
+				require.NoError(t, err)
+				require.EqualValues(t, 2, total)
+				require.Equal(t, []int{-10, 10}, []int{logs[0].Quota, logs[1].Quota})
+				// Simulate an old schema and verify pending defaults/backfill dedup.
+				require.NoError(t, db.Migrator().DropIndex(&BenefitChangeRecord{}, "idx_benefit_pulse_log"))
+				require.NoError(t, db.Migrator().DropColumn(&BenefitChangeRecord{}, "PulseLogSynced"))
+				require.NoError(t, db.AutoMigrate(&BenefitChangeRecord{}))
+				// A real upgrade starts with fresh connections; discard PostgreSQL
+				// prepared SELECT * plans from before this in-process schema change.
+				pool.SetMaxIdleConns(0)
+				pool.SetMaxIdleConns(16)
+				require.NoError(t, SyncPulseBenefitLogs(""))
+				var count int64
+				require.NoError(t, LOG_DB.Model(&Log{}).Count(&count).Error)
+				require.EqualValues(t, 2, count)
+			})
 
 			t.Run("concurrent_global_and_user_limits", func(t *testing.T) {
 				reset(t)

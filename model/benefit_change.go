@@ -51,7 +51,7 @@ type BenefitChangeRecord struct {
 	BenefitType string `json:"benefit_type" gorm:"type:varchar(32);not null;index"`
 	Action      string `json:"action" gorm:"type:varchar(16);not null;index;uniqueIndex:idx_benefit_change_dedup,priority:3"`
 
-	SourceType string `json:"source_type" gorm:"type:varchar(64);not null;index:idx_benefit_source;uniqueIndex:idx_benefit_change_dedup,priority:1"`
+	SourceType string `json:"source_type" gorm:"type:varchar(64);not null;index:idx_benefit_source;index:idx_benefit_pulse_log,priority:1;uniqueIndex:idx_benefit_change_dedup,priority:1"`
 	SourceRef  string `json:"source_ref" gorm:"type:varchar(255);not null;index:idx_benefit_source;uniqueIndex:idx_benefit_change_dedup,priority:2"`
 
 	UserId     int    `json:"user_id" gorm:"index"`
@@ -63,6 +63,9 @@ type BenefitChangeRecord struct {
 	// PayloadHash binds a source_ref to the complete request payload.
 	PayloadHash string `json:"payload_hash" gorm:"type:char(64);index"`
 	Detail      string `json:"detail" gorm:"type:text"`
+	// The committed audit record doubles as a durable log outbox. Old Pulse
+	// records start pending and are backfilled without changing quota.
+	PulseLogSynced bool `json:"-" gorm:"not null;default:false;index:idx_benefit_pulse_log,priority:2"`
 
 	CreatedAt int64 `json:"created_at" gorm:"bigint;index"`
 	UpdatedAt int64 `json:"updated_at" gorm:"bigint;index"`
