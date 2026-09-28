@@ -458,7 +458,7 @@ func SearchUsers(c *gin.Context) {
 func parseContentSafetyStatus(raw string) (string, error) {
 	status := strings.ToLower(strings.TrimSpace(raw))
 	allowed := map[string]struct{}{
-		"": {}, model.ContentSafetyLevelNormal: {}, model.ContentSafetyLevelTriggered: {},
+		"": {}, model.ContentSafetyLevelNormal: {}, model.ContentSafetyLevelTriggered: {}, model.ContentSafetyLevelWhitelisted: {},
 		model.ContentSafetyLevelWarning1: {}, model.ContentSafetyLevelWarning2: {},
 		model.ContentSafetyLevelCoolingOff: {}, model.ContentSafetyLevelObserved: {},
 		model.ContentSafetyLevelFocus: {}, model.ContentSafetyLevelReviewPending: {},

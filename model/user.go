@@ -133,6 +133,7 @@ type User struct {
 	RegisterIPBlacklistRuleID     int    `json:"register_ip_blacklist_rule_id,omitempty" gorm:"-"`
 	RegisterIPBlacklistCIDR       string `json:"register_ip_blacklist_cidr,omitempty" gorm:"-"`
 	RegisterIPBlacklistReason     string `json:"register_ip_blacklist_reason,omitempty" gorm:"-"`
+	ContentSafetyWhitelisted      bool   `json:"content_safety_whitelisted" gorm:"not null;default:false"`
 	ContentSafetyCount            int    `json:"content_safety_count" gorm:"-"`
 	ContentSafetyLevel            string `json:"content_safety_level" gorm:"-"`
 	ContentSafetyLastAt           int64  `json:"content_safety_last_at" gorm:"-"`
@@ -1634,7 +1635,7 @@ func (user *User) Update(updatePassword bool) error {
 		if err := InvalidatePulsePaidFundingTx(tx, user.Id, "admin_user_update"); err != nil {
 			return err
 		}
-		return tx.Model(&User{}).Where("id = ?", user.Id).Omit("pulse_paid_quota", "pulse_funding_epoch", "pulse_reward_hold").Updates(newUser).Error
+		return tx.Model(&User{}).Where("id = ?", user.Id).Omit("pulse_paid_quota", "pulse_funding_epoch", "pulse_reward_hold", "content_safety_whitelisted").Updates(newUser).Error
 	}); err != nil {
 		return err
 	}
@@ -1683,7 +1684,7 @@ func (user *User) Edit(updatePassword bool) error {
 		if err := InvalidatePulsePaidFundingTx(tx, user.Id, "admin_user_edit"); err != nil {
 			return err
 		}
-		return tx.Model(&User{}).Where("id = ?", user.Id).Omit("pulse_paid_quota", "pulse_funding_epoch", "pulse_reward_hold").Updates(updates).Error
+		return tx.Model(&User{}).Where("id = ?", user.Id).Omit("pulse_paid_quota", "pulse_funding_epoch", "pulse_reward_hold", "content_safety_whitelisted").Updates(updates).Error
 	}); err != nil {
 		return err
 	}

@@ -98,6 +98,14 @@ func TestContentSafetyRecordOnlyGroupUsesExactMatch(t *testing.T) {
 }
 
 func TestRecordContentSafetyPolicyViolationRecordOnlyKeepsAuditWithoutUserAction(t *testing.T) {
+	testContentSafetyRecordOnly(t, ContentSafetyRecordOnlyGroup, false)
+}
+
+func TestContentSafetyWhitelistKeepsAuditWithoutUserAction(t *testing.T) {
+	testContentSafetyRecordOnly(t, "default", true)
+}
+
+func testContentSafetyRecordOnly(t *testing.T, group string, whitelisted bool) {
 	db, err := gorm.Open(sqlite.Open("file:content_safety_record_only?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(
@@ -116,7 +124,7 @@ func TestRecordContentSafetyPolicyViolationRecordOnlyKeepsAuditWithoutUserAction
 		}
 	})
 
-	user := &model.User{Username: "record-only-policy-user", Role: common.RoleCommonUser, Status: common.UserStatusEnabled}
+	user := &model.User{Username: "record-only-policy-user", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, ContentSafetyWhitelisted: whitelisted}
 	require.NoError(t, db.Create(user).Error)
 
 	gin.SetMode(gin.TestMode)
@@ -135,7 +143,7 @@ func TestRecordContentSafetyPolicyViolationRecordOnlyKeepsAuditWithoutUserAction
 		info := &relaycommon.RelayInfo{
 			UserId: user.Id, TokenId: 10, ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 20},
 			RequestId:       fmt.Sprintf("record-only-request-%d", sequence),
-			OriginModelName: "gpt-5.6-sol", UsingGroup: ContentSafetyRecordOnlyGroup,
+			OriginModelName: "gpt-5.6-sol", UsingGroup: group,
 			StartTime: time.Now(), IsStream: true,
 		}
 		latest, err = RecordContentSafetyPolicyViolation(c, info, policyErr)
@@ -161,7 +169,11 @@ func TestRecordContentSafetyPolicyViolationRecordOnlyKeepsAuditWithoutUserAction
 
 	state, err := model.GetUserContentSafetyState(user.Id)
 	require.NoError(t, err)
-	require.Equal(t, model.ContentSafetyLevelNormal, state.Level)
+	if whitelisted {
+		require.Equal(t, model.ContentSafetyLevelWhitelisted, state.Level)
+	} else {
+		require.Equal(t, model.ContentSafetyLevelNormal, state.Level)
+	}
 	require.False(t, state.HasUnreadWarning)
 	require.Zero(t, state.WindowCount)
 	require.Zero(t, state.CooldownUntil)

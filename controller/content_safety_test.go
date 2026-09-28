@@ -1,8 +1,10 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,4 +67,34 @@ func TestSelfContentSafetyStateAndAcknowledgement(t *testing.T) {
 	var violation model.ContentSafetyViolation
 	require.NoError(t, db.Where("user_id = ?", user.Id).First(&violation).Error)
 	require.Greater(t, violation.WarningReadAt, int64(0))
+}
+
+func TestContentSafetyWhitelistAPIValidationAndSelfState(t *testing.T) {
+	db, user := setupContentSafetyControllerTest(t)
+	require.NoError(t, db.AutoMigrate(&model.Log{}))
+	admin := &model.User{Username: "whitelist-admin", Role: common.RoleAdminUser, Status: common.UserStatusEnabled, AffCode: "whitelist-admin"}
+	require.NoError(t, db.Create(admin).Error)
+	for _, body := range []string{`{}`, `{"enabled":null}`, `{"enabled":"true"}`} {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Params = gin.Params{{Key: "id", Value: fmt.Sprint(user.Id)}}
+		c.Set("id", admin.Id)
+		c.Request = httptest.NewRequest(http.MethodPut, "/", strings.NewReader(body))
+		UpdateContentSafetyWhitelist(c)
+		require.Contains(t, recorder.Body.String(), `"success":false`)
+	}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Params = gin.Params{{Key: "id", Value: fmt.Sprint(user.Id)}}
+	c.Set("id", admin.Id)
+	c.Request = httptest.NewRequest(http.MethodPut, "/", strings.NewReader(`{"enabled":true}`))
+	UpdateContentSafetyWhitelist(c)
+	require.Contains(t, recorder.Body.String(), `"content_safety_whitelisted":true`)
+	recorder = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(recorder)
+	c.Set("id", user.Id)
+	c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+	GetSelfContentSafetyState(c)
+	require.Contains(t, recorder.Body.String(), `"whitelisted":true`)
+	require.Contains(t, recorder.Body.String(), `"has_unread_warning":false`)
 }

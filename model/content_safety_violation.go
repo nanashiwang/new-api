@@ -101,7 +101,10 @@ type ContentSafetyEnforcementResult struct {
 	Username   string
 }
 
+const ContentSafetyLevelWhitelisted = "whitelisted"
+
 type ContentSafetyState struct {
+	Whitelisted      bool                    `json:"whitelisted"`
 	Level            string                  `json:"level"`
 	WindowCount      int                     `json:"window_count"`
 	BurstCount       int                     `json:"burst_count"`
@@ -118,6 +121,9 @@ func contentSafetyLevelForState(user *User, state *ContentSafetyState, now int64
 	}
 	if legacyDisable && user.Status == common.UserStatusDisabled {
 		return ContentSafetyLevelLegacyDisabled
+	}
+	if user.ContentSafetyWhitelisted {
+		return ContentSafetyLevelWhitelisted
 	}
 	if state.ReviewCaseId > 0 {
 		return ContentSafetyLevelReviewPending
@@ -167,7 +173,12 @@ func applyUserContentSafetyFilters(tx *gorm.DB, query *gorm.DB, params UserSearc
 	approvedSQL := "SELECT COUNT(1) FROM content_safety_review_cases csa2 WHERE csa2.user_id = users.id AND csa2.status = 'approved_disable'"
 	legacySQL := "SELECT COUNT(1) FROM content_safety_violations csh WHERE csh.user_id = users.id AND csh.action IN ('disabled','already_disabled')"
 
+	if status != "" && status != ContentSafetyLevelTriggered && status != ContentSafetyLevelWhitelisted && status != ContentSafetyLevelAdminDisabled && status != ContentSafetyLevelLegacyDisabled {
+		query = query.Where("users.content_safety_whitelisted = ?", false)
+	}
 	switch status {
+	case ContentSafetyLevelWhitelisted:
+		query = query.Where("users.content_safety_whitelisted = ?", true)
 	case ContentSafetyLevelNormal:
 		query = query.Where("("+countSQL+") = 0", cutoff)
 	case ContentSafetyLevelTriggered:
@@ -361,6 +372,9 @@ func AttachUserContentSafetyMetadata(tx *gorm.DB, users []*User) error {
 
 	for userID, state := range states {
 		user := usersByID[userID]
+		if user.ContentSafetyWhitelisted {
+			state.CooldownUntil, state.BurstCount = 0, 0
+		}
 		state.Level = contentSafetyLevelForState(user, state, now, approvedDisable[userID], legacyDisabled[userID])
 		user.ContentSafetyLevel = state.Level
 		user.ContentSafetyCount = state.WindowCount
@@ -385,14 +399,15 @@ func AttachUserContentSafetyMetadata(tx *gorm.DB, users []*User) error {
 
 func GetUserContentSafetyState(userID int) (*ContentSafetyState, error) {
 	var user User
-	if err := DB.Select("id", "status", "role").First(&user, userID).Error; err != nil {
+	if err := DB.Select("id", "status", "role", "content_safety_whitelisted").First(&user, userID).Error; err != nil {
 		return nil, err
 	}
 	if err := AttachUserContentSafetyMetadata(DB, []*User{&user}); err != nil {
 		return nil, err
 	}
 	state := &ContentSafetyState{
-		Level: user.ContentSafetyLevel, WindowCount: user.ContentSafetyCount,
+		Whitelisted: user.ContentSafetyWhitelisted,
+		Level:       user.ContentSafetyLevel, WindowCount: user.ContentSafetyCount,
 		BurstCount: user.ContentSafetyBurstCount, CooldownCount: user.ContentSafetyCooldownCount,
 		CooldownUntil: user.ContentSafetyCooldownUntil, ReviewCaseId: user.ContentSafetyReviewCaseID,
 	}
@@ -403,7 +418,7 @@ func GetUserContentSafetyState(userID int) (*ContentSafetyState, error) {
 			return nil, err
 		}
 		state.LatestViolation = &latest
-		state.HasUnreadWarning = latest.Action != ContentSafetyActionRecorded && latest.WarningReadAt == 0
+		state.HasUnreadWarning = !user.ContentSafetyWhitelisted && latest.Action != ContentSafetyActionRecorded && latest.WarningReadAt == 0
 	}
 	return state, nil
 }
@@ -414,7 +429,8 @@ func GetActiveContentSafetyCooldown(userID int, now int64) (int64, error) {
 	}
 	var cooldownUntil int64
 	err := DB.Model(&ContentSafetyViolation{}).Select("COALESCE(MAX(cooldown_until), 0)").
-		Where("user_id = ? AND cooldown_until > ?", userID, now).Scan(&cooldownUntil).Error
+		Where("user_id = ? AND cooldown_until > ?", userID, now).
+		Where("EXISTS (?)", DB.Model(&User{}).Select("1").Where("id = ? AND content_safety_whitelisted = ?", userID, false)).Scan(&cooldownUntil).Error
 	return cooldownUntil, err
 }
 
@@ -443,10 +459,11 @@ func RecordContentSafetyViolation(params RecordContentSafetyViolationParams) (*C
 		}
 
 		var user User
-		if err := tx.Select("id", "username", "role", "status").First(&user, params.UserId).Error; err != nil {
+		if err := tx.Select("id", "username", "role", "status", "content_safety_whitelisted").First(&user, params.UserId).Error; err != nil {
 			return err
 		}
 		result.UserStatus, result.UserRole, result.Username = user.Status, user.Role, user.Username
+		params.RecordOnly = params.RecordOnly || user.ContentSafetyWhitelisted
 
 		var existing ContentSafetyViolation
 		if err := tx.Where("event_key = ?", params.EventKey).First(&existing).Error; err == nil {

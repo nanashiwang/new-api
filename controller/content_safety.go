@@ -27,7 +27,7 @@ func GetSelfContentSafetyState(c *gin.Context) {
 		return
 	}
 	data := gin.H{
-		"level": state.Level, "window_count": state.WindowCount,
+		"level": state.Level, "whitelisted": state.Whitelisted, "window_count": state.WindowCount,
 		"burst_count": state.BurstCount, "cooldown_count": state.CooldownCount,
 		"cooldown_until": state.CooldownUntil, "has_unread_warning": state.HasUnreadWarning,
 	}
@@ -140,4 +140,35 @@ func ResolveContentSafetyReviewCase(c *gin.Context) {
 		model.RecordLog(resolved.UserId, model.LogTypeSystem, "管理员已完成人工内容安全复核，账户未被永久停用。")
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": resolved})
+}
+
+// UpdateContentSafetyWhitelist changes only the local safety enforcement exemption.
+func UpdateContentSafetyWhitelist(c *gin.Context) {
+	userID, err := strconv.Atoi(c.Param("id"))
+	var request struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err != nil || userID <= 0 || common.DecodeJson(c.Request.Body, &request) != nil || request.Enabled == nil {
+		common.ApiError(c, errors.New("无效的白名单参数"))
+		return
+	}
+	if err := model.SetContentSafetyWhitelist(userID, c.GetInt("id"), *request.Enabled); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"content_safety_whitelisted": *request.Enabled})
+}
+
+func GetContentSafetyWhitelist(c *gin.Context) {
+	userID, err := strconv.Atoi(c.Param("id"))
+	if err != nil || userID <= 0 {
+		common.ApiError(c, errors.New("无效的用户 ID"))
+		return
+	}
+	user, err := model.GetUserById(userID, false)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"content_safety_whitelisted": user.ContentSafetyWhitelisted})
 }

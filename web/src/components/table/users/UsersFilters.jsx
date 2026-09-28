@@ -111,6 +111,7 @@ const UsersFilters = ({
   const contentSafetyStatusOptions = useMemo(
     () => [
       { label: t('全部风控状态'), value: '' },
+      { label: t('内容安全白名单'), value: 'whitelisted' },
       { label: t('正常（近30天无记录）'), value: 'normal' },
       { label: t('已触发（至少1次）'), value: 'triggered' },
       { label: t('警告 1/3'), value: 'warning_1' },

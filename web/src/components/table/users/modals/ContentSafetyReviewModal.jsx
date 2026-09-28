@@ -5,10 +5,34 @@ This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU Affero General Public License as
 published by the Free Software Foundation, either version 3 of the
 License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Input, Modal, Spin, Tag, Typography } from '@douyinfe/semi-ui';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import {
+  Button,
+  Input,
+  Modal,
+  Spin,
+  Switch,
+  Tag,
+  Typography,
+} from '@douyinfe/semi-ui';
 import { API } from '../../../../helpers/apiCore';
 import { timestamp2string } from '../../../../helpers';
 import { showError, showSuccess } from '../../../../helpers/toast';
@@ -34,7 +58,9 @@ const ContentSafetyReviewModal = ({
   t,
 }) => {
   const isMobile = useIsMobile();
+  const loadSequence = useRef(0);
   const [loading, setLoading] = useState(false);
+  const [whitelisted, setWhitelisted] = useState(null);
   const [submitting, setSubmitting] = useState('');
   const [violations, setViolations] = useState([]);
   const [reviewCases, setReviewCases] = useState([]);
@@ -44,18 +70,32 @@ const ContentSafetyReviewModal = ({
 
   const load = useCallback(async () => {
     if (!visible || !user?.id) return;
+    const sequence = ++loadSequence.current;
     setLoading(true);
     try {
-      const [violationResponse, caseResponse] = await Promise.all([
-        API.get('/api/content-safety/violations', {
-          params: { user_id: user.id, page: 1, page_size: 20 },
-          disableDuplicate: true,
-        }),
-        API.get('/api/content-safety/review-cases', {
-          params: { user_id: user.id, page: 1, page_size: 20 },
-          disableDuplicate: true,
-        }),
-      ]);
+      const [violationResponse, caseResponse, whitelistResponse] =
+        await Promise.all([
+          API.get('/api/content-safety/violations', {
+            params: { user_id: user.id, page: 1, page_size: 20 },
+            disableDuplicate: true,
+          }),
+          API.get('/api/content-safety/review-cases', {
+            params: { user_id: user.id, page: 1, page_size: 20 },
+            disableDuplicate: true,
+          }),
+          API.get(`/api/content-safety/users/${user.id}/whitelist`, {
+            disableDuplicate: true,
+            skipErrorHandler: true,
+          }).catch(() => null),
+        ]);
+      if (sequence !== loadSequence.current) return;
+      setWhitelisted(
+        whitelistResponse?.data?.success &&
+          typeof whitelistResponse.data.data?.content_safety_whitelisted ===
+            'boolean'
+          ? whitelistResponse.data.data.content_safety_whitelisted
+          : null,
+      );
       if (!violationResponse?.data?.success)
         throw new Error(
           violationResponse?.data?.message || t('读取风控记录失败'),
@@ -65,18 +105,23 @@ const ContentSafetyReviewModal = ({
       setViolations(violationResponse.data.data?.items || []);
       setReviewCases(caseResponse.data.data?.items || []);
     } catch (error) {
-      showError(error?.message || t('读取风控记录失败'));
+      if (sequence === loadSequence.current)
+        showError(error?.message || t('读取风控记录失败'));
     } finally {
-      setLoading(false);
+      if (sequence === loadSequence.current) setLoading(false);
     }
   }, [t, user?.id, visible]);
 
   useEffect(() => {
     if (visible) {
       setNote('');
+      setWhitelisted(null);
       setEvidenceByViolation({});
       load();
     }
+    return () => {
+      loadSequence.current += 1;
+    };
   }, [load, visible]);
 
   const pendingCase = useMemo(
@@ -99,6 +144,25 @@ const ContentSafetyReviewModal = ({
       onChanged?.();
     } catch (error) {
       showError(error?.message || t('提交审核结果失败'));
+    } finally {
+      setSubmitting('');
+    }
+  };
+
+  const updateWhitelist = async (enabled) => {
+    setSubmitting('whitelist');
+    try {
+      const response = await API.put(
+        `/api/content-safety/users/${user.id}/whitelist`,
+        { enabled },
+      );
+      if (!response?.data?.success)
+        throw new Error(response?.data?.message || t('保存白名单失败'));
+      setWhitelisted(response.data.data.content_safety_whitelisted);
+      showSuccess(t('白名单设置已保存'));
+      onChanged?.();
+    } catch (error) {
+      showError(error?.message || t('保存白名单失败'));
     } finally {
       setSubmitting('');
     }
@@ -145,13 +209,47 @@ const ContentSafetyReviewModal = ({
     <Modal
       title={`${t('内容风控人工复核')} · ${user?.username || '-'}`}
       visible={visible}
-      onCancel={onCancel}
+      onCancel={() => {
+        if (!submitting) onCancel();
+      }}
+      closable={!submitting}
+      maskClosable={!submitting}
+      closeOnEsc={!submitting}
       footer={null}
       width={isMobile ? 'calc(100vw - 24px)' : 820}
       bodyStyle={{ maxHeight: '72vh', overflowY: 'auto' }}
     >
       <Spin spinning={loading}>
         <div className='space-y-4'>
+          <div className='rounded-xl border border-[var(--semi-color-border)] p-4'>
+            <div className='flex items-center justify-between gap-3'>
+              <Text strong id='content-safety-whitelist-label'>
+                {t('内容安全白名单')}
+              </Text>
+              <Switch
+                aria-labelledby='content-safety-whitelist-label'
+                checked={whitelisted === true}
+                disabled={loading || whitelisted === null || !!submitting}
+                loading={submitting === 'whitelist'}
+                onChange={updateWhitelist}
+              />
+            </div>
+            <Text type='tertiary' className='mt-2 block'>
+              {t(
+                '开启后仅记录上游安全拒绝，不执行本站冷静期、不发送处罚警告、不新增自动复核单；上游安全策略和管理员手动停用仍然有效。',
+              )}
+            </Text>
+            <Text type='tertiary' className='mt-2 block'>
+              {t(
+                '移出白名单后恢复原有规则，尚未到期的历史冷静期可能重新生效。',
+              )}
+            </Text>
+            {!loading && whitelisted === null && (
+              <Text type='warning' className='mt-2 block'>
+                {t('白名单状态读取失败或后端尚不支持，请刷新或升级后重试。')}
+              </Text>
+            )}
+          </div>
           <div className='rounded-xl border border-[var(--semi-color-border)] bg-[var(--semi-color-fill-0)] p-4'>
             <div className='flex flex-wrap items-center gap-2'>
               <Title heading={6} style={{ margin: 0 }}>

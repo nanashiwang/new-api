@@ -125,7 +125,7 @@ func RecordContentSafetyPolicyViolation(c *gin.Context, info *relaycommon.RelayI
 	if evidenceErr := captureContentSafetyEvidence(c, result); evidenceErr != nil {
 		common.SysError(fmt.Sprintf("content safety evidence capture failed: violation_id=%d err=%s", result.Violation.Id, sanitizeContentSafetyAuditText(evidenceErr.Error(), 256)))
 	}
-	if !recordOnly {
+	if result.Violation.Action != model.ContentSafetyActionRecorded {
 		if notificationErr := scheduleContentSafetyEmail(result); notificationErr != nil {
 			common.SysError(fmt.Sprintf("content safety email scheduling failed: violation_id=%d err=%s", result.Violation.Id, sanitizeContentSafetyAuditText(notificationErr.Error(), 256)))
 		}

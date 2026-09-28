@@ -263,6 +263,7 @@ const renderContentSafety = (record, t, showReviewModal) => {
   const count = Number(record?.content_safety_count || 0);
   const metaByLevel = {
     normal: { label: t('正常'), color: 'grey' },
+    whitelisted: { label: t('内容安全白名单'), color: 'green' },
     warning_1: { label: t('警告 1/3'), color: 'yellow' },
     warning_2: { label: t('严重警告 2/3'), color: 'orange' },
     cooling_off: { label: t('冷静中'), color: 'red' },
