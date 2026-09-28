@@ -9,6 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -106,4 +107,33 @@ func TestDescribeClientCancellation(t *testing.T) {
 	category, reason, _ := describeRequestFailure(err, true)
 	require.Equal(t, "client_canceled", category)
 	require.Equal(t, "客户端取消请求", reason)
+}
+
+func TestFinalFailureKeepsUnbilledUsageSnapshotOnlyInAdminDiagnostics(t *testing.T) {
+	ctx := failureLogContext(t)
+	usage := &dto.Usage{PromptTokens: 41093, CompletionTokens: 1, TotalTokens: 41094,
+		InputTokensEstimated: true, InterruptedOutput: true, WebSearchRequests: 2}
+	CaptureUnbilledRequestUsage(nil, usage)
+	CaptureUnbilledRequestUsage(ctx, nil)
+	CaptureUnbilledRequestUsage(ctx, usage)
+	usage.PromptTokens = 999 // Later mutations must not change the diagnostic snapshot.
+	MarkRequestFailure(ctx, types.NewErrorWithStatusCode(fmt.Errorf("upstream unavailable"), "upstream_error", 500))
+	RecordFinalRequestFailure(ctx, time.Second)
+	var row model.Log
+	require.NoError(t, model.LOG_DB.Where("request_id = ?", "req-stream-failure").First(&row).Error)
+	require.Equal(t, model.LogTypeError, row.Type)
+	require.Zero(t, row.Quota)
+	require.Zero(t, row.PromptTokens)
+	require.Zero(t, row.CompletionTokens)
+	other, err := common.StrToMap(row.Other)
+	require.NoError(t, err)
+	require.NotContains(t, other, "unbilled_usage")
+	diagnostics := other["admin_info"].(map[string]interface{})["unbilled_usage"].(map[string]interface{})
+	require.EqualValues(t, 41093, diagnostics["prompt_tokens"])
+	require.EqualValues(t, 1, diagnostics["completion_tokens"])
+	require.EqualValues(t, 41094, diagnostics["total_tokens"])
+	require.EqualValues(t, 2, diagnostics["web_search_requests"])
+	require.Equal(t, true, diagnostics["input_tokens_estimated"])
+	require.Equal(t, true, diagnostics["interrupted_output"])
+	require.Equal(t, false, diagnostics["charged"])
 }

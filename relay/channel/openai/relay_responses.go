@@ -278,7 +278,7 @@ func OaiResponsesStreamHandlerWithOptions(c *gin.Context, info *relaycommon.Rela
 	bufferedPreludeBytes := 0
 	bufferedPrelude := make([]bufferedResponsesStreamEvent, 0, 4)
 	interruptedUsage := func() *dto.Usage {
-		// No output means no charge, even if a failed prelude reported input usage.
+		// No output means no partial-output snapshot, even if a failed prelude reported usage.
 		if !hasEffectiveOutput {
 			return nil
 		}

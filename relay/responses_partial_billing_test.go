@@ -19,7 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestResponsesPartialTokenOnlySettlementCannotBeRefunded(t *testing.T) {
+func TestResponsesSuccessfulTokenOnlySettlementCannotBeRefunded(t *testing.T) {
 	truncateRelayTables(t)
 	seedRelayUser(t, 5111, 0)
 	seedRelayPackageToken(t, 6111, 5111, "partial-token-test", 100, 100)
@@ -34,17 +34,17 @@ func TestResponsesPartialTokenOnlySettlementCannotBeRefunded(t *testing.T) {
 	}
 	require.Nil(t, service.PreConsumeBilling(c, 20, info))
 	body := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n" +
-		`data: {"type":"response.incomplete","response":{"status":"incomplete","usage":{"input_tokens":5,"output_tokens":8,"total_tokens":13}}}` + "\n"
+		`data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":5,"output_tokens":8,"total_tokens":13}}}` + "\n"
 	usage, apiErr := openaichannel.OaiResponsesStreamHandler(c, info, &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(body))})
-	require.NotNil(t, apiErr)
+	require.Nil(t, apiErr)
 	require.NotNil(t, usage)
-	require.True(t, usage.InterruptedOutput)
-	postConsumeQuota(c, info, usage, "流式响应中断，按已交付用量结算")
+	require.False(t, usage.InterruptedOutput)
+	postConsumeQuota(c, info, usage)
 	require.False(t, info.Billing.NeedsRefund())
 	info.Billing.Refund(c) // mirrors the controller error defer
 	var token model.Token
 	require.NoError(t, model.DB.First(&token, 6111).Error)
 	require.Equal(t, 87, token.RemainQuota)
 	require.Equal(t, 13, getLastRelayLog(t).Quota)
-	require.False(t, info.StreamStatus.IsSuccessful())
+	require.True(t, info.StreamStatus.IsSuccessful())
 }

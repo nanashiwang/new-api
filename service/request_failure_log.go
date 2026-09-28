@@ -9,6 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -16,6 +17,7 @@ import (
 
 const requestFailureKey = "final_request_failure"
 const requestFailureAttemptsKey = "request_failure_attempts"
+const requestUnbilledUsageKey = "request_unbilled_usage"
 const RequestLogStreamKey = "request_log_stream"
 const RequestOutcomeKey = "relay_request_succeeded"
 
@@ -38,6 +40,26 @@ func MarkRequestFailure(c *gin.Context, err *types.NewAPIError) {
 	if c != nil && err != nil {
 		c.Set(requestFailureKey, err)
 	}
+}
+
+// CaptureUnbilledRequestUsage snapshots counters only, without settling quota or
+// creating a consumption record. The final failure log keeps these admin-only
+// diagnostics separate from billable usage and successful-request statistics.
+func CaptureUnbilledRequestUsage(c *gin.Context, usage *dto.Usage) {
+	if c == nil || usage == nil {
+		return
+	}
+	c.Set(requestUnbilledUsageKey, map[string]interface{}{
+		"prompt_tokens":             usage.PromptTokens,
+		"completion_tokens":         usage.CompletionTokens,
+		"total_tokens":              usage.TotalTokens,
+		"prompt_tokens_details":     usage.PromptTokensDetails.Clone(),
+		"completion_tokens_details": usage.CompletionTokenDetails,
+		"web_search_requests":       usage.WebSearchRequests,
+		"input_tokens_estimated":    usage.InputTokensEstimated,
+		"interrupted_output":        usage.InterruptedOutput,
+		"charged":                   false,
+	})
 }
 
 var logSecretPattern = regexp.MustCompile(`(?i)(bearer\s+)[a-z0-9._~+/=-]+|\bsk-[a-z0-9_-]+|((?:api[_-]?key|access[_-]?token|authorization|password)\s*[=:]\s*)[^\s,;]+`)
@@ -149,6 +171,9 @@ func RecordFinalRequestFailure(c *gin.Context, elapsed time.Duration) {
 	}
 	if attempts != nil {
 		adminInfo["attempts"] = attempts
+	}
+	if usage, exists := c.Get(requestUnbilledUsageKey); exists {
+		adminInfo["unbilled_usage"] = usage
 	}
 	if apiErr.Upstream != nil && !apiErr.Upstream.IsZero() {
 		adminInfo["upstream"] = apiErr.Upstream
