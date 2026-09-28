@@ -70,6 +70,8 @@ func TestBuildClientCanceledError(t *testing.T) {
 	if assert.NotNil(t, apiErr) {
 		assert.True(t, types.IsSkipRetryError(apiErr), "客户端断开不应重试")
 		assert.Equal(t, "client canceled while waiting for channel capacity", apiErr.Error())
+		assert.Equal(t, types.StatusClientClosedRequest, apiErr.StatusCode)
+		assert.Equal(t, types.FailureClientCanceled, types.ClassifyFailure(apiErr))
 	}
 }
 

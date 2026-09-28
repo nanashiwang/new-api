@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -177,6 +178,18 @@ func TestNewDoRequestErrorMapsResponseHeaderTimeoutToGatewayTimeout(t *testing.T
 	require.Equal(t, http.StatusGatewayTimeout, apiErr.StatusCode)
 	require.True(t, types.IsSkipRetryError(apiErr))
 	require.Contains(t, apiErr.Error(), "upstream response header timeout")
+}
+
+func TestNewDoRequestErrorKeepsClientCancellationClassification(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	requestCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(requestCtx)
+	apiErr := newDoRequestError(ctx, context.Canceled)
+	apiErr.SetMessage(apiErr.Error() + " (request id: req-canceled)")
+	require.Equal(t, types.StatusClientClosedRequest, apiErr.StatusCode)
+	require.Equal(t, types.FailureClientCanceled, types.ClassifyFailure(apiErr))
+	require.True(t, types.IsSkipRetryError(apiErr))
 }
 
 func TestShouldUseImageHTTPClientForResponsesImageGenerationTool(t *testing.T) {

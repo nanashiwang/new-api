@@ -55,6 +55,9 @@ func ShouldRetryChannelError(c *gin.Context, openaiErr *types.NewAPIError, retry
 	if openaiErr == nil {
 		return false
 	}
+	if c != nil && c.Request != nil && c.Request.Context().Err() != nil {
+		return false
+	}
 	if ShouldSkipRetryAfterChannelAffinityFailure(c, openaiErr) {
 		return false
 	}

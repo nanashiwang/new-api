@@ -511,6 +511,9 @@ func newDoRequestError(c *gin.Context, err error) *types.NewAPIError {
 	if c != nil && c.Request != nil {
 		if ctxErr := c.Request.Context().Err(); ctxErr != nil {
 			logger.LogInfo(c, "request canceled by client: "+ctxErr.Error())
+			if errors.Is(ctxErr, context.Canceled) {
+				return types.NewClientCanceledError(types.ErrOptionWithHideErrMsg("client request canceled"))
+			}
 			return types.NewError(ctxErr, types.ErrorCodeDoRequestFailed,
 				types.ErrOptionWithSkipRetry(),
 				types.ErrOptionWithHideErrMsg("client request canceled"))

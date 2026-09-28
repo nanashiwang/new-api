@@ -17,6 +17,15 @@ const (
 	FailureService        FailureClass = "service"
 )
 
+// StatusClientClosedRequest matches the status used by the reverse proxy when
+// the downstream connection closes before a response can be delivered.
+const StatusClientClosedRequest = 499
+
+func NewClientCanceledError(ops ...NewAPIErrorOptions) *NewAPIError {
+	return NewErrorWithStatusCode(context.Canceled, ErrorCodeClientCanceled, StatusClientClosedRequest,
+		append([]NewAPIErrorOptions{ErrOptionWithSkipRetry()}, ops...)...)
+}
+
 func ClassifyFailure(err *NewAPIError) FailureClass {
 	if err == nil {
 		return FailureUnknown
@@ -24,7 +33,7 @@ func ClassifyFailure(err *NewAPIError) FailureClass {
 	code := err.GetErrorCode()
 	local := err.GetErrorType() == ErrorTypeNewAPIError && err.UpstreamStatusCode == 0
 	if local {
-		if errors.Is(err.Err, context.Canceled) || (code == ErrorCodeDoRequestFailed && strings.HasPrefix(err.Error(), "client canceled while receiving responses stream")) {
+		if code == ErrorCodeClientCanceled || errors.Is(err.Err, context.Canceled) || (code == ErrorCodeDoRequestFailed && strings.HasPrefix(err.Error(), "client canceled while receiving responses stream")) {
 			return FailureClientCanceled
 		}
 		switch code {

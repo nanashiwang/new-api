@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -390,10 +389,7 @@ func buildChannelCapacityError(c *gin.Context, statusCode int, reason string, re
 
 // buildClientCanceledError 构造客户端断开取消的错误：跳过重试、隐藏内部细节，不污染错误率指标。
 func buildClientCanceledError() *types.NewAPIError {
-	return types.NewError(
-		context.Canceled,
-		types.ErrorCodeDoRequestFailed,
-		types.ErrOptionWithSkipRetry(),
+	return types.NewClientCanceledError(
 		types.ErrOptionWithHideErrMsg("client canceled while waiting for channel capacity"),
 	)
 }

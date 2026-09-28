@@ -90,6 +90,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	defer func() {
 		if newAPIError != nil {
+			newAPIError = service.NormalizeClientCancellation(c, newAPIError)
 			service.MarkRequestFailure(c, newAPIError)
 			if newAPIError.RetryAfter > 0 {
 				retryAfterSeconds := int((newAPIError.RetryAfter + time.Second - 1) / time.Second)
@@ -251,6 +252,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	var lastRelayError *types.NewAPIError
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
+		if c.Request.Context().Err() != nil {
+			newAPIError = service.NormalizeClientCancellation(c, types.NewError(c.Request.Context().Err(), types.ErrorCodeDoRequestFailed, types.ErrOptionWithSkipRetry()))
+			break
+		}
 		channel, releaseSlot, channelErr, overloadControl := selectChannelWithConcurrency(c, relayInfo, retryParam)
 		if channelErr != nil {
 			if healthRequest != nil && (channelErr.StatusCode >= 500 || channelErr.StatusCode == http.StatusTooManyRequests) {
@@ -310,6 +315,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if breakLoop {
 			break
 		}
+		newAPIError = service.NormalizeClientCancellation(c, newAPIError)
 		healthRequest.ObserveResult(relayInfo, newAPIError, c.Request.Context().Err() == nil, time.Now())
 
 		if newAPIError == nil {
@@ -326,6 +332,12 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				}
 			}
 			return
+		}
+
+		if types.ClassifyFailure(newAPIError) == types.FailureClientCanceled {
+			service.AppendRequestFailureAttempt(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, "", channel.GetAutoBan()), newAPIError)
+			logger.LogInfo(c, "client request canceled; stopping relay without channel failover")
+			break
 		}
 
 		newAPIError = service.NormalizeContentSafetyPolicyError(newAPIError)

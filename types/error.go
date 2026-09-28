@@ -49,6 +49,7 @@ const (
 	ErrorCodeInvalidApiType     ErrorCode = "invalid_api_type"
 	ErrorCodeJsonMarshalFailed  ErrorCode = "json_marshal_failed"
 	ErrorCodeDoRequestFailed    ErrorCode = "do_request_failed"
+	ErrorCodeClientCanceled     ErrorCode = "client_canceled"
 	ErrorCodeGetChannelFailed   ErrorCode = "get_channel_failed"
 	ErrorCodeGenRelayInfoFailed ErrorCode = "gen_relay_info_failed"
 

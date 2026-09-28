@@ -33,3 +33,15 @@ func TestClassifyFailure(t *testing.T) {
 		})
 	}
 }
+
+func TestClientCancellationClassificationSurvivesMessageReplacement(t *testing.T) {
+	err := NewClientCanceledError(ErrOptionWithHideErrMsg("client request canceled"))
+	err.SetMessage(err.Error() + " (request id: req-canceled)")
+	if ClassifyFailure(err) != FailureClientCanceled || err.StatusCode != StatusClientClosedRequest || !IsSkipRetryError(err) {
+		t.Fatalf("lost cancellation classification after message replacement: %+v", err)
+	}
+	upstream := WithOpenAIError(OpenAIError{Code: "client_canceled", Message: "provider canceled"}, 500)
+	if ClassifyFailure(upstream) != FailureService {
+		t.Fatal("upstream cancellation must not be attributed to the client")
+	}
+}
