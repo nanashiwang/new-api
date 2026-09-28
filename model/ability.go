@@ -53,6 +53,28 @@ func GetEnabledModels() []string {
 	return models
 }
 
+// HasConfiguredModelInGroups includes disabled routes: an outage must not be
+// reported as an unknown model. Only inspect the caller's permitted scope.
+func HasConfiguredModelInGroups(groups []string, modelName string, allowedChannels []int) (bool, error) {
+	if DB == nil {
+		return false, errors.New("database unavailable")
+	}
+	if len(groups) == 0 || modelName == "" || (allowedChannels != nil && len(allowedChannels) == 0) {
+		return false, nil
+	}
+	names := []string{modelName}
+	if normalized := ratio_setting.FormatMatchingModelName(modelName); normalized != "" && normalized != modelName {
+		names = append(names, normalized)
+	}
+	query := DB.Model(&Ability{}).Where(commonGroupCol+" IN ? AND model IN ?", groups, names)
+	if len(allowedChannels) > 0 {
+		query = query.Where("channel_id IN ?", allowedChannels)
+	}
+	var rows []Ability
+	err := query.Select("channel_id").Limit(1).Find(&rows).Error
+	return len(rows) > 0, err
+}
+
 func GetAllEnableAbilities() []Ability {
 	var abilities []Ability
 	DB.Find(&abilities, "enabled = ?", true)

@@ -74,6 +74,7 @@ type GeneralOpenAIRequest struct {
 	// Used by OpenAI to cache responses for similar requests to optimize your cache hit rates. Replaces the user field
 	PromptCacheKey       string          `json:"prompt_cache_key,omitempty"`
 	PromptCacheRetention json.RawMessage `json:"prompt_cache_retention,omitempty"`
+	PromptCacheOptions   json.RawMessage `json:"prompt_cache_options,omitempty"` // Kimi cache TTL
 	LogitBias            json.RawMessage `json:"logit_bias,omitempty"`
 	Metadata             json.RawMessage `json:"metadata,omitempty"`
 	Prediction           json.RawMessage `json:"prediction,omitempty"`
@@ -157,6 +158,10 @@ func (r *GeneralOpenAIRequest) GetTokenCountMeta() *types.TokenCountMeta {
 	for _, message := range r.Messages {
 		tokenCountMeta.MessagesCount++
 		texts = append(texts, message.Role)
+		if len(message.Tools) > 0 {
+			// Dynamic tool definitions are part of the input even without content.
+			texts = append(texts, string(message.Tools))
+		}
 		if message.Content != nil {
 			if message.Name != nil {
 				tokenCountMeta.NameCount++
@@ -314,7 +319,11 @@ type Message struct {
 	FunctionCall     json.RawMessage `json:"function_call,omitempty"`
 	ToolCalls        json.RawMessage `json:"tool_calls,omitempty"`
 	ToolCallId       string          `json:"tool_call_id,omitempty"`
-	parsedContent    []MediaContent
+	Tools            json.RawMessage `json:"tools,omitempty"`
+	// ContentPresent preserves explicit null on dynamic tool messages across
+	// decoding and DeepCopy, while allowing absent content to stay absent.
+	ContentPresent bool `json:"-"`
+	parsedContent  []MediaContent
 	//parsedStringContent *string
 }
 

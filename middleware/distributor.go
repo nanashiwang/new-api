@@ -153,12 +153,16 @@ func Distribute() func(c *gin.Context) {
 				return
 			}
 			if channel == nil {
+				if !hasConfiguredRequestModel(c, modelRequest.Model, usingGroup) {
+					abortWithOpenAiMessage(c, http.StatusNotFound, i18n.T(c, i18n.MsgDistributorModelNotFound, map[string]any{"Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+					return
+				}
 				recordUnavailableGroupHealth(c, modelRequest.Model, usingGroup, selectGroup)
 				showGroup := usingGroup
 				if usingGroup == "auto" && selectGroup != "" {
 					showGroup = fmt.Sprintf("auto(%s)", selectGroup)
 				}
-				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": showGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": showGroup, "Model": modelRequest.Model}), types.ErrorCodeNoAvailableChannel)
 				return
 			}
 			selectedChannel = channel
@@ -325,7 +329,7 @@ func selectChannelForRequest(c *gin.Context, modelName string, usingGroup string
 			}
 			return nil, selectGroup, types.NewErrorWithStatusCode(
 				errors.New(i18n.T(c, i18n.MsgDistributorGetChannelFailed, map[string]any{"Group": showGroup, "Model": modelName, "Error": err.Error()})),
-				types.ErrorCodeModelNotFound,
+				types.ErrorCodeGetChannelFailed,
 				http.StatusServiceUnavailable,
 				types.ErrOptionWithSkipRetry(),
 			)
@@ -646,6 +650,16 @@ func extractModelNameFromGeminiPath(path string) string {
 // Selection outages are samples only for configured models after authentication
 // and model/group permission checks. Invalid requests and unknown model names do
 // not manufacture failures or unbounded metric cardinality.
+func hasConfiguredRequestModel(c *gin.Context, modelName, usingGroup string) bool {
+	groups := []string{usingGroup}
+	if usingGroup == "auto" {
+		groups = service.GetUserAutoGroup(common.GetContextKeyString(c, constant.ContextKeyUserGroup))
+	}
+	exists, err := model.HasConfiguredModelInGroups(groups, modelName, GetAllowedTokenChannelIDs(c))
+	// Database failures are service failures, not proof that a model is absent.
+	return err != nil || exists
+}
+
 func recordUnavailableGroupHealth(c *gin.Context, modelName, usingGroup, selectedGroup string) {
 	if !grouphealth.SupportsRequest(c.Request.Method, c.Request.URL.Path) {
 		return

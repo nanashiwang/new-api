@@ -79,6 +79,7 @@ const (
 	ErrorCodeEmptyResponse          ErrorCode = "empty_response"
 	ErrorCodeAwsInvokeError         ErrorCode = "aws_invoke_error"
 	ErrorCodeModelNotFound          ErrorCode = "model_not_found"
+	ErrorCodeNoAvailableChannel     ErrorCode = "no_available_channel"
 	ErrorCodePromptBlocked          ErrorCode = "prompt_blocked"
 
 	// sql error

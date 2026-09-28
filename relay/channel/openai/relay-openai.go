@@ -163,12 +163,21 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	var secondLastStreamData string // 存储倒数第二个stream data，用于音频模型
 	var terminalError *types.NewAPIError
 	var completed bool
+	// OpenAI clients can receive each event immediately. The cross-protocol
+	// converters retain their existing final-event handling.
+	immediate := info.RelayFormat == types.RelayFormatOpenAI
+	thinkToContent := info.ChannelSetting.ThinkingToContent
+	if request, ok := info.Request.(*dto.GeneralOpenAIRequest); ok && request.ResponseFormat != nil {
+		if request.ResponseFormat.Type == "json_object" || request.ResponseFormat.Type == "json_schema" {
+			thinkToContent = false // Reasoning must not corrupt structured content.
+		}
+	}
 
 	// 检查是否为音频模型
 	isAudioModel := strings.Contains(strings.ToLower(model), "audio")
 
 	helper.StreamScannerHandler(c, resp, info, func(data string) bool {
-		if lastStreamData != "" {
+		if !immediate && lastStreamData != "" {
 			err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent)
 			if err != nil {
 				common.SysLog("error handling stream format: " + err.Error())
@@ -213,6 +222,16 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 
 			lastStreamData = data
 			streamItems = append(streamItems, data)
+			if immediate {
+				out, err := filterChatStreamUsage(data, info.ShouldIncludeUsage)
+				if err == nil && out != "" {
+					err = HandleStreamFormat(c, info, out, info.ChannelSetting.ForceFormat, thinkToContent)
+				}
+				if err != nil {
+					info.StreamStatus.RecordError("failed to deliver OpenAI stream event")
+					return false
+				}
+			}
 		}
 		return true
 	})
@@ -251,12 +270,6 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	if err := handleLastResponse(lastStreamData, &responseId, &createAt, &systemFingerprint, &model, &usage,
 		&containStreamUsage, info, &shouldSendLastResp); err != nil {
 		logger.LogError(c, fmt.Sprintf("error handling last response: %s, lastStreamData: [%s]", err.Error(), lastStreamData))
-	}
-
-	if info.RelayFormat == types.RelayFormatOpenAI {
-		if shouldSendLastResp {
-			_ = sendStreamData(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent)
-		}
 	}
 
 	// 处理token计算
