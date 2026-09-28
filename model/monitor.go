@@ -128,19 +128,26 @@ func channelMonitorStatsCacheKey(startTime, endTime int64, groupBy, username str
 // groupBy 为 "group" 时按日志分组聚合，否则按渠道聚合。
 //
 // 统计查询要对时间窗口内的全部 logs 行做聚合，成本随日志量线性增长，因此结果
-// 按归一化后的窗口缓存，避免仪表盘刷新或多个管理员同时查看时重复扫描日志表。
-func GetChannelMonitorStats(startTime, endTime int64, groupBy, username string) ([]ChannelMonitorStats, error) {
-	startTime, endTime = normalizeMonitorRange(startTime, endTime)
+// 默认按归一化窗口缓存；exactRange 保留精确边界并采用左闭右开区间，
+// 用于看板跳转渠道用量。两种语义使用不同缓存键。
+func GetChannelMonitorStats(startTime, endTime int64, groupBy, username string, exactRange ...bool) ([]ChannelMonitorStats, error) {
+	exact := len(exactRange) > 0 && exactRange[0]
+	if !exact {
+		startTime, endTime = normalizeMonitorRange(startTime, endTime)
+	}
 	groupBy = strings.TrimSpace(groupBy)
 	username = strings.TrimSpace(username)
 
 	cache := getChannelMonitorStatsCache()
 	cacheKey := channelMonitorStatsCacheKey(startTime, endTime, groupBy, username)
+	if exact {
+		cacheKey = "exact:" + cacheKey
+	}
 	if cached, found, err := cache.Get(cacheKey); err == nil && found {
 		return cached, nil
 	}
 
-	stats, err := loadChannelMonitorStats(startTime, endTime, groupBy, username)
+	stats, err := loadChannelMonitorStats(startTime, endTime, groupBy, username, exact)
 	if err != nil {
 		return nil, err
 	}
@@ -148,22 +155,13 @@ func GetChannelMonitorStats(startTime, endTime int64, groupBy, username string) 
 	return stats, nil
 }
 
-func loadChannelMonitorStats(startTime, endTime int64, groupBy, username string) ([]ChannelMonitorStats, error) {
+func loadChannelMonitorStats(startTime, endTime int64, groupBy, username string, exactRange ...bool) ([]ChannelMonitorStats, error) {
 	groupCol := logGroupCol
 	if groupCol == "" {
 		groupCol = commonGroupCol
 	}
 
-	// 消费日志计为成功，错误日志计为失败；use_time 记录的是秒。
-	aggregates := fmt.Sprintf(`
-		COUNT(*) as total_requests,
-		SUM(CASE WHEN type = %d THEN 1 ELSE 0 END) as success_requests,
-		SUM(CASE WHEN type = %d THEN 1 ELSE 0 END) as failed_requests,
-		COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total_tokens,
-		COALESCE(SUM(quota), 0) as total_quota,
-		COALESCE(AVG(use_time), 0) as avg_use_time,
-		COALESCE(MAX(created_at), 0) as last_used_at`,
-		LogTypeConsume, LogTypeError)
+	aggregates := channelMonitorAggregates()
 
 	var selectClause, groupClause string
 	if groupBy == "group" {
@@ -176,10 +174,16 @@ func loadChannelMonitorStats(startTime, endTime int64, groupBy, username string)
 
 	query := LOG_DB.Table("logs").
 		Select(selectClause).
-		Where("created_at >= ? AND created_at <= ?", startTime, endTime).
+		Where("created_at >= ?", startTime).
 		Where("type IN (?, ?)", LogTypeConsume, LogTypeError).
 		Group(groupClause).
 		Order("total_requests DESC")
+
+	if len(exactRange) > 0 && exactRange[0] {
+		query = query.Where("created_at < ?", endTime)
+	} else {
+		query = query.Where("created_at <= ?", endTime)
+	}
 
 	if username != "" {
 		query = query.Where("username = ?", username)
@@ -250,4 +254,18 @@ func fillChannelInfo(stats []ChannelMonitorStats) {
 			stats[i].ChannelGroup = channel.Group
 		}
 	}
+}
+
+// Shared by dashboard monitoring and channel-management usage.
+func channelMonitorAggregates() string {
+	// 消费日志计为成功，错误日志计为失败；use_time 记录的是秒。
+	return fmt.Sprintf(`
+		COUNT(*) as total_requests,
+		SUM(CASE WHEN type = %d THEN 1 ELSE 0 END) as success_requests,
+		SUM(CASE WHEN type = %d THEN 1 ELSE 0 END) as failed_requests,
+		COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total_tokens,
+		COALESCE(SUM(quota), 0) as total_quota,
+		COALESCE(AVG(use_time), 0) as avg_use_time,
+		COALESCE(MAX(created_at), 0) as last_used_at`,
+		LogTypeConsume, LogTypeError)
 }

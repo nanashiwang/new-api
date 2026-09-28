@@ -31,6 +31,8 @@ import {
 } from '../tokens/tokenGroupUtils';
 
 const ChannelsFilters = ({
+  usageOptions,
+  setActivePage,
   setEditingChannel,
   setShowEdit,
   refresh,
@@ -128,7 +130,7 @@ const ChannelsFilters = ({
           onClick={() => setShowColumnSelector(true)}
           className='w-full md:w-auto'
         >
-          {t('列设置')}
+          {usageOptions?.enabled ? t('配置视图列设置') : t('列设置')}
         </Button>
       </div>
 
@@ -217,7 +219,8 @@ const ChannelsFilters = ({
                 setGroupVendor(categoryGroupVendor || '');
                 // 重置后立即查询，使用setTimeout确保表单重置完成
                 setTimeout(() => {
-                  refresh();
+                  setActivePage(1);
+                  refresh(1);
                 }, 100);
               }
             }}

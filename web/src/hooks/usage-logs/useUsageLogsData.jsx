@@ -100,20 +100,47 @@ export const useLogsData = () => {
   // Form state
   const [formApi, setFormApi] = useState(null);
   let now = new Date();
+  const [usageLink] = useState(() => {
+    const q = new URLSearchParams(window.location.search);
+    if (!isAdminUser || q.get('source') !== 'channel-usage') return null;
+    const start = Number(q.get('start_time')),
+      end = Number(q.get('end_time'));
+    const ids = (q.get('channel_ids') || '')
+      .split(',')
+      .filter((id) => /^\d+$/.test(id));
+    if (
+      !Number.isInteger(start) ||
+      !Number.isInteger(end) ||
+      start <= 0 ||
+      end <= start ||
+      end - start > 30 * 86400 ||
+      !ids.length
+    )
+      return null;
+    return {
+      start,
+      end,
+      ids,
+      model: q.get('model') || '',
+      group: q.get('group') || '',
+    };
+  });
   const formInitValues = {
     username: '',
     token_name: '',
-    model_name: '',
+    model_name: usageLink?.model || '',
     channel: '',
     channel_ids: [],
-    channel_keyword: '',
+    channel_keyword: usageLink?.ids.join(',') || '',
     group_vendor: '',
-    group: '',
+    group: usageLink?.group || '',
     request_id: '',
-    dateRange: [
-      timestamp2string(getTodayStartTimestamp()),
-      timestamp2string(now.getTime() / 1000 + 3600),
-    ],
+    dateRange: usageLink
+      ? [timestamp2string(usageLink.start), timestamp2string(usageLink.end - 1)]
+      : [
+          timestamp2string(getTodayStartTimestamp()),
+          timestamp2string(now.getTime() / 1000 + 3600),
+        ],
     logType: '0',
   };
 
@@ -255,7 +282,7 @@ export const useLogsData = () => {
 
   // 获取表单值的辅助函数，确保所有值都是字符串
   const getFormValues = () => {
-    const formValues = formApi ? formApi.getValues() : {};
+    const formValues = formApi ? formApi.getValues() : formInitValues;
 
     let start_timestamp = timestamp2string(getTodayStartTimestamp());
     let end_timestamp = timestamp2string(now.getTime() / 1000 + 3600);
@@ -1080,6 +1107,7 @@ export const useLogsData = () => {
   };
 
   return {
+    fromChannelUsage: Boolean(usageLink),
     groupSummaryVisible,
     setGroupSummaryVisible,
     groupSummaryLoading,

@@ -29,7 +29,7 @@ func TestLogScopeRoutesRejectNonAdmin(t *testing.T) {
 			c.Next()
 		})
 		SetApiRouter(r)
-		for _, path := range []string{"/api/log/channel-options?keyword=muze", "/api/log/group-summary?start_timestamp=1&end_timestamp=2"} {
+		for _, path := range []string{"/api/channel/usage?start_time=1&end_time=2", "/api/log/channel-options?keyword=muze", "/api/log/group-summary?start_timestamp=1&end_timestamp=2"} {
 			req := httptest.NewRequest(http.MethodGet, path, nil)
 			req.Header.Set("New-Api-User", "1")
 			w := httptest.NewRecorder()

@@ -18,6 +18,10 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { useState, useEffect, useRef, useMemo } from 'react';
+import {
+  initialChannelUsage,
+  sumChannelUsage,
+} from '../../helpers/channelUsage';
 import { useTranslation } from 'react-i18next';
 import {
   API,
@@ -61,6 +65,13 @@ const EMPTY_CHANNEL_CONCURRENCY_SNAPSHOT = {
 export const useChannelsData = () => {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
+
+  const [usageOptions, setUsageOptions] = useState(() =>
+    initialChannelUsage(window.location.search),
+  );
+  const [usageMeta, setUsageMeta] = useState(null);
+  const [usageError, setUsageError] = useState('');
+  const usageOptionsMounted = useRef(false);
 
   // 基础状态s
   const [channels, setChannels] = useState([]);
@@ -435,6 +446,7 @@ export const useChannelsData = () => {
         return {
           ...item,
           status,
+          usage: sumChannelUsage(item.children),
           effective_available: tagAggregationStatus.enabledCount > 0,
           tagAggregationStatus,
         };
@@ -453,6 +465,88 @@ export const useChannelsData = () => {
     };
   };
 
+  const changeUsageOptions = (options) => {
+    requestCounter.current += 1;
+    setUsageMeta(null);
+    setUsageError('');
+    setChannels([]);
+    setActivePage(1);
+    setUsageOptions(options);
+    const url = new URL(window.location.href);
+    if (options.enabled) {
+      url.searchParams.set('view', 'usage');
+      url.searchParams.set('start_time', options.range[0]);
+      url.searchParams.set('end_time', options.range[1]);
+    } else {
+      ['view', 'start_time', 'end_time'].forEach((key) =>
+        url.searchParams.delete(key),
+      );
+    }
+    window.history.replaceState(null, '', url);
+  };
+
+  const loadUsageChannels = async (page, size, tagMode, category, status) => {
+    const reqId = ++requestCounter.current;
+    setLoading(true);
+    setUsageError('');
+    setUsageMeta(null);
+    setChannels([]);
+    const values = getFormValues();
+    try {
+      const res = await API.get('/api/channel/usage', {
+        params: {
+          p: page,
+          page_size: size,
+          tag_mode: tagMode,
+          category: tagMode ? 'all' : category,
+          status,
+          keyword: values.searchKeyword,
+          group: values.searchGroup,
+          model: values.searchModel,
+          start_time: usageOptions.range[0],
+          end_time: usageOptions.range[1],
+          usage_order: usageOptions.order,
+        },
+      });
+      if (reqId !== requestCounter.current) return;
+      const { success, data, message } = res.data || {};
+      if (!success || !Array.isArray(data?.items) || !data?.usage_summary)
+        throw new Error(message || t('渠道用量不可用，请确认后端已升级'));
+      setChannelFormat(data.items, tagMode);
+      setChannelCount(data.total);
+      setCategoryCounts(data.category_counts || {});
+      setUsageMeta({
+        ...data,
+        items: undefined,
+        group: values.searchGroup,
+        model: values.searchModel,
+      });
+      setActivePage(page);
+    } catch (error) {
+      if (reqId === requestCounter.current) {
+        setChannelCount(0);
+        setUsageError(
+          error.response?.status === 404
+            ? t('渠道用量不可用，请确认后端已升级')
+            : t('加载渠道用量失败，请重试'),
+        );
+      }
+    } finally {
+      if (reqId === requestCounter.current) {
+        setLoading(false);
+        setSearching(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!usageOptionsMounted.current) {
+      usageOptionsMounted.current = true;
+      return;
+    }
+    loadChannels(1, pageSize, idSort, enableTagMode).catch(showError);
+  }, [usageOptions]);
+
   // Load channels
   const loadChannels = async (
     page,
@@ -463,6 +557,14 @@ export const useChannelsData = () => {
     statusF,
   ) => {
     if (statusF === undefined) statusF = statusFilter;
+    if (usageOptions.enabled)
+      return loadUsageChannels(
+        page,
+        pageSize,
+        enableTagMode,
+        categoryKey,
+        statusF,
+      );
 
     const { searchKeyword, searchGroup, searchModel } = getFormValues();
     if (searchKeyword !== '' || searchGroup !== '' || searchModel !== '') {
@@ -512,6 +614,14 @@ export const useChannelsData = () => {
     pageSz = pageSize,
     sortFlag = idSort,
   ) => {
+    if (usageOptions.enabled)
+      return loadUsageChannels(
+        page,
+        pageSz,
+        enableTagMode,
+        categoryKey,
+        statusF,
+      );
     const { searchKeyword, searchGroup, searchModel } = getFormValues();
     const reqId = ++requestCounter.current;
     setLoading(true);
@@ -587,6 +697,7 @@ export const useChannelsData = () => {
 
   // Refresh
   const refresh = async (page = activePage) => {
+    if (typeof page !== 'number') page = activePage;
     const { searchKeyword, searchGroup, searchModel } = getFormValues();
     let channelsRequest;
     if (searchKeyword === '' && searchGroup === '' && searchModel === '') {
@@ -1566,6 +1677,10 @@ export const useChannelsData = () => {
   }, [categoryCounts]);
 
   return {
+    usageOptions,
+    changeUsageOptions,
+    usageMeta,
+    usageError,
     // 基础状态s
     channels,
     loading,

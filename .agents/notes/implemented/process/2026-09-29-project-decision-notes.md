@@ -10,7 +10,7 @@ Status: implemented
 
 AGENTS.md 要求按任务范围核对现有页面、接口与数据，优先复用，再实施。功能地图提供代码入口，决策笔记记录理由与真实备选；两者各司其职，不建立逐篇总索引。固定版本的 Skill 按项目安装；Bun 直接执行 TypeScript 校验，不增加 npm/tsx 在线下载依赖。
 
-用户已有授权优先于上游重复确认流程。结构校验运行于本地 Makefile 和 CI；业务运行时、应用版本与生产部署不随流程接入改变。第一篇业务提案是 [渠道用量整合](../../proposed/feature/2026-09-29-channel-usage-in-management.md)，尚未实现。
+用户已有授权优先于上游重复确认流程。结构校验运行于本地 Makefile 和 CI；业务运行时、应用版本与生产部署不随流程接入改变。第一篇业务提案是 [渠道用量整合](../feature/2026-09-29-channel-usage-in-management.md)，随业务实现更新状态。
 
 ## Existing capabilities and impact
 

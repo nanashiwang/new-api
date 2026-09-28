@@ -21,6 +21,7 @@ import React from 'react';
 import { Banner } from '@douyinfe/semi-ui';
 import { IconAlertTriangle } from '@douyinfe/semi-icons';
 import CardPro from '../../common/ui/CardPro';
+import ChannelUsageToolbar from './ChannelUsageToolbar';
 import ChannelsTable from './ChannelsTable';
 import ChannelsActions from './ChannelsActions';
 import ChannelsFilters from './ChannelsFilters';
@@ -117,7 +118,12 @@ const ChannelsPage = () => {
         type='type3'
         tabsArea={<ChannelsTabs {...channelsData} />}
         actionsArea={<ChannelsActions {...channelsData} />}
-        searchArea={<ChannelsFilters {...channelsData} />}
+        searchArea={
+          <div className='w-full'>
+            <ChannelUsageToolbar {...channelsData} />
+            <ChannelsFilters {...channelsData} />
+          </div>
+        }
         paginationArea={createCardProPagination({
           currentPage: channelsData.activePage,
           pageSize: channelsData.pageSize,

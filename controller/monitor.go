@@ -3,6 +3,7 @@ package controller
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
@@ -38,8 +39,13 @@ func GetChannelMonitor(c *gin.Context) {
 		return
 	}
 
+	exact := c.Query("exact_range") == "true"
+	if exact && (startTime <= 0 || endTime <= startTime || endTime-startTime > 30*86400 || endTime > time.Now().Unix()+1) {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "请选择有效时间范围，最长30天且不能超过当前时间"})
+		return
+	}
 	// 查询监控数据
-	stats, err := model.GetChannelMonitorStats(startTime, endTime, groupBy, username)
+	stats, err := model.GetChannelMonitorStats(startTime, endTime, groupBy, username, exact)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,

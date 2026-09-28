@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
+import { Banner } from '@douyinfe/semi-ui';
 import CardPro from '../../common/ui/CardPro';
 import LogsTable from './UsageLogsTable';
 import LogsActions from './UsageLogsActions';
@@ -47,6 +48,16 @@ const LogsPage = () => {
       {logsData.isAdminUser && <LogGroupSummaryModal {...logsData} />}
 
       {/* Main Content */}
+      {logsData.fromChannelUsage && (
+        <Banner
+          type='info'
+          closeIcon={null}
+          style={{ marginBottom: 12 }}
+          description={logsData.t(
+            '已带入渠道与时间筛选。渠道用量汇总消费和错误日志；本页额度统计仅包含消费记录，全部日志还可能包含退款等记录。',
+          )}
+        />
+      )}
       <CardPro
         type='type2'
         statsArea={<LogsActions {...logsData} />}

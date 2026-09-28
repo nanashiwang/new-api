@@ -29,6 +29,7 @@ import {
 import CompactModeToggle from '../../common/ui/CompactModeToggle';
 
 const ChannelsActions = ({
+  usageOptions,
   enableBatchDelete,
   batchDeleteChannels,
   setShowBatchSetTag,
@@ -238,6 +239,7 @@ const ChannelsActions = ({
             </Typography.Text>
             <Switch
               size='small'
+              disabled={usageOptions?.enabled}
               checked={idSort}
               onChange={(v) => {
                 localStorage.setItem('id-sort', v + '');
