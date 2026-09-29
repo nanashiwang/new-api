@@ -56,3 +56,28 @@ func TestFormatRequestBodyTooLargeMessageIncludesActionableHint(t *testing.T) {
 		}
 	}
 }
+
+func TestDialogRequestBodyLimitIsConsistentAcrossProtocols(t *testing.T) {
+	oldGlobal, oldBusiness := constant.MaxRequestBodyMB, constant.ResponsesRequestBodyLimitMB
+	t.Cleanup(func() {
+		constant.MaxRequestBodyMB, constant.ResponsesRequestBodyLimitMB = oldGlobal, oldBusiness
+	})
+	for _, path := range []string{
+		"/v1/chat/completions", "/v1/messages", "/v1/responses", "/v1/responses/compact",
+		"/openai/v1/chat/completions", "/openai/v1/messages", "/openai/v1/responses", "/pg/chat/completions",
+	} {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, path, nil)
+		for _, limits := range [][3]int{{256, 192, 192}, {128, 192, 128}, {256, 0, 256}, {256, 20, 20}} {
+			constant.MaxRequestBodyMB, constant.ResponsesRequestBodyLimitMB = limits[0], limits[1]
+			if got := GetRequestBodyLimitMB(c); got != limits[2] {
+				t.Fatalf("%s global=%d business=%d: got %d want %d", path, limits[0], limits[1], got, limits[2])
+			}
+		}
+	}
+	for _, path := range []string{"/v1/messages-other", "/v1/responses_other", "/v1/chat/completionsFake", "/api/user/", "/v1/images/edits"} {
+		if IsResponsesRequestBodyLimitedPath(path) {
+			t.Fatalf("unrelated path matched business limit: %s", path)
+		}
+	}
+}

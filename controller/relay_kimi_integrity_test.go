@@ -55,6 +55,10 @@ func TestRelayKimiFinalOutboundRequestIntegrity(t *testing.T) {
 		{"chat_moonshot", "/v1/chat/completions", `{"model":"kimi-k3","messages":[{"role":"user","content":[{"type":"video_url","video_url":"data:video/mp4;base64,AAAA"}]}],"max_completion_tokens":64,"tool_choice":"required","tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}],"reasoning_effort":"low"}`, types.RelayFormatOpenAI, constant.ChannelTypeMoonshot, false},
 		{"messages_openai", "/v1/messages", `{"model":"kimi-k3","messages":[{"role":"user","content":"look up"}],"max_tokens":64,"tool_choice":{"type":"any","disable_parallel_tool_use":true},"tools":[{"name":"lookup","input_schema":{"type":"object"}}]}`, types.RelayFormatClaude, constant.ChannelTypeOpenAI, false},
 		{"passthrough_unchanged", "/v1/chat/completions", `{"model":"kimi-k3","messages":[{"role":"user","content":"test"}],"max_tokens":4096,"max_completion_tokens":64}`, types.RelayFormatOpenAI, constant.ChannelTypeOpenAI, true},
+		{"report_16_off", "/v1/chat/completions", `{"model":"kimi-k3","messages":[{"role":"user","content":"OK"}],"max_tokens":16,"temperature":0.6,"reasoning_effort":"none"}`, types.RelayFormatOpenAI, constant.ChannelTypeMoonshot, false},
+		{"report_32_thinking", "/v1/chat/completions", `{"model":"kimi-k3","messages":[{"role":"user","content":"OK"}],"max_tokens":32,"temperature":1,"reasoning_effort":"low"}`, types.RelayFormatOpenAI, constant.ChannelTypeOpenAI, false},
+		{"report_50_n2", "/v1/chat/completions", `{"model":"kimi-k3","messages":[{"role":"user","content":"OK"}],"max_tokens":50,"temperature":1,"n":2,"top_p":0.5}`, types.RelayFormatOpenAI, constant.ChannelTypeMoonshot, false},
+		{"dynamic_tool", "/v1/chat/completions", `{"model":"kimi-k3","messages":[{"role":"system","tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]},{"role":"user","content":"look up"}],"tool_choice":"required","max_tokens":50}`, types.RelayFormatOpenAI, constant.ChannelTypeMoonshot, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			transport := &kimiContractTransport{}
@@ -75,18 +79,20 @@ func TestRelayKimiFinalOutboundRequestIntegrity(t *testing.T) {
 			}
 			var out dto.GeneralOpenAIRequest
 			require.NoError(t, common.Unmarshal(transport.body, &out))
-			require.Equal(t, uint(64), out.MaxTokens)
-			require.Zero(t, out.MaxCompletionTokens)
-			require.Equal(t, "required", out.ToolChoice)
-			require.Equal(t, "lookup", out.Tools[0].Function.Name)
 			if tc.format == types.RelayFormatClaude {
+				require.Equal(t, "required", out.ToolChoice)
+				require.Equal(t, "lookup", out.Tools[0].Function.Name)
+				require.Equal(t, uint(64), out.MaxTokens)
+				require.Zero(t, out.MaxCompletionTokens)
 				require.Equal(t, common.GetPointer(false), out.ParallelTooCalls)
 			} else {
 				var before, after map[string]json.RawMessage
 				require.NoError(t, common.UnmarshalJsonStr(tc.body, &before))
 				require.NoError(t, common.Unmarshal(transport.body, &after))
 				require.JSONEq(t, string(before["messages"]), string(after["messages"]))
-				require.Equal(t, "low", out.ReasoningEffort)
+				require.Equal(t, string(before["max_tokens"]), string(after["max_tokens"]))
+				require.Equal(t, string(before["max_completion_tokens"]), string(after["max_completion_tokens"]))
+				require.JSONEq(t, tc.body, string(transport.body), "native parameters must not be silently rewritten to satisfy a vendor")
 			}
 		})
 	}

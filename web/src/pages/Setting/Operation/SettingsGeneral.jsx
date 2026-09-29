@@ -320,7 +320,7 @@ export default function GeneralSettings(props) {
                   suffix='MiB'
                   placeholder='20'
                   extraText={t(
-                    '作用于 /v1/responses、/v1/chat/completions 及兼容路径，0 表示关闭业务预检；仍受全局请求体上限、Nginx 和上游限制影响。',
+                    '作用于 /v1/responses、/v1/chat/completions、/v1/messages 及兼容路径，限制解压后的完整请求体。0 表示关闭业务预检；仍受全局请求体上限、Nginx 和上游限制影响。',
                   )}
                   onChange={handleFieldChange('ResponsesRequestBodyLimitMB')}
                 />

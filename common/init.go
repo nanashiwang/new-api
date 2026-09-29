@@ -159,7 +159,7 @@ func initConstantEnv() {
 	constant.StreamScannerMaxBufferMB = GetEnvOrDefault("STREAM_SCANNER_MAX_BUFFER_MB", 128)
 	// MaxRequestBodyMB 请求体最大大小（解压后），用于防止超大请求/zip bomb导致内存暴涨
 	constant.MaxRequestBodyMB = GetEnvOrDefault("MAX_REQUEST_BODY_MB", 256)
-	// ResponsesRequestBodyLimitMB 是 /v1/responses 与 /v1/chat/completions 的业务预检上限，避免超大图片/上下文请求在上游反复 413。0 表示不启用业务预检。
+	// ResponsesRequestBodyLimitMB 是 Chat、Messages、Responses 的完整请求体业务预检上限（解压后）。0 表示不启用业务预检；保留管理员配置及更小的全局限制。
 	constant.ResponsesRequestBodyLimitMB = GetEnvOrDefault("RESPONSES_REQUEST_BODY_LIMIT_MB", 20)
 	constant.AnonymousRequestBodyLimitKB = GetEnvOrDefault("ANONYMOUS_REQUEST_BODY_LIMIT_KB", 512)
 	// ForceStreamOption 覆盖请求参数，强制返回usage信息

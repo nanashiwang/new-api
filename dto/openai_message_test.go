@@ -12,6 +12,7 @@ func TestDynamicToolMessagesSurviveCopyAndSerialization(t *testing.T) {
 	for _, body := range []string{
 		`{"role":"system","tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]}`,
 		`{"role":"system","content":null,"tools":[]}`,
+		`{"role":"system","content":"","tools":[{"type":"function","function":{"name":"lookup"}}]}`,
 		`{"role":"system","content":"invalid combination","tools":[]}`,
 		`{"role":"user","content":"invalid role","tools":[]}`,
 		`{"role":"assistant","content":null,"reasoning_content":"plan","tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]}`,

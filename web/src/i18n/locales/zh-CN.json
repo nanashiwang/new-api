@@ -1,5 +1,6 @@
 {
   "translation": {
+    "作用于 /v1/responses、/v1/chat/completions、/v1/messages 及兼容路径，限制解压后的完整请求体。0 表示关闭业务预检；仍受全局请求体上限、Nginx 和上游限制影响。": "作用于 /v1/responses、/v1/chat/completions、/v1/messages 及兼容路径，限制解压后的完整请求体。0 表示关闭业务预检；仍受全局请求体上限、Nginx 和上游限制影响。",
     "内容安全白名单": "内容安全白名单",
     "保存白名单失败": "保存白名单失败",
     "白名单设置已保存": "白名单设置已保存",

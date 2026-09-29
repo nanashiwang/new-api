@@ -11,7 +11,9 @@
 | 渠道周期额度策略 | [controller](../controller/channel_period_quota.go)、[service](../service/channel_period_quota.go) | `/api/channel/:id/quota_usage`、`/api/channel/tag/quota_usage`；策略周期用量 | 面向配额控制与策略周期，不替代任意时间范围统计 |
 | 渠道路由与权重 | [缓存路由](../model/channel_cache.go)、[能力选择](../model/ability.go) | 分组/模型/优先级筛选后的渠道选择 | 权重影响请求分配，不保证金额占比；不能以累计花费直接反推合理权重 |
 | 工具选择与历史思考转换 | [请求转换](../service/convert.go)、[工具选择](../service/claude_tool_choice.go)、[Chat/Responses](../service/openaicompat/chat_to_responses.go) | `/v1/messages` 转 Chat；Chat 消息级 tools 由请求 DTO 保留 | 明确 any/指定工具/并行要求，不强迫 auto 调工具；不支持的动态工具跨协议转换明确拒绝；不保证上游执行 |
-| 视频请求与输出预算 | [请求 DTO](../dto/openai_request.go)、[K3 输出别名](../dto/kimi_output_limit.go)、[Claude 转换](../relay/channel/claude/relay-claude.go) | 复用 relay 鉴权/渠道选择；视频字符串与对象保留，max_completion_tokens 使用同一有效上限 | 不支持的视频转 Claude 返回错误；不提取视频帧或保证上游理解；不截断回答；不改变价格与实际 usage |
+| 视频请求与输出预算 | [请求 DTO](../dto/openai_request.go)、[Claude 转换](../relay/channel/claude/relay-claude.go) | 复用 relay 鉴权/渠道选择；视频字符串与对象保留；K3 原生 Chat 保留调用者预算字段，跨协议沿用已有明确映射 | 不按模型名自动改写K3预算；不支持的视频转 Claude 返回错误；不提取视频帧或保证上游理解；不截断回答 |
 | Chat 转 Messages 流式交付 | [流处理](../relay/channel/openai/relay-openai.go)、[工具块状态](../service/chat_to_claude_stream.go)、[scanner](../relay/helper/stream_scanner.go) | 内容立即发送，结束元数据单独保留以接收 usage；错误交给 controller 退款 | 不以心跳计首字；已输出不重试；不完整流无成功终态；不代表上游首字延迟 SLA |
+| 三协议完整请求体上限 | [上限选择](../common/request_body_limit.go)、[请求缓存](../common/gin.go)、[解压入口](../middleware/gzip.go)、[管理配置](../web/src/pages/Setting/Operation/SettingsGeneral.jsx) | 复用 ResponsesRequestBodyLimitMB，覆盖 Chat/Messages/Responses 及已登记兼容路径；限解压后的完整请求体 | 配置192时仍服从较低全局限制；不强改默认或已有值；CDN/反代独立限制；验收边界见 [K3复测清单](KIMI_RETEST_ACCEPTANCE.md) |
+| 流式失败日志并发计数 | [日志入口](../logger/logger.go)、[回归](../logger/logger_concurrency_test.go) | 原子计数与单一异步轮转调度，writer 快照与替换同步 | 只影响日志轮转触发，不参与用量或扣费；不保证外部直接修改 Gin writer 的同步 |
 
 权限最终以 [API 路由](../router/api-router.go) 为准。新增渠道分析先对比统计面板、渠道管理和使用日志三处，确认数据定义、权限、分页/排序与跳转条件一致后再选方案。

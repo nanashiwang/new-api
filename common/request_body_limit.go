@@ -49,11 +49,13 @@ func IsResponsesRequestBodyLimitedPath(path string) bool {
 	for _, prefix := range []string{
 		"/v1/responses",
 		"/v1/chat/completions",
+		"/v1/messages",
 		"/pg/chat/completions",
 		"/openai/v1/responses",
 		"/openai/v1/chat/completions",
+		"/openai/v1/messages",
 	} {
-		if strings.HasPrefix(path, prefix) {
+		if path == prefix || strings.HasPrefix(path, prefix+"/") {
 			return true
 		}
 	}

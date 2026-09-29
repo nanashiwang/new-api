@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -26,14 +27,11 @@ const (
 
 const maxLogCount = 1000000
 
-var logCount int
-var setupLogLock sync.Mutex
-var setupLogWorking bool
+var logCount atomic.Int64
+var setupLogLock sync.RWMutex
+var setupLogWorking atomic.Bool
 
 func SetupLogger() {
-	defer func() {
-		setupLogWorking = false
-	}()
 	if *common.LogDir != "" {
 		ok := setupLogLock.TryLock()
 		if !ok {
@@ -75,21 +73,23 @@ func LogDebug(ctx context.Context, msg string, args ...any) {
 }
 
 func logHelper(ctx context.Context, level string, msg string) {
+	setupLogLock.RLock()
 	writer := gin.DefaultErrorWriter
 	if level == loggerINFO {
 		writer = gin.DefaultWriter
 	}
+	setupLogLock.RUnlock()
 	id := ctx.Value(common.RequestIdKey)
 	if id == nil {
 		id = "SYSTEM"
 	}
 	now := time.Now()
 	_, _ = fmt.Fprintf(writer, "[%s] %v | %s | %s \n", level, now.Format("2006/01/02 - 15:04:05"), id, msg)
-	logCount++ // we don't need accurate count, so no lock here
-	if logCount > maxLogCount && !setupLogWorking {
-		logCount = 0
-		setupLogWorking = true
+	if logCount.Add(1) > maxLogCount && setupLogWorking.CompareAndSwap(false, true) {
+		// Approximate at rotation boundaries, but all accesses are synchronized.
+		logCount.Store(0)
 		gopool.Go(func() {
+			defer setupLogWorking.Store(false)
 			SetupLogger()
 		})
 	}

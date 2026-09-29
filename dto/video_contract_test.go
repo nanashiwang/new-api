@@ -37,21 +37,14 @@ func TestOutputBudgetMetadataUsesEffectiveLimit(t *testing.T) {
 	require.Equal(t, int(req.GetMaxTokens()), req.GetTokenCountMeta().MaxTokens)
 }
 
-func TestKimiOutputBudgetNormalizationIsScopedAndIdempotent(t *testing.T) {
+func TestEffectiveOutputBudgetDoesNotRewriteRequest(t *testing.T) {
 	for _, model := range []string{"kimi-k3", "k3", "gpt-4.1", "kimi-k2.5", "other-kimi-k3"} {
 		for _, limits := range [][2]uint{{4096, 64}, {64, 4096}, {256, 0}, {0, 256}, {0, 0}} {
 			req := GeneralOpenAIRequest{Model: model, MaxTokens: limits[0], MaxCompletionTokens: limits[1]}
 			before := req
 			effective := req.GetMaxTokens()
-			req.NormalizeKimiOutputLimit()
-			req.NormalizeKimiOutputLimit()
-			require.Equal(t, effective, req.GetMaxTokens())
-			if model == "kimi-k3" || model == "k3" {
-				require.Zero(t, req.MaxCompletionTokens)
-				require.Equal(t, effective, req.MaxTokens)
-			} else {
-				require.Equal(t, before, req)
-			}
+			require.EqualValues(t, effective, req.GetTokenCountMeta().MaxTokens)
+			require.Equal(t, before, req, "inspecting a budget must not mutate the request")
 		}
 	}
 }
