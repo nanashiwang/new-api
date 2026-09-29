@@ -269,6 +269,7 @@ type RelayInfo struct {
 	ParamOverrideAudit                    []string
 	StreamStatus                          *StreamStatus
 	ResponsesCompletedSummary             *ResponsesCompletedSummary
+	KimiUsageEvidence                     *KimiUsageEvidence
 	ChatToolProtocol                      dto.ChatToolProtocol
 	ChatToolCount                         int
 
@@ -301,6 +302,7 @@ type RelayInfo struct {
 func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 	// Observations belong to this attempt, not an earlier failed channel.
 	info.ResponseModel = nil
+	info.KimiUsageEvidence = nil
 	channelType := common.GetContextKeyInt(c, constant.ContextKeyChannelType)
 	paramOverride := common.GetContextKeyStringMap(c, constant.ContextKeyChannelParamOverride)
 	headerOverride := common.GetContextKeyStringMap(c, constant.ContextKeyChannelHeaderOverride)

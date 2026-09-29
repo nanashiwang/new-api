@@ -231,7 +231,16 @@ func HandleFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, lastStream
 		if info.ShouldIncludeUsage && !containStreamUsage {
 			response := helper.GenerateFinalUsageResponse(responseId, createAt, model, *usage)
 			response.SetSystemFingerprint(systemFingerprint)
-			helper.ObjectData(c, response)
+			if usesKimiChatUsage(info) {
+				// Token fallback cannot manufacture cache/reasoning evidence.
+				raw, err := common.Marshal(response)
+				if err == nil {
+					raw = preserveKimiChatUsage(info, []byte(`{}`), raw, true)
+					_ = helper.StringData(c, string(raw))
+				}
+			} else {
+				helper.ObjectData(c, response)
+			}
 		}
 		helper.Done(c)
 

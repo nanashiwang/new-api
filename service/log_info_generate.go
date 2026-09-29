@@ -127,6 +127,19 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 
 	adminInfo := make(map[string]interface{})
 	adminInfo["use_channel"] = ctx.GetStringSlice("use_channel")
+	if relayInfo.KimiUsageEvidence != nil {
+		// An immutable metadata snapshot, stripped by formatUserLogs.
+		snapshot := *relayInfo.KimiUsageEvidence
+		if snapshot.Cache.Value != nil {
+			count := *snapshot.Cache.Value
+			snapshot.Cache.Value = &count
+		}
+		if snapshot.Reasoning.Value != nil {
+			count := *snapshot.Reasoning.Value
+			snapshot.Reasoning.Value = &count
+		}
+		adminInfo["kimi_usage_evidence"] = snapshot
+	}
 	isMultiKey := common.GetContextKeyBool(ctx, constant.ContextKeyChannelIsMultiKey)
 	if isMultiKey {
 		adminInfo["is_multi_key"] = true

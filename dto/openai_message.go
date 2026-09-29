@@ -68,8 +68,9 @@ func (m *openAIRequestMessage) UnmarshalJSON(data []byte) error {
 func (m openAIRequestMessage) MarshalJSON() ([]byte, error) {
 	type messageAlias Message
 	if len(m.Tools) > 0 && m.Content == nil && !m.ContentPresent {
-		// Kimi dynamic tools require content to be omitted, not null. Keep
-		// explicit content (including null) so upstream validation still applies.
+		// Preserve omitted content without inventing null. Official KVV also
+		// uses an explicit empty string, which must be kept verbatim below.
+		// Explicit null is preserved for upstream validation, not normalized.
 		return common.Marshal(struct {
 			messageAlias
 			Content json.RawMessage `json:"content,omitempty"`

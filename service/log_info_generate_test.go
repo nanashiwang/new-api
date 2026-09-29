@@ -13,7 +13,31 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
 )
+
+func TestKimiUsageEvidenceOnlyAppearsInAdminMetadata(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+	other := GenerateTextOtherInfo(c, info, 1, 1, 1, 0, 1, 1, 1)
+	require.NotContains(t, other["admin_info"], "kimi_usage_evidence")
+	info.KimiUsageEvidence = &relaycommon.KimiUsageEvidence{
+		Cache:     relaycommon.UsageCountEvidence{Status: "reported", Source: "usage.cache_read_tokens", Value: common.GetPointer(0)},
+		Reasoning: relaycommon.UsageCountEvidence{Status: "missing"},
+	}
+	other = GenerateTextOtherInfo(c, info, 1, 1, 1, 0, 1, 1, 1)
+	require.NotContains(t, other, "kimi_usage_evidence")
+	snapshot := other["admin_info"].(map[string]interface{})["kimi_usage_evidence"].(relaycommon.KimiUsageEvidence)
+	*info.KimiUsageEvidence.Cache.Value = 999
+	info.KimiUsageEvidence.Reasoning.Status = "changed-later"
+	require.Equal(t, 0, *snapshot.Cache.Value)
+	require.Equal(t, "missing", snapshot.Reasoning.Status)
+	raw, err := common.Marshal(snapshot)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"cache":{"status":"reported","source":"usage.cache_read_tokens","value":0},"reasoning":{"status":"missing"}}`, string(raw))
+}
 
 func TestGenerateTextOtherInfoIncludesParamOverrideAuditAndStreamStatus(t *testing.T) {
 	gin.SetMode(gin.TestMode)
