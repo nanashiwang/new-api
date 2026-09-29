@@ -163,9 +163,10 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	var secondLastStreamData string // 存储倒数第二个stream data，用于音频模型
 	var terminalError *types.NewAPIError
 	var completed bool
-	// OpenAI clients can receive each event immediately. The cross-protocol
-	// converters retain their existing final-event handling.
-	immediate := info.RelayFormat == types.RelayFormatOpenAI
+	var claudeTerminal *dto.ChatCompletionsStreamResponse
+	// Only terminal metadata is deferred for Messages; content never waits for
+	// another upstream block. Gemini keeps its existing conversion behavior.
+	immediate := info.RelayFormat == types.RelayFormatOpenAI || info.RelayFormat == types.RelayFormatClaude
 	thinkToContent := info.ChannelSetting.ThinkingToContent
 	if request, ok := info.Request.(*dto.GeneralOpenAIRequest); ok && request.ResponseFormat != nil {
 		if request.ResponseFormat.Type == "json_object" || request.ResponseFormat.Type == "json_schema" {
@@ -180,7 +181,8 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 		if !immediate && lastStreamData != "" {
 			err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent)
 			if err != nil {
-				common.SysLog("error handling stream format: " + err.Error())
+				terminalError = types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+				return false
 			}
 		}
 		if len(data) > 0 {
@@ -208,8 +210,10 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 				for _, choice := range event.Choices {
 					completed = completed || (choice.FinishReason != nil && *choice.FinishReason != "")
 				}
-			} else if info.StreamStatus != nil {
+			} else {
 				info.StreamStatus.RecordError("invalid OpenAI stream event")
+				terminalError = types.NewOpenAIError(fmt.Errorf("invalid OpenAI stream event"), types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+				return false
 			}
 			// Some providers append metadata chunks after the standard usage chunk.
 			// Keep the latest valid usage instead of assuming it is the final SSE event.
@@ -222,7 +226,13 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 
 			lastStreamData = data
 			streamItems = append(streamItems, data)
-			if immediate {
+			if info.RelayFormat == types.RelayFormatClaude {
+				if err := deliverClaudeStreamEvent(c, info, event, &claudeTerminal); err != nil {
+					info.StreamStatus.RecordError("failed to deliver Messages stream event")
+					terminalError = types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+					return false
+				}
+			} else if immediate {
 				out, err := filterChatStreamUsage(data, info.ShouldIncludeUsage)
 				if err == nil && out != "" {
 					err = HandleStreamFormat(c, info, out, info.ChannelSetting.ForceFormat, thinkToContent)
@@ -237,7 +247,7 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	})
 	if terminalError != nil {
 		info.StreamStatus.MarkOutcome(relaycommon.ResponseOutcomeFailed)
-		return nil, terminalError
+		return nil, finishChatStreamError(c, info, terminalError)
 	}
 	info.StreamStatus.RequireTerminal()
 	if completed || (info.StreamStatus != nil && info.StreamStatus.EndReason == relaycommon.StreamEndReasonDone) {
@@ -245,6 +255,14 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	}
 	if !completed && info.StreamStatus != nil && info.StreamStatus.EndReason != relaycommon.StreamEndReasonDone {
 		info.StreamStatus.RecordError("OpenAI stream ended without a completion marker")
+	}
+	if !info.StreamStatus.IsSuccessful() {
+		if c.Request.Context().Err() != nil {
+			return nil, types.NewClientCanceledError()
+		}
+		return nil, finishChatStreamError(c, info, types.NewOpenAIError(
+			fmt.Errorf("upstream stream ended unsuccessfully: %s", info.StreamStatus.EndReason),
+			types.ErrorCodeBadResponseBody, http.StatusBadGateway))
 	}
 
 	// 对音频模型，从倒数第二个stream data中提取usage信息
@@ -284,7 +302,24 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 
 	applyUsagePostProcessing(info, usage, common.StringToByteSlice(lastStreamData))
 
-	HandleFinalResponse(c, info, lastStreamData, responseId, createAt, model, systemFingerprint, usage, containStreamUsage)
+	if info.RelayFormat == types.RelayFormatClaude {
+		if claudeTerminal == nil {
+			claudeTerminal = &dto.ChatCompletionsStreamResponse{
+				Choices: []dto.ChatCompletionsStreamResponseChoice{{FinishReason: common.GetPointer("stop")}},
+			}
+		}
+		claudeTerminal.Usage = usage
+		final, err := common.Marshal(claudeTerminal)
+		if err == nil {
+			err = HandleStreamFormat(c, info, string(final), false, false)
+		}
+		if err != nil {
+			info.StreamStatus.RecordError("failed to finalize Messages stream")
+			return nil, finishChatStreamError(c, info, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusBadGateway))
+		}
+	} else {
+		HandleFinalResponse(c, info, lastStreamData, responseId, createAt, model, systemFingerprint, usage, containStreamUsage)
+	}
 
 	return usage, nil
 }

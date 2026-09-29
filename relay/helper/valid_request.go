@@ -297,6 +297,9 @@ func GetAndValidateTextRequest(c *gin.Context, relayMode int) (*dto.GeneralOpenA
 	if textRequest.MaxTokens > math.MaxInt32/2 {
 		return nil, errors.New("max_tokens is invalid")
 	}
+	if textRequest.MaxCompletionTokens > math.MaxInt32/2 {
+		return nil, errors.New("max_completion_tokens is invalid")
+	}
 	if textRequest.Model == "" {
 		return nil, errors.New("model is required")
 	}

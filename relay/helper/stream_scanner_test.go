@@ -56,6 +56,29 @@ func buildSSEBody(n int) string {
 	return b.String()
 }
 
+func TestStreamScannerHandlerStopClosesBlockedBodyBeforeJoining(t *testing.T) {
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	c, resp, info := setupStreamTest(t, reader)
+	resp.Body = reader
+	written := make(chan struct{})
+	go func() {
+		defer close(written)
+		_, _ = io.WriteString(writer, "data: {\"reject\":true}\n\n")
+		// The second write cannot finish unless the scanner is closed.
+		_, _ = io.WriteString(writer, strings.Repeat("x", 128*1024))
+	}()
+	start := time.Now()
+	StreamScannerHandler(c, resp, info, func(string) bool { return false })
+	require.Less(t, time.Since(start), 2*time.Second, "must not wait for the 5s worker cleanup fallback")
+	select {
+	case <-written:
+	case <-time.After(time.Second):
+		t.Fatal("upstream writer survived stream cancellation")
+	}
+}
+
 // slowReader wraps a reader and injects a delay before each Read call,
 // simulating a slow upstream that trickles data.
 type slowReader struct {

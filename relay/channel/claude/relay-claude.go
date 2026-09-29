@@ -74,6 +74,20 @@ func functionParametersToClaudeInputSchema(parameters any) map[string]any {
 }
 
 func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRequest) (*dto.ClaudeRequest, error) {
+	for _, message := range textRequest.Messages {
+		if len(message.Tools) > 0 {
+			return nil, types.NewErrorWithStatusCode(
+				fmt.Errorf("message-level dynamic tools cannot be converted to Claude Messages; use Chat Completions for this request"),
+				types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+		}
+		for _, part := range message.ParseContent() {
+			if part.Type == dto.ContentTypeVideoUrl {
+				return nil, types.NewErrorWithStatusCode(
+					fmt.Errorf("video_url cannot be converted to Claude Messages; use a video-capable Chat Completions channel"),
+					types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+			}
+		}
+	}
 	claudeTools := make([]any, 0, len(textRequest.Tools))
 
 	for _, tool := range textRequest.Tools {
@@ -375,6 +389,9 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 						claudeMediaMessage.Text = common.GetPointer[string](mediaMessage.Text)
 					} else {
 						imageUrl := mediaMessage.GetImageMedia()
+						if imageUrl == nil {
+							return nil, fmt.Errorf("unsupported media type for Claude Messages: %s", mediaMessage.Type)
+						}
 						claudeMediaMessage.Type = "image"
 						claudeMediaMessage.Source = &dto.ClaudeMessageSource{
 							Type: "base64",

@@ -149,11 +149,7 @@ func (r *GeneralOpenAIRequest) GetTokenCountMeta() *types.TokenCountMeta {
 		texts = append(texts, inputs...)
 	}
 
-	if r.MaxCompletionTokens > r.MaxTokens {
-		tokenCountMeta.MaxTokens = int(r.MaxCompletionTokens)
-	} else {
-		tokenCountMeta.MaxTokens = int(r.MaxTokens)
-	}
+	tokenCountMeta.MaxTokens = int(r.GetMaxTokens())
 
 	for _, message := range r.Messages {
 		tokenCountMeta.MessagesCount++
@@ -389,15 +385,16 @@ func (m *MediaContent) GetFile() *MessageFile {
 }
 
 func (m *MediaContent) GetVideoUrl() *MessageVideoUrl {
-	if m.VideoUrl != nil {
-		if _, ok := m.VideoUrl.(*MessageVideoUrl); ok {
-			return m.VideoUrl.(*MessageVideoUrl)
-		}
-		if itemMap, ok := m.VideoUrl.(map[string]any); ok {
-			out := &MessageVideoUrl{
-				Url: common.Interface2String(itemMap["url"]),
-			}
-			return out
+	switch video := m.VideoUrl.(type) {
+	case string:
+		return &MessageVideoUrl{Url: video}
+	case MessageVideoUrl:
+		return &video
+	case *MessageVideoUrl:
+		return video
+	case map[string]any:
+		if url, ok := video["url"].(string); ok {
+			return &MessageVideoUrl{Url: url}
 		}
 	}
 	return nil
@@ -635,15 +632,13 @@ func (m *Message) ParseContent() []MediaContent {
 				}
 			}
 		case ContentTypeVideoUrl:
-			if videoUrl, ok := contentItem["video_url"].(string); ok {
-				contentList = append(contentList, MediaContent{
-					Type:         ContentTypeVideoUrl,
-					CacheControl: cacheControl,
-					VideoUrl: &MessageVideoUrl{
-						Url: videoUrl,
-					},
-				})
-			}
+			// Preserve the original string/object, including provider extensions.
+			// Invalid values remain visible to converters instead of losing media.
+			contentList = append(contentList, MediaContent{
+				Type:         ContentTypeVideoUrl,
+				CacheControl: cacheControl,
+				VideoUrl:     contentItem["video_url"],
+			})
 		}
 	}
 

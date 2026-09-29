@@ -116,6 +116,9 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 	inputItems := make([]map[string]any, 0, len(req.Messages))
 
 	for _, msg := range req.Messages {
+		if len(msg.Tools) > 0 {
+			return nil, fmt.Errorf("message-level dynamic tools cannot be converted to Responses; use Chat Completions for this request")
+		}
 		role := strings.TrimSpace(msg.Role)
 		if role == "" {
 			continue
@@ -407,10 +410,7 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 
 	textRaw := convertChatResponseFormatToResponsesText(req.ResponseFormat)
 
-	maxOutputTokens := req.MaxTokens
-	if req.MaxCompletionTokens > maxOutputTokens {
-		maxOutputTokens = req.MaxCompletionTokens
-	}
+	maxOutputTokens := req.GetMaxTokens()
 	// OpenAI Responses API rejects max_output_tokens < 16 when explicitly provided.
 	//if maxOutputTokens > 0 && maxOutputTokens < 16 {
 	//	maxOutputTokens = 16

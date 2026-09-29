@@ -340,6 +340,7 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 		request.Messages[0].Role = "developer"
 	}
 
+	request.NormalizeKimiOutputLimit()
 	return request, nil
 }
 

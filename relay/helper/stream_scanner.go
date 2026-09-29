@@ -119,6 +119,11 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		if pingTicker != nil {
 			pingTicker.Stop()
 		}
+		// Cancellation or a rejected event can leave scanner.Scan blocked on
+		// the upstream body. Close it before joining the worker goroutines.
+		if resp.Body != nil {
+			_ = resp.Body.Close()
+		}
 
 		// 等待所有 goroutine 退出，最多等待5秒
 		done := make(chan struct{})
