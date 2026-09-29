@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -48,7 +49,11 @@ func TestChatStreamDeliversFirstEventBeforeNextUpstreamChunk(t *testing.T) {
 				}()
 				c, _ := gin.CreateTestContext(w)
 				c.Request = r
-				_, _ = OaiStreamHandler(c, chatDeliveryInfo(), &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: reader})
+				info := chatDeliveryInfo()
+				// The K3 usage collector must not buffer text/thinking/tool
+				// output while waiting for a later accounting snapshot.
+				info.ChannelType = constant.ChannelTypeMoonshot
+				_, _ = OaiStreamHandler(c, info, &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: reader})
 				close(finished)
 			}))
 			defer server.Close()

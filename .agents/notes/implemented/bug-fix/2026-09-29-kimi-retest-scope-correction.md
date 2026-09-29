@@ -22,6 +22,7 @@ Status: implemented
 - 第一项“已知假成功识别”留作阻塞验收项：当前仓库未定位到伙伴对应实现，不重复编造识别规则，不拿普通 Responses 失败退款用例替代。七条历史候选不调整余额。
 - 首页/文档/KVV 单独核对；找不到 KVV 入口、原始产物或实际部署证据时明确写未验收。
 - 失败验收发现的日志计数并发访问按[局部日志同步决定](2026-09-29-relay-log-counter-synchronization.md)处理，只同步计数及调度状态，不改变扣费、退款、渠道路由或日志内容。
+- 动态工具本地模拟与官方正反例的对应按[官方KVV对齐](../testing/2026-09-29-official-kvv-alignment.md)记录。system + content="" + tools为官方正例，不将空字符串与非空内容混同；省略/null仍独立保真。门户与官方脚本的覆盖范围分别核对。
 
 ## Alternatives considered
 

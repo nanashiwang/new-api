@@ -15,5 +15,8 @@
 | Chat 转 Messages 流式交付 | [流处理](../relay/channel/openai/relay-openai.go)、[工具块状态](../service/chat_to_claude_stream.go)、[scanner](../relay/helper/stream_scanner.go) | 内容立即发送，结束元数据单独保留以接收 usage；错误交给 controller 退款 | 不以心跳计首字；已输出不重试；不完整流无成功终态；不代表上游首字延迟 SLA |
 | 三协议完整请求体上限 | [上限选择](../common/request_body_limit.go)、[请求缓存](../common/gin.go)、[解压入口](../middleware/gzip.go)、[管理配置](../web/src/pages/Setting/Operation/SettingsGeneral.jsx) | 复用 ResponsesRequestBodyLimitMB，覆盖 Chat/Messages/Responses 及已登记兼容路径；限解压后的完整请求体 | 配置192时仍服从较低全局限制；不强改默认或已有值；CDN/反代独立限制；验收边界见 [K3复测清单](KIMI_RETEST_ACCEPTANCE.md) |
 | 流式失败日志并发计数 | [日志入口](../logger/logger.go)、[回归](../logger/logger_concurrency_test.go) | 原子计数与单一异步轮转调度，writer 快照与替换同步 | 只影响日志轮转触发，不参与用量或扣费；不保证外部直接修改 Gin writer 的同步 |
+| 官方KVV基线与本地转发回归 | [对齐基线](KVV_OFFICIAL_ALIGNMENT.md)、[模拟回归](../controller/relay_kimi_compat_test.go)、[请求DTO](../dto/openai_message.go)、[真实验收记录](KIMI_LIVE_ACCEPTANCE_2026-09-29.md) | 固定官方提交，system空字符串动态工具正例及角色/非空反例；两种渠道、流式/非流式；人工真实验收独立记录 | 不增加KVV门户或自动在线调用；模拟通过不代表官方实测通过；真实验收存在失败，skip/未测/SLA分别记录 |
+| K3缓存/思考用量兼容 | [字段处理](../relay/channel/openai/kimi_usage_fields.go)、[流式快照](../relay/channel/openai/kimi_usage_stream_evidence.go)、[计费回归](../controller/relay_kimi_usage_billing_test.go)、[验收说明](KIMI_USAGE_FIELDS.md) | 原生Chat补齐真实嵌套/平铺/单choice计数；对应总量相同时保留前块细项；消费日志admin_info记录来源 | 显式0优先、未知不造数、多choice不合并、跨响应不继承；不修改路由或测试器，来源诊断不向普通用户日志暴露 |
+| K3真实入口补充验收 | [用户体验实测](KIMI_USER_EXPERIENCE_2026-09-29.md)、[供应商原始响应对照](KIMI_USAGE_UPSTREAM_DIAGNOSIS_2026-09-29.md)、[实际usage切片回放](../relay/channel/openai/kimi_usage_fields_test.go) | 默认路由及逐请求定向的缓存/思考/工具验证；供应商原始usage与本站消费日志分别核对 | 默认路由多渠道结果不互相继承；本地回放不等于补丁部署，不是完整KVV、缓存TTL或并发SLA |
 
 权限最终以 [API 路由](../router/api-router.go) 为准。新增渠道分析先对比统计面板、渠道管理和使用日志三处，确认数据定义、权限、分页/排序与跳转条件一致后再选方案。

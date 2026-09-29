@@ -37,9 +37,17 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
 	if err := common.UnmarshalJsonStr(data, &lastStreamResponse); err != nil {
 		return err
 	}
+	sendFormatted := func(value any) error {
+		raw, err := common.Marshal(value)
+		if err != nil {
+			return err
+		}
+		raw = preserveKimiChatUsage(info, []byte(data), raw, false)
+		return helper.StringData(c, string(raw))
+	}
 
 	if !thinkToContent {
-		return helper.ObjectData(c, lastStreamResponse)
+		return sendFormatted(lastStreamResponse)
 	}
 
 	hasThinkingContent := false
@@ -67,12 +75,12 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
 			}
 			info.ThinkingContentInfo.IsFirstThinkingContent = false
 			info.ThinkingContentInfo.HasSentThinkingContent = true
-			return helper.ObjectData(c, response)
+			return sendFormatted(response)
 		}
 	}
 
 	if lastStreamResponse.Choices == nil || len(lastStreamResponse.Choices) == 0 {
-		return helper.ObjectData(c, lastStreamResponse)
+		return sendFormatted(lastStreamResponse)
 	}
 
 	// Process each choice
@@ -87,7 +95,9 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
 				response.Choices[j].Delta.Reasoning = nil
 			}
 			info.ThinkingContentInfo.SendLastThinkingContent = true
-			helper.ObjectData(c, response)
+			if err := sendFormatted(response); err != nil {
+				return err
+			}
 		}
 
 		// Convert reasoning content to regular content if any
@@ -102,7 +112,7 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
 		}
 	}
 
-	return helper.ObjectData(c, lastStreamResponse)
+	return sendFormatted(lastStreamResponse)
 }
 
 func chatCompletionsStreamEventError(data string) *types.NewAPIError {
@@ -160,6 +170,8 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	var usage = &dto.Usage{}
 	var streamItems []string // store stream items
 	var lastStreamData string
+	var lastUsageData string
+	var kimiUsageEvidence kimiUsageStreamEvidence
 	var secondLastStreamData string // 存储倒数第二个stream data，用于音频模型
 	var terminalError *types.NewAPIError
 	var completed bool
@@ -186,6 +198,7 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 			}
 		}
 		if len(data) > 0 {
+			data = string(kimiUsageEvidence.normalize(info, []byte(data)))
 			if eventError := chatCompletionsStreamEventError(data); eventError != nil {
 				terminalError = eventError
 				if service.IsContentSafetyPolicyError(eventError) {
@@ -218,6 +231,13 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 			// Some providers append metadata chunks after the standard usage chunk.
 			// Keep the latest valid usage instead of assuming it is the final SSE event.
 			updateUsageFromStreamData(data, &usage, &containStreamUsage)
+			if usesKimiChatUsage(info) && event.Usage != nil {
+				observed := *event.Usage
+				normalizeOpenAIUsage(&observed)
+				if service.ValidUsage(&observed) {
+					lastUsageData = data
+				}
+			}
 
 			// 对音频模型，保存倒数第二个stream data
 			if isAudioModel && lastStreamData != "" {
@@ -300,7 +320,11 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 		usage.CompletionTokens += toolCount * 7
 	}
 
-	applyUsagePostProcessing(info, usage, common.StringToByteSlice(lastStreamData))
+	usageData := lastStreamData
+	if usesKimiChatUsage(info) && lastUsageData != "" {
+		usageData = lastUsageData
+	}
+	applyUsagePostProcessing(info, usage, common.StringToByteSlice(usageData))
 
 	if info.RelayFormat == types.RelayFormatClaude {
 		if claudeTerminal == nil {
@@ -351,6 +375,9 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 		}
 	}
 
+	var kimiUsageEvidence kimiUsageStreamEvidence
+	responseBody = kimiUsageEvidence.normalize(info, responseBody)
+	reportedBody := responseBody
 	err = common.Unmarshal(responseBody, &simpleResponse)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
@@ -412,9 +439,8 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 			if err != nil {
 				return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 			}
-		} else {
-			break
 		}
+		responseBody = preserveKimiChatUsage(info, reportedBody, responseBody, usageModified)
 	case types.RelayFormatClaude:
 		claudeResp := service.ResponseOpenAI2Claude(&simpleResponse, info)
 		claudeRespStr, err := common.Marshal(claudeResp)
@@ -980,6 +1006,20 @@ func writeOpenaiImageStreamDone(c *gin.Context) error {
 func applyUsagePostProcessing(info *relaycommon.RelayInfo, usage *dto.Usage, responseBody []byte) {
 	if info == nil || usage == nil || info.ChannelMeta == nil {
 		return
+	}
+	if usesKimiChatUsage(info) {
+		normalized := normalizeKimiChatUsage(info, responseBody)
+		reported := usageObject(usageObject(normalized)["usage"])
+		if reported != nil {
+			if count, ok := nonnegativeUsageCount(usageObject(reported["prompt_tokens_details"])["cached_tokens"]); ok {
+				usage.PromptTokensDetails.CachedTokens = count
+			}
+			if count, ok := nonnegativeUsageCount(usageObject(reported["completion_tokens_details"])["reasoning_tokens"]); ok {
+				usage.CompletionTokenDetails.ReasoningTokens = count
+			}
+			return
+		}
+		// No response-level usage: keep the legacy provider-specific fallback.
 	}
 
 	switch info.ChannelType {
