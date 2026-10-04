@@ -1,5 +1,12 @@
 {
   "translation": {
+    "我的收藏分组": "Groupes favoris",
+    "选择分组后可收藏": "Sélectionnez un groupe à ajouter aux favoris",
+    "暂无可用收藏，请先选择并收藏分组": "Aucun favori disponible. Sélectionnez un groupe et ajoutez-le aux favoris.",
+    "收藏当前分组": "Ajouter ce groupe aux favoris",
+    "取消收藏": "Retirer des favoris",
+    "无法保存收藏，关闭页面后可能丢失": "Impossible de sauvegarder les favoris ; ils peuvent être perdus à la fermeture.",
+    "收藏仅保存在当前浏览器，按账号隔离": "Les favoris sont enregistrés dans ce navigateur, séparément pour chaque compte.",
     "作用于 /v1/responses、/v1/chat/completions、/v1/messages 及兼容路径，限制解压后的完整请求体。0 表示关闭业务预检；仍受全局请求体上限、Nginx 和上游限制影响。": "S’applique à /v1/responses, /v1/chat/completions, /v1/messages et aux chemins compatibles, pour le corps complet après décompression. 0 désactive ce contrôle ; les limites globales, Nginx et du fournisseur restent applicables.",
     "内容安全白名单": "Liste blanche de sécurité du contenu",
     "保存白名单失败": "Échec de l’enregistrement",

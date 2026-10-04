@@ -56,6 +56,8 @@ import {
   IconKey,
 } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
+import TokenGroupFavorites from '../TokenGroupFavorites';
+import { UserContext } from '../../../../context/User';
 import { StatusContext } from '../../../../context/Status';
 import {
   buildTokenGroupVendorOptions,
@@ -83,6 +85,12 @@ const EditTokenModal = (props) => {
   const loadedTokenValuesRef = useRef(null);
   const [models, setModels] = useState([]);
   const [groups, setGroups] = useState([]);
+  const [availableGroups, setAvailableGroups] = useState({
+    userId: null,
+    groups: [],
+  });
+  const [userState] = useContext(UserContext);
+  const groupRequestRef = useRef(0);
   const groupHealth = useGroupHealth({ enabled: Boolean(props.visiable) });
   const groupHealthByName = useMemo(
     () =>
@@ -476,7 +484,17 @@ const EditTokenModal = (props) => {
   };
 
   const loadGroups = async () => {
-    let res = await API.get(`/api/user/self/groups`);
+    const requestId = ++groupRequestRef.current;
+    setAvailableGroups({ userId: null, groups: [] });
+    let res;
+    try {
+      // A reopened or account-switched dialog needs a fresh permission snapshot,
+      // not another subscriber to a previous account's in-flight GET.
+      res = await API.get(`/api/user/self/groups`, { disableDuplicate: true });
+    } catch {
+      return;
+    }
+    if (requestId !== groupRequestRef.current) return;
     const { success, message, data } = res.data;
     if (success) {
       let localGroupOptions = Object.entries(data).map(([group, info]) => ({
@@ -484,6 +502,10 @@ const EditTokenModal = (props) => {
         value: group,
         ratio: info.ratio,
       }));
+      setAvailableGroups({
+        userId: userState?.user?.id,
+        groups: [...localGroupOptions],
+      });
       if (statusState?.status?.default_use_auto_group) {
         if (localGroupOptions.some((group) => group.value === 'auto')) {
           localGroupOptions.sort((a, b) => (a.value === 'auto' ? -1 : 1));
@@ -599,8 +621,15 @@ const EditTokenModal = (props) => {
         props.editingToken.model_limits || [],
       );
     }
-    loadGroups();
   }, [props.editingToken.id]);
+
+  useEffect(() => {
+    setAvailableGroups({ userId: null, groups: [] });
+    if (props.visiable) loadGroups();
+    return () => {
+      groupRequestRef.current += 1;
+    };
+  }, [props.visiable, props.editingToken.id, userState?.user?.id]);
 
   useEffect(() => {
     if (props.visiable) {
@@ -1225,6 +1254,21 @@ const EditTokenModal = (props) => {
                       placeholder={t('请输入名称')}
                       rules={[{ required: true, message: t('请输入名称') }]}
                       showClear
+                    />
+                  </Col>
+                  <Col span={24}>
+                    <TokenGroupFavorites
+                      key={userState?.user?.id ?? 'anonymous'}
+                      userId={userState?.user?.id}
+                      groups={
+                        availableGroups.userId === userState?.user?.id
+                          ? availableGroups.groups
+                          : []
+                      }
+                      value={values.group}
+                      onSelect={(group) =>
+                        formApiRef.current?.setValue('group', group)
+                      }
                     />
                   </Col>
                   {groups.length > 0 ? (

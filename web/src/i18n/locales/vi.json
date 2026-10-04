@@ -1,5 +1,12 @@
 {
   "translation": {
+    "我的收藏分组": "Nhóm yêu thích",
+    "选择分组后可收藏": "Chọn nhóm để thêm vào yêu thích",
+    "暂无可用收藏，请先选择并收藏分组": "Chưa có nhóm yêu thích khả dụng. Hãy chọn và thêm nhóm trước.",
+    "收藏当前分组": "Thêm nhóm hiện tại vào yêu thích",
+    "取消收藏": "Bỏ yêu thích",
+    "无法保存收藏，关闭页面后可能丢失": "Không thể lưu mục yêu thích; chúng có thể mất khi đóng trang.",
+    "收藏仅保存在当前浏览器，按账号隔离": "Mục yêu thích được lưu trong trình duyệt này, riêng cho từng tài khoản.",
     "作用于 /v1/responses、/v1/chat/completions、/v1/messages 及兼容路径，限制解压后的完整请求体。0 表示关闭业务预检；仍受全局请求体上限、Nginx 和上游限制影响。": "Áp dụng cho /v1/responses, /v1/chat/completions, /v1/messages và các đường dẫn tương thích, giới hạn toàn bộ nội dung yêu cầu sau giải nén. 0 tắt kiểm tra này; giới hạn toàn cục, Nginx và nhà cung cấp vẫn có hiệu lực.",
     "内容安全白名单": "Danh sách trắng an toàn nội dung",
     "保存白名单失败": "Không thể lưu danh sách trắng",

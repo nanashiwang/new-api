@@ -1,5 +1,12 @@
 {
   "translation": {
+    "我的收藏分组": "Favorite groups",
+    "选择分组后可收藏": "Select a group to favorite",
+    "暂无可用收藏，请先选择并收藏分组": "No available favorites. Select and favorite a group first.",
+    "收藏当前分组": "Favorite current group",
+    "取消收藏": "Remove favorite",
+    "无法保存收藏，关闭页面后可能丢失": "Unable to save favorites; they may be lost when this page closes.",
+    "收藏仅保存在当前浏览器，按账号隔离": "Favorites are stored in this browser, separately for each account.",
     "作用于 /v1/responses、/v1/chat/completions、/v1/messages 及兼容路径，限制解压后的完整请求体。0 表示关闭业务预检；仍受全局请求体上限、Nginx 和上游限制影响。": "Applies to /v1/responses, /v1/chat/completions, /v1/messages and compatible paths, limiting the complete decompressed request body. 0 disables this precheck; global, Nginx and upstream limits still apply.",
     "内容安全白名单": "Content safety whitelist",
     "保存白名单失败": "Failed to save whitelist",

@@ -20,3 +20,4 @@
 | K3真实入口补充验收 | [用户体验实测](KIMI_USER_EXPERIENCE_2026-09-29.md)、[供应商原始响应对照](KIMI_USAGE_UPSTREAM_DIAGNOSIS_2026-09-29.md)、[实际usage切片回放](../relay/channel/openai/kimi_usage_fields_test.go) | 默认路由及逐请求定向的缓存/思考/工具验证；供应商原始usage与本站消费日志分别核对 | 默认路由多渠道结果不互相继承；本地回放不等于补丁部署，不是完整KVV、缓存TTL或并发SLA |
 
 权限最终以 [API 路由](../router/api-router.go) 为准。新增渠道分析先对比统计面板、渠道管理和使用日志三处，确认数据定义、权限、分页/排序与跳转条件一致后再选方案。
+| 令牌创建/编辑：个人收藏分组 | [表单](../web/src/components/table/tokens/modals/EditTokenModal.jsx)、[收藏入口](../web/src/components/table/tokens/TokenGroupFavorites.jsx)、[本地存储](../web/src/components/table/tokens/groupFavoriteStorage.js) | 已登录用户；仅 `/api/user/self/groups` 本次返回的可用组能成为收藏捷径；沿用原 `group` 字段和模型/渠道联动 | 当前浏览器按账号隔离，不跨设备/客户端同步；收藏不赋予权限、不改变计费/路由；编辑保留的失效组不加入收藏候选 |
