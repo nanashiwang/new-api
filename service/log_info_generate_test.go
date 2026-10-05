@@ -16,6 +16,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestHeaderOverrideAppearsOnlyInAdminConsumeMetadata(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	client := newRelayHttpClient(120 * time.Second)
+	t.Cleanup(client.CloseIdleConnections)
+	RecordRelayHTTPTimeout(c, client, true)
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+	other := GenerateTextOtherInfo(c, info, 1, 1, 1, 0, 1, 1, 1)
+	require.Contains(t, other["admin_info"], "relay_http_timeout")
+	require.NotContains(t, other, "relay_http_timeout")
+}
+
 func TestKimiUsageEvidenceOnlyAppearsInAdminMetadata(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())

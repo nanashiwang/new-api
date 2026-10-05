@@ -550,6 +550,21 @@ func shouldUseImageHTTPClient(info *common.RelayInfo) bool {
 	return false
 }
 
+func channelNonStreamHeaderTimeout(info *common.RelayInfo) time.Duration {
+	if info == nil || info.ChannelMeta == nil || info.IsStream || shouldUseImageHTTPClient(info) {
+		return 0
+	}
+	seconds := info.ChannelSetting.NonStreamResponseHeaderTimeoutSec
+	if seconds <= 0 || seconds > 600 {
+		return 0
+	}
+	switch info.RelayMode {
+	case constant.RelayModeChatCompletions, constant.RelayModeCompletions, constant.RelayModeResponses:
+		return time.Duration(seconds) * time.Second
+	}
+	return 0
+}
+
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
 	if err := applyCPAIdentity(req.Header, info); err != nil {
 		return nil, err
@@ -567,6 +582,14 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	} else {
 		client = service.GetHttpClient()
 	}
+	wait := channelNonStreamHeaderTimeout(info)
+	if wait > 0 {
+		client, err = service.WithResponseHeaderTimeout(client, wait)
+		if err != nil {
+			return nil, fmt.Errorf("configure channel header timeout: %w", err)
+		}
+	}
+	service.RecordRelayHTTPTimeout(c, client, wait > 0)
 
 	var stopPinger context.CancelFunc
 	if info.IsStream {

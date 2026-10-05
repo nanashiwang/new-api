@@ -37,6 +37,9 @@ func failureLogContext(t *testing.T) *gin.Context {
 
 func TestFinalFailureRecordsHTTP200StreamErrorOnce(t *testing.T) {
 	ctx := failureLogContext(t)
+	client := newRelayHttpClient(120 * time.Second)
+	t.Cleanup(client.CloseIdleConnections)
+	RecordRelayHTTPTimeout(ctx, client, true)
 	ctx.Set(RequestLogStreamKey, true)
 	ctx.Header("Content-Type", "text/event-stream")
 	ctx.Writer.WriteHeaderNow()
@@ -60,6 +63,7 @@ func TestFinalFailureRecordsHTTP200StreamErrorOnce(t *testing.T) {
 	require.EqualValues(t, 400, details["status_code"])
 	require.EqualValues(t, 1554, details["latency_ms"])
 	require.Equal(t, "/v1/chat/completions", details["request_path"])
+	require.Contains(t, details["admin_info"], "relay_http_timeout")
 	require.NotContains(t, log.Other, "hidden-secret")
 	require.NotContains(t, log.Other, "sk-another-secret")
 }
