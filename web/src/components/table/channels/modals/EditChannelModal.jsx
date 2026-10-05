@@ -195,6 +195,7 @@ const EditChannelModal = (props) => {
     cpa_instance_id: '',
     thinking_to_content: false,
     proxy: '',
+    nonstream_response_header_timeout_sec: 0,
     pass_through_body_enabled: false,
     chat_completions_to_responses_mode: 'inherit',
     claude_incremental_cache_enabled: false,
@@ -540,6 +541,7 @@ const EditChannelModal = (props) => {
 
   // 渠道额外设置状态
   const [channelSettings, setChannelSettings] = useState({
+    nonstream_response_header_timeout_sec: 0,
     force_format: false,
     cpa_user_identity_enabled: false,
     cpa_instance_id: '',
@@ -828,6 +830,8 @@ const EditChannelModal = (props) => {
           data.thinking_to_content =
             parsedSettings.thinking_to_content || false;
           data.proxy = parsedSettings.proxy || '';
+          data.nonstream_response_header_timeout_sec =
+            parsedSettings.nonstream_response_header_timeout_sec ?? 0;
           data.pass_through_body_enabled =
             parsedSettings.pass_through_body_enabled || false;
           data.chat_completions_to_responses_mode =
@@ -861,6 +865,7 @@ const EditChannelModal = (props) => {
           data.cpa_instance_id = '';
           data.thinking_to_content = false;
           data.proxy = '';
+          data.nonstream_response_header_timeout_sec = 0;
           data.pass_through_body_enabled = false;
           data.chat_completions_to_responses_mode = 'inherit';
           data.claude_incremental_cache_enabled = false;
@@ -885,6 +890,7 @@ const EditChannelModal = (props) => {
         data.thinking_to_content = false;
         data.claude_incremental_cache_enabled = false;
         data.proxy = '';
+        data.nonstream_response_header_timeout_sec = 0;
         data.pass_through_body_enabled = false;
         data.chat_completions_to_responses_mode = 'inherit';
         data.system_prompt = '';
@@ -1017,6 +1023,7 @@ const EditChannelModal = (props) => {
         force_format: data.force_format,
         thinking_to_content: data.thinking_to_content,
         proxy: data.proxy,
+        nonstream_response_header_timeout_sec: data.nonstream_response_header_timeout_sec,
         pass_through_body_enabled: data.pass_through_body_enabled,
         chat_completions_to_responses_mode:
           data.chat_completions_to_responses_mode || 'inherit',
@@ -1487,6 +1494,7 @@ const EditChannelModal = (props) => {
     formApiRef.current?.reset();
     // 重置渠道设置状态
     setChannelSettings({
+      nonstream_response_header_timeout_sec: 0,
       force_format: false,
     cpa_user_identity_enabled: false,
     cpa_instance_id: '',
@@ -1897,6 +1905,13 @@ const EditChannelModal = (props) => {
         ? originalChannelExtraSettings.quota_policy
         : {};
 
+    const nonstreamHeaderTimeout = Number(
+      localInputs.nonstream_response_header_timeout_sec ?? 0,
+    );
+    if (!Number.isInteger(nonstreamHeaderTimeout) || nonstreamHeaderTimeout < 0 || nonstreamHeaderTimeout > 600) {
+      showError(t('非流式响应头超时必须为 0 到 600 的整数'));
+      return;
+    }
     // 生成渠道额外设置JSON
     const channelExtraSettings = {
       ...originalChannelExtraSettings,
@@ -1905,6 +1920,7 @@ const EditChannelModal = (props) => {
       cpa_instance_id: (localInputs.cpa_instance_id || '').trim(),
       thinking_to_content: localInputs.thinking_to_content || false,
       proxy: localInputs.proxy || '',
+      nonstream_response_header_timeout_sec: nonstreamHeaderTimeout,
       pass_through_body_enabled: localInputs.pass_through_body_enabled || false,
       chat_completions_to_responses_mode:
         localInputs.chat_completions_to_responses_mode || 'inherit',
@@ -2022,6 +2038,7 @@ const EditChannelModal = (props) => {
     delete localInputs.client_restriction_mode;
     delete localInputs.client_restriction_clients;
     delete localInputs.proxy;
+    delete localInputs.nonstream_response_header_timeout_sec;
     delete localInputs.pass_through_body_enabled;
     delete localInputs.system_prompt;
     delete localInputs.system_prompt_override;
@@ -4670,6 +4687,18 @@ const EditChannelModal = (props) => {
                       extraText={t('启用请求体透传功能')}
                     />
 
+                    <Form.InputNumber
+                      field='nonstream_response_header_timeout_sec'
+                      label={t('非流式响应头超时（秒）')}
+                      min={0}
+                      max={600}
+                      precision={0}
+                      onChange={(value) =>
+                        handleChannelSettingsChange('nonstream_response_header_timeout_sec', value ?? 0)
+                      }
+                      style={{ width: '100%' }}
+                      extraText={t('0 为继承全局；仅非流式文本请求生效，最长 600 秒。流式和生图不变，总超时及反向代理限制仍生效。')}
+                    />
                     <Form.Input
                       field='proxy'
                       label={t('代理地址')}

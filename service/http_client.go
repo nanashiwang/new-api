@@ -36,6 +36,7 @@ func checkRedirect(req *http.Request, via []*http.Request) error {
 }
 
 func InitHttpClient() {
+	resetHeaderOverrideClients()
 	httpClient = newRelayHttpClient(time.Duration(common.RelayResponseHeaderTimeout) * time.Second)
 	imageHttpClient = newRelayHttpClient(time.Duration(common.RelayImageResponseHeaderTimeout) * time.Second)
 }
@@ -122,6 +123,7 @@ func GetImageHttpClientWithProxy(proxyURL string) (*http.Client, error) {
 
 // ResetProxyClientCache 清空代理客户端缓存，确保下次使用时重新初始化
 func ResetProxyClientCache() {
+	resetHeaderOverrideClients()
 	proxyClientLock.Lock()
 	defer proxyClientLock.Unlock()
 	for _, client := range proxyClients {
@@ -214,7 +216,7 @@ func NewProxyHttpClient(proxyURL string, imageRequest ...bool) (*http.Client, er
 			ExpectContinueTimeout: 1 * time.Second,
 			ForceAttemptHTTP2:     true,
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return dialer.Dial(network, addr)
+				return dialer.(proxy.ContextDialer).DialContext(ctx, network, addr)
 			},
 		}
 		if common.TLSInsecureSkipVerify {

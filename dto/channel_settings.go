@@ -110,6 +110,9 @@ func (p QuotaPolicy) Validate() error {
 }
 
 type ChannelSettings struct {
+	// 0 inherits the default; only non-streaming text relay requests use this override.
+	NonStreamResponseHeaderTimeoutSec int `json:"nonstream_response_header_timeout_sec,omitempty"`
+
 	CPAUserIdentityEnabled         bool                           `json:"cpa_user_identity_enabled,omitempty"`
 	CPAInstanceID                  string                         `json:"cpa_instance_id,omitempty"`
 	ForceFormat                    bool                           `json:"force_format,omitempty"`
@@ -136,6 +139,9 @@ type ChannelSettings struct {
 }
 
 func (s ChannelSettings) Validate() error {
+	if s.NonStreamResponseHeaderTimeoutSec < 0 || s.NonStreamResponseHeaderTimeoutSec > 600 {
+		return fmt.Errorf("nonstream_response_header_timeout_sec must be an integer from 0 to 600")
+	}
 	if err := s.ValidateCPAIdentity(); err != nil {
 		return err
 	}
