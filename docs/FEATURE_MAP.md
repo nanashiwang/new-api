@@ -4,6 +4,7 @@
 
 | 能力/入口 | 主要实现 | 接口与数据 | 边界 |
 |---|---|---|---|
+| 令牌管理：当前分组倍率 | [列表列](../web/src/components/table/tokens/TokensColumnDefs.jsx)、[只读响应](../controller/token_list_ratio.go)、[列表/搜索](../controller/token.go)、[倍率服务](../service/group.go) | 当前用户 `/api/token/`、`/api/token/search`；`group_ratio` + `group_ratio_status`，沿用用户可用分组和专属倍率覆盖；空组继承用户分组 | 每页最多读取一次用户分组；零倍率有效，auto 动态，未知/无权/旧后端显示 —；桌面与移动端共用；不写数据库、不修改扣费/路由，未含模型价格和时间倍率 |
 | 渠道非流式响应头等待 | [渠道编辑](../web/src/components/table/channels/modals/EditChannelModal.jsx)、[设置校验](../dto/channel_settings.go)、[客户端覆盖](../service/http_client_header_override.go)、[转发入口](../relay/channel/api_request.go)、[说明](CHANNEL_NONSTREAM_TIMEOUT.md) | 管理员渠道接口，复用 setting JSON；0继承，1—600秒；消费/失败管理员日志记录实际客户端时限 | 仅非流式文本请求；流式/图片不变；保留代理、总时限及取消；有界连接池缓存；不改重试/计费、不自动配置生产渠道 |
 | 渠道管理：列表、已用/剩余、优先级、权重 | [渠道表格](../web/src/components/table/channels/index.jsx)、[列定义](../web/src/components/table/channels/ChannelsColumnDefs.jsx)、[渠道模型](../model/channel.go) | `/api/channel/`；主库 channels，余额按渠道支持情况查询 | used_quota 是累计额度，不是时间段消耗；余额不等于日志统计 |
 | 渠道管理：时段用量视图 | [用量工具栏](../web/src/components/table/channels/ChannelUsageToolbar.jsx)、[组合列表接口](../controller/channel_usage.go)、[用量模型](../model/channel_usage.go) | 管理员 `/api/channel/usage`；主库渠道过滤 + 共享日志聚合定义，精确半开区间 | 最长 30d、全量消耗排序后分页、完整标签汇总、全筛选范围占比；消费/错误日志，不代表上游成本；已删除渠道单列 |

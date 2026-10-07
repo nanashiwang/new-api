@@ -111,6 +111,34 @@ const renderGroupColumn = (text, record, t) => {
   return renderGroup(text);
 };
 
+// The API resolves inherited groups and user-specific pricing for this page.
+// Missing/invalid metadata (including an older backend) must not become 1x.
+const renderGroupRatio = (record, t) => {
+  const ratio = record?.group_ratio;
+  const isFixed =
+    record?.group_ratio_status === 'fixed' &&
+    typeof ratio === 'number' &&
+    Number.isFinite(ratio) &&
+    ratio >= 0;
+  const isAuto = record?.group_ratio_status === 'auto';
+  const label = isFixed ? `${ratio}x` : isAuto ? t('自动') : '—';
+  const hint = isFixed
+    ? t(
+        '当前分组倍率，已包含适用的专属倍率，不含模型价格和时间倍率；实际扣费以使用日志为准。',
+      )
+    : isAuto
+      ? t('自动分组的倍率由实际使用的分组决定，请以使用日志为准。')
+      : t('当前无法确定分组倍率，请刷新或联系管理员；不会按 1x 估算。');
+
+  return (
+    <Tooltip content={hint} position='top'>
+      <Tag color='white' shape='circle'>
+        {label}
+      </Tag>
+    </Tooltip>
+  );
+};
+
 // 渲染 Token key 列（支持显示/隐藏与复制）
 const renderTokenKey = (
   text,
@@ -809,6 +837,12 @@ export const getTokensColumns = ({
       dataIndex: 'group',
       key: 'group',
       render: (text, record) => renderGroupColumn(text, record, t),
+    },
+    {
+      title: t('倍率'),
+      dataIndex: 'group_ratio',
+      key: 'group_ratio',
+      render: (_text, record) => renderGroupRatio(record, t),
     },
     {
       title: t('密钥'),
