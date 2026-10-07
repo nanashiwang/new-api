@@ -128,14 +128,6 @@ func buildMaskedTokenResponse(token *model.Token) *model.Token {
 	return &maskedToken
 }
 
-func buildMaskedTokenResponses(tokens []*model.Token) []*model.Token {
-	maskedTokens := make([]*model.Token, 0, len(tokens))
-	for _, token := range tokens {
-		maskedTokens = append(maskedTokens, buildMaskedTokenResponse(token))
-	}
-	return maskedTokens
-}
-
 func GetAllTokens(c *gin.Context) {
 	userId := c.GetInt("id")
 	group := strings.TrimSpace(c.Query("group"))
@@ -163,7 +155,7 @@ func GetAllTokens(c *gin.Context) {
 		return
 	}
 	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(buildMaskedTokenResponses(tokens))
+	pageInfo.SetItems(buildTokenListItems(userId, tokens))
 	common.ApiSuccess(c, pageInfo)
 	return
 }
@@ -201,7 +193,7 @@ func SearchTokens(c *gin.Context) {
 		return
 	}
 	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(buildMaskedTokenResponses(tokens))
+	pageInfo.SetItems(buildTokenListItems(userId, tokens))
 	common.ApiSuccess(c, pageInfo)
 	return
 }
