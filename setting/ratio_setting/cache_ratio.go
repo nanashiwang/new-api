@@ -4,6 +4,9 @@ import (
 	"github.com/QuantumNous/new-api/types"
 )
 
+// Existing Claude pricing contract: 1h creation costs 1.6 times 5m creation.
+const ClaudeCacheCreation1hMultiplier = 1.6
+
 var defaultCacheRatio = map[string]float64{
 	"gemini-3-flash-preview":              0.1,
 	"gemini-3-pro-preview":                0.1,
@@ -74,10 +77,10 @@ var defaultCacheRatio = map[string]float64{
 }
 
 var defaultCreateCacheRatio = map[string]float64{
-	"mimo-v2.5":                          0,
-	"mimo-v2.5-pro":                      0,
-	"MiMo-V2.5":                          0,
-	"MiMo-V2.5-Pro":                      0,
+	"mimo-v2.5":                           0,
+	"mimo-v2.5-pro":                       0,
+	"MiMo-V2.5":                           0,
+	"MiMo-V2.5-Pro":                       0,
 	"claude-3-sonnet-20240229":            1.25,
 	"claude-3-opus-20240229":              1.25,
 	"claude-3-haiku-20240307":             1.25,

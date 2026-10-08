@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 import { BILLING_PRICING_VARS } from '../constants/billing.constants.js';
 import { formatModelPricingUnitPrice } from './modelPricingCurrency.js';
+import { getCacheCreationBreakdown } from './cacheCreation.js';
 
 const numberOrZero = (value) => {
   const numeric = Number(value || 0);
@@ -72,11 +73,9 @@ export const resolveTieredLogParams = (record, tier) => {
   const promptTokens = numberOrZero(record?.prompt_tokens);
   const completionTokens = numberOrZero(record?.completion_tokens);
   const cacheReadTokens = numberOrZero(record?.cache_tokens);
-  const cacheCreationTotal = numberOrZero(record?.cache_creation_tokens);
-  const cacheCreation1h = numberOrZero(record?.cache_creation_tokens_1h);
-  const cacheCreation5m =
-    numberOrZero(record?.cache_creation_tokens_5m) ||
-    Math.max(cacheCreationTotal - cacheCreation1h, 0);
+  const creation = getCacheCreationBreakdown(record);
+  const cacheCreation1h = creation.oneHour;
+  const cacheCreation5m = creation.fiveMinute + creation.unclassified;
   const imageInputTokens = numberOrZero(
     record?.image_input_tokens ?? record?.image_output,
   );

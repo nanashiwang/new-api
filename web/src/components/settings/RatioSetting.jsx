@@ -41,6 +41,7 @@ const RatioSetting = () => {
     CreateCacheRatio: '',
     CompletionRatio: '',
     CompletionRatioMeta: '',
+    CacheCreationPriceMeta: '',
     GroupRatio: '',
     GroupGroupRatio: '',
     TimeRatioRules: '',

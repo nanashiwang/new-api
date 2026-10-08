@@ -246,6 +246,9 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		return newAPIError
 	}
 
+	if cacheErr := service.ValidateClaudeCacheUsage(info, usage.(*dto.Usage)); cacheErr != nil {
+		return cacheErr
+	}
 	service.PostClaudeConsumeQuota(c, info, usage.(*dto.Usage))
 	return nil
 }

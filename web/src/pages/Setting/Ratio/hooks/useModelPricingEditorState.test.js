@@ -62,6 +62,19 @@ const emptySourceMaps = () => ({
 });
 
 describe('audio duration pricing visual editor state', () => {
+  test('cache TTL preview metadata is display-only and survives model state', () => {
+    const maps = emptySourceMaps();
+    maps.ModelRatio['opaque-model-alias'] = 10;
+    maps.CreateCacheRatio['opaque-model-alias'] = 1.25;
+    maps.CacheCreationPriceMeta = { 'opaque-model-alias': 1.6 };
+    const model = buildModelState('opaque-model-alias', maps);
+    expect(model.cacheCreation1hMultiplier).toBe(1.6);
+    expect(model.createCachePrice).toBe('25');
+    const serialized = serializeModel(model, t);
+    expect(serialized.CreateCacheRatio).toBe(1.25);
+    expect(serialized).not.toHaveProperty('CacheCreationPriceMeta');
+    expect(serialized).not.toHaveProperty('cacheCreation1hMultiplier');
+  });
   test('includes models configured only through the hourly price map', () => {
     const sourceMaps = emptySourceMaps();
     sourceMaps.AudioDurationPrice[modelName] = 0.074;

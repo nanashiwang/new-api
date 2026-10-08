@@ -183,6 +183,9 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 	}
 
 	var containAudioTokens = usage.(*dto.Usage).CompletionTokenDetails.AudioTokens > 0 || usage.(*dto.Usage).PromptTokensDetails.AudioTokens > 0
+	if cacheErr := service.ValidateClaudeCacheUsage(info, usage.(*dto.Usage)); cacheErr != nil {
+		return cacheErr
+	}
 	var containsAudioRatios = ratio_setting.ContainsAudioRatio(info.OriginModelName) || ratio_setting.ContainsAudioCompletionRatio(info.OriginModelName)
 
 	if containAudioTokens && containsAudioRatios {
@@ -212,6 +215,9 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 
 	// Tiered billing: only determines quota, logging continues through normal path
 	isClaudeUsageSemantic := relayInfo.GetFinalRequestRelayFormat() == types.RelayFormatClaude
+	isClaudeUsageSemantic = isClaudeUsageSemantic || strings.EqualFold(usage.UsageSemantic, "anthropic")
+	// Claude parsers and the handler boundary validate this before settlement.
+	claudeCreation, _ := usage.CacheCreationBreakdown()
 	var tieredUsedVars map[string]bool
 	if snap := relayInfo.TieredBillingSnapshot; snap != nil {
 		tieredUsedVars = billingexpr.UsedVars(snap.ExprString)
@@ -308,6 +314,9 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 			relayInfo.PriceData.AudioDurationSeconds,
 			relayInfo.PriceData.AudioDurationPrice,
 		))
+	} else if isClaudeUsageSemantic {
+		quotaCalculateDecimal = decimal.NewFromFloat(service.ClaudeTokenQuotaAmount(
+			promptTokens, completionTokens, cacheTokens, claudeCreation, relayInfo.PriceData))
 	} else if !relayInfo.PriceData.UsePrice {
 		baseTokens := dPromptTokens
 		// 减去 cached tokens
@@ -371,6 +380,9 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 	}
 
 	quota := int(quotaCalculateDecimal.Round(0).IntPart())
+	if isClaudeUsageSemantic {
+		quota = int(quotaCalculateDecimal.IntPart())
+	}
 	if tieredOk {
 		quota = tieredQuota
 	}
@@ -379,6 +391,9 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 		quota += toolResult.TotalQuota
 	}
 	totalTokens := promptTokens + completionTokens
+	if isClaudeUsageSemantic {
+		totalTokens += cacheTokens + claudeCreation.Total
+	}
 
 	// record all the consume log even if quota is 0
 	if totalTokens == 0 {
@@ -398,7 +413,7 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 				"tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, modelName, relayInfo.FinalPreConsumedQuota))
 		}
 	} else {
-		if !ratio.IsZero() && quota == 0 {
+		if !isClaudeUsageSemantic && !ratio.IsZero() && quota == 0 {
 			quota = 1
 		}
 	}
@@ -439,6 +454,9 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 	if cachedCreationTokens != 0 {
 		other["cache_creation_tokens"] = cachedCreationTokens
 		other["cache_creation_ratio"] = cachedCreationRatio
+	}
+	if isClaudeUsageSemantic {
+		service.AppendClaudeCacheCreationInfo(other, claudeCreation, relayInfo.PriceData)
 	}
 	for _, item := range toolResult.Items {
 		switch item.Name {

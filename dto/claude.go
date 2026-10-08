@@ -557,6 +557,8 @@ func (c *ClaudeResponse) GetClaudeError() *types.ClaudeError {
 }
 
 type ClaudeUsage struct {
+	cacheReadPresent         bool
+	cacheCreationPresent     bool
 	inputTokensPresent       bool
 	outputTokensPresent      bool
 	InputTokens              int                       `json:"input_tokens"`
@@ -571,6 +573,8 @@ type ClaudeUsage struct {
 }
 
 type ClaudeCacheCreationUsage struct {
+	fiveMinutePresent      bool
+	oneHourPresent         bool
 	Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens,omitempty"`
 	Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens,omitempty"`
 }

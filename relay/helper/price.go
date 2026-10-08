@@ -32,7 +32,7 @@ func shouldApplyDefaultCompletionReserve(info *relaycommon.RelayInfo, priceData 
 }
 
 // https://docs.claude.com/en/docs/build-with-claude/prompt-caching#1-hour-cache-duration
-const claudeCacheCreation1hMultiplier = 6 / 3.75
+const claudeCacheCreation1hMultiplier = ratio_setting.ClaudeCacheCreation1hMultiplier
 
 // HandleGroupRatio checks for "auto_group" in the context and updates the group ratio and relayInfo.UsingGroup if present
 func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.GroupRatioInfo {

@@ -39,6 +39,7 @@ import {
 import { IconHelpCircle } from '@douyinfe/semi-icons';
 import { CircleAlert, Route, Sparkles, BadgeCheck } from 'lucide-react';
 import { getResponseModelInfo } from '../../../helpers/responseModel';
+import { getCacheCreationBreakdown } from '../../../helpers/cacheCreation';
 
 const colors = [
   'amber',
@@ -363,15 +364,8 @@ function getPromptCacheSummary(other) {
   }
 
   const cacheReadTokens = toTokenNumber(other.cache_tokens);
-  const cacheCreationTokens = toTokenNumber(other.cache_creation_tokens);
-  const cacheCreationTokens5m = toTokenNumber(other.cache_creation_tokens_5m);
-  const cacheCreationTokens1h = toTokenNumber(other.cache_creation_tokens_1h);
-
-  const hasSplitCacheCreation =
-    cacheCreationTokens5m > 0 || cacheCreationTokens1h > 0;
-  const cacheWriteTokens = hasSplitCacheCreation
-    ? cacheCreationTokens5m + cacheCreationTokens1h
-    : cacheCreationTokens;
+  const creation = getCacheCreationBreakdown(other);
+  const cacheWriteTokens = creation.total;
 
   if (cacheReadTokens <= 0 && cacheWriteTokens <= 0) {
     return null;
@@ -380,6 +374,8 @@ function getPromptCacheSummary(other) {
   return {
     cacheReadTokens,
     cacheWriteTokens,
+    unclassified: creation.unclassified,
+    conflict: creation.conflict,
   };
 }
 
@@ -766,6 +762,12 @@ export const getLogsColumns = ({
           cacheText = `${t('缓存读')} ${formatTokenCount(cacheSummary.cacheReadTokens)}`;
         } else if (hasCacheWrite) {
           cacheText = `${t('缓存写')} ${formatTokenCount(cacheSummary.cacheWriteTokens)}`;
+        }
+        if (cacheSummary?.unclassified > 0) {
+          cacheText += ` · ${t('未细分')} ${formatTokenCount(cacheSummary.unclassified)}`;
+        }
+        if (cacheSummary?.conflict) {
+          cacheText += ` · ${t('缓存用量明细冲突')}`;
         }
 
         return record.type === 0 ||

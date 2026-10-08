@@ -4,6 +4,7 @@
 
 | 能力/入口 | 主要实现 | 接口与数据 | 边界 |
 |---|---|---|---|
+| Claude缓存时长计费与展示 | [组成规则](../dto/cache_creation.go)、[原生解析](../relay/channel/claude/usage.go)、[普通计算](../service/claude_cache_billing.go)、[阶梯规范化](../service/tiered_settle.go)、[日志展示](../web/src/helpers/cacheCreation.js)、[说明](CLAUDE_CACHE_BILLING.md) | Messages/Chat原生Claude语义；普通及阶梯共享总量/5m/1h/未细分组成；option只读TTL元数据、pricing派生1h价 | 不改价格/余额/路由；明确0与缺失区分，冲突拒绝成功扣费；缓存only保留；旧日志按当时记录解释；上游不报TTL时不造1h数据，部署/真实供应商需另验 |
 | 令牌管理：当前分组倍率 | [列表列](../web/src/components/table/tokens/TokensColumnDefs.jsx)、[只读响应](../controller/token_list_ratio.go)、[列表/搜索](../controller/token.go)、[倍率服务](../service/group.go) | 当前用户 `/api/token/`、`/api/token/search`；`group_ratio` + `group_ratio_status`，沿用用户可用分组和专属倍率覆盖；空组继承用户分组 | 每页最多读取一次用户分组；零倍率有效，auto 动态，未知/无权/旧后端显示 —；桌面与移动端共用；不写数据库、不修改扣费/路由，未含模型价格和时间倍率 |
 | 渠道非流式响应头等待 | [渠道编辑](../web/src/components/table/channels/modals/EditChannelModal.jsx)、[设置校验](../dto/channel_settings.go)、[客户端覆盖](../service/http_client_header_override.go)、[转发入口](../relay/channel/api_request.go)、[说明](CHANNEL_NONSTREAM_TIMEOUT.md) | 管理员渠道接口，复用 setting JSON；0继承，1—600秒；消费/失败管理员日志记录实际客户端时限 | 仅非流式文本请求；流式/图片不变；保留代理、总时限及取消；有界连接池缓存；不改重试/计费、不自动配置生产渠道 |
 | 渠道管理：列表、已用/剩余、优先级、权重 | [渠道表格](../web/src/components/table/channels/index.jsx)、[列定义](../web/src/components/table/channels/ChannelsColumnDefs.jsx)、[渠道模型](../model/channel.go) | `/api/channel/`；主库 channels，余额按渠道支持情况查询 | used_quota 是累计额度，不是时间段消耗；余额不等于日志统计 |

@@ -17,6 +17,9 @@ func FinalizeTestConsumeQuota(c *gin.Context, info *relaycommon.RelayInfo, usage
 	if info == nil || usage == nil {
 		return nil
 	}
+	if cacheErr := service.ValidateClaudeCacheUsage(info, usage); cacheErr != nil {
+		return cacheErr
+	}
 
 	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
 		originModelName := info.OriginModelName

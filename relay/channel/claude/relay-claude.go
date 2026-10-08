@@ -658,6 +658,7 @@ func ResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.OpenAITextRe
 }
 
 type ClaudeResponseInfo struct {
+	UsageError           error
 	ResponseId           string
 	Created              int64
 	Model                string
@@ -818,6 +819,9 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	}
 	if info.RelayFormat == types.RelayFormatClaude {
 		FormatClaudeResponseInfo(&claudeResponse, nil, claudeInfo)
+		if claudeInfo.UsageError != nil {
+			return types.NewError(claudeInfo.UsageError, types.ErrorCodeBadResponseBody, types.ErrOptionWithSkipRetry())
+		}
 
 		if claudeResponse.Type == "message_start" {
 			// message_start, 获取usage
@@ -836,6 +840,9 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		// Account for terminal frames even when they produce no OpenAI chunk.
 		if !FormatClaudeResponseInfo(&claudeResponse, nil, claudeInfo) {
 			return nil
+		}
+		if claudeInfo.UsageError != nil {
+			return types.NewError(claudeInfo.UsageError, types.ErrorCodeBadResponseBody, types.ErrOptionWithSkipRetry())
 		}
 		response := StreamResponseClaude2OpenAI(&claudeResponse, claudeInfo)
 		if response == nil {
@@ -933,6 +940,9 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		claudeInfo.Usage = &dto.Usage{}
 	}
 	mergeClaudeUsage(claudeInfo, claudeResponse.Usage, true)
+	if claudeInfo.UsageError != nil {
+		return types.NewError(claudeInfo.UsageError, types.ErrorCodeBadResponseBody, types.ErrOptionWithSkipRetry())
+	}
 	for i := range claudeResponse.Content {
 		appendClaudeUsageText(claudeInfo, &claudeResponse.Content[i])
 	}
