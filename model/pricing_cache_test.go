@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
 
@@ -58,5 +59,14 @@ func TestApplyPricingCacheSupport(t *testing.T) {
 	applyPricingCacheSupport(&perCallPricing, "cache-supported-model")
 	if perCallPricing.SupportsCacheRead || perCallPricing.SupportsCacheCreation {
 		t.Fatalf("per-call pricing should ignore cache support: %+v", perCallPricing)
+	}
+
+	timed := Pricing{QuotaType: 0, SupportedEndpointTypes: []constant.EndpointType{constant.EndpointTypeAnthropic}}
+	applyPricingCacheSupport(&timed, "cache-supported-model")
+	if !timed.SupportsCacheCreationTTL || timed.CacheCreationRatio1h != 2 {
+		t.Fatalf("timed pricing missing 1h derived price: %+v", timed)
+	}
+	if perTokenPricing.SupportsCacheCreationTTL {
+		t.Fatal("a generic model without an Anthropic endpoint must not acquire TTL pricing")
 	}
 }

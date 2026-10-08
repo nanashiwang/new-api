@@ -204,6 +204,7 @@ export const buildModelState = (name, sourceMaps) => {
   return {
     ...EMPTY_MODEL,
     name,
+    cacheCreation1hMultiplier: sourceMaps.CacheCreationPriceMeta?.[name],
     billingMode: hasValue(audioDurationPrice)
       ? 'per-audio-hour'
       : hasValue(fixedPrice)
@@ -730,6 +731,7 @@ export function useModelPricingEditorState({
       ModelRatio: parseOptionJSON(options.ModelRatio),
       CompletionRatio: parseOptionJSON(options.CompletionRatio),
       CompletionRatioMeta: parseOptionJSON(options.CompletionRatioMeta),
+      CacheCreationPriceMeta: parseOptionJSON(options.CacheCreationPriceMeta),
       CacheRatio: parseOptionJSON(options.CacheRatio),
       CreateCacheRatio: parseOptionJSON(options.CreateCacheRatio),
       ImageRatio: parseOptionJSON(options.ImageRatio),

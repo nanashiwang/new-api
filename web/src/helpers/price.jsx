@@ -188,7 +188,7 @@ export const calculateModelPrice = ({
     if (record.supports_cache_creation) {
       pricingItems.push({
         key: 'cacheCreation',
-        label: '缓存创建',
+        label: record.supports_cache_creation_ttl ? '缓存创建价格（5分钟）' : '缓存创建',
         value: formatTokenUnitPrice({
           priceUSD:
             record.model_ratio *
@@ -202,6 +202,25 @@ export const calculateModelPrice = ({
         }),
         unitLabel,
       });
+      if (
+        record.supports_cache_creation_ttl === true &&
+        typeof record.cache_creation_ratio_1h === 'number' &&
+        Number.isFinite(record.cache_creation_ratio_1h) &&
+        record.cache_creation_ratio_1h >= 0
+      ) {
+        pricingItems.push({
+          key: 'cacheCreation1h',
+          label: '缓存创建价格（1小时）',
+          value: formatTokenUnitPrice({
+            priceUSD: record.model_ratio * record.cache_creation_ratio_1h * 2 * usedGroupRatio,
+            tokenUnit,
+            displayPrice,
+            currency,
+            precision,
+          }),
+          unitLabel,
+        });
+      }
     }
 
     return {

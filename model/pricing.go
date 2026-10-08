@@ -15,26 +15,28 @@ import (
 )
 
 type Pricing struct {
-	ModelName              string                  `json:"model_name"`
-	Description            string                  `json:"description,omitempty"`
-	Icon                   string                  `json:"icon,omitempty"`
-	Tags                   string                  `json:"tags,omitempty"`
-	VendorID               int                     `json:"vendor_id,omitempty"`
-	QuotaType              int                     `json:"quota_type"`
-	ModelRatio             float64                 `json:"model_ratio"`
-	ModelPrice             float64                 `json:"model_price"`
-	AudioDurationPrice     float64                 `json:"audio_duration_price"`
-	OwnerBy                string                  `json:"owner_by"`
-	CompletionRatio        float64                 `json:"completion_ratio"`
-	SupportsCacheRead      bool                    `json:"supports_cache_read"`
-	CacheRatio             float64                 `json:"cache_ratio"`
-	SupportsCacheCreation  bool                    `json:"supports_cache_creation"`
-	CacheCreationRatio     float64                 `json:"cache_creation_ratio"`
-	EnableGroup            []string                `json:"enable_groups"`
-	SupportedEndpointTypes []constant.EndpointType `json:"supported_endpoint_types"`
-	BillingMode            string                  `json:"billing_mode,omitempty"`
-	BillingExpr            string                  `json:"billing_expr,omitempty"`
-	PricingVersion         string                  `json:"pricing_version,omitempty"`
+	ModelName                string                  `json:"model_name"`
+	Description              string                  `json:"description,omitempty"`
+	Icon                     string                  `json:"icon,omitempty"`
+	Tags                     string                  `json:"tags,omitempty"`
+	VendorID                 int                     `json:"vendor_id,omitempty"`
+	QuotaType                int                     `json:"quota_type"`
+	ModelRatio               float64                 `json:"model_ratio"`
+	ModelPrice               float64                 `json:"model_price"`
+	AudioDurationPrice       float64                 `json:"audio_duration_price"`
+	OwnerBy                  string                  `json:"owner_by"`
+	CompletionRatio          float64                 `json:"completion_ratio"`
+	SupportsCacheRead        bool                    `json:"supports_cache_read"`
+	CacheRatio               float64                 `json:"cache_ratio"`
+	SupportsCacheCreation    bool                    `json:"supports_cache_creation"`
+	CacheCreationRatio       float64                 `json:"cache_creation_ratio"`
+	SupportsCacheCreationTTL bool                    `json:"supports_cache_creation_ttl"`
+	CacheCreationRatio1h     float64                 `json:"cache_creation_ratio_1h"`
+	EnableGroup              []string                `json:"enable_groups"`
+	SupportedEndpointTypes   []constant.EndpointType `json:"supported_endpoint_types"`
+	BillingMode              string                  `json:"billing_mode,omitempty"`
+	BillingExpr              string                  `json:"billing_expr,omitempty"`
+	PricingVersion           string                  `json:"pricing_version,omitempty"`
 }
 
 type PricingVendor struct {
@@ -110,6 +112,13 @@ func applyPricingCacheSupport(pricing *Pricing, modelName string) {
 	if cacheCreationRatio, ok := ratio_setting.GetCreateCacheRatio(modelName); ok {
 		pricing.SupportsCacheCreation = true
 		pricing.CacheCreationRatio = cacheCreationRatio
+		for _, endpoint := range pricing.SupportedEndpointTypes {
+			if endpoint == constant.EndpointTypeAnthropic {
+				pricing.SupportsCacheCreationTTL = true
+				pricing.CacheCreationRatio1h = cacheCreationRatio * ratio_setting.ClaudeCacheCreation1hMultiplier
+				break
+			}
+		}
 	}
 }
 

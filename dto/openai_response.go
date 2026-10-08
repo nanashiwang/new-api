@@ -223,6 +223,7 @@ type CompletionsStreamResponse struct {
 }
 
 type Usage struct {
+	CacheCreationTotalReported bool `json:"-"`
 	// InputTokensEstimated distinguishes local fallback counts from upstream usage.
 	InputTokensEstimated bool            `json:"-"`
 	InterruptedOutput    bool            `json:"-"` // diagnostic partial output; failed responses must not be billed

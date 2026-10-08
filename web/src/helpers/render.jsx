@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import i18next from 'i18next';
+import { getCacheCreationBreakdown } from './cacheCreation';
 import { Modal, Tag, Typography, Avatar } from '@douyinfe/semi-ui';
 import { copy, showSuccess } from './utils';
 import { isMiMoModel } from './modelVendor';
@@ -1350,7 +1351,7 @@ function renderPriceSimpleCore({
     cacheCreationTokens5m > 0 || cacheCreationTokens1h > 0;
 
   const shouldShowLegacyCacheCreation =
-    !hasSplitCacheCreation && cacheCreationTokens !== 0;
+    cacheCreationTokens > cacheCreationTokens5m + cacheCreationTokens1h;
 
   const shouldShowCache = cacheTokens !== 0;
   const shouldShowCacheCreation5m =
@@ -1412,7 +1413,7 @@ function renderPriceSimpleCore({
           }),
         });
       }
-      if (!hasSplitCacheCreation && shouldShowLegacyCacheCreation) {
+      if (shouldShowLegacyCacheCreation) {
         segments.push({
           tone: 'secondary',
           text: i18next.t('缓存创建 {{price}} / 1M tokens', {
@@ -1567,7 +1568,7 @@ function renderPriceSimpleCore({
         }),
       );
     }
-    if (!hasSplitCacheCreation && shouldShowLegacyCacheCreation) {
+    if (shouldShowLegacyCacheCreation) {
       parts.push(
         i18next.t('缓存创建 {{price}} / 1M tokens', {
           price: formatCompactDisplayPrice(
@@ -2354,7 +2355,7 @@ export function renderTieredModelPrice(opts) {
       prompt_tokens: inputTokens,
       completion_tokens: completionTokens,
       cache_tokens: cacheTokens,
-      cache_creation_tokens: cacheCreationTokens,
+      cache_creation_tokens: opts.cache_creation_tokens,
       cache_creation_tokens_5m: cacheCreationTokens5m,
       cache_creation_tokens_1h: cacheCreationTokens1h,
     },
@@ -2844,9 +2845,7 @@ export function renderClaudeModelPrice(opts) {
     const cacheCreationRatioPrice1h = modelRatio * 2.0 * cacheCreationRatio1h;
     const hasSplitCacheCreation =
       cacheCreationTokens5m > 0 || cacheCreationTokens1h > 0;
-    const legacyCacheCreationTokens = hasSplitCacheCreation
-      ? 0
-      : cacheCreationTokens;
+    const legacyCacheCreationTokens = getCacheCreationBreakdown(opts).unclassified;
     const effectiveInputTokens =
       inputTokens +
       cacheTokens * cacheRatio +
@@ -2862,11 +2861,8 @@ export function renderClaudeModelPrice(opts) {
     const cacheCreationUnitPrice = cacheCreationRatioPrice * rate;
     const cacheCreationUnitPrice5m = cacheCreationRatioPrice5m * rate;
     const cacheCreationUnitPrice1h = cacheCreationRatioPrice1h * rate;
-    const cacheCreationUnitPriceTotal =
-      cacheCreationUnitPrice5m + cacheCreationUnitPrice1h;
     const shouldShowCache = cacheTokens > 0;
-    const shouldShowLegacyCacheCreation =
-      !hasSplitCacheCreation && cacheCreationTokens > 0;
+    const shouldShowLegacyCacheCreation = legacyCacheCreationTokens > 0;
     const shouldShowCacheCreation5m =
       hasSplitCacheCreation && cacheCreationTokens5m > 0;
     const shouldShowCacheCreation1h =
@@ -2895,7 +2891,7 @@ export function renderClaudeModelPrice(opts) {
         i18next.t(
           '缓存创建 {{tokens}} tokens / 1M tokens * {{symbol}}{{price}}',
           {
-            tokens: cacheCreationTokens,
+            tokens: legacyCacheCreationTokens,
             symbol,
             price: cacheCreationUnitPrice.toFixed(6),
           },
@@ -2963,7 +2959,7 @@ export function renderClaudeModelPrice(opts) {
             },
           )
         : null,
-      !hasSplitCacheCreation && cacheCreationTokens > 0
+      legacyCacheCreationTokens > 0
         ? buildBillingPriceText(
             '缓存创建价格：{{symbol}}{{price}} / 1M tokens',
             {
@@ -2972,6 +2968,9 @@ export function renderClaudeModelPrice(opts) {
               rate,
             },
           )
+        : null,
+      hasSplitCacheCreation && legacyCacheCreationTokens > 0
+        ? buildBillingText('未细分缓存创建：{{tokens}} tokens，按通用创建价格计算。', { tokens: legacyCacheCreationTokens })
         : null,
       hasSplitCacheCreation && cacheCreationTokens5m > 0
         ? buildBillingPriceText(
@@ -3032,16 +3031,13 @@ export function renderClaudeModelPrice(opts) {
   const hasSplitCacheCreation =
     cacheCreationTokens5m > 0 || cacheCreationTokens1h > 0;
   const shouldShowCache = cacheTokens > 0;
-  const shouldShowLegacyCacheCreation =
-    !hasSplitCacheCreation && cacheCreationTokens > 0;
+  const legacyCacheCreationTokens = getCacheCreationBreakdown(opts).unclassified;
+  const shouldShowLegacyCacheCreation = legacyCacheCreationTokens > 0;
   const shouldShowCacheCreation5m =
     hasSplitCacheCreation && cacheCreationTokens5m > 0;
   const shouldShowCacheCreation1h =
     hasSplitCacheCreation && cacheCreationTokens1h > 0;
 
-  const legacyCacheCreationTokens = hasSplitCacheCreation
-    ? 0
-    : cacheCreationTokens;
   const effectiveInputTokens =
     inputTokens +
     cacheTokens * cacheRatioValue +
@@ -3109,19 +3105,22 @@ export function renderClaudeModelPrice(opts) {
       ? buildBillingText(
           '缓存创建：{{tokens}} / 1M * 模型倍率 {{modelRatio}} * 缓存创建倍率 {{cacheCreationRatio}} * {{ratioType}} {{ratio}} = {{amount}}',
           {
-            tokens: cacheCreationTokens,
+            tokens: legacyCacheCreationTokens,
             modelRatio: modelRatioValue,
             cacheCreationRatio: cacheCreationRatioValue,
             ratioType: ratioLabel,
             ratio: groupRatio,
             amount: renderDisplayAmountFromUsd(
-              (cacheCreationTokens / 1000000) *
+              (legacyCacheCreationTokens / 1000000) *
                 inputRatioPrice *
                 cacheCreationRatioValue *
                 groupRatio,
             ),
           },
         )
+      : null,
+    hasSplitCacheCreation && legacyCacheCreationTokens > 0
+      ? buildBillingText('未细分缓存创建：{{tokens}} tokens，按通用创建价格计算。', { tokens: legacyCacheCreationTokens })
       : null,
     shouldShowCacheCreation5m
       ? buildBillingText(

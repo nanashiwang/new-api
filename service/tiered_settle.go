@@ -1,6 +1,8 @@
 package service
 
 import (
+	"strings"
+
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -19,15 +21,22 @@ type TieredResultWrapper = billingexpr.TieredResult
 // report them as text-only. This function normalizes to text-only when
 // sub-categories are separately priced.
 func BuildTieredTokenParams(usage *dto.Usage, isClaudeUsageSemantic bool, usedVars map[string]bool) billingexpr.TokenParams {
+	if usage == nil {
+		return billingexpr.TokenParams{}
+	}
+	isClaudeUsageSemantic = isClaudeUsageSemantic || strings.EqualFold(usage.UsageSemantic, "anthropic")
 	p := float64(usage.PromptTokens)
 	c := float64(usage.CompletionTokens)
 	cr := float64(usage.PromptTokensDetails.CachedTokens)
 	cc5m := float64(usage.PromptTokensDetails.CachedCreationTokens)
 	cc1h := float64(0)
 
-	if usage.UsageSemantic == "anthropic" {
-		cc1h = float64(usage.ClaudeCacheCreation1hTokens)
-		cc5m = float64(usage.ClaudeCacheCreation5mTokens)
+	if isClaudeUsageSemantic {
+		if creation, err := usage.CacheCreationBreakdown(); err == nil {
+			cc1h = float64(creation.OneHour)
+			// cc includes generic/unclassified creation, never drops it.
+			cc5m = float64(creation.FiveMinute + creation.Unclassified)
+		}
 	}
 
 	img := float64(usage.PromptTokensDetails.ImageTokens)
@@ -41,6 +50,17 @@ func BuildTieredTokenParams(usage *dto.Usage, isClaudeUsageSemantic bool, usedVa
 	inputLen := p
 	if isClaudeUsageSemantic {
 		inputLen = p + cr + cc5m + cc1h
+		// Match the expression contract: categories not priced separately
+		// belong to p, but never change the tier-selection length.
+		if !usedVars["cr"] {
+			p += cr
+		}
+		if !usedVars["cc"] {
+			p += cc5m
+		}
+		if !usedVars["cc1h"] {
+			p += cc1h
+		}
 	}
 
 	if !isClaudeUsageSemantic {

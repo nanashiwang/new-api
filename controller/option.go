@@ -105,6 +105,15 @@ func GetOptions(c *gin.Context) {
 		Key:   "CompletionRatioMeta",
 		Value: buildCompletionRatioMetaValue(optionValues),
 	})
+	cacheCreationMeta := make(map[string]float64)
+	for _, price := range model.GetPricing() {
+		if price.SupportsCacheCreationTTL {
+			cacheCreationMeta[price.ModelName] = ratio_setting.ClaudeCacheCreation1hMultiplier
+		}
+	}
+	if encoded, err := common.Marshal(cacheCreationMeta); err == nil {
+		options = append(options, &model.Option{Key: "CacheCreationPriceMeta", Value: string(encoded)})
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",

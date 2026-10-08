@@ -589,7 +589,7 @@ export default function ModelPricingEditor({
                         }
                       />
                       <PriceInput
-                        label={t('缓存创建价格')}
+                        label={t(selectedModel.cacheCreation1hMultiplier > 0 ? '缓存创建价格（5分钟）' : '缓存创建价格')}
                         value={selectedModel.createCachePrice}
                         placeholder={t('输入 $/1M tokens')}
                         onChange={(value) =>
@@ -617,7 +617,14 @@ export default function ModelPricingEditor({
                             'createCachePrice',
                           )
                             ? t('当前未启用，需要时再打开即可。')
-                            : ''
+                            : selectedModel.cacheCreation1hMultiplier > 0
+                              ? t('1小时缓存创建价格：{{price}} USD / 1M tokens（5分钟价格 × {{multiplier}}，自动计算）', {
+                                price: hasValue(selectedModel.createCachePrice)
+                                  ? Number((Number(selectedModel.createCachePrice) * selectedModel.cacheCreation1hMultiplier).toFixed(8))
+                                  : '—',
+                                multiplier: selectedModel.cacheCreation1hMultiplier,
+                              })
+                              : t('未提供缓存时长能力信息，当前显示通用缓存创建价。')
                         }
                       />
                     </Card>

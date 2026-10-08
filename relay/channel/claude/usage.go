@@ -1,6 +1,9 @@
 package claude
 
 import (
+	"errors"
+	"math"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
@@ -11,6 +14,18 @@ import (
 
 func mergeClaudeUsage(state *ClaudeResponseInfo, usage *dto.ClaudeUsage, final bool) {
 	if usage == nil {
+		return
+	}
+	if state.UsageError != nil {
+		return
+	}
+	state.Usage.UsageSemantic = "anthropic"
+	if usage.InputTokens < 0 || usage.OutputTokens < 0 || usage.CacheReadInputTokens < 0 {
+		state.UsageError = errors.New("negative Claude usage")
+		return
+	}
+	if _, err := dto.ResolveCacheCreation(usage.CacheCreationInputTokens, usage.GetCacheCreation5mTokens(), usage.GetCacheCreation1hTokens(), usage.HasCacheCreationTokens()); err != nil {
+		state.UsageError = err
 		return
 	}
 	if usage.HasInputTokens() && usage.InputTokens >= 0 {
@@ -25,17 +40,48 @@ func mergeClaudeUsage(state *ClaudeResponseInfo, usage *dto.ClaudeUsage, final b
 	}
 	// Claude counters are cumulative snapshots, never per-event increments.
 	// Output-only final frames must retain the earlier cache breakdown.
-	if usage.CacheReadInputTokens > 0 {
+	if usage.HasCacheReadTokens() {
 		state.Usage.PromptTokensDetails.CachedTokens = usage.CacheReadInputTokens
 	}
-	if created := usage.GetCacheCreationTotalTokens(); created > 0 {
-		state.Usage.PromptTokensDetails.CachedCreationTokens = created
+	if usage.HasCacheCreationTokens() {
+		if usage.CacheCreationInputTokens != state.Usage.PromptTokensDetails.CachedCreationTokens {
+			// A changed total cannot inherit unreported TTLs from an older
+			// snapshot. Keep the new total as unclassified if necessary.
+			if !usage.CacheCreation.HasFiveMinute() {
+				state.Usage.ClaudeCacheCreation5mTokens = 0
+			}
+			if !usage.CacheCreation.HasOneHour() {
+				state.Usage.ClaudeCacheCreation1hTokens = 0
+			}
+		}
+		state.Usage.PromptTokensDetails.CachedCreationTokens = usage.CacheCreationInputTokens
+		state.Usage.CacheCreationTotalReported = true
 	}
-	if tokens := usage.GetCacheCreation5mTokens(); tokens > 0 {
-		state.Usage.ClaudeCacheCreation5mTokens = tokens
+	if usage.CacheCreation != nil {
+		if usage.CacheCreation.HasFiveMinute() {
+			state.Usage.ClaudeCacheCreation5mTokens = usage.GetCacheCreation5mTokens()
+		}
+		if usage.CacheCreation.HasOneHour() {
+			state.Usage.ClaudeCacheCreation1hTokens = usage.GetCacheCreation1hTokens()
+		}
+		if !state.Usage.CacheCreationTotalReported {
+			// Derived totals follow the latest snapshot; they are not authority.
+			state.Usage.PromptTokensDetails.CachedCreationTokens = 0
+		}
 	}
-	if tokens := usage.GetCacheCreation1hTokens(); tokens > 0 {
-		state.Usage.ClaudeCacheCreation1hTokens = tokens
+	breakdown, err := state.Usage.CacheCreationBreakdown()
+	if err != nil {
+		state.UsageError = err
+		return
+	}
+	state.Usage.PromptTokensDetails.CachedCreationTokens = breakdown.Total
+	total := 0
+	for _, count := range []int{state.Usage.PromptTokens, state.Usage.CompletionTokens, state.Usage.PromptTokensDetails.CachedTokens, breakdown.Total} {
+		if count < 0 || count > math.MaxInt-total {
+			state.UsageError = errors.New("Claude usage total overflow")
+			return
+		}
+		total += count
 	}
 	state.Usage.TotalTokens = state.Usage.PromptTokens + state.Usage.CompletionTokens
 }
