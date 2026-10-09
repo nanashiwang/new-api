@@ -33,6 +33,8 @@ import { SiStripe } from 'react-icons/si';
 import { IconCreditCard, IconInfoCircle } from '@douyinfe/semi-icons';
 import { renderQuota } from '../../../helpers';
 import { getPaymentCurrencySymbol } from '../../../helpers/render';
+import { EPAY_USDT_TRC20 } from '../../../helpers/epayMethods';
+import UsdtPaymentNotice from '../UsdtPaymentNotice';
 import {
   formatSubscriptionDuration,
   formatSubscriptionResetPeriod,
@@ -467,6 +469,9 @@ const SubscriptionPurchaseModal = ({
                     {t('支付')}
                   </Button>
                 </div>
+              )}
+              {hasEpay && selectedEpayMethod === EPAY_USDT_TRC20 && (
+                <UsdtPaymentNotice />
               )}
             </div>
           ) : (

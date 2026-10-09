@@ -1,5 +1,13 @@
 {
   "translation": {
+    "虚拟币支付": "Paiement en cryptomonnaie",
+    "启用 USDT / TRC20": "Activer USDT / TRC20",
+    "充值方式设置须为 JSON 数组，且每项的 type 及其他字段均为字符串": "Les moyens de paiement doivent être un tableau JSON dont tous les champs, y compris type, sont des chaînes.",
+    "复用上方易支付地址、商户 ID 和密钥。请先在 Epay 商户中心完成 BEpusdt 网关到账测试，并启用为 USDT 默认通道。": "Réutilise l’URL, l’identifiant marchand et la clé Epay ci-dessus. Effectuez un test de paiement BEpusdt dans le portail marchand Epay, puis activez-le comme canal USDT par défaut.",
+    "订单按人民币计价，客户使用 USDT / TRC20 付款，资金进入商户钱包。BEpusdt 地址、API Token 和钱包在 Epay 配置，无需在此填写。": "Les commandes sont facturées en CNY. Les clients paient en USDT sur TRC20 directement dans le portefeuille du marchand. Configurez l’URL BEpusdt, le jeton API et le portefeuille dans Epay.",
+    "开关与充值方式设置同步，保存后同时用于余额充值和套餐购买；关闭不影响已创建订单的到账通知。": "Cet interrupteur synchronise les moyens de paiement. Après enregistrement, il s’applique aux recharges et aux achats de forfaits. Sa désactivation ne bloque pas les notifications des commandes existantes.",
+    "订单以人民币计价。请在收银台使用 TRC20 网络，按显示的地址和精确 USDT 数量付款；到账确认后自动更新订单，请勿重复转账。": "Les commandes sont facturées en CNY. Utilisez le réseau TRC20, l’adresse et le montant USDT exacts indiqués à la caisse. La commande sera mise à jour après confirmation. Ne payez pas deux fois.",
+    "USDT / TRC20": "USDT / TRC20",
     "我的收藏分组": "Groupes favoris",
     "选择分组后可收藏": "Sélectionnez un groupe à ajouter aux favoris",
     "暂无可用收藏，请先选择并收藏分组": "Aucun favori disponible. Sélectionnez un groupe et ajoutez-le aux favoris.",

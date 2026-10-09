@@ -18,7 +18,15 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useEffect, useState, useRef } from 'react';
-import { Button, Form, Row, Col, Typography, Spin } from '@douyinfe/semi-ui';
+import {
+  Button,
+  Form,
+  Row,
+  Col,
+  Typography,
+  Spin,
+  Switch,
+} from '@douyinfe/semi-ui';
 const { Text } = Typography;
 import {
   API,
@@ -28,6 +36,11 @@ import {
   verifyJSON,
 } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
+import {
+  isEpayUsdtEnabled,
+  parseEpayMethods,
+  setEpayUsdtEnabled,
+} from '../../../helpers/epayMethods';
 
 export default function SettingsPaymentGateway(props) {
   const { t } = useTranslation();
@@ -95,7 +108,19 @@ export default function SettingsPaymentGateway(props) {
   }, [props.options]);
 
   const handleFormChange = (values) => {
-    setInputs(values);
+    // Semi may reuse its values object; derive the switch from a fresh snapshot.
+    setInputs({ ...values });
+  };
+
+  const toggleUsdt = (enabled) => {
+    try {
+      const payMethods = setEpayUsdtEnabled(inputs.PayMethods, enabled);
+      formApiRef.current.setValue('PayMethods', payMethods);
+    } catch {
+      showError(
+        t('充值方式设置须为 JSON 数组，且每项的 type 及其他字段均为字符串'),
+      );
+    }
   };
 
   const submitPayAddress = async () => {
@@ -112,8 +137,12 @@ export default function SettingsPaymentGateway(props) {
     }
 
     if (originInputs['PayMethods'] !== inputs.PayMethods) {
-      if (!verifyJSON(inputs.PayMethods)) {
-        showError(t('充值方式设置不是合法的 JSON 字符串'));
+      try {
+        parseEpayMethods(inputs.PayMethods);
+      } catch {
+        showError(
+          t('充值方式设置须为 JSON 数组，且每项的 type 及其他字段均为字符串'),
+        );
         return;
       }
     }
@@ -166,7 +195,10 @@ export default function SettingsPaymentGateway(props) {
         options.push({ key: 'TopupGroupRatio', value: inputs.TopupGroupRatio });
       }
       if (originInputs['PayMethods'] !== inputs.PayMethods) {
-        options.push({ key: 'PayMethods', value: inputs.PayMethods });
+        options.push({
+          key: 'PayMethods',
+          value: JSON.stringify(parseEpayMethods(inputs.PayMethods)),
+        });
       }
       if (originInputs['AmountOptions'] !== inputs.AmountOptions) {
         options.push({
@@ -285,6 +317,34 @@ export default function SettingsPaymentGateway(props) {
             placeholder={t('为一个 JSON 文本')}
             autosize
           />
+          <Form.Slot label={t('虚拟币支付')}>
+            <div className='flex items-center gap-3'>
+              <Switch
+                checked={isEpayUsdtEnabled(inputs.PayMethods)}
+                onChange={toggleUsdt}
+                disabled={loading}
+                aria-label={t('启用 USDT / TRC20')}
+              />
+              <Text>{t('启用 USDT / TRC20')}</Text>
+            </div>
+            <div className='mt-2 space-y-1'>
+              <Text type='secondary' className='block'>
+                {t(
+                  '复用上方易支付地址、商户 ID 和密钥。请先在 Epay 商户中心完成 BEpusdt 网关到账测试，并启用为 USDT 默认通道。',
+                )}
+              </Text>
+              <Text type='secondary' className='block'>
+                {t(
+                  '订单按人民币计价，客户使用 USDT / TRC20 付款，资金进入商户钱包。BEpusdt 地址、API Token 和钱包在 Epay 配置，无需在此填写。',
+                )}
+              </Text>
+              <Text type='tertiary' className='block'>
+                {t(
+                  '开关与充值方式设置同步，保存后同时用于余额充值和套餐购买；关闭不影响已创建订单的到账通知。',
+                )}
+              </Text>
+            </div>
+          </Form.Slot>
 
           <Row
             gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}

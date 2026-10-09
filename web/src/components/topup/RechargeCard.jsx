@@ -47,6 +47,8 @@ import {
 
 import { getCurrencyConfig } from '../../helpers/render';
 import SubscriptionPlansCard from './SubscriptionPlansCard';
+import UsdtPaymentNotice from './UsdtPaymentNotice';
+import { EPAY_USDT_TRC20 } from '../../helpers/epayMethods';
 
 const { Text } = Typography;
 
@@ -296,6 +298,11 @@ const RechargeCard = ({
                               </Text>
                             </div>
                           )}
+                          {payWay === EPAY_USDT_TRC20 && (
+                            <div className='mt-2'>
+                              <UsdtPaymentNotice />
+                            </div>
+                          )}
                           <div className='mt-1 h-5 flex items-center'>
                             {amountLoading ? (
                               <>
@@ -363,6 +370,8 @@ const RechargeCard = ({
                                       <SiWechat size={18} color='#07C160' />
                                     ) : payMethod.type === 'stripe' ? (
                                       <SiStripe size={18} color='#635BFF' />
+                                    ) : payMethod.type === EPAY_USDT_TRC20 ? (
+                                      <Coins size={18} color='#26A17B' />
                                     ) : (
                                       <CreditCard
                                         size={18}

@@ -20,7 +20,9 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import { Modal, Typography, Card, Spin } from '@douyinfe/semi-ui';
 import { SiAlipay, SiWechat, SiStripe } from 'react-icons/si';
-import { CreditCard } from 'lucide-react';
+import { CreditCard, Coins } from 'lucide-react';
+import { EPAY_USDT_TRC20 } from '../../../helpers/epayMethods';
+import UsdtPaymentNotice from '../UsdtPaymentNotice';
 
 const { Text } = Typography;
 
@@ -152,6 +154,8 @@ const PaymentConfirmModal = ({
                             size={16}
                             color='#635BFF'
                           />
+                        ) : payMethod.type === EPAY_USDT_TRC20 ? (
+                          <Coins className='mr-2' size={16} color='#26A17B' />
                         ) : (
                           <CreditCard
                             className='mr-2'
@@ -217,6 +221,7 @@ const PaymentConfirmModal = ({
             </Text>
           </div>
         </Card>
+        {payWay === EPAY_USDT_TRC20 && <UsdtPaymentNotice />}
       </div>
     </Modal>
   );

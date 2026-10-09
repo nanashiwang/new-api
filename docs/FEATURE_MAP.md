@@ -1,6 +1,6 @@
 # 功能地图
 
-核对日期：2026-09-29。用于定位代码，不替代代码和现场验证；覆盖已核对的渠道运营与协议转换能力，其他模块按任务逐步补充。更改相关功能时同步本表，不把历史方案写成当前能力。
+核对日期：2026-10-09。用于定位代码，不替代代码和现场验证；覆盖已核对的渠道运营、协议转换、令牌管理与支付能力，其他模块按任务逐步补充。更改相关功能时同步本表，不把历史方案写成当前能力。
 
 | 能力/入口 | 主要实现 | 接口与数据 | 边界 |
 |---|---|---|---|
@@ -21,6 +21,9 @@
 | 官方KVV基线与本地转发回归 | [对齐基线](KVV_OFFICIAL_ALIGNMENT.md)、[模拟回归](../controller/relay_kimi_compat_test.go)、[请求DTO](../dto/openai_message.go)、[真实验收记录](KIMI_LIVE_ACCEPTANCE_2026-09-29.md) | 固定官方提交，system空字符串动态工具正例及角色/非空反例；两种渠道、流式/非流式；人工真实验收独立记录 | 不增加KVV门户或自动在线调用；模拟通过不代表官方实测通过；真实验收存在失败，skip/未测/SLA分别记录 |
 | K3缓存/思考用量兼容 | [字段处理](../relay/channel/openai/kimi_usage_fields.go)、[流式快照](../relay/channel/openai/kimi_usage_stream_evidence.go)、[计费回归](../controller/relay_kimi_usage_billing_test.go)、[验收说明](KIMI_USAGE_FIELDS.md) | 原生Chat补齐真实嵌套/平铺/单choice计数；对应总量相同时保留前块细项；消费日志admin_info记录来源 | 显式0优先、未知不造数、多choice不合并、跨响应不继承；不修改路由或测试器，来源诊断不向普通用户日志暴露 |
 | K3真实入口补充验收 | [用户体验实测](KIMI_USER_EXPERIENCE_2026-09-29.md)、[供应商原始响应对照](KIMI_USAGE_UPSTREAM_DIAGNOSIS_2026-09-29.md)、[实际usage切片回放](../relay/channel/openai/kimi_usage_fields_test.go) | 默认路由及逐请求定向的缓存/思考/工具验证；供应商原始usage与本站消费日志分别核对 | 默认路由多渠道结果不互相继承；本地回放不等于补丁部署，不是完整KVV、缓存TTL或并发SLA |
+| 支付设置：USDT / TRC20 开关 | [易支付设置](../web/src/pages/Setting/Payment/SettingsPaymentGateway.jsx)、[支付方式配置](../web/src/helpers/epayMethods.js)、[接入说明](EPAY_USDT.md) | 超级管理员 `/api/option/`；现有 `PayMethods` 及 Epay 地址、PID、密钥 | 开关同步 JSON，保留其他方式和自定义字段；无独立开关或数据库迁移，BEpusdt 配置由 Epay 商户中心维护 |
+| 余额充值与套餐购买：USDT / TRC20 | [充值入口](../web/src/components/topup/index.jsx)、[套餐入口](../web/src/components/topup/SubscriptionPlansCard.jsx)、[充值 controller](../controller/topup.go)、[套餐 controller](../controller/subscription_payment_epay.go) | 登录用户 `/api/user/pay`、`/api/subscription/epay/pay`；TopUp / SubscriptionOrder；标准易支付签名通知 | 精确类型 `usdt.trc20`，订单和回调金额均为 CNY；链上币额及到账由 Epay/BEpusdt 核对；关闭仅停止新订单 |
+| 支付记录：USDT 标签和筛选 | [记录弹窗](../web/src/components/topup/modals/TopupHistoryModal.jsx)、[记录模型](../model/payment_record.go) | 用户 `/api/user/payment-records/self`、管理员 `/api/user/payment-records`；充值和套餐联合记录 | 用户仅见本人；记录保留人民币支付金额，不能当作实际 USDT 数量或链上凭证 |
+| 令牌创建/编辑：个人收藏分组 | [表单](../web/src/components/table/tokens/modals/EditTokenModal.jsx)、[收藏入口](../web/src/components/table/tokens/TokenGroupFavorites.jsx)、[本地存储](../web/src/components/table/tokens/groupFavoriteStorage.js) | 已登录用户；仅 `/api/user/self/groups` 本次返回的可用组能成为收藏捷径；沿用原 `group` 字段和模型/渠道联动 | 当前浏览器按账号隔离，不跨设备/客户端同步；收藏不赋予权限、不改变计费/路由；编辑保留的失效组不加入收藏候选 |
 
 权限最终以 [API 路由](../router/api-router.go) 为准。新增渠道分析先对比统计面板、渠道管理和使用日志三处，确认数据定义、权限、分页/排序与跳转条件一致后再选方案。
-| 令牌创建/编辑：个人收藏分组 | [表单](../web/src/components/table/tokens/modals/EditTokenModal.jsx)、[收藏入口](../web/src/components/table/tokens/TokenGroupFavorites.jsx)、[本地存储](../web/src/components/table/tokens/groupFavoriteStorage.js) | 已登录用户；仅 `/api/user/self/groups` 本次返回的可用组能成为收藏捷径；沿用原 `group` 字段和模型/渠道联动 | 当前浏览器按账号隔离，不跨设备/客户端同步；收藏不赋予权限、不改变计费/路由；编辑保留的失效组不加入收藏候选 |

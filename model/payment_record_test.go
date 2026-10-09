@@ -52,6 +52,27 @@ func setupPaymentRecordTestDB(t *testing.T) {
 	))
 }
 
+func TestPaymentRecordsFilterUsdtAndKeepUserBoundary(t *testing.T) {
+	setupPaymentRecordTestDB(t)
+	user := createPaymentRecordTestUser(t, "usdt-owner")
+	other := createPaymentRecordTestUser(t, "usdt-other")
+	now := common.GetTimestamp()
+	createPaymentRecordTopUpWithDetail(t, user.Id, "USDT-MINE", now, now, common.TopUpStatusSuccess, "usdt.trc20", 14.6)
+	createPaymentRecordTopUpWithDetail(t, user.Id, "ALIPAY-MINE", now, now, common.TopUpStatusSuccess, "alipay", 14.6)
+	createPaymentRecordTopUpWithDetail(t, other.Id, "USDT-OTHER", now, now, common.TopUpStatusSuccess, "usdt.trc20", 7.3)
+	params := PaymentRecordSearchParams{PaymentMethod: "usdt.trc20"}
+	records, total, err := GetUserPaymentRecordsByParams(user.Id, params, &common.PageInfo{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, records, 1)
+	require.Equal(t, "USDT-MINE", records[0].TradeNo)
+	require.Equal(t, "CNY", records[0].PaidCurrency)
+	records, total, err = GetAllPaymentRecordsByParams(params, &common.PageInfo{Page: 1, PageSize: 1})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, total)
+	require.Len(t, records, 1)
+}
+
 func createPaymentRecordTestUser(t *testing.T, username string) *User {
 	t.Helper()
 	user := &User{

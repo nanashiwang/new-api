@@ -1,5 +1,13 @@
 {
   "translation": {
+    "虚拟币支付": "Crypto payments",
+    "启用 USDT / TRC20": "Enable USDT / TRC20",
+    "充值方式设置须为 JSON 数组，且每项的 type 及其他字段均为字符串": "Payment methods must be a JSON array with string values for type and all other fields.",
+    "复用上方易支付地址、商户 ID 和密钥。请先在 Epay 商户中心完成 BEpusdt 网关到账测试，并启用为 USDT 默认通道。": "Uses the Epay URL, merchant ID and key above. First complete a BEpusdt payment test in the Epay merchant portal, then enable it as the default USDT channel.",
+    "订单按人民币计价，客户使用 USDT / TRC20 付款，资金进入商户钱包。BEpusdt 地址、API Token 和钱包在 Epay 配置，无需在此填写。": "Orders are priced in CNY. Customers pay USDT on TRC20 directly to the merchant wallet. Configure the BEpusdt URL, API Token and wallet in Epay, not here.",
+    "开关与充值方式设置同步，保存后同时用于余额充值和套餐购买；关闭不影响已创建订单的到账通知。": "The switch updates the payment methods configuration. Once saved, it applies to balance top-ups and plan purchases. Disabling it does not block payment notifications for existing orders.",
+    "订单以人民币计价。请在收银台使用 TRC20 网络，按显示的地址和精确 USDT 数量付款；到账确认后自动更新订单，请勿重复转账。": "Orders are priced in CNY. At checkout, use the TRC20 network and the exact address and USDT amount shown. Your order updates after payment confirmation. Do not transfer twice.",
+    "USDT / TRC20": "USDT / TRC20",
     "我的收藏分组": "Favorite groups",
     "选择分组后可收藏": "Select a group to favorite",
     "暂无可用收藏，请先选择并收藏分组": "No available favorites. Select and favorite a group first.",
