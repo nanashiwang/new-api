@@ -1,5 +1,9 @@
 {
   "translation": {
+    "启用 {{method}}": "Activer {{method}}",
+    "复用上方易支付地址、商户 ID 和密钥。请先在 Epay 商户中心为每个币种和网络完成 BEpusdt 到账测试、启用并设为该组合的默认通道，再打开对应开关。": "Utilise l’URL Epay, l’identifiant marchand et la clé ci-dessus. Pour chaque monnaie et réseau, testez un paiement BEpusdt dans Epay, activez le canal et définissez-le par défaut pour cette combinaison avant d’activer son interrupteur.",
+    "订单按人民币计价，客户使用所选网络的 USDT 或 USDC 付款。BEpusdt、钱包及各链代币合约在 Epay / 网关配置；同名代币的跨链版本不一定通用。": "Les commandes sont libellées en CNY. Le client paie en USDT ou USDC sur le réseau choisi. Configurez BEpusdt, les portefeuilles et les contrats de jetons dans Epay / la passerelle ; des jetons de même symbole sur différentes chaînes ne sont pas forcément interchangeables.",
+    "订单以人民币计价。请使用 {{network}} 网络支付 {{coin}}，并核对收银台的代币合约、地址和精确数量；到账确认后自动更新订单，请勿跨链或重复转账。": "Commande en CNY. Payez en {{coin}} sur {{network}} et vérifiez le contrat du jeton, l’adresse et le montant exact à la caisse. La commande sera mise à jour après confirmation. N’utilisez pas un autre réseau et ne transférez pas deux fois.",
     "虚拟币支付": "Paiement en cryptomonnaie",
     "启用 USDT / TRC20": "Activer USDT / TRC20",
     "充值方式设置须为 JSON 数组，且每项的 type 及其他字段均为字符串": "Les moyens de paiement doivent être un tableau JSON dont tous les champs, y compris type, sont des chaînes.",

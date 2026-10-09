@@ -20,15 +20,19 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import { Banner } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
+import { getEpayCryptoMethod } from '../../helpers/epayMethods';
 
-export default function UsdtPaymentNotice() {
+export default function CryptoPaymentNotice({ method }) {
   const { t } = useTranslation();
+  const crypto = getEpayCryptoMethod(method);
+  if (!crypto) return null;
   return (
     <Banner
       type='info'
       closeIcon={null}
       description={t(
-        '订单以人民币计价。请在收银台使用 TRC20 网络，按显示的地址和精确 USDT 数量付款；到账确认后自动更新订单，请勿重复转账。',
+        '订单以人民币计价。请使用 {{network}} 网络支付 {{coin}}，并核对收银台的代币合约、地址和精确数量；到账确认后自动更新订单，请勿跨链或重复转账。',
+        { network: crypto.network, coin: crypto.coin },
       )}
     />
   );

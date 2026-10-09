@@ -37,9 +37,10 @@ import {
 } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
 import {
-  isEpayUsdtEnabled,
+  EPAY_CRYPTO_METHODS,
+  isEpayCryptoEnabled,
   parseEpayMethods,
-  setEpayUsdtEnabled,
+  setEpayCryptoEnabled,
 } from '../../../helpers/epayMethods';
 
 export default function SettingsPaymentGateway(props) {
@@ -112,9 +113,9 @@ export default function SettingsPaymentGateway(props) {
     setInputs({ ...values });
   };
 
-  const toggleUsdt = (enabled) => {
+  const toggleCrypto = (type, enabled) => {
     try {
-      const payMethods = setEpayUsdtEnabled(inputs.PayMethods, enabled);
+      const payMethods = setEpayCryptoEnabled(inputs.PayMethods, type, enabled);
       formApiRef.current.setValue('PayMethods', payMethods);
     } catch {
       showError(
@@ -318,24 +319,42 @@ export default function SettingsPaymentGateway(props) {
             autosize
           />
           <Form.Slot label={t('虚拟币支付')}>
-            <div className='flex items-center gap-3'>
-              <Switch
-                checked={isEpayUsdtEnabled(inputs.PayMethods)}
-                onChange={toggleUsdt}
-                disabled={loading}
-                aria-label={t('启用 USDT / TRC20')}
-              />
-              <Text>{t('启用 USDT / TRC20')}</Text>
-            </div>
+            {['USDT', 'USDC'].map((coin) => (
+              <div key={coin} className='mb-4'>
+                <Text strong>{coin}</Text>
+                <div className='grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 mt-2'>
+                  {EPAY_CRYPTO_METHODS.filter(
+                    (method) => method.coin === coin,
+                  ).map((method) => (
+                    <div key={method.type} className='flex items-center gap-3'>
+                      <Switch
+                        checked={isEpayCryptoEnabled(
+                          inputs.PayMethods,
+                          method.type,
+                        )}
+                        onChange={(enabled) =>
+                          toggleCrypto(method.type, enabled)
+                        }
+                        disabled={loading}
+                        aria-label={t('启用 {{method}}', {
+                          method: method.name,
+                        })}
+                      />
+                      <Text>{method.network}</Text>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
             <div className='mt-2 space-y-1'>
               <Text type='secondary' className='block'>
                 {t(
-                  '复用上方易支付地址、商户 ID 和密钥。请先在 Epay 商户中心完成 BEpusdt 网关到账测试，并启用为 USDT 默认通道。',
+                  '复用上方易支付地址、商户 ID 和密钥。请先在 Epay 商户中心为每个币种和网络完成 BEpusdt 到账测试、启用并设为该组合的默认通道，再打开对应开关。',
                 )}
               </Text>
               <Text type='secondary' className='block'>
                 {t(
-                  '订单按人民币计价，客户使用 USDT / TRC20 付款，资金进入商户钱包。BEpusdt 地址、API Token 和钱包在 Epay 配置，无需在此填写。',
+                  '订单按人民币计价，客户使用所选网络的 USDT 或 USDC 付款。BEpusdt、钱包及各链代币合约在 Epay / 网关配置；同名代币的跨链版本不一定通用。',
                 )}
               </Text>
               <Text type='tertiary' className='block'>

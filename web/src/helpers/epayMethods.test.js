@@ -23,9 +23,41 @@ import {
   isEpayUsdtEnabled,
   parseEpayMethods,
   setEpayUsdtEnabled,
+  EPAY_CRYPTO_METHODS,
+  getEpayCryptoMethod,
+  isEpayCryptoEnabled,
+  setEpayCryptoEnabled,
 } from './epayMethods';
 
 describe('Epay USDT configuration', () => {
+  test.each(EPAY_CRYPTO_METHODS)(
+    'independent combination: $type',
+    ({ type, name }) => {
+      const original = [
+        { type: 'alipay', name: 'Alipay' },
+        { type: 'legacy.coin', name: 'Custom' },
+      ];
+      const enabled = setEpayCryptoEnabled(original, type, true);
+      expect(isEpayCryptoEnabled(enabled, type)).toBe(true);
+      expect(parseEpayMethods(enabled)[2].name).toBe(name);
+      expect(setEpayCryptoEnabled(enabled, type, true)).toBe(enabled);
+      expect(
+        parseEpayMethods(setEpayCryptoEnabled(enabled, type, false)),
+      ).toEqual(original);
+    },
+  );
+
+  test('coins on the same network remain independent', () => {
+    let value = setEpayCryptoEnabled('', 'usdt.erc20', true);
+    value = setEpayCryptoEnabled(value, 'usdc.erc20', true);
+    value = setEpayCryptoEnabled(value, 'usdt.erc20', false);
+    expect(isEpayCryptoEnabled(value, 'usdc.erc20')).toBe(true);
+    expect(isEpayCryptoEnabled(value, 'usdt.erc20')).toBe(false);
+    expect(getEpayCryptoMethod('usdt.base')).toBeUndefined();
+    expect(getEpayCryptoMethod('usdc.trc20')).toBeUndefined();
+    expect(() => setEpayCryptoEnabled(value, 'usdt.base', true)).toThrow();
+    expect(new Set(EPAY_CRYPTO_METHODS.map((m) => m.type)).size).toBe(12);
+  });
   test('enabling preserves unrelated methods and does not duplicate USDT', () => {
     const original = [
       { type: 'alipay', name: 'Custom Alipay', min_topup: '12' },

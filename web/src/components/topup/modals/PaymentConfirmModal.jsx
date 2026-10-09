@@ -21,8 +21,8 @@ import React from 'react';
 import { Modal, Typography, Card, Spin } from '@douyinfe/semi-ui';
 import { SiAlipay, SiWechat, SiStripe } from 'react-icons/si';
 import { CreditCard, Coins } from 'lucide-react';
-import { EPAY_USDT_TRC20 } from '../../../helpers/epayMethods';
-import UsdtPaymentNotice from '../UsdtPaymentNotice';
+import { getEpayCryptoMethod } from '../../../helpers/epayMethods';
+import CryptoPaymentNotice from '../CryptoPaymentNotice';
 
 const { Text } = Typography;
 
@@ -154,8 +154,12 @@ const PaymentConfirmModal = ({
                             size={16}
                             color='#635BFF'
                           />
-                        ) : payMethod.type === EPAY_USDT_TRC20 ? (
-                          <Coins className='mr-2' size={16} color='#26A17B' />
+                        ) : getEpayCryptoMethod(payMethod.type) ? (
+                          <Coins
+                            className='mr-2'
+                            size={16}
+                            color={getEpayCryptoMethod(payMethod.type).color}
+                          />
                         ) : (
                           <CreditCard
                             className='mr-2'
@@ -221,7 +225,7 @@ const PaymentConfirmModal = ({
             </Text>
           </div>
         </Card>
-        {payWay === EPAY_USDT_TRC20 && <UsdtPaymentNotice />}
+        {getEpayCryptoMethod(payWay) && <CryptoPaymentNotice method={payWay} />}
       </div>
     </Modal>
   );

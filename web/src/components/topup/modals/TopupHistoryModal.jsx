@@ -56,7 +56,7 @@ import { openInvoicePdf } from '../../../helpers/invoicePdf';
 import { UserContext } from '../../../context/User';
 import { useIsMobile } from '../../../hooks/common/useIsMobile';
 import PaymentRiskCaseDetailModal from './PaymentRiskCaseDetailModal';
-import { EPAY_USDT_TRC20 } from '../../../helpers/epayMethods';
+import { EPAY_CRYPTO_METHODS } from '../../../helpers/epayMethods';
 
 const { Text } = Typography;
 
@@ -74,7 +74,7 @@ const PAYMENT_METHOD_MAP = {
   wxpay: '微信',
   wallet: '钱包',
   bank_transfer: '银行转账',
-  [EPAY_USDT_TRC20]: 'USDT / TRC20',
+  ...Object.fromEntries(EPAY_CRYPTO_METHODS.map(({ type, name }) => [type, name])),
 };
 
 const RISK_STATUS_CONFIG = {
@@ -133,7 +133,7 @@ const PAYMENT_OPTIONS = [
   { label: '钱包', value: 'wallet' },
   { label: '微信', value: 'wxpay' },
   { label: '支付宝', value: 'alipay' },
-  { label: 'USDT / TRC20', value: EPAY_USDT_TRC20 },
+  ...EPAY_CRYPTO_METHODS.map(({ name, type }) => ({ label: name, value: type })),
   { label: 'Stripe', value: 'stripe' },
   { label: 'Creem', value: 'creem' },
 ];

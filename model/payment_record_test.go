@@ -60,6 +60,8 @@ func TestPaymentRecordsFilterUsdtAndKeepUserBoundary(t *testing.T) {
 	createPaymentRecordTopUpWithDetail(t, user.Id, "USDT-MINE", now, now, common.TopUpStatusSuccess, "usdt.trc20", 14.6)
 	createPaymentRecordTopUpWithDetail(t, user.Id, "ALIPAY-MINE", now, now, common.TopUpStatusSuccess, "alipay", 14.6)
 	createPaymentRecordTopUpWithDetail(t, other.Id, "USDT-OTHER", now, now, common.TopUpStatusSuccess, "usdt.trc20", 7.3)
+	createPaymentRecordTopUpWithDetail(t, user.Id, "USDC-BASE", now, now, common.TopUpStatusSuccess, "usdc.base", 7.3)
+	createPaymentRecordTopUpWithDetail(t, user.Id, "USDC-ETH", now, now, common.TopUpStatusSuccess, "usdc.erc20", 14.6)
 	params := PaymentRecordSearchParams{PaymentMethod: "usdt.trc20"}
 	records, total, err := GetUserPaymentRecordsByParams(user.Id, params, &common.PageInfo{Page: 1, PageSize: 10})
 	require.NoError(t, err)
@@ -67,6 +69,14 @@ func TestPaymentRecordsFilterUsdtAndKeepUserBoundary(t *testing.T) {
 	require.Len(t, records, 1)
 	require.Equal(t, "USDT-MINE", records[0].TradeNo)
 	require.Equal(t, "CNY", records[0].PaidCurrency)
+	for _, method := range []string{"usdc.base", "usdc.erc20"} {
+		matched, n, queryErr := GetUserPaymentRecordsByParams(user.Id, PaymentRecordSearchParams{PaymentMethod: method}, &common.PageInfo{Page: 1, PageSize: 10})
+		require.NoError(t, queryErr)
+		require.EqualValues(t, 1, n)
+		require.Len(t, matched, 1)
+		require.Equal(t, method, matched[0].PaymentMethod)
+		require.Equal(t, "CNY", matched[0].PaidCurrency)
+	}
 	records, total, err = GetAllPaymentRecordsByParams(params, &common.PageInfo{Page: 1, PageSize: 1})
 	require.NoError(t, err)
 	require.EqualValues(t, 2, total)
